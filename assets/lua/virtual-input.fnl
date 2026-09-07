@@ -493,8 +493,11 @@
   result)
 
 (fn on-text-input [self payload]
-  (if (and payload (= (type payload.text) :string))
-      (self:insert-text payload.text)
+  (if (= self.mode :insert)
+      (do
+        (when (and payload (= (type payload.text) :string))
+          (self:insert-text payload.text))
+        true)
       false))
 
 (fn on-key-down [self payload]
