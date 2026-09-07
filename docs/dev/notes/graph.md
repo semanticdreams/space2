@@ -48,6 +48,10 @@ Full node views and panels handle dense content, long payloads, and editor-style
 
 Graph-selection actions must read active `GraphMap` selection, validate accepted node types, and fail loudly or display explicit graph-native status on invalid selection. Destructive actions must be explicit graph actions rather than confirmation-dialog flows.
 
+### Kind badges
+
+Graph node adapters may expose `kind-badge` presentation metadata for preview-card and full node-view titlebars. Missing metadata derives compact badge text from a stable key scheme before the first `:` when one exists; explicit `false` opts out. Graph core and GraphMap persistence still capture topology only: node keys, edge source/target keys, and map-local interaction state. Badge text and colors remain render-time presentation metadata and must not be written into graph topology state.
+
 ## Extracted
 - Graph model: `graph/core` owns nodes/edges, add/remove/replace, and emits signals (`node-added`, `node-removed`, `node-replaced`, `edge-added`, `edge-removed`).
 - Graph view: `graph/view` (`GraphView`) owns ForceLayout, points, labels, selection, movables, persistence, and node dialogs. It listens to graph signals and can be dropped/recreated without touching the graph model.
