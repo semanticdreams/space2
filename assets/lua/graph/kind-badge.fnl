@@ -1,5 +1,4 @@
 (local glm (require :glm))
-(local Utils (require :graph/core/utils))
 
 (local KindBadge {})
 (local default-background (glm.vec4 0.35 0.38 0.42 1))
@@ -23,7 +22,15 @@
   normalized)
 
 (fn normalize-color [value fallback]
-  (Utils.ensure-glm-vec4 value fallback))
+  (if (= value nil)
+      fallback
+      (= (type value) :userdata)
+      (if (glm.is-vec3 value)
+          (error "color must be a glm.vec4, not glm.vec3")
+          (glm.vec4 value.x value.y value.z value.w))
+      (= (type value) :table)
+      (glm.vec4 (table.unpack value))
+      (error "color must be a vec4 or table color")))
 
 (fn normalize-explicit-color [field value fallback]
   (if (= value nil)
