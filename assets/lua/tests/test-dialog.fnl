@@ -813,7 +813,7 @@
   (set app.create-default-projection AppProjection.create-default-projection)
   (local camera (make-default-camera))
   (set app.camera camera)
-
+  (set app.presentation-camera (fn [_opts] camera))
   (local scene (Scene {:icons env.icons
                        :camera camera}))
   (local hud (Hud {:scene scene
@@ -882,11 +882,11 @@
                         :layout-root app.layout-root
                         :hud app.hud
                         :intersectables app.intersectables
-                        :resizables app.resizables})
+                        :resizables app.resizables
+                        :presentation-camera app.presentation-camera})
       (var scene nil)
       (var hud nil)
       (var camera nil)
-
       (fn cleanup []
         (when scene
           (scene:drop)
@@ -901,8 +901,8 @@
         (set app.layout-root originals.layout-root)
         (set app.hud originals.hud)
         (set app.intersectables originals.intersectables)
-        (set app.resizables originals.resizables))
-
+        (set app.resizables originals.resizables)
+        (set app.presentation-camera originals.presentation-camera))
       (run-with-cleanup
         cleanup
         (fn []
@@ -918,7 +918,7 @@
   (set app.create-default-projection AppProjection.create-default-projection)
   (local camera (make-default-camera))
   (set app.camera camera)
-
+  (set app.presentation-camera (fn [_opts] camera))
   (local scene (Scene {:icons env.icons
                        :camera camera}))
   (set app.scene scene)
@@ -972,10 +972,10 @@
                         :resizables app.resizables
                         :viewport app.viewport
                         :create-default-projection app.create-default-projection
-                        :camera app.camera})
+                        :camera app.camera
+                        :presentation-camera app.presentation-camera})
       (var scene nil)
       (var camera nil)
-
       (fn cleanup []
         (when scene
           (scene:drop)
@@ -989,8 +989,8 @@
         (set app.resizables originals.resizables)
         (set app.viewport originals.viewport)
         (set app.create-default-projection originals.create-default-projection)
-        (set app.camera originals.camera))
-
+        (set app.camera originals.camera)
+        (set app.presentation-camera originals.presentation-camera))
       (run-with-cleanup
         cleanup
         (fn []
