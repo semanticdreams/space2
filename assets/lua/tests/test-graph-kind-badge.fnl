@@ -223,6 +223,45 @@
     (layout:drop))
   {:layout layout :drop drop})
 
+(fn dialog-title-prefix-builder [ctx]
+  (local Text (require :text))
+  (local text ((Text {:text "FS"}) ctx))
+  (set text.text "FS")
+  text)
+
+(fn dialog-body-builder [_ctx]
+  (make-simple-widget "body"))
+
+(fn test-node-view-builder [_ctx _opts]
+  (make-simple-widget "node-view"))
+
+(fn test-node-view [_node]
+  test-node-view-builder)
+
+(fn dialog-title-prefix-renders-before-title []
+  (local Dialog (require :dialog))
+  (local dialog
+    ((Dialog {:title "Node"
+              :title-prefix dialog-title-prefix-builder
+              :child dialog-body-builder})
+     (make-ui-ctx)))
+  (local titlebar-card (. dialog.children 1 :element))
+  (local title-flex (. titlebar-card.children 2))
+  (assert (= (. title-flex.children 1 :element :text) "FS")
+          "title prefix should be before title")
+  (dialog:drop))
+
+(fn node-view-dialog-renders-kind-badge-before-title []
+  (local Builder (require :graph/view/node-view-dialog-builder))
+  (local node (Graph.GraphNode {:key "fs:/tmp/a.txt"
+                                :label "a.txt"
+                                :view test-node-view}))
+  (local builder (Builder.make-dialog-builder node (node.view node) {}))
+  (local dialog (builder (make-ui-ctx) {}))
+  (assert dialog.title-kind-badge "node-view dialog should expose the title badge")
+  (assert (= dialog.title-kind-badge-text "FS"))
+  (dialog:drop))
+
 (fn noop []
   nil)
 
@@ -292,7 +331,11 @@
 (table.insert tests {:name "Expanded card renders kind badge before title"
                      :fn expanded-card-renders-kind-badge-before-title})
 (table.insert tests {:name "Expanded card without badge keeps existing titlebar structure"
-                     :fn expanded-card-without-badge-keeps-existing-titlebar-structure})
+                      :fn expanded-card-without-badge-keeps-existing-titlebar-structure})
+(table.insert tests {:name "Dialog title prefix renders before title"
+                     :fn dialog-title-prefix-renders-before-title})
+(table.insert tests {:name "Node view dialog renders kind badge before title"
+                     :fn node-view-dialog-renders-kind-badge-before-title})
 
 (fn main []
   (local runner (require :tests/runner))
