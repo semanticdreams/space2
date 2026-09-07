@@ -69,6 +69,91 @@
   (assert (= node.kind-badge false)
           "GraphNode should preserve explicit false opt-out"))
 
+(fn graph-map-capture-excludes-kind-badge-metadata []
+  (local graph (Graph {:with-start false}))
+  (graph:register-key-loader "test"
+    (fn [key]
+      (Graph.GraphNode {:key key :kind-badge {:text "Test"}})))
+  (local graph-map (GraphMap {:graph graph :id "badge-topology"}))
+  (local a (graph-map:load-by-key "test:a"))
+  (local b (graph-map:load-by-key "test:b"))
+  (graph-map:add-edge (Graph.GraphEdge {:source a :target b}))
+  (local state (graph-map:capture-state))
+  (assert (= state.kind-badge nil) "capture-state must not add top-level badge metadata")
+  (assert (= (length state.nodes) 2) "capture-state should preserve node keys")
+  (assert (= (. state.nodes 1) "test:a"))
+  (assert (= (. state.nodes 2) "test:b"))
+  (assert (= (length state.edges) 1) "capture-state should preserve edges")
+  (assert (= (. state.edges 1 :kind-badge) nil) "captured edges must not include badges")
+  (graph-map:drop)
+  (graph:drop))
+
+(fn stub-point-set-position [self position]
+  (set self.position position))
+
+(fn stub-point-set-position-values [self x y z]
+  (set self.position (glm.vec3 x y z)))
+
+(fn stub-point-set-color [self color]
+  (set self.color color))
+
+(fn stub-point-set-size [self size]
+  (set self.size size))
+
+(fn stub-point-set-depth-offset-index [self depth]
+  (set self.depth-offset-index depth))
+
+(fn stub-point-intersect [_self _ray]
+  nil)
+
+(fn stub-point-drop [_self]
+  nil)
+
+(fn create-stub-point [created opts]
+  (local point {:opts opts
+                :position opts.position
+                :color opts.color
+                :size opts.size
+                :depth-offset-index opts.depth-offset-index
+                :set-position stub-point-set-position
+                :set-position-values stub-point-set-position-values
+                :set-color stub-point-set-color
+                :set-size stub-point-set-size
+                :set-depth-offset-index stub-point-set-depth-offset-index
+                :intersect stub-point-intersect
+                :drop stub-point-drop})
+  (table.insert created point)
+  point)
+
+(fn make-points-stub []
+  (local created [])
+  {:created created
+   :create-point (fn [_self opts]
+                   (create-stub-point created opts))})
+
+(fn compact-point-ignores-kind-badge-metadata []
+  (local GraphNodePresentation (require :graph/view/presentation))
+  (local points (make-points-stub))
+  (local node (Graph.GraphNode {:key "fs:/tmp/badged.txt"
+                                :label "badged.txt"
+                                :color (glm.vec4 0.1 0.2 0.3 1)
+                                :size 11.0}))
+  (local point
+    (GraphNodePresentation.compact-point
+      {:points points
+       :position (glm.vec3 1 2 3)
+       :depth-offset-step 1
+       :base-depth-offset-index 2
+       :base-layer-index 3
+       :kind-badge node.kind-badge
+       :layers [{:size 0 :color (glm.vec4 0.7 0.8 0.9 1)}
+                {:size 0 :color (glm.vec4 0.4 0.5 0.6 1)}
+                {:size node.size :color node.color}]}))
+  (assert (= (length point.layers) 3) "compact point should keep three layers")
+  (assert (= point.header-bar nil) "compact point should not gain titlebar UI")
+  (assert (= point.kind-badge nil) "compact point should not copy badge metadata")
+  (when point.drop (point:drop)))
+
 (table.insert tests {:name "KindBadge derives uppercase scheme text"
                      :fn normalize-derives-uppercase-scheme})
 (table.insert tests {:name "KindBadge omits badge for keys without scheme"
@@ -85,6 +170,10 @@
                      :fn graph-node-stores-normalized-derived-kind-badge})
 (table.insert tests {:name "GraphNode preserves explicit kind-badge opt-out"
                      :fn graph-node-preserves-explicit-kind-badge-opt-out})
+(table.insert tests {:name "GraphMap capture excludes kind-badge metadata"
+                     :fn graph-map-capture-excludes-kind-badge-metadata})
+(table.insert tests {:name "Compact point ignores kind-badge metadata"
+                     :fn compact-point-ignores-kind-badge-metadata})
 
 (fn main []
   (local runner (require :tests/runner))
