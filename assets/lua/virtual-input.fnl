@@ -789,6 +789,7 @@
     (assert ctx.get-text-ssbo-batcher "VirtualInput requires ctx.get-text-ssbo-batcher")
     (assert ctx.get-rectangle-quad-batcher "VirtualInput requires ctx.get-rectangle-quad-batcher")
     (local clickables (assert ctx.clickables "VirtualInput requires ctx.clickables"))
+    (local pointer-target (and ctx ctx.pointer-target))
     (local colors (resolve-input-colors ctx options))
     (local focus-context (and ctx ctx.focus))
     (local focusable? (and focus-context (not (= options.focusable? false))))
@@ -819,10 +820,11 @@
        :layout layout
        :buffer buffer
        :rows row-widgets
-       :background background
-       :caret caret
-       :clickables clickables
-       :focus-node focus-node
+        :background background
+        :caret caret
+        :clickables clickables
+        :pointer-target pointer-target
+        :focus-node focus-node
         :focus-manager focus-manager
         :connected? false
         :line-count line-count
