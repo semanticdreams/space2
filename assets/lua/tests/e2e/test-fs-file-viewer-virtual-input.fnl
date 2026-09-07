@@ -53,6 +53,13 @@
 (fn status-string [view]
   (text-of view.status-text))
 
+(fn visible-buffer-text [input]
+  (local viewport (input.buffer:get-viewport {:line 0 :column 0 :lines 4 :columns 120}))
+  (table.concat
+    (icollect [_ row (ipairs viewport.rows)]
+      row.text)
+    "\n"))
+
 (fn assert-caret-inside-input [input]
   (input.layout:layouter)
   (assert input.caret.visible? "file viewer caret should be visible")
@@ -239,6 +246,40 @@
           (.. "routed click inside expanded graph file viewer VirtualInput should focus it; "
               "mouse-down clickable=" winner
               ", screen=(" (tostring pointer.x) "," (tostring pointer.y) ")"))
+  (assert (= (app.states:active-name) :text)
+          "routed click should put expanded file viewer in text state")
+  (assert (= view.virtual-input.mode :normal)
+          "routed click should leave expanded file viewer VirtualInput in normal mode")
+  (local after-click-text (visible-buffer-text view.virtual-input))
+  (assert (not (active-text-input {:text "R"}))
+          "text input routed while expanded file viewer is in textnav should not insert")
+  (assert (= (visible-buffer-text view.virtual-input) after-click-text)
+          "text input in textnav should not mutate expanded file viewer buffer")
+  (assert (active-key-down {:key (string.byte "i")})
+          "Vim i should enter insert for expanded file viewer")
+  (assert (= (app.states:active-name) :insert)
+          "expanded file viewer should enter app insert state")
+  (assert (= view.virtual-input.mode :insert)
+          "expanded file viewer VirtualInput should enter insert mode")
+  (assert (active-text-input {:text "i"})
+          "insert-entering text event should be consumed for expanded file viewer")
+  (assert (= (visible-buffer-text view.virtual-input) after-click-text)
+          "insert-entering text event should not mutate expanded file viewer buffer")
+  (assert (active-text-input {:text "!"})
+          "printable text should insert in expanded file viewer insert mode")
+  (local inserted-text (visible-buffer-text view.virtual-input))
+  (assert (= (+ (# after-click-text) 1) (# inserted-text))
+          "insert mode printable text should insert exactly one character")
+  (assert (active-key-down {:key 27})
+          "Escape should return expanded file viewer to text mode")
+  (assert (= (app.states:active-name) :text)
+          "Escape should return expanded file viewer app state to text")
+  (assert (= view.virtual-input.mode :normal)
+          "Escape should return expanded file viewer VirtualInput to normal mode")
+  (assert (not (active-text-input {:text "Q"}))
+          "text input after Escape in textnav should not insert into expanded file viewer")
+  (assert (= (visible-buffer-text view.virtual-input) inserted-text)
+          "text input after Escape should not mutate expanded file viewer buffer")
   (assert (active-key-down {:key (string.byte "l")})
           "focused expanded graph file viewer VirtualInput should consume h/j/k/l navigation")
   (Harness.cleanup-target target)
