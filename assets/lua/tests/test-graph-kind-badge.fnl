@@ -46,6 +46,17 @@
     (assert (string.find (tostring err) "kind-badge" 1 true)
             (.. "expected clear kind-badge error, got " (tostring err)))))
 
+(fn malformed-explicit-colors-fail-loudly []
+  (each [_ field (ipairs [:background-color :foreground-color])]
+    (each [_ color-value (ipairs [false true "red" 12])]
+      (local metadata {:text "FS"})
+      (tset metadata field color-value)
+      (local (ok err)
+        (pcall (fn [] (KindBadge.normalize {:key "fs:/tmp/a.txt" :value metadata}))))
+      (assert (not ok) (.. "malformed explicit " field " should fail"))
+      (assert (string.find (tostring err) (.. "kind-badge." field) 1 true)
+              (.. "expected clear kind-badge color error, got " (tostring err))))))
+
 (fn graph-node-stores-normalized-derived-kind-badge []
   (local node (Graph.GraphNode {:key "fs:/tmp/a.txt"
                                 :label "a.txt"
@@ -68,6 +79,8 @@
                      :fn normalize-explicit-text-trims-without-changing-case})
 (table.insert tests {:name "KindBadge malformed explicit metadata fails loudly"
                      :fn malformed-explicit-badge-fails-loudly})
+(table.insert tests {:name "KindBadge malformed explicit colors fail loudly"
+                     :fn malformed-explicit-colors-fail-loudly})
 (table.insert tests {:name "GraphNode stores normalized derived kind-badge metadata"
                      :fn graph-node-stores-normalized-derived-kind-badge})
 (table.insert tests {:name "GraphNode preserves explicit kind-badge opt-out"

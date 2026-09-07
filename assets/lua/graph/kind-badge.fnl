@@ -25,6 +25,19 @@
 (fn normalize-color [value fallback]
   (Utils.ensure-glm-vec4 value fallback))
 
+(fn normalize-explicit-color [field value fallback]
+  (if (= value nil)
+      fallback
+      (and (not= (type value) :userdata) (not= (type value) :table))
+      (error (.. "kind-badge." field " must be a vec4 or table color"))
+      (do
+        (local (ok color-or-error)
+          (pcall normalize-color value fallback))
+        (if ok
+            color-or-error
+            (error (.. "kind-badge." field " must be a vec4 or table color: "
+                       (tostring color-or-error)))))))
+
 (fn KindBadge.normalize [opts]
   (local options (or opts {}))
   (local value options.value)
@@ -41,11 +54,13 @@
   (if (= text false)
       false
       text
-      {:text text
-       :background-color (normalize-color (and (= (type value) :table) value.background-color)
-                                          (normalize-color (or options.color options.accent) default-background))
-       :foreground-color (normalize-color (and (= (type value) :table) value.foreground-color)
-                                          default-foreground)}
+       {:text text
+        :background-color (normalize-explicit-color :background-color
+                                                   (if (= (type value) :table) value.background-color nil)
+                                                   (normalize-color (or options.color options.accent) default-background))
+        :foreground-color (normalize-explicit-color :foreground-color
+                                                   (if (= (type value) :table) value.foreground-color nil)
+                                                   default-foreground)}
       nil))
 
 KindBadge
