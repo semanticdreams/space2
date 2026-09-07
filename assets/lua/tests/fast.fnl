@@ -158,6 +158,7 @@
       :tests.test-disclosure-row
     :tests.test-status-badge
     :tests.test-cgltf
+    :tests.test-graph-kind-badge
     :tests.test-graph-core
     :tests.test-graph-file-types
     :tests.test-fs-file-viewer
