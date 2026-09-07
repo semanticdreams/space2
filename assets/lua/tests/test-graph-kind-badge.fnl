@@ -154,6 +154,119 @@
   (assert (= point.kind-badge nil) "compact point should not copy badge metadata")
   (when point.drop (point:drop)))
 
+(fn titlebar-builder-returns-nil-for-missing-or-opted-out-badges []
+  (local ViewKindBadge (require :graph/view/kind-badge))
+  (assert (= (ViewKindBadge.titlebar-builder nil) nil))
+  (assert (= (ViewKindBadge.titlebar-builder false) nil)))
+
+(fn make-icons-stub []
+  (local glyph {:advance 1
+                :planeBounds {:left 0 :right 1 :top 1 :bottom 0}
+                :atlasBounds {:left 0 :right 1 :top 1 :bottom 0}})
+  (local font {:metadata {:metrics {:ascender 1 :descender -1}
+                          :atlas {:width 1 :height 1}}
+               :glyph-map {4242 glyph}
+               :advance 1})
+  (local stub {:font font
+               :codepoints {:close_fullscreen 4242
+                            :open_in_new 4242
+                            :more_vert 4242
+                            :table 4242
+                            :code 4242
+                            :close 4242}})
+  (set stub.get
+       (fn [self name]
+         (local value (. self.codepoints name))
+         (assert value (.. "Missing icon " name))
+         value))
+  (set stub.resolve
+       (fn [self name]
+         (local code (self:get name))
+         {:type :font :codepoint code :font self.font}))
+  stub)
+
+(fn stub-register [_self _obj]
+  nil)
+
+(fn make-clickables-stub []
+  {:register stub-register
+   :unregister stub-register
+   :register-right-click stub-register
+   :unregister-right-click stub-register
+   :register-double-click stub-register
+   :unregister-double-click stub-register})
+
+(fn make-hoverables-stub []
+  {:register stub-register
+   :unregister stub-register})
+
+(fn make-ui-ctx []
+  (local BuildContext (require :build-context))
+  (local {: LayoutRoot} (require :layout))
+  (local ctx (BuildContext {:layout-root (LayoutRoot {:log-dirt? false})
+                            :clickables (make-clickables-stub)
+                            :hoverables (make-hoverables-stub)}))
+  (set ctx.icons (make-icons-stub))
+  ctx)
+
+(fn make-simple-widget [name]
+  (local {: Layout} (require :layout))
+  (fn simple-measurer [self]
+    (set self.measure (glm.vec3 4 2 0)))
+  (fn simple-layouter [_self]
+    nil)
+  (local layout
+    (Layout {:name name
+             :measurer simple-measurer
+             :layouter simple-layouter}))
+  (fn drop [_self]
+    (layout:drop))
+  {:layout layout :drop drop})
+
+(fn noop []
+  nil)
+
+(fn noop-event [_event]
+  nil)
+
+(fn tracked-preview []
+  (fn [_node _opts]
+    (fn [_ctx]
+      (make-simple-widget "graph-kind-badge-preview"))))
+
+(fn build-test-card [GraphNodePresentation node]
+  (set node.preview (tracked-preview))
+  ((GraphNodePresentation.card-builder
+     {:node node
+      :position (glm.vec3 0 0 0)
+      :default-size (glm.vec3 32 18 0)
+      :on-collapse noop
+      :on-open noop-event
+      :on-menu noop-event})
+   (make-ui-ctx)))
+
+(fn expanded-card-renders-kind-badge-before-title []
+  (local GraphNodePresentation (require :graph/view/presentation))
+  (local node (Graph.GraphNode {:key "fs:/tmp/a.txt" :label "a.txt"}))
+  (local card (build-test-card GraphNodePresentation node))
+  (assert card.header-kind-badge "badged card should expose header-kind-badge")
+  (assert (= (. card.header-bar.children 1 :element) card.header-kind-badge)
+          "badge should be first header child")
+  (assert (= (. card.header-bar.children 2 :element) card.header-title)
+          "title should immediately follow badge")
+  (assert (= card.header-title-text "a.txt"))
+  (card:drop))
+
+(fn expanded-card-without-badge-keeps-existing-titlebar-structure []
+  (local GraphNodePresentation (require :graph/view/presentation))
+  (local node (Graph.GraphNode {:key "start" :label "Start"}))
+  (local card (build-test-card GraphNodePresentation node))
+  (assert (= node.kind-badge nil))
+  (assert (= card.header-kind-badge nil))
+  (assert (= (. card.header-bar.children 1 :element) card.header-title)
+          "title should remain first header child without badge")
+  (card:drop))
+
 (table.insert tests {:name "KindBadge derives uppercase scheme text"
                      :fn normalize-derives-uppercase-scheme})
 (table.insert tests {:name "KindBadge omits badge for keys without scheme"
@@ -173,7 +286,13 @@
 (table.insert tests {:name "GraphMap capture excludes kind-badge metadata"
                      :fn graph-map-capture-excludes-kind-badge-metadata})
 (table.insert tests {:name "Compact point ignores kind-badge metadata"
-                     :fn compact-point-ignores-kind-badge-metadata})
+                      :fn compact-point-ignores-kind-badge-metadata})
+(table.insert tests {:name "Graph view kind badge builder omits missing badges"
+                     :fn titlebar-builder-returns-nil-for-missing-or-opted-out-badges})
+(table.insert tests {:name "Expanded card renders kind badge before title"
+                     :fn expanded-card-renders-kind-badge-before-title})
+(table.insert tests {:name "Expanded card without badge keeps existing titlebar structure"
+                     :fn expanded-card-without-badge-keeps-existing-titlebar-structure})
 
 (fn main []
   (local runner (require :tests/runner))
