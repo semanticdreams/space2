@@ -25,9 +25,9 @@
   (if (= value nil)
       fallback
       (= (type value) :userdata)
-      (if (glm.is-vec3 value)
-          (error "color must be a glm.vec4, not glm.vec3")
-          (glm.vec4 value.x value.y value.z value.w))
+      (if (glm.is-vec4 value)
+          value
+          (error "color must be a glm.vec4 userdata"))
       (= (type value) :table)
       (glm.vec4 (table.unpack value))
       (error "color must be a vec4 or table color")))

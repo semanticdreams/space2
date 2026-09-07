@@ -48,7 +48,7 @@
 
 (fn malformed-explicit-colors-fail-loudly []
   (each [_ field (ipairs [:background-color :foreground-color])]
-    (each [_ color-value (ipairs [false true "red" 12 (glm.vec3 1 0 0)])]
+    (each [_ color-value (ipairs [false true "red" 12 (glm.vec3 1 0 0) (glm.quat 1 0 0 0)])]
       (local metadata {:text "FS"})
       (tset metadata field color-value)
       (local (ok err)
