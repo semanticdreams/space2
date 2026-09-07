@@ -3,7 +3,28 @@
 (local GraphViewNodeViews (require :graph/view/node-views))
 (local PanelTransfer (require :panel-transfer))
 (local HackerNewsRootNode (require :graph/nodes/hackernews-root))
+(local logging (require :logging))
 (local {: Layout} (require :layout))
+
+(fn capture-warnings [body]
+    (local original-warn logging.warn)
+    (local warnings [])
+    (set logging.warn
+         (fn [message]
+             (table.insert warnings (tostring message))))
+    (local (ok result) (pcall body))
+    (set logging.warn original-warn)
+    (when (not ok)
+        (error result))
+    warnings)
+
+(fn assert-unresolved-restored-warning [warnings key]
+    (local expected (.. "[graph-view] skipping unresolved restored node view: " key))
+    (assert (= (length warnings) 1)
+            (.. "expected one unresolved restored-node warning for " key))
+    (assert (= (. warnings 1) expected)
+            (.. "expected unresolved restored-node warning for " key
+                ", got " (tostring (. warnings 1)))))
 
 (fn make-icons-stub []
     (local glyph {:advance 1})
@@ -231,10 +252,14 @@
           (local views (GraphViewNodeViews {:ctx ctx
                                             :graph-map graph
                                             :view-target target}))
-           (views:restore-state {:open-views [{:node-key "terrain-tool:world-1:apply-perlin"
-                                               :graph-map-id "main"}]})
-          (assert (= (length target.children) 0)
-                  "restore-state should skip unresolved node views")
+           (local warnings
+             (capture-warnings
+               (fn []
+                 (views:restore-state {:open-views [{:node-key "terrain-tool:world-1:apply-perlin"
+                                                     :graph-map-id "main"}]}))))
+           (assert-unresolved-restored-warning warnings "terrain-tool:world-1:apply-perlin")
+           (assert (= (length target.children) 0)
+                   "restore-state should skip unresolved node views")
           (local state (views:capture-state))
           (assert (= (length (or state.open-views [])) 1)
                   "capture-state should preserve unresolved restored node views")
@@ -253,11 +278,15 @@
                                             :view-target target}))
           (assert (and target.restorer target.restorer.restorer)
                   "expected graph node views to register panel restorer")
-           ((. target.restorer :restorer) {:node-key "terrain:world-1:node-a"
-                                           :graph-map-id "main"
-                                           :layer "float"})
-          (assert (= (length target.children) 0)
-                  "panel restorer should skip unresolved node views")
+           (local warnings
+             (capture-warnings
+               (fn []
+                 ((. target.restorer :restorer) {:node-key "terrain:world-1:node-a"
+                                                 :graph-map-id "main"
+                                                 :layer "float"}))))
+           (assert-unresolved-restored-warning warnings "terrain:world-1:node-a")
+           (assert (= (length target.children) 0)
+                   "panel restorer should skip unresolved node views")
           (local state (views:capture-state))
           (assert (= (length (or state.open-views [])) 1)
                   "capture-state should preserve unresolved node views from panel restore")
@@ -647,10 +676,14 @@
            (local views (GraphViewNodeViews {:ctx ctx
                                              :graph-map graph
                                              :view-target target}))
-            (views:restore-state {:open-views [{:node-key "missing-node"
-                                                :graph-map-id "main"}]})
-           (assert (not load-by-key-called?)
-                   "restore-state should not call load-by-key for missing nodes")
+            (local warnings
+              (capture-warnings
+                (fn []
+                  (views:restore-state {:open-views [{:node-key "missing-node"
+                                                      :graph-map-id "main"}]}))))
+            (assert-unresolved-restored-warning warnings "missing-node")
+            (assert (not load-by-key-called?)
+                    "restore-state should not call load-by-key for missing nodes")
            (assert (= (length target.children) 0)
                    "restore-state should not add child for missing nodes")
            (views:drop-all))}])
