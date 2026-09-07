@@ -391,6 +391,9 @@ sol::table create_glm_table(sol::state_view lua)
     glm_table.set_function("is-vec3", [](const sol::object& obj) {
         return obj.is<glm::vec3>();
     });
+    glm_table.set_function("is-vec4", [](const sol::object& obj) {
+        return obj.is<glm::vec4>();
+    });
     glm_table.set_function("is-mat4", [](const sol::object& obj) {
         return obj.is<glm::mat4>();
     });

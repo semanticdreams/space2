@@ -6,6 +6,7 @@
 (local {: Flex : FlexChild} (require :flex))
 (local Button (require :button))
 (local {: resolve-card-colors : get-button-theme-colors} (require :widget-theme-utils))
+(local ViewKindBadge (require :graph/view/kind-badge))
 
 (local default-focus-border-width 0.3)
 (local default-selection-border-width 0.5)
@@ -71,26 +72,36 @@
       (((require :text) {:text title-text}) child-ctx))
     (fn spacer-builder [_ctx]
       (local layout (Layout {:name "graph-card-header-spacer"
-                              :measurer (fn [self] (set self.measure (glm.vec3 0 0 0)))
-                              :layouter (fn [_self] nil)}))
+                               :measurer (fn [self] (set self.measure (glm.vec3 0 0 0)))
+                               :layouter (fn [_self] nil)}))
       {:layout layout :drop (fn [_self] (layout:drop))})
+    (local badge-builder
+      (ViewKindBadge.titlebar-builder node.kind-badge {:scale 0.9
+                                                       :padding [0.18 0.06]}))
+    (local titlebar-children [])
+    (when badge-builder
+      (table.insert titlebar-children (FlexChild badge-builder 0)))
+    (table.insert titlebar-children (FlexChild title-builder 0))
+    (table.insert titlebar-children (FlexChild spacer-builder 1))
+    (table.insert titlebar-children
+                  (FlexChild (Button {:icon "close_fullscreen"
+                                      :variant :ghost
+                                      :focusable? false :text nil
+                                      :on-click (fn [_ _] (on-collapse))}) 0))
+    (table.insert titlebar-children
+                  (FlexChild (Button {:icon "open_in_new"
+                                      :variant :ghost
+                                      :focusable? false :text nil
+                                      :on-click (fn [_ event] (on-open event))}) 0))
+    (table.insert titlebar-children
+                  (FlexChild (Button {:icon "more_vert"
+                                      :variant :ghost
+                                      :focusable? false :text nil
+                                      :on-click (fn [_ event] (on-menu event))}) 0))
     ((Flex {:axis 1
             :yalign :center
             :xspacing 0.25
-            :children [(FlexChild title-builder 0)
-                       (FlexChild spacer-builder 1)
-                       (FlexChild (Button {:icon "close_fullscreen"
-                                             :variant :ghost
-                                             :focusable? false :text nil
-                                             :on-click (fn [_ _] (on-collapse))}) 0)
-                        (FlexChild (Button {:icon "open_in_new"
-                                             :variant :ghost
-                                             :focusable? false :text nil
-                                             :on-click (fn [_ event] (on-open event))}) 0)
-                        (FlexChild (Button {:icon "more_vert"
-                                             :variant :ghost
-                                             :focusable? false :text nil
-                                             :on-click (fn [_ event] (on-menu event))}) 0)]})
+            :children titlebar-children})
       ctx))
 
   (fn [ctx]
@@ -193,7 +204,11 @@
                 (- card.position.y (/ resolved.y 2.0))
                 (- card.position.z (/ resolved.z 2.0))))
     (local header-bar (build-header-bar ctx))
-    (set card.header-bar header-bar) (set card.header-title (. header-bar.children 1 :element)) (set card.header-title-text title-text)
+    (local has-badge? (not (or (= node.kind-badge nil) (= node.kind-badge false))))
+    (set card.header-bar header-bar)
+    (set card.header-kind-badge (if has-badge? (. header-bar.children 1 :element) nil))
+    (set card.header-title (. header-bar.children (if has-badge? 2 1) :element))
+    (set card.header-title-text title-text)
 
 
     (fn measurer [self]
