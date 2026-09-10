@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Start from current committed branch HEAD `191f9ef`.
+- Start from current committed branch HEAD `e8b9085`.
 - The uncommitted failed R5 follow-up was reverted; do not resurrect that patch.
 - Keep `Input`/`InputModel` fallback behavior unchanged.
 - `VirtualInput` owns authoritative cached logical cursor tuple: `cursor-byte`, `cursor-line`, `cursor-column`, plus validity/update rules.
@@ -306,15 +306,18 @@
 
 ---
 
-### Task 4: VirtualInput Authoritative Cursor and Viewport Anchor Cache
+### Task 4: VirtualInput Anchor Cache and TextState Bounded Routing
 
 **Files:**
 - Modify: `assets/lua/virtual-input.fnl`
+- Modify: `assets/lua/text-state.fnl`
 - Test: `assets/lua/tests/test-virtual-input.fnl`
+- Test: `assets/lua/tests/test-input-model.fnl`
+- Test: `assets/lua/tests/test-input.fnl`
 
 **Interfaces:**
 - Consumes `buffer:adjacent-codepoint-from-anchor(anchor, delta) -> table`, `buffer:move-to-line-column-from-anchor(anchor, target-line, target-column, opts) -> table`, and `buffer:build-viewport-row-from-anchor(anchor, columns) -> table`.
-- Produces `input.bounded-logical-navigation? = true`, `input:move-caret-horizontal-bounded(delta: number, opts: table|nil) -> boolean`, `input:move-caret-vertical-bounded(delta: number, opts: table|nil) -> boolean`, and authoritative `input.cursor-index`, `input.cursor-line`, `input.cursor-column`.
+- Produces `input.bounded-logical-navigation? = true`, `input:move-caret-horizontal-bounded(delta: number, opts: table|nil) -> boolean`, `input:move-caret-vertical-bounded(delta: number, opts: table|nil) -> boolean`, authoritative `input.cursor-index`, `input.cursor-line`, `input.cursor-column`, and `TextState` dispatch that skips pre-command clamp only for bounded `VirtualInput` `h/l/j/k` while preserving `Input`/`InputModel` behavior.
 
 - [ ] **Step 1: Add cursor cache helpers.**
 
@@ -380,54 +383,32 @@
   - They must call `invalidate-anchor-caches!` before exact resync.
   - They must leave `selection-anchor-byte` consistent with `buffer.cursor-byte`.
 
-- [ ] **Step 8: Run focused validation.**
-
-  ```bash
-  make fennel-check
-  make constraints
-  SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets FENNEL_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" FENNEL_MACRO_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" ./build/space -m tests.test-virtual-input:main
-  ```
-
----
-
-### Task 5: TextState Bounded Hot-Path Routing
-
-**Files:**
-- Modify: `assets/lua/text-state.fnl`
-- Test: `assets/lua/tests/test-virtual-input.fnl`
-- Test: `assets/lua/tests/test-input-model.fnl`
-- Test: `assets/lua/tests/test-input.fnl`
-
-**Interfaces:**
-- Consumes `input.bounded-logical-navigation?`, `input:move-caret-horizontal-bounded(delta, opts) -> boolean`, and `input:move-caret-vertical-bounded(delta, opts) -> boolean`.
-- Produces `TextState` dispatch that keeps `Input`/`InputModel` behavior unchanged while skipping full pre-command clamp for bounded `VirtualInput` `h/l/j/k`.
-
-- [ ] **Step 1: Add helper `bounded-hot-key?`.**
+- [ ] **Step 8: Add `TextState` helper `bounded-hot-key?`.**
 
   It must return true only for `h`, `l`, `j`, `k`, `SDLK_LEFT`, and `SDLK_RIGHT` when active input has `bounded-logical-navigation?`.
 
-- [ ] **Step 2: Update `handle-text-key`.**
+- [ ] **Step 9: Update `TextState` `handle-text-key`.**
 
   Requirements:
   - Resolve key before calling `clamp-caret-to-current-line`.
   - If `bounded-hot-key?` is true, do not call `clamp-caret-to-current-line`.
   - For all other inputs and keys, preserve the existing clamp-before-command behavior.
 
-- [ ] **Step 3: Update `move-horizontal`.**
+- [ ] **Step 10: Update `TextState` `move-horizontal`.**
 
   Requirements:
   - If input has `bounded-logical-navigation?` and `move-caret-horizontal-bounded`, call it directly.
   - On success, call `remember-column input nil`.
   - Otherwise execute the existing implementation unchanged.
 
-- [ ] **Step 4: Update `move-vertical`.**
+- [ ] **Step 11: Update `TextState` `move-vertical`.**
 
   Requirements:
   - If input has `bounded-logical-navigation?` and `move-caret-vertical-bounded`, call it directly with delta.
   - Preserve preferred-column behavior by calling `remember-column input nil` before the bounded call.
   - Otherwise execute the existing implementation unchanged.
 
-- [ ] **Step 5: Run focused compatibility validation.**
+- [ ] **Step 12: Run integrated focused validation.**
 
   ```bash
   make fennel-check
@@ -439,13 +420,13 @@
 
 ---
 
-### Task 6: File-Viewer E2E Anchor Navigation Coverage
+### Task 5: File-Viewer E2E Anchor Navigation Coverage
 
 **Files:**
 - Modify: `assets/lua/tests/e2e/test-fs-file-viewer-virtual-input.fnl`
 
 **Interfaces:**
-- Consumes: bounded `VirtualInput` navigation from Tasks 4 and 5.
+- Consumes: bounded `VirtualInput` navigation from Task 4.
 - Produces: E2E coverage that the graph file viewer remains usable after far horizontal navigation.
 
 - [ ] **Step 1: Extend the existing expanded file-viewer VirtualInput E2E flow.**
@@ -479,13 +460,13 @@
 
 ---
 
-### Task 7: Developer Documentation
+### Task 6: Developer Documentation
 
 **Files:**
 - Modify: `docs/dev/features/lazy-text-buffer-virtual-input.md`
 
 **Interfaces:**
-- Consumes: final API and invariants from Tasks 3-6.
+- Consumes: final API and invariants from Tasks 3-5.
 - Produces: canonical developer documentation for lazy anchor navigation.
 
 - [ ] **Step 1: Update the “Viewport snapshots” section.**
@@ -521,7 +502,7 @@
 
 ---
 
-### Task 8: Final Integration Validation
+### Task 7: Final Integration Validation
 
 **Files:**
 - Modify: no production files unless validation exposes a defect.
