@@ -26,15 +26,17 @@ When edits change document structure, line anchors reset to the beginning so lat
 
 ## Viewport snapshots
 
-`buffer:get-viewport {:line line :column column :lines lines :columns columns}` returns a bounded snapshot containing only requested rows and visible columns. Rows include text/codepoints for display plus byte offsets needed for caret movement and selection.
+`buffer:get-viewport {:line line :column column :lines lines :columns columns}` returns a bounded snapshot containing only requested rows and visible columns. Rows include text/codepoints for display plus byte offsets needed for caret movement and selection. `VirtualInput` records those row anchors as byte, line, and logical column tuples so later caret and viewport work can resume from a known nearby position.
 
-Viewport construction reads composed ranges in bounded chunks and marks long rows as partial when the row exceeds the scan budget. The editor must not fall back to whole-file reads when lazy indexing or row discovery is incomplete.
+Viewport construction reads composed ranges in bounded chunks and marks long rows as partial when the row exceeds the scan budget. Anchor-relative refresh may rebuild each visible row with `buffer:build-viewport-row-from-anchor(anchor, columns)` when cached row anchors exist for the current `scroll-line`/`scroll-column`. Far horizontal viewport refresh must use a cached row anchor for the requested logical column or explicitly report that bounded refresh is unavailable; the editor must not fall back to whole-file reads when lazy indexing or row discovery is incomplete.
 
 ## VirtualInput widget
 
 `VirtualInput` is the file-scale text widget. It renders a bounded set of visible rows by feeding each visible row's codepoints to child `Text` widgets, routes keyboard editing to `LazyTextBuffer`, tracks viewport scroll, handles selection/copy, and exposes save handling for buffers that support saving.
 
 `VirtualInput` exposes a deliberately small `Input`-compatible facade for the existing `TextState` and `InsertState` modal routes. The facade supports Vim-style `i`, `h`, `j`, `k`, `l`, and `x` in text mode, Escape and Return handling in insert mode, multiline insertion for Return, and Ctrl+S routing for file-viewer saves. File-scale editors should rely on this bounded facade instead of converting the document into an `InputModel`.
+
+`VirtualInput` owns the authoritative cached logical cursor tuple: `cursor-index` (byte offset), `cursor-line`, and `cursor-column`. It mirrors that tuple to the compatibility model after updates, but ordinary file-scale navigation should treat the widget cache as the source of truth. Ordinary `h`, `l`, `j`, and `k` navigation uses the cached cursor and viewport anchors to call bounded `LazyTextBuffer` movement APIs such as adjacent-codepoint and line/column-from-anchor movement. Exact commands that intentionally need document-wide knowledge, including `$`, `A`, and `G`, may still use exact scan paths, but they must update the cached cursor tuple and viewport anchors afterward before returning to ordinary navigation.
 
 The configured `:line-count` and `:column-count` are preferred maximum viewport dimensions. The allocated layout size determines the current visible row/column counts, so containers can shrink a file viewer without forcing the widget to render or request more lazy-buffer data than fits. All rendered children — background, row text, and caret — receive a `VirtualInput`-local clip region intersected with any parent clip bounds so narrow allocations clip consistently.
 
@@ -63,7 +65,9 @@ Validation for this stack should cover the full ladder because it spans native f
 - `make build` after native binding or runtime changes.
 - `make fennel-check` before constraints and Fennel tests.
 - `make constraints` as the structural gate.
-- Focused tests for `tests.test-fs`, `tests.test-lazy-text-buffer`, `tests.test-virtual-input`, `tests.test-fs-file-viewer`, `tests.test-input-model`, and `tests.test-input`.
+- Focused lazy-anchor navigation checks for `tests.test-lazy-text-buffer`, `tests.test-virtual-input`, `tests.test-input`, and `tests.test-input-model` whenever bounded buffer APIs or `TextState`/`VirtualInput` routing changes.
+- Focused file-source and graph integration checks for `tests.test-fs` and `tests.test-fs-file-viewer` when save/source behavior changes.
+- File-viewer E2E coverage when file-viewer routing changes, especially for far-line and far-horizontal caret movement through the graph file viewer.
 - The standard full `make test` command with keyring skipped, audio disabled, and `SPACE_ASSETS_PATH` set to the absolute assets directory.
 
 Regression tests should prove bounded reads, piece-table editing, viewport-only rendering, save success, conflict detection with `file changed` errors, graph viewer integration, and continued `Input`/`InputModel` compatibility.

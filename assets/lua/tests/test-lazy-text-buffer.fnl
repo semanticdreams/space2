@@ -43,6 +43,44 @@
       result
       (error result)))
 
+(fn call-with-large-concat-disabled [limit f arg]
+  (local original-concat table.concat)
+  (set table.concat
+       (fn [items sep i j]
+         (var total 0)
+         (local start (or i 1))
+         (local finish (or j (length items)))
+         (for [index start finish]
+           (local item (. items index))
+           (when (= (type item) :string)
+             (set total (+ total (# item)))))
+         (when (> total limit)
+           (error (.. "table.concat materialized " total " bytes; limit=" limit)))
+         (original-concat items sep i j)))
+  (local (ok result) (pcall f arg))
+  (set table.concat original-concat)
+  (if ok
+      result
+      (error result)))
+
+(fn instrument-source-reads [source]
+  (local original-read-range source.read-range)
+  (set source.read-count 0)
+  (set source.bytes-requested 0)
+  (set source.max-requested 0)
+  (set source.read-range
+       (fn [self offset max-bytes]
+         (set self.read-count (+ self.read-count 1))
+         (set self.bytes-requested (+ self.bytes-requested max-bytes))
+         (set self.max-requested (math.max self.max-requested max-bytes))
+         (original-read-range self offset max-bytes)))
+  source)
+
+(fn reset-source-read-stats [source]
+  (set source.read-count 0)
+  (set source.bytes-requested 0)
+  (set source.max-requested 0))
+
 (fn assert-source-range [file]
   (local source (source-for-file file {:chunk-bytes 4}))
   (assert (= source.path (fs.absolute file)))
@@ -117,6 +155,98 @@
   (buffer:move-caret-to-line-column 2 0)
   (assert (= buffer.cursor-byte 7) "caret line 2 column 0 should land at cc start"))
 
+(fn lazy-text-buffer-adjacent-codepoint-from-anchor-stays-within-line []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "anchor-adjacent.txt"))
+  (fs.write-file file "abc\nxyz")
+  (local buffer (buffer-for-file file {:chunk-bytes 4}))
+  (local left (buffer:adjacent-codepoint-from-anchor {:byte 2 :line 0 :column 2} -1))
+  (assert left.bounded? "left anchor movement should be bounded")
+  (assert left.moved? "left anchor movement should move")
+  (assert (= left.byte 1))
+  (assert (= left.line 0))
+  (assert (= left.column 1))
+  (local right (buffer:adjacent-codepoint-from-anchor {:byte 2 :line 0 :column 2} 1))
+  (assert right.bounded? "right anchor movement should be bounded")
+  (assert right.moved? "right anchor movement should move")
+  (assert (= right.byte 3))
+  (assert (= right.line 0))
+  (assert (= right.column 3))
+  (local line-end (buffer:adjacent-codepoint-from-anchor {:byte 3 :line 0 :column 3} 1))
+  (assert line-end.bounded? "line-end anchor movement should be bounded")
+  (assert (not line-end.moved?) "movement from line end should not cross newline")
+  (assert line-end.line-end? "line-end movement should report line-end")
+  (assert (= line-end.byte 3))
+  (assert (= line-end.line 0))
+  (assert (= line-end.column 3)))
+
+(fn lazy-text-buffer-line-column-from-near-anchor-is-bounded []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "anchor-near-line-column.txt"))
+  (fs.write-file file (string.rep "a" 100000))
+  (local source (instrument-source-reads (source-for-file file {:chunk-bytes 16})))
+  (local buffer (LazyTextBuffer {:source source :chunk-bytes 16}))
+  (local anchor {:byte 99990 :line 0 :column 99990})
+  (local read-budget (* 4 (math.max 16 buffer.chunk-bytes)))
+  (reset-source-read-stats source)
+  (local result (buffer:move-to-line-column-from-anchor anchor 0 99995 {:max-codepoints 16}))
+  (assert result.bounded? "near anchor line-column move should be bounded")
+  (assert (= result.byte 99995))
+  (assert (= result.line 0))
+  (assert (= result.column 99995))
+  (assert (not result.clamped?) "near anchor line-column move should not clamp")
+  (assert (<= source.max-requested (math.max 16 buffer.chunk-bytes))
+          (.. "near anchor move should keep source read requests bounded; max=" source.max-requested))
+  (assert (<= source.read-count 4)
+          (.. "near anchor move should use a bounded number of source reads; reads=" source.read-count))
+  (assert (<= source.bytes-requested read-budget)
+          (.. "near anchor move should keep total requested bytes bounded; bytes=" source.bytes-requested)))
+
+(fn lazy-text-buffer-line-column-from-far-line-start-reports-unbounded []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "anchor-far-line-column.txt"))
+  (fs.write-file file (string.rep "a" 100000))
+  (local source (instrument-source-reads (source-for-file file {:chunk-bytes 16})))
+  (local buffer (LazyTextBuffer {:source source :chunk-bytes 16}))
+  (local anchor {:byte 0 :line 0 :column 0})
+  (buffer:move-caret-to-byte 42)
+  (local original-cursor-byte buffer.cursor-byte)
+  (local read-budget (* 4 (math.max 16 buffer.chunk-bytes)))
+  (reset-source-read-stats source)
+  (local result (buffer:move-to-line-column-from-anchor anchor 0 99995 {:max-codepoints 16}))
+  (assert (not result.bounded?) "far anchor line-column move should report unbounded")
+  (assert (= result.reason :anchor-too-far))
+  (assert (= buffer.cursor-byte original-cursor-byte) "unbounded anchor move must not move the buffer cursor")
+  (assert (<= source.max-requested (math.max 16 buffer.chunk-bytes))
+          (.. "far anchor move should keep source read requests bounded; max=" source.max-requested))
+  (assert (<= source.read-count 4)
+          (.. "far anchor move should use a bounded number of source reads; reads=" source.read-count))
+  (assert (<= source.bytes-requested read-budget)
+          (.. "far anchor move should keep total requested bytes bounded; bytes=" source.bytes-requested)))
+
+(fn lazy-text-buffer-builds-viewport-row-from-anchor-without-prefix-materialization []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "anchor-viewport-row.txt"))
+  (fs.write-file file (string.rep "a" 100000))
+  (local buffer (buffer-for-file file {:chunk-bytes 16}))
+  (local anchor {:byte 99990 :line 0 :column 99990})
+  (call-with-large-concat-disabled
+    4096
+    (fn [target-buffer]
+      (local row (target-buffer:build-viewport-row-from-anchor anchor 5))
+      (assert (= row.line 0))
+      (assert (= row.start-byte 99990))
+      (assert (= row.start-column 99990))
+      (assert (= row.text "aaaaa"))
+      (assert (= (. row.column-byte-offsets 1) 0))
+      (assert (= (. row.column-byte-offsets 2) 1))
+      (assert (= (. row.column-byte-offsets 3) 2))
+      (assert (= (. row.column-byte-offsets 4) 3))
+      (assert (= (. row.column-byte-offsets 5) 4))
+      (assert (= (. row.column-byte-offsets 6) 5))
+      (assert (not row.partial?) "viewport row from anchor should preserve fully-known row partial flag"))
+    buffer))
+
 (fn lazy-text-buffer-maps-utf8-columns-to-byte-offsets []
   (local root (make-clean-temp-dir))
   (local file (fs.join-path root "utf8.txt"))
@@ -181,6 +311,65 @@
   (assert row.partial? "long newline-free row should report partial metadata")
   (assert (not row.line-end-known?) "line ending should be unknown after bounded scan")
   (assert (<= source.read-count 2) (.. "viewport should not scan to EOF; reads=" source.read-count)))
+
+(fn lazy-text-buffer-line-column-move-does-not-materialize-long-line []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "long-line-move.txt"))
+  (local text (string.rep "abcdefghij" 4096))
+  (fs.write-file file text)
+  (local source (source-for-file file {:chunk-bytes 16}))
+  (local original-read-range source.read-range)
+  (set source.max-requested 0)
+  (set source.read-range
+       (fn [self offset max-bytes]
+         (set self.max-requested (math.max self.max-requested max-bytes))
+         (original-read-range self offset max-bytes)))
+  (local buffer (LazyTextBuffer {:source source :chunk-bytes 16}))
+  (call-with-large-concat-disabled
+    4096
+    (fn [target-buffer]
+      (target-buffer:move-caret-to-line-column 0 (# text)))
+    buffer)
+  (assert (= buffer.cursor-byte buffer.size) "wide line-column move should land at EOF")
+  (assert (<= source.max-requested 16) (.. "line-column move should keep source read requests bounded; max=" source.max-requested))
+  (local snapshot (buffer:get-viewport {:line 0 :column 0 :lines 1 :columns 5}))
+  (assert (= (. snapshot.rows 1 :text) "abcde") "viewport after long-line move should remain clipped"))
+
+(fn lazy-text-buffer-horizontal-viewport-does-not-materialize-prefix []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "long-line-horizontal.txt"))
+  (local text (string.rep "abcdefghij" 4096))
+  (fs.write-file file text)
+  (local buffer (buffer-for-file file {:chunk-bytes 16}))
+  (call-with-large-concat-disabled
+    4096
+    (fn [target-buffer]
+      (local snapshot (target-buffer:get-viewport {:line 0 :column (- (# text) 5) :lines 1 :columns 5}))
+      (local row (. snapshot.rows 1))
+      (assert (= row.text "fghij") "horizontally scrolled viewport should render only visible suffix")
+      (assert (= row.start-byte (- (# text) 5)) "row start-byte should move to visible suffix")
+      (assert (= (. row.column-byte-offsets 1) 0))
+      (assert (= (. row.column-byte-offsets 6) 5)))
+    buffer))
+
+(fn lazy-text-buffer-line-column-move-resolves-lines-beyond-index-budget []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "far-logical-move.txt"))
+  (fs.write-file file (string.rep "x\n" 1000))
+  (local source (source-for-file file {:chunk-bytes 16}))
+  (local original-read-range source.read-range)
+  (set source.max-requested 0)
+  (set source.read-range
+       (fn [self offset max-bytes]
+         (set self.max-requested (math.max self.max-requested max-bytes))
+         (original-read-range self offset max-bytes)))
+  (local buffer (LazyTextBuffer {:source source :chunk-bytes 16 :line-index-scan-budget 64}))
+  (local final-line (- (buffer:get-line-count) 1))
+  (buffer:move-caret-to-line-column final-line 0)
+  (assert (= buffer.cursor-byte buffer.size)
+          (.. "far logical line move should land at final line start; cursor=" buffer.cursor-byte " size=" buffer.size))
+  (assert (<= source.max-requested 4096)
+          (.. "far logical line move should keep individual reads bounded; max=" source.max-requested)))
 
 (fn lazy-text-buffer-bounds-missing-line-discovery-in-newline-free-file []
   (local root (make-clean-temp-dir))
@@ -448,15 +637,81 @@
   (local snapshot (buffer:get-viewport {:line 0 :column 0 :lines 1 :columns 10}))
   (assert (= (. snapshot.rows 1 :text) "x") "backspace should delete the full multibyte character"))
 
+(fn lazy-text-buffer-exposes-logical-query-helpers []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "logical-queries.txt"))
+  (fs.write-file file " \tα\r\nbb\n")
+  (local source (source-for-file file {:chunk-bytes 3}))
+  (local original-read-range source.read-range)
+  (set source.max-requested 0)
+  (set source.read-range
+       (fn [self offset max-bytes]
+         (set self.max-requested (math.max self.max-requested max-bytes))
+         (original-read-range self offset max-bytes)))
+  (local buffer (LazyTextBuffer {:source source :chunk-bytes 3}))
+  (local summary (buffer:get-line-summary 0))
+  (assert (= summary.line 0))
+  (assert summary.known?)
+  (assert (= summary.start-byte 0))
+  (assert (= summary.line-end-byte 4))
+  (assert summary.line-end-known?)
+  (assert (= summary.newline-bytes 2))
+  (assert (= summary.codepoint-count 3))
+  (assert (= summary.first-nonblank-column 2))
+  (assert (= (buffer:get-line-count) 3))
+  (local (line column known?) (buffer:line-column-for-byte 7))
+  (assert known?)
+  (assert (= line 1))
+  (assert (= column 1))
+  (assert (= (buffer:byte-for-codepoint-position -4) 0))
+  (assert (= (buffer:byte-for-codepoint-position 2) 2))
+  (assert (= (buffer:byte-for-codepoint-position 3) 4))
+  (assert (= (buffer:byte-for-codepoint-position 99) buffer.size))
+  (assert (<= source.max-requested 4096) (.. "logical queries should read bounded chunks; max=" source.max-requested)))
+
+(fn lazy-text-buffer-logical-queries-consume-split-crlf-once []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "split-crlf-logical.txt"))
+  (local prefix (string.rep "a" 4095))
+  (fs.write-file file (.. prefix "\r\nb"))
+  (local buffer (buffer-for-file file {:chunk-bytes 4096}))
+  (assert (= (buffer:get-line-count) 2) "split CRLF at logical scan chunk boundary should count as one separator")
+  (local summary (buffer:get-line-summary 1))
+  (assert (= summary.line 1))
+  (assert (= summary.start-byte 4097) "line summary scan should resume after both CR and LF")
+  (assert (= summary.line-end-byte 4098))
+  (assert (= summary.codepoint-count 1)))
+
+(fn lazy-text-buffer-logical-query-required-args-error []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "logical-query-required-args.txt"))
+  (fs.write-file file "abc")
+  (local buffer (buffer-for-file file {:chunk-bytes 4}))
+  (assert-error-contains
+    "LazyTextBuffer line-column-for-byte requires numeric byte"
+    (fn [target-buffer] (target-buffer:line-column-for-byte nil))
+    buffer)
+  (assert-error-contains
+    "LazyTextBuffer byte-for-codepoint-position requires numeric position"
+    (fn [target-buffer] (target-buffer:byte-for-codepoint-position nil))
+    buffer))
+
 (table.insert tests {:name "lazy text source reads bounded byte ranges" :fn lazy-text-source-reads-bounded-byte-ranges})
 (table.insert tests {:name "lazy text source records baseline token" :fn lazy-text-source-records-baseline-token})
 (table.insert tests {:name "lazy text buffer viewport reads only requested rows" :fn lazy-text-buffer-viewport-reads-only-requested-rows})
 (table.insert tests {:name "lazy text buffer indexes LF and CRLF across chunks" :fn lazy-text-buffer-indexes-lf-and-crlf-across-chunks})
 (table.insert tests {:name "lazy text buffer direct line request handles CRLF split across chunks" :fn lazy-text-buffer-direct-line-request-handles-crlf-split-across-chunks})
+(table.insert tests {:name "lazy text buffer adjacent codepoint from anchor stays within line" :fn lazy-text-buffer-adjacent-codepoint-from-anchor-stays-within-line})
+(table.insert tests {:name "lazy text buffer line-column from near anchor is bounded" :fn lazy-text-buffer-line-column-from-near-anchor-is-bounded})
+(table.insert tests {:name "lazy text buffer line-column from far line start reports unbounded" :fn lazy-text-buffer-line-column-from-far-line-start-reports-unbounded})
+(table.insert tests {:name "lazy text buffer builds viewport row from anchor without prefix materialization" :fn lazy-text-buffer-builds-viewport-row-from-anchor-without-prefix-materialization})
 (table.insert tests {:name "lazy text buffer maps UTF-8 columns to byte offsets" :fn lazy-text-buffer-maps-utf8-columns-to-byte-offsets})
 (table.insert tests {:name "lazy text buffer clips nonzero UTF-8 columns with relative offsets" :fn lazy-text-buffer-clips-nonzero-utf8-columns-with-relative-offsets})
 (table.insert tests {:name "lazy text buffer clips before multibyte boundary" :fn lazy-text-buffer-clips-before-multibyte-boundary})
 (table.insert tests {:name "lazy text buffer bounds newline-free viewport source reads" :fn lazy-text-buffer-bounds-newline-free-viewport-source-reads})
+(table.insert tests {:name "lazy text buffer line-column move does not materialize long line" :fn lazy-text-buffer-line-column-move-does-not-materialize-long-line})
+(table.insert tests {:name "lazy text buffer horizontal viewport does not materialize prefix" :fn lazy-text-buffer-horizontal-viewport-does-not-materialize-prefix})
+(table.insert tests {:name "lazy text buffer line-column move resolves lines beyond index budget" :fn lazy-text-buffer-line-column-move-resolves-lines-beyond-index-budget})
 (table.insert tests {:name "lazy text buffer bounds missing line discovery in newline-free file" :fn lazy-text-buffer-bounds-missing-line-discovery-in-newline-free-file})
 (table.insert tests {:name "lazy text buffer bounds far line discovery with many newlines" :fn lazy-text-buffer-bounds-far-line-discovery-with-many-newlines})
 (table.insert tests {:name "lazy text buffer inserts and deletes across piece boundaries" :fn lazy-text-buffer-inserts-and-deletes-across-piece-boundaries})
@@ -474,6 +729,9 @@
 (table.insert tests {:name "lazy text buffer rejects invalid UTF-8 inserted text" :fn lazy-text-buffer-rejects-invalid-utf8-inserted-text})
 (table.insert tests {:name "lazy text buffer moves caret by UTF-8 boundaries" :fn lazy-text-buffer-moves_caret_by_utf8_boundaries})
 (table.insert tests {:name "lazy text buffer deletes UTF-8 codepoints" :fn lazy-text-buffer-deletes_utf8_codepoints})
+(table.insert tests {:name "lazy text buffer exposes logical query helpers" :fn lazy-text-buffer-exposes-logical-query-helpers})
+(table.insert tests {:name "lazy text buffer logical queries consume split CRLF once" :fn lazy-text-buffer-logical-queries-consume-split-crlf-once})
+(table.insert tests {:name "lazy text buffer logical query required args error" :fn lazy-text-buffer-logical-query-required-args-error})
 
 (local main
   (fn []

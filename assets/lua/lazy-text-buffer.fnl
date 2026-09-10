@@ -174,6 +174,334 @@
     (when (> (# text) 0)
       (string.byte text 1))))
 
+(local logical-scan-chunk-bytes 4096)
+
+(fn whitespace-codepoint? [codepoint]
+  (if (= codepoint 9)
+      true
+      (= codepoint 10)
+      true
+      (= codepoint 11)
+      true
+      (= codepoint 12)
+      true
+      (= codepoint 13)
+      true
+      (= codepoint 32)
+      true
+      false))
+
+(fn read-logical-chunk [buffer pos]
+  (local chunk (read-composed-range buffer pos (math.min logical-scan-chunk-bytes (- buffer.size pos))))
+  (if (and (> (# chunk) 0) (< (+ pos (# chunk)) buffer.size))
+      (do
+        (local prefix-end (complete-utf8-prefix-length chunk))
+        (if (> prefix-end 0)
+            (string.sub chunk 1 prefix-end)
+            chunk))
+      chunk))
+
+(fn logical-codepoint-step [buffer chunk index global-byte]
+  (local expected-len (utf8-sequence-length (string.byte chunk index)))
+  (local complete-len (complete-utf8-sequence-length-at chunk index))
+  (local cp (if complete-len (semantic-utf8-codepoint chunk index complete-len) nil))
+  (if cp
+      (values complete-len cp false)
+      (and expected-len
+           (valid-truncated-utf8-prefix? chunk index expected-len)
+           (< (+ global-byte (- (# chunk) index) 1) buffer.size))
+      (values 0 nil true)
+      (valid-truncated-utf8-prefix? chunk index expected-len)
+      (values (- (# chunk) index -1) 0xFFFD false)
+      complete-len
+      (values complete-len 0xFFFD false)
+      (values 1 0xFFFD false)))
+
+(fn nearest-byte-anchor [anchors byte]
+  (var best (. anchors 1))
+  (each [_ anchor (ipairs anchors)]
+    (when (and (<= anchor.byte byte) (>= anchor.byte best.byte))
+      (set best anchor)))
+  best)
+
+(fn nearest-line-anchor [anchors line]
+  (var best (. anchors 1))
+  (each [_ anchor (ipairs anchors)]
+    (when (and (<= anchor.line line) (>= anchor.line best.line))
+      (set best anchor)))
+  best)
+
+(fn note-summary-codepoint [state cp advance global-byte]
+  (when (and (= state.first-nonblank-column nil) (not (whitespace-codepoint? cp)))
+    (set state.first-nonblank-column state.codepoint-count))
+  (set state.codepoint-count (+ state.codepoint-count 1))
+  (set state.line-end-byte (+ global-byte advance)))
+
+(fn first-nonblank-or-end [state]
+  (if (= state.first-nonblank-column nil)
+      state.codepoint-count
+      state.first-nonblank-column))
+
+(fn advance-line-column-chunk [buffer state target chunk]
+  (var i 1)
+  (while (and (<= i (# chunk)) (< state.pos target))
+    (local b (string.byte chunk i))
+    (if (= b 10)
+        (do
+          (set state.line (+ state.line 1))
+          (set state.column 0)
+          (set state.pos (+ state.pos 1))
+          (table.insert buffer.line-anchors {:line state.line :byte state.pos}))
+        (= b 13)
+        (do
+          (local next-b (if (< i (# chunk))
+                            (string.byte chunk (+ i 1))
+                            (byte-at buffer (+ state.pos 1))))
+          (local newline-bytes (if (= next-b 10) 2 1))
+          (if (< target (+ state.pos newline-bytes))
+              (set state.pos target)
+              (do
+                (set state.line (+ state.line 1))
+                (set state.column 0)
+                (set state.pos (+ state.pos newline-bytes))
+                (table.insert buffer.line-anchors {:line state.line :byte state.pos})
+                (when (= newline-bytes 2)
+                  (set i (+ i 1))))))
+        (do
+          (local (advance _cp wait?) (logical-codepoint-step buffer chunk i state.pos))
+          (if wait?
+              (set i (# chunk))
+              (if (< target (+ state.pos advance))
+                  (set state.pos target)
+                  (do
+                    (set state.pos (+ state.pos advance))
+                    (set state.column (+ state.column 1))
+                    (set i (+ i advance -1)))))))
+    (set i (+ i 1))))
+
+(fn advance-codepoint-position-chunk [buffer state target chunk]
+  (var i 1)
+  (while (and (<= i (# chunk)) (< state.codepoints target))
+    (local (advance _cp wait?) (logical-codepoint-step buffer chunk i state.pos))
+    (if wait?
+        (set i (# chunk))
+        (do
+          (set state.codepoints (+ state.codepoints 1))
+          (set state.pos (math.min buffer.size (+ state.pos advance)))
+          (set i (+ i advance -1))))
+    (set i (+ i 1))))
+
+(fn advance-line-summary-scan-chunk [buffer state target-line chunk]
+  (var i 1)
+  (set state.extra-consumed-bytes 0)
+  (while (and (<= i (# chunk)) (< state.line target-line))
+    (local b (string.byte chunk i))
+    (if (= b 10)
+        (do
+          (set state.line (+ state.line 1))
+          (set state.line-start (+ state.pos i))
+          (table.insert buffer.line-anchors {:line state.line :byte state.line-start}))
+        (= b 13)
+        (do
+          (local next-b (if (< i (# chunk))
+                            (string.byte chunk (+ i 1))
+                            (byte-at buffer (+ state.pos i))))
+          (local newline-bytes (if (= next-b 10) 2 1))
+          (set state.line (+ state.line 1))
+          (set state.line-start (+ state.pos i newline-bytes -1))
+          (table.insert buffer.line-anchors {:line state.line :byte state.line-start})
+          (when (and (= newline-bytes 2) (= i (# chunk)))
+            (set state.extra-consumed-bytes 1))
+          (when (= newline-bytes 2)
+            (set i (+ i 1)))))
+    (set i (+ i 1))))
+
+(fn count-line-separators-chunk [buffer state chunk]
+  (var i 1)
+  (set state.extra-consumed-bytes 0)
+  (while (<= i (# chunk))
+    (local b (string.byte chunk i))
+    (if (= b 10)
+        (set state.lines (+ state.lines 1))
+        (= b 13)
+        (do
+          (local next-b (if (< i (# chunk))
+                            (string.byte chunk (+ i 1))
+                            (byte-at buffer (+ state.pos i))))
+          (set state.lines (+ state.lines 1))
+          (when (and (= next-b 10) (= i (# chunk)))
+            (set state.extra-consumed-bytes 1))
+          (when (= next-b 10)
+            (set i (+ i 1)))))
+    (set i (+ i 1))))
+
+(fn scan-line-summary-from [buffer start-line start-byte target-line]
+  (local state {:line start-line
+                :line-start start-byte
+                :pos start-byte
+                :extra-consumed-bytes 0})
+  (var done false)
+  (while (and (not done) (< state.line target-line) (< state.pos buffer.size))
+    (local chunk (read-logical-chunk buffer state.pos))
+    (if (= (# chunk) 0)
+        (set done true)
+        (do
+          (advance-line-summary-scan-chunk buffer state target-line chunk)
+          (set state.pos (+ state.pos (# chunk) state.extra-consumed-bytes)))))
+  (values state.line state.line-start))
+
+(fn summarize-line-at [buffer line start-byte]
+  (var pos start-byte)
+  (local state {:codepoint-count 0
+                :first-nonblank-column nil
+                :line-end-byte start-byte
+                :newline-bytes 0})
+  (var done false)
+  (while (and (not done) (< pos buffer.size))
+    (local chunk (read-logical-chunk buffer pos))
+    (if (= (# chunk) 0)
+        (set done true)
+        (do
+          (var i 1)
+          (while (and (<= i (# chunk)) (not done))
+            (local global-byte (+ pos i -1))
+            (local b (string.byte chunk i))
+            (if (= b 10)
+                (do
+                  (set state.line-end-byte global-byte)
+                  (set state.newline-bytes 1)
+                  (set done true))
+                (= b 13)
+                (do
+                  (local next-b (if (< i (# chunk))
+                                    (string.byte chunk (+ i 1))
+                                    (byte-at buffer (+ global-byte 1))))
+                  (set state.line-end-byte global-byte)
+                  (set state.newline-bytes (if (= next-b 10) 2 1))
+                  (set done true))
+                (do
+                  (local (advance cp wait?) (logical-codepoint-step buffer chunk i global-byte))
+                  (if wait?
+                      (set done true)
+                      (do
+                        (note-summary-codepoint state cp advance global-byte)
+                        (set i (+ i advance -1))))))
+            (set i (+ i 1)))
+          (when (and (not done) (> (# chunk) 0))
+            (set pos (+ pos (# chunk)))))))
+  {:line line
+   :known? true
+   :start-byte start-byte
+   :line-end-byte state.line-end-byte
+   :line-end-known? true
+   :newline-bytes state.newline-bytes
+   :codepoint-count state.codepoint-count
+   :first-nonblank-column (first-nonblank-or-end state)})
+
+(fn get-line-summary [buffer line]
+  (assert (= (type line) :number) "LazyTextBuffer get-line-summary requires numeric line")
+  (local target-line (math.max 0 (math.floor line)))
+  (if (= buffer.size 0)
+      {:line 0
+       :known? true
+       :start-byte 0
+       :line-end-byte 0
+       :line-end-known? true
+       :newline-bytes 0
+       :codepoint-count 0
+       :first-nonblank-column 0}
+      (do
+        (local anchor (nearest-line-anchor buffer.line-anchors target-line))
+        (local (actual-line start-byte) (scan-line-summary-from buffer anchor.line anchor.byte target-line))
+        (summarize-line-at buffer actual-line start-byte))))
+
+(fn get-line-count [buffer]
+  (local state {:lines 1 :pos 0 :extra-consumed-bytes 0})
+  (while (< state.pos buffer.size)
+    (local chunk (read-logical-chunk buffer state.pos))
+    (if (= (# chunk) 0)
+        (set state.pos buffer.size)
+        (do
+          (count-line-separators-chunk buffer state chunk)
+          (set state.pos (+ state.pos (# chunk) state.extra-consumed-bytes)))))
+  state.lines)
+
+(fn line-column-for-byte [buffer byte]
+  (assert (= (type byte) :number) "LazyTextBuffer line-column-for-byte requires numeric byte")
+  (local target (clamp (math.floor byte) 0 buffer.size))
+  (local anchor (nearest-byte-anchor buffer.line-anchors target))
+  (local state {:line anchor.line :column 0 :pos anchor.byte})
+  (while (< state.pos target)
+    (local chunk (read-logical-chunk buffer state.pos))
+    (if (= (# chunk) 0)
+        (set state.pos target)
+        (advance-line-column-chunk buffer state target chunk)))
+  (values state.line state.column true))
+
+(fn byte-for-codepoint-position [buffer position]
+  (assert (= (type position) :number) "LazyTextBuffer byte-for-codepoint-position requires numeric position")
+  (local target (math.floor position))
+  (if (<= target 0)
+      0
+      (do
+        (local state {:codepoints 0 :pos 0})
+        (while (and (< state.pos buffer.size) (< state.codepoints target))
+          (local chunk (read-logical-chunk buffer state.pos))
+          (if (= (# chunk) 0)
+              (set state.pos buffer.size)
+               (advance-codepoint-position-chunk buffer state target chunk)))
+         state.pos)))
+
+(fn line-column-byte-step [buffer chunk index global-byte]
+  (local b (string.byte chunk index))
+  (if (= b 10)
+      (values 0 true)
+      (= b 13)
+      (values 0 true)
+      (do
+        (var advance nil)
+        (var wait? nil)
+        (local (chunk-advance _chunk-cp chunk-wait?) (logical-codepoint-step buffer chunk index global-byte))
+        (set advance chunk-advance)
+        (set wait? chunk-wait?)
+        (when wait?
+          (local extended (read-composed-range buffer global-byte (math.min 4 (- buffer.size global-byte))))
+          (local (extended-advance _extended-cp extended-wait?)
+            (logical-codepoint-step buffer extended 1 global-byte))
+          (set advance extended-advance)
+          (set wait? extended-wait?))
+        (if wait?
+            (values 0 true)
+            (values advance false)))))
+
+(fn byte-for-line-column [buffer start-byte column]
+  (local target-column (math.max 0 (math.floor column)))
+  (var pos start-byte)
+  (var current-column 0)
+  (var done false)
+  (while (and (not done) (< pos buffer.size) (< current-column target-column))
+    (local chunk (read-logical-chunk buffer pos))
+    (if (= (# chunk) 0)
+        (do
+          (set pos buffer.size)
+          (set done true))
+        (do
+          (local chunk-start pos)
+          (var i 1)
+          (while (and (<= i (# chunk)) (not done) (< current-column target-column))
+            (local global-byte (+ chunk-start i -1))
+            (local (advance stop?) (line-column-byte-step buffer chunk i global-byte))
+            (if stop?
+                (do
+                  (set pos global-byte)
+                  (set done true))
+                (do
+                  (set pos (math.min buffer.size (+ global-byte advance)))
+                  (set current-column (+ current-column 1))
+                  (set i (+ i advance -1))))
+            (set i (+ i 1))))))
+  (values (clamp pos 0 buffer.size) current-column))
+
 (fn nearest-anchor [anchors line]
   (var best (. anchors 1))
   (each [_ anchor (ipairs anchors)]
@@ -360,8 +688,8 @@
    :line-end-known? line-end-known?
    :partial? partial?
    :newline-bytes newline-bytes
-    :text text
-    :codepoints cps
+   :text text
+   :codepoints cps
     :column-byte-offsets offsets
     :display-byte-offsets display-offsets})
 
@@ -389,6 +717,170 @@
         (while (and (> pos 0) (utf8-continuation? (byte-at buffer pos)))
           (set pos (- pos 1)))
         pos)))
+
+(fn normalize-anchor [buffer anchor]
+  (assert (= (type anchor.byte) :number) "LazyTextBuffer anchor requires numeric byte")
+  (assert (= (type anchor.line) :number) "LazyTextBuffer anchor requires numeric line")
+  (assert (= (type anchor.column) :number) "LazyTextBuffer anchor requires numeric column")
+  {:byte (clamp (math.floor anchor.byte) 0 buffer.size)
+   :line (math.max 0 (math.floor anchor.line))
+   :column (math.max 0 (math.floor anchor.column))})
+
+(fn codepoint-advance-from-byte [buffer byte]
+  (local chunk (read-composed-range buffer byte (math.min 4 (- buffer.size byte))))
+  (local (advance _cp wait?) (logical-codepoint-step buffer chunk 1 byte))
+  (if wait?
+      0
+      advance))
+
+(fn adjacent-codepoint-from-anchor [buffer anchor delta]
+  (when (not (or (= delta -1) (= delta 1)))
+    (error "LazyTextBuffer adjacent-codepoint-from-anchor requires delta -1 or 1"))
+  (local normalized (normalize-anchor buffer anchor))
+  (if (= delta -1)
+      (if (<= normalized.column 0)
+          {:bounded? true
+           :moved? false
+           :line-start? true
+           :byte normalized.byte
+           :line normalized.line
+           :column normalized.column}
+          (do
+            (local next-byte (previous-codepoint-boundary buffer normalized.byte))
+            {:bounded? true
+             :moved? (not= next-byte normalized.byte)
+             :byte next-byte
+             :line normalized.line
+             :column (math.max 0 (- normalized.column 1))}))
+      (do
+        (local next-byte (byte-at buffer normalized.byte))
+        (if (or (= next-byte nil) (= next-byte 10) (= next-byte 13))
+            {:bounded? true
+             :moved? false
+             :line-end? true
+             :byte normalized.byte
+             :line normalized.line
+             :column normalized.column}
+            (do
+              (local advance (codepoint-advance-from-byte buffer normalized.byte))
+              (local moved? (> advance 0))
+              (local target-byte (if moved? (math.min buffer.size (+ normalized.byte advance)) normalized.byte))
+              (local following-byte (byte-at buffer target-byte))
+              {:bounded? true
+               :moved? moved?
+               :after-line-end? (and moved?
+                                     (or (= following-byte nil)
+                                         (= following-byte 10)
+                                         (= following-byte 13)))
+               :byte target-byte
+               :line normalized.line
+               :column (if moved? (+ normalized.column 1) normalized.column)})))))
+
+(fn unbounded-anchor-result [anchor reason]
+  {:bounded? false
+   :reason reason
+   :byte anchor.byte
+   :line anchor.line
+   :column anchor.column})
+
+(fn scan-forward-line-column-chunk [buffer state target]
+  (local remaining-columns (- target state.column))
+  (local read-bytes (math.min buffer.chunk-bytes (* remaining-columns 4) (- buffer.size state.pos)))
+  (local chunk (read-composed-range buffer state.pos read-bytes))
+  (if (= (# chunk) 0)
+      (do
+        (set state.clamped? true)
+        (set state.done? true))
+      (do
+        (local chunk-start state.pos)
+        (var i 1)
+        (while (and (<= i (# chunk)) (not state.done?) (< state.column target))
+          (local global-byte (+ chunk-start i -1))
+          (local (advance stop?) (line-column-byte-step buffer chunk i global-byte))
+          (if stop?
+              (do
+                (set state.pos global-byte)
+                (set state.clamped? true)
+                (set state.done? true))
+              (do
+                (set state.pos (math.min buffer.size (+ global-byte advance)))
+                (set state.column (+ state.column 1))
+                (set i (+ i advance -1))))
+          (set i (+ i 1))))))
+
+(fn scan-forward-line-column-from-anchor [buffer anchor target]
+  (local state {:pos anchor.byte
+                :column anchor.column
+                :clamped? false
+                :done? false})
+  (while (and (not state.done?) (< state.column target))
+    (scan-forward-line-column-chunk buffer state target))
+  {:bounded? true
+   :byte state.pos
+   :line anchor.line
+   :column state.column
+   :clamped? state.clamped?})
+
+(fn scan-backward-line-column-from-anchor [buffer anchor target]
+  (var pos anchor.byte)
+  (var column anchor.column)
+  (while (and (> column target) (> column 0))
+    (set pos (previous-codepoint-boundary buffer pos))
+    (set column (- column 1)))
+  {:bounded? true
+   :byte pos
+   :line anchor.line
+   :column column
+   :clamped? false})
+
+(fn scan-line-column-from-anchor [buffer anchor target-column max-codepoints]
+  (local target (math.max 0 (math.floor target-column)))
+  (local max-steps (math.max 0 (math.floor max-codepoints)))
+  (local delta (- target anchor.column))
+  (if (> (math.abs delta) max-steps)
+      (unbounded-anchor-result anchor :anchor-too-far)
+      (= delta 0)
+      {:bounded? true
+       :byte anchor.byte
+       :line anchor.line
+       :column anchor.column
+       :clamped? false}
+      (> delta 0)
+      (scan-forward-line-column-from-anchor buffer anchor target)
+      (scan-backward-line-column-from-anchor buffer anchor target)))
+
+(fn move-to-line-column-from-anchor [buffer anchor target-line target-column opts]
+  (assert (= (type target-line) :number) "LazyTextBuffer move-to-line-column-from-anchor requires numeric target-line")
+  (assert (= (type target-column) :number) "LazyTextBuffer move-to-line-column-from-anchor requires numeric target-column")
+  (local normalized (normalize-anchor buffer anchor))
+  (local options (or opts {}))
+  (local max-codepoints (or options.max-codepoints (math.max 1 (* 2 (or buffer.chunk-bytes 1)))))
+  (local line (math.max 0 (math.floor target-line)))
+  (local result
+    (if (= line normalized.line)
+        (scan-line-column-from-anchor buffer normalized target-column max-codepoints)
+        options.target-anchor
+        (do
+          (local target-normalized (normalize-anchor buffer options.target-anchor))
+          (if (and (. options.target-anchor :line-end?) (> target-column target-normalized.column))
+              {:bounded? true
+               :byte target-normalized.byte
+               :line target-normalized.line
+               :column target-normalized.column
+               :clamped? true}
+              (scan-line-column-from-anchor buffer target-normalized target-column max-codepoints)))
+        options.line-anchor
+        (scan-line-column-from-anchor buffer (normalize-anchor buffer options.line-anchor) target-column max-codepoints)
+        (unbounded-anchor-result normalized :missing-line-anchor)))
+  (when result.bounded?
+    (set buffer.cursor-byte result.byte))
+  result)
+
+(fn build-viewport-row-from-anchor [buffer anchor columns]
+  (local normalized (normalize-anchor buffer anchor))
+  (local row (build-row buffer normalized.line normalized.byte columns))
+  (set row.start-column normalized.column)
+  row)
 
 (fn next-codepoint-boundary [buffer byte]
   (if (>= byte buffer.size)
@@ -440,14 +932,18 @@
   (var start-byte initial-start-byte)
   (var line-start-known? initial-known?)
   (for [_ 1 requested-lines]
+    (local (visible-start-byte visible-start-column)
+      (if (and line-start-known? (> start-column 0))
+          (byte-for-line-column buffer start-byte start-column)
+          (values start-byte 0)))
     (local row (if line-start-known?
-                 (build-row buffer line start-byte (+ start-column requested-columns))
-                 (unknown-row line start-byte)))
+                  (build-row buffer line visible-start-byte requested-columns)
+                  (unknown-row line start-byte)))
+    (when line-start-known?
+      (set row.start-column visible-start-column))
     (local next-start-byte (if (and line-start-known? row.line-end-known?)
                               (+ row.line-end-byte row.newline-bytes)
                               start-byte))
-    (when (> start-column 0)
-      (clip-row-column row start-column requested-columns))
     (table.insert rows row)
     (set start-byte next-start-byte)
     (set line-start-known? (and line-start-known? row.line-end-known?))
@@ -513,16 +1009,8 @@
   true)
 
 (fn move-caret-to-line-column [buffer line column]
-  (local (start known?) (find-line-start buffer line))
-  (if known?
-      (do
-        (local row (build-row buffer line start column))
-        (local offsets row.column-byte-offsets)
-        (local byte-offset (if (= (. offsets (+ column 1)) nil)
-                             (. offsets (# offsets))
-                             (. offsets (+ column 1))))
-        (set buffer.cursor-byte (clamp (+ start byte-offset) 0 buffer.size)))
-      (set buffer.cursor-byte (clamp start 0 buffer.size)))
+  (local summary (get-line-summary buffer line))
+  (set buffer.cursor-byte (byte-for-line-column buffer summary.start-byte column))
   true)
 
 (fn scroll-lines [buffer delta]
@@ -600,8 +1088,15 @@
    :selection nil
    :dirty? false
    :line-anchors [{:line 0 :byte 0}]
-    :get-viewport get-viewport
-    :insert-text insert-text
+     :get-viewport get-viewport
+     :get-line-summary get-line-summary
+     :get-line-count get-line-count
+      :line-column-for-byte line-column-for-byte
+      :byte-for-codepoint-position byte-for-codepoint-position
+      :adjacent-codepoint-from-anchor adjacent-codepoint-from-anchor
+      :move-to-line-column-from-anchor move-to-line-column-from-anchor
+      :build-viewport-row-from-anchor build-viewport-row-from-anchor
+      :insert-text insert-text
     :delete-selection delete-selection
     :delete-before-cursor delete-before-cursor
     :delete-at-cursor delete-at-cursor
