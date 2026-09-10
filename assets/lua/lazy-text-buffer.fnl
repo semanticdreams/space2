@@ -841,10 +841,8 @@
   true)
 
 (fn move-caret-to-line-column [buffer line column]
-  (local (start known?) (find-line-start buffer line))
-  (if known?
-      (set buffer.cursor-byte (byte-for-line-column buffer start column))
-      (set buffer.cursor-byte (clamp start 0 buffer.size)))
+  (local summary (get-line-summary buffer line))
+  (set buffer.cursor-byte (byte-for-line-column buffer summary.start-byte column))
   true)
 
 (fn scroll-lines [buffer delta]

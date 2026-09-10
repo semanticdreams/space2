@@ -225,6 +225,25 @@
   (local snapshot (buffer:get-viewport {:line 0 :column 0 :lines 1 :columns 5}))
   (assert (= (. snapshot.rows 1 :text) "abcde") "viewport after long-line move should remain clipped"))
 
+(fn lazy-text-buffer-line-column-move-resolves-lines-beyond-index-budget []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "far-logical-move.txt"))
+  (fs.write-file file (string.rep "x\n" 1000))
+  (local source (source-for-file file {:chunk-bytes 16}))
+  (local original-read-range source.read-range)
+  (set source.max-requested 0)
+  (set source.read-range
+       (fn [self offset max-bytes]
+         (set self.max-requested (math.max self.max-requested max-bytes))
+         (original-read-range self offset max-bytes)))
+  (local buffer (LazyTextBuffer {:source source :chunk-bytes 16 :line-index-scan-budget 64}))
+  (local final-line (- (buffer:get-line-count) 1))
+  (buffer:move-caret-to-line-column final-line 0)
+  (assert (= buffer.cursor-byte buffer.size)
+          (.. "far logical line move should land at final line start; cursor=" buffer.cursor-byte " size=" buffer.size))
+  (assert (<= source.max-requested 4096)
+          (.. "far logical line move should keep individual reads bounded; max=" source.max-requested)))
+
 (fn lazy-text-buffer-bounds-missing-line-discovery-in-newline-free-file []
   (local root (make-clean-temp-dir))
   (local file (fs.join-path root "missing-line.txt"))
@@ -560,6 +579,7 @@
 (table.insert tests {:name "lazy text buffer clips before multibyte boundary" :fn lazy-text-buffer-clips-before-multibyte-boundary})
 (table.insert tests {:name "lazy text buffer bounds newline-free viewport source reads" :fn lazy-text-buffer-bounds-newline-free-viewport-source-reads})
 (table.insert tests {:name "lazy text buffer line-column move does not materialize long line" :fn lazy-text-buffer-line-column-move-does-not-materialize-long-line})
+(table.insert tests {:name "lazy text buffer line-column move resolves lines beyond index budget" :fn lazy-text-buffer-line-column-move-resolves-lines-beyond-index-budget})
 (table.insert tests {:name "lazy text buffer bounds missing line discovery in newline-free file" :fn lazy-text-buffer-bounds-missing-line-discovery-in-newline-free-file})
 (table.insert tests {:name "lazy text buffer bounds far line discovery with many newlines" :fn lazy-text-buffer-bounds-far-line-discovery-with-many-newlines})
 (table.insert tests {:name "lazy text buffer inserts and deletes across piece boundaries" :fn lazy-text-buffer-inserts-and-deletes-across-piece-boundaries})
