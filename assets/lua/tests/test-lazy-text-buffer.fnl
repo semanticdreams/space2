@@ -225,6 +225,23 @@
   (local snapshot (buffer:get-viewport {:line 0 :column 0 :lines 1 :columns 5}))
   (assert (= (. snapshot.rows 1 :text) "abcde") "viewport after long-line move should remain clipped"))
 
+(fn lazy-text-buffer-horizontal-viewport-does-not-materialize-prefix []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "long-line-horizontal.txt"))
+  (local text (string.rep "abcdefghij" 4096))
+  (fs.write-file file text)
+  (local buffer (buffer-for-file file {:chunk-bytes 16}))
+  (call-with-large-concat-disabled
+    4096
+    (fn [target-buffer]
+      (local snapshot (target-buffer:get-viewport {:line 0 :column (- (# text) 5) :lines 1 :columns 5}))
+      (local row (. snapshot.rows 1))
+      (assert (= row.text "fghij") "horizontally scrolled viewport should render only visible suffix")
+      (assert (= row.start-byte (- (# text) 5)) "row start-byte should move to visible suffix")
+      (assert (= (. row.column-byte-offsets 1) 0))
+      (assert (= (. row.column-byte-offsets 6) 5)))
+    buffer))
+
 (fn lazy-text-buffer-line-column-move-resolves-lines-beyond-index-budget []
   (local root (make-clean-temp-dir))
   (local file (fs.join-path root "far-logical-move.txt"))
@@ -579,6 +596,7 @@
 (table.insert tests {:name "lazy text buffer clips before multibyte boundary" :fn lazy-text-buffer-clips-before-multibyte-boundary})
 (table.insert tests {:name "lazy text buffer bounds newline-free viewport source reads" :fn lazy-text-buffer-bounds-newline-free-viewport-source-reads})
 (table.insert tests {:name "lazy text buffer line-column move does not materialize long line" :fn lazy-text-buffer-line-column-move-does-not-materialize-long-line})
+(table.insert tests {:name "lazy text buffer horizontal viewport does not materialize prefix" :fn lazy-text-buffer-horizontal-viewport-does-not-materialize-prefix})
 (table.insert tests {:name "lazy text buffer line-column move resolves lines beyond index budget" :fn lazy-text-buffer-line-column-move-resolves-lines-beyond-index-budget})
 (table.insert tests {:name "lazy text buffer bounds missing line discovery in newline-free file" :fn lazy-text-buffer-bounds-missing-line-discovery-in-newline-free-file})
 (table.insert tests {:name "lazy text buffer bounds far line discovery with many newlines" :fn lazy-text-buffer-bounds-far-line-discovery-with-many-newlines})

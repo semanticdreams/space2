@@ -688,10 +688,10 @@
    :line-end-known? line-end-known?
    :partial? partial?
    :newline-bytes newline-bytes
-    :text text
-    :codepoints cps
-    :column-byte-offsets offsets
-    :display-byte-offsets display-offsets})
+   :text text
+   :codepoints cps
+   :column-byte-offsets offsets
+   :display-byte-offsets display-offsets})
 
 (fn delete-range [buffer start-byte end-byte]
   (local start (clamp start-byte 0 buffer.size))
@@ -768,14 +768,15 @@
   (var start-byte initial-start-byte)
   (var line-start-known? initial-known?)
   (for [_ 1 requested-lines]
+    (local visible-start-byte (if (and line-start-known? (> start-column 0))
+                                (byte-for-line-column buffer start-byte start-column)
+                                start-byte))
     (local row (if line-start-known?
-                 (build-row buffer line start-byte (+ start-column requested-columns))
+                 (build-row buffer line visible-start-byte requested-columns)
                  (unknown-row line start-byte)))
     (local next-start-byte (if (and line-start-known? row.line-end-known?)
                               (+ row.line-end-byte row.newline-bytes)
                               start-byte))
-    (when (> start-column 0)
-      (clip-row-column row start-column requested-columns))
     (table.insert rows row)
     (set start-byte next-start-byte)
     (set line-start-known? (and line-start-known? row.line-end-known?))
