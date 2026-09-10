@@ -167,10 +167,14 @@
       ":"
       (tostring (math.max 0 (math.floor column)))))
 
-(fn store-row-anchor-column! [self line column byte]
+(fn store-row-anchor-column! [self line column byte line-end?]
   (local anchor {:byte byte :line line :column column})
-  (tset self.viewport-row-anchor-cache (anchor-cache-key line column) anchor)
-  anchor)
+  (when line-end? (tset anchor :line-end? true)) (tset self.viewport-row-anchor-cache (anchor-cache-key line column) anchor) anchor)
+(fn store-known-row-end-anchor! [self row base-column base-byte]
+  (when (and row.line-end-known? (= (or row.end-byte row.line-end-byte) row.line-end-byte))
+    (assert row.column-byte-offsets "known viewport rows require column-byte-offsets") (assert row.line-end-byte "known viewport rows require line-end-byte") (local offsets row.column-byte-offsets)
+    (local end-column (+ base-column (math.max 0 (- (# offsets) 1))))
+    (store-row-anchor-column! self row.line end-column row.line-end-byte true)))
 
 (fn store-viewport-row-anchor! [self row start-column]
   (assert self "store-viewport-row-anchor! requires input")
@@ -178,15 +182,24 @@
     (local line (or row.line 0))
     (local base-column (math.max 0 (math.floor (or row.start-column start-column 0))))
     (local base-byte (or row.start-byte 0))
-    (store-row-anchor-column! self line base-column base-byte)
-    (each [i offset (ipairs (or row.column-byte-offsets []))]
-      (store-row-anchor-column! self line (+ base-column i -1) (+ base-byte offset)))
-    (when (and row.line-end-known? (> (or row.newline-bytes 0) 0))
-      (store-row-anchor-column! self (+ line 1) 0 (+ row.line-end-byte row.newline-bytes)))))
+    (when (or row.start-column row.line-end-known?)
+      (store-row-anchor-column! self line base-column base-byte)
+      (each [i offset (ipairs (or row.column-byte-offsets []))]
+        (store-row-anchor-column! self line (+ base-column i -1) (+ base-byte offset)))
+      (store-known-row-end-anchor! self row base-column base-byte)
+      (when (and row.line-end-known? (> (or row.newline-bytes 0) 0))
+        (store-row-anchor-column! self (+ line 1) 0 (+ row.line-end-byte row.newline-bytes))))))
 
 (fn lookup-viewport-row-anchor [self line column]
   (assert self "lookup-viewport-row-anchor requires input")
   (. self.viewport-row-anchor-cache (anchor-cache-key line column)))
+
+(fn lookup-line-end-anchor [self line target-column]
+  (assert self "lookup-line-end-anchor requires input")
+  (var found nil)
+  (each [_ anchor (pairs (or self.viewport-row-anchor-cache {}))]
+    (when (and (. anchor :line-end?) (= anchor.line line) (<= anchor.column target-column) (or (not found) (> anchor.column found.column)))
+      (set found anchor))) found)
 
 (fn store-viewport-anchors! [self snapshot]
   (assert self "store-viewport-anchors! requires input")
@@ -547,6 +560,9 @@
           (self.buffer:clear-selection))))
   (when moved
     (set-cached-caret! self self.buffer.cursor-byte target-line target-column)
+    (when self.buffer.adjacent-codepoint-from-anchor
+      (local next-result (self.buffer:adjacent-codepoint-from-anchor (cursor-anchor self) 1))
+      (store-row-anchor-column! self target-line target-column self.buffer.cursor-byte (and next-result next-result.bounded? (. next-result :line-end?))))
     (keep-caret-visible self)
     (store-scroll-anchor-from-cursor! self)
     (mark-caret-dirty self)
@@ -642,36 +658,34 @@
   moved)
 
 (fn target-line-anchor [self target-line target-column]
-  (local preferred (lookup-viewport-row-anchor self target-line target-column))
-  (if preferred
-      preferred
-      (do
-        (local scrolled (lookup-viewport-row-anchor self target-line self.scroll-column))
-        (if scrolled
-            scrolled
-            (lookup-viewport-row-anchor self target-line 0)))))
+  (local line-end (lookup-line-end-anchor self target-line target-column)) (local preferred (lookup-viewport-row-anchor self target-line target-column))
+  (if (and line-end preferred (> preferred.column line-end.column)) line-end preferred preferred
+      (do (local scrolled (lookup-viewport-row-anchor self target-line self.scroll-column))
+        (if (and line-end scrolled (> scrolled.column line-end.column)) line-end scrolled scrolled
+            (do (local line-start (lookup-viewport-row-anchor self target-line 0)) (if line-start line-start line-end))))))
 
 (fn move-caret-horizontal-bounded [self delta opts]
   (when (not self.buffer.adjacent-codepoint-from-anchor)
     (error "VirtualInput requires buffer:adjacent-codepoint-from-anchor for bounded horizontal movement"))
   (local direction (if (< delta 0) -1 1))
   (local result (self.buffer:adjacent-codepoint-from-anchor (cursor-anchor self) direction))
-  (local cached-next-line (and result result.line-end? (> direction 0) (target-line-anchor self (+ result.line 1) 0)))
+  (local cached-next-line (and (and opts opts.allow-line-cross?) result result.line-end? (> direction 0) (target-line-anchor self (+ result.line 1) 0)))
   (local target-anchor cached-next-line)
+  (local line-end-anchor (and (> direction 0) result result.moved? (not (and opts opts.allow-after-line-end?)) (lookup-line-end-anchor self result.line result.column)))
+  (local after-line-end? (and (> direction 0) result result.moved? (not (and opts opts.allow-after-line-end?))
+                              (or (. result :after-line-end?) (and line-end-anchor (= line-end-anchor.column result.column)))))
   (if (not (and result result.bounded?))
+      false
+      after-line-end?
       false
       (and (not result.moved?) (not target-anchor))
       false
       (do
         (local anchor (or self.selection-anchor-byte self.buffer.cursor-byte 0))
         (local target (if target-anchor target-anchor result))
-        (set-cached-caret! self target.byte target.line target.column)
-        (update-horizontal-selection self anchor (and opts opts.extend-selection?))
-        (keep-line-visible self target.line)
-        (keep-column-visible self target.column)
-        (store-scroll-anchor-from-cursor! self)
-        (mark-caret-dirty self)
-        (refresh-anchored-viewport! self))))
+        (set-cached-caret! self target.byte target.line target.column) (update-horizontal-selection self anchor (and opts opts.extend-selection?))
+        (keep-line-visible self target.line) (keep-column-visible self target.column) (store-scroll-anchor-from-cursor! self) (mark-caret-dirty self) (refresh-anchored-viewport! self)
+        true)))
 
 (fn apply-bounded-vertical-result! [self result target-column extend-selection?]
   (local anchor (if (= self.selection-anchor-byte nil)
@@ -684,7 +698,8 @@
   (keep-column-visible self result.column)
   (store-scroll-anchor-from-cursor! self)
   (mark-caret-dirty self)
-  (refresh-anchored-viewport! self))
+  (refresh-anchored-viewport! self)
+  true)
 
 (fn move-caret-vertical-bounded [self delta opts]
   (when (not self.buffer.move-to-line-column-from-anchor)
@@ -698,10 +713,14 @@
         (if (not target-anchor)
             false
             (do
+              (local requested-column (if (and (. target-anchor :line-end?)
+                                                (> target-column target-anchor.column))
+                                        target-anchor.column
+                                        target-column))
               (local result (self.buffer:move-to-line-column-from-anchor
                               (cursor-anchor self)
                               target-line
-                              target-column
+                              requested-column
                               {:max-codepoints (+ (or self.visible-column-count 1) 2)
                                :target-anchor target-anchor}))
               (if (not (and result result.bounded?))
@@ -763,7 +782,7 @@
       false))
 
 (fn move-direct-horizontal-key [self bounded-delta fallback-delta shift?]
-  (local opts {:extend-selection? shift?})
+  (local opts {:extend-selection? shift? :allow-line-cross? true :allow-after-line-end? true})
   (if (and self.bounded-logical-navigation?
            self.buffer.adjacent-codepoint-from-anchor
            self.move-caret-horizontal-bounded)

@@ -337,10 +337,13 @@
                       false)))))))
 
 (fn move-vertical [input delta]
-  (remember-column input nil)
   (if (and input.bounded-logical-navigation? input.move-caret-vertical-bounded)
-      (input:move-caret-vertical-bounded delta)
       (do
+        (when (= input.__preferred-column nil)
+          (remember-column input nil))
+        (input:move-caret-vertical-bounded delta))
+      (do
+        (remember-column input nil)
         (local lines (input-lines input))
         (if (and (not lines) (not (has-logical-navigation? input)))
             false

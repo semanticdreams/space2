@@ -500,7 +500,7 @@
                   (set current-column (+ current-column 1))
                   (set i (+ i advance -1))))
             (set i (+ i 1))))))
-  (clamp pos 0 buffer.size))
+  (values (clamp pos 0 buffer.size) current-column))
 
 (fn nearest-anchor [anchors line]
   (var best (. anchors 1))
@@ -765,8 +765,13 @@
               (local advance (codepoint-advance-from-byte buffer normalized.byte))
               (local moved? (> advance 0))
               (local target-byte (if moved? (math.min buffer.size (+ normalized.byte advance)) normalized.byte))
+              (local following-byte (byte-at buffer target-byte))
               {:bounded? true
                :moved? moved?
+               :after-line-end? (and moved?
+                                     (or (= following-byte nil)
+                                         (= following-byte 10)
+                                         (= following-byte 13)))
                :byte target-byte
                :line normalized.line
                :column (if moved? (+ normalized.column 1) normalized.column)})))))
@@ -855,7 +860,15 @@
     (if (= line normalized.line)
         (scan-line-column-from-anchor buffer normalized target-column max-codepoints)
         options.target-anchor
-        (scan-line-column-from-anchor buffer (normalize-anchor buffer options.target-anchor) target-column max-codepoints)
+        (do
+          (local target-normalized (normalize-anchor buffer options.target-anchor))
+          (if (and (. options.target-anchor :line-end?) (> target-column target-normalized.column))
+              {:bounded? true
+               :byte target-normalized.byte
+               :line target-normalized.line
+               :column target-normalized.column
+               :clamped? true}
+              (scan-line-column-from-anchor buffer target-normalized target-column max-codepoints)))
         options.line-anchor
         (scan-line-column-from-anchor buffer (normalize-anchor buffer options.line-anchor) target-column max-codepoints)
         (unbounded-anchor-result normalized :missing-line-anchor)))
@@ -919,12 +932,15 @@
   (var start-byte initial-start-byte)
   (var line-start-known? initial-known?)
   (for [_ 1 requested-lines]
-    (local visible-start-byte (if (and line-start-known? (> start-column 0))
-                                (byte-for-line-column buffer start-byte start-column)
-                                start-byte))
+    (local (visible-start-byte visible-start-column)
+      (if (and line-start-known? (> start-column 0))
+          (byte-for-line-column buffer start-byte start-column)
+          (values start-byte 0)))
     (local row (if line-start-known?
-                 (build-row buffer line visible-start-byte requested-columns)
-                 (unknown-row line start-byte)))
+                  (build-row buffer line visible-start-byte requested-columns)
+                  (unknown-row line start-byte)))
+    (when line-start-known?
+      (set row.start-column visible-start-column))
     (local next-start-byte (if (and line-start-known? row.line-end-known?)
                               (+ row.line-end-byte row.newline-bytes)
                               start-byte))

@@ -807,7 +807,7 @@
       (assert (= input.visible-column-count 3) "precondition: narrow layout should expose three visual columns")
       (assert (text-state:on-key-down {:key (string.byte "l")})
               "TextState l should move beyond the last visible codepoint")
-      (assert (= buffer.cursor-byte 3) "l should route through the UTF-8-safe buffer movement API")
+      (assert (= buffer.cursor-byte 3) (.. "l should route through the UTF-8-safe buffer movement API; byte=" buffer.cursor-byte " column=" input.cursor-column))
       (input:drop))))
 
 (fn virtual-input-long-line-horizontal-navigation-keeps-caret-visible []
@@ -1102,6 +1102,25 @@
       (assert-no-full-logical-scans buffer "j/k from cached target anchors")
       (input:drop))))
 
+(fn virtual-input-j-k-from-far-column-clamps-to-short-target-line-end []
+  (with-virtual-input-states (fn [env]
+    (local text-state (. env :text-state)) (local huge-line (string.rep "a" 100000)) (local short-line "tiny")
+    (local buffer (instrument-logical-scans (lazy-buffer "hot-jk-short-target" (.. huge-line "\n" short-line "\n" huge-line) {:chunk-bytes 65536}))) (local input (build-input {:buffer buffer :line-count 3 :column-count 4})) (narrow-layout! input 4 3)
+    (input:move-caret-to-line-column 0 90000) (set input.scroll-line 0) (set buffer.scroll-line 0) (set input.scroll-column 89997) (input:refresh-viewport) (buffer:move-caret-to-line-column 1 (# short-line))
+    (tset input.viewport-row-anchor-cache "1:4" {:byte buffer.cursor-byte :line 1 :column 4 :line-end? true}) (tset input.viewport-row-anchor-cache "1:90000" {:byte buffer.cursor-byte :line 1 :column 4 :line-end? true})
+    (input:move-caret-to-line-column 0 90000) (set input.scroll-line 0) (set buffer.scroll-line 0) (set input.scroll-column 89997) (input:request-focus) (set input.__preferred-column 90000) (reset-logical-scan-counters! buffer)
+    (assert (input:move-caret-vertical-bounded 1) "bounded j should move into short cached row") (assert (= input.cursor-line 1) "j should move to short line") (assert (= input.cursor-column (# short-line)) "j should clamp to actual short line end")
+    (assert (= input.__preferred-column 90000) "j should preserve far preferred column") (assert (text-state:on-key-down {:key (key "k")}) "k should return toward cached huge source") (assert (= input.cursor-line 0) "k should return to huge source") (assert (= input.cursor-column 90000) "k should restore far preferred column") (assert-no-full-logical-scans buffer "j/k far column into short target") (input:drop))))
+
+(fn virtual-input-text-state-l-stops-at-cached-line-end []
+  (with-virtual-input-states (fn [env]
+    (local text-state (. env :text-state)) (local buffer (instrument-logical-scans (lazy-buffer "hot-l-boundary" "abc\ndef" {:chunk-bytes 16}))) (local input (build-input {:buffer buffer :line-count 2 :column-count 8}))
+    (narrow-layout! input 8 2) (input:on-click {:row-index 1 :column 0}) (assert (text-state:on-key-down {:key (key "$") :mod 1}) "$ should move to last valid character") (assert (= input.cursor-column 2) "$ should land on last valid character")
+    (reset-logical-scan-counters! buffer) (assert (= (input:move-caret-horizontal-bounded 1) false) "bounded l after $ should return false") (assert (text-state:on-key-down {:key (key "l")}) "TextState should consume l")
+    (assert (= input.cursor-line 0) "l after $ should not cross rows") (assert (= input.cursor-column 2) "l after $ should not move") (input:move-caret-to-line-column 0 0) (input:refresh-viewport) (reset-logical-scan-counters! buffer)
+    (assert (text-state:on-key-down {:key (key "l")}) "first l should move") (assert (text-state:on-key-down {:key (key "l")}) "second l should reach last valid character") (assert (= (input:move-caret-horizontal-bounded 1) false) "bounded l at cached row boundary should return false")
+    (assert (text-state:on-key-down {:key (key "l")}) "TextState should consume repeated boundary l") (assert (= input.cursor-line 0) "repeated l should not cross rows") (assert (= input.cursor-column 2) "repeated l should stay at line end") (assert-no-full-logical-scans buffer "cached line-end l") (input:drop))))
+
 (fn virtual-input-refresh-after-far-horizontal-scroll-uses-cached-viewport-anchor []
   (local buffer (instrument-logical-scans (lazy-buffer "hot-refresh-horizontal-anchor" (string.rep "a" 100000) {:chunk-bytes 65536})))
   (local input (build-input {:buffer buffer :line-count 1 :column-count 4}))
@@ -1144,56 +1163,37 @@
       (assert-input-cursor input buffer 1 5 "G")
       (input:drop))))
 
-(table.insert tests {:name "VirtualInput requires explicit build context" :fn virtual-input-requires-explicit-build-context})
-(table.insert tests {:name "VirtualInput renders only visible viewport rows" :fn virtual-input-renders-only-visible-viewport-rows})
-(table.insert tests {:name "VirtualInput caret navigation loads lazy rows" :fn virtual-input-caret-navigation-loads-lazy-rows})
-(table.insert tests {:name "VirtualInput PageDown keeps subsequent vertical navigation valid" :fn virtual-input-page-down-keeps-subsequent-vertical-navigation-valid})
-(table.insert tests {:name "VirtualInput Shift+PageDown extends selection" :fn virtual-input-shift-page-down-extends-selection})
-(table.insert tests {:name "VirtualInput Shift+PageUp extends selection" :fn virtual-input-shift-page-up-extends-selection})
-(table.insert tests {:name "VirtualInput inserts and deletes through lazy buffer" :fn virtual-input-inserts-and-deletes-through-lazy-buffer})
-(table.insert tests {:name "VirtualInput copies selected text" :fn virtual-input-copies-selected-text})
-(table.insert tests {:name "VirtualInput save reports success and conflict" :fn virtual-input-save-reports-success-and-conflict})
-(table.insert tests {:name "VirtualInput drop tears down owned children" :fn virtual-input-drop-tears-down-owned-children})
-(table.insert tests {:name "VirtualInput click focus routes InputState events" :fn virtual-input-click-focus-routes-input-state-events})
-(table.insert tests {:name "VirtualInput TextState i enters insert mode" :fn virtual-input-text-state-i-enters-insert-mode})
-(table.insert tests {:name "VirtualInput state helper clears ignored text input" :fn virtual-input-state-helper-clears-ignored-text-input})
-(table.insert tests {:name "VirtualInput TextState h/l move without numeric delta error" :fn virtual-input-text-state-h-l-move-without-numeric-delta-error})
-(table.insert tests {:name "VirtualInput TextState j/k move using lazy rows" :fn virtual-input-text-state-j-k-move-using-lazy-rows})
-(table.insert tests {:name "VirtualInput TextState x deletes and clamps" :fn virtual-input-text-state-x-deletes-and-clamps})
-(table.insert tests {:name "VirtualInput InsertState Escape returns to text mode" :fn virtual-input-insert-state-escape-returns-to-text-mode})
-(table.insert tests {:name "VirtualInput InsertState Return inserts newline" :fn virtual-input-insert-state-return-inserts-newline})
-(table.insert tests {:name "VirtualInput insertion replaces real buffer selection" :fn virtual-input-insertion-replaces-real-buffer-selection})
-(table.insert tests {:name "VirtualInput Backspace deletes active selection" :fn virtual-input-backspace-deletes-active-selection})
-(table.insert tests {:name "VirtualInput Delete deletes active selection" :fn virtual-input-delete-deletes-active-selection})
-(table.insert tests {:name "VirtualInput caret navigation scrolls to target row" :fn virtual-input-caret-navigation-scrolls-to-target-row})
-(table.insert tests {:name "VirtualInput horizontal navigation preserves UTF-8 boundaries" :fn virtual-input-horizontal-navigation-preserves-utf8-boundaries})
-(table.insert tests {:name "VirtualInput horizontal crossing newline scrolls viewport" :fn virtual-input-horizontal-crossing-newline-scrolls-viewport})
-(table.insert tests {:name "VirtualInput horizontal navigation requires safe buffer API" :fn virtual-input-horizontal-navigation-requires-safe-buffer-api})
-(table.insert tests {:name "VirtualInput layout hides off-viewport caret" :fn virtual-input-layout-hides-off-viewport-caret})
-(table.insert tests {:name "VirtualInput narrow layout requests visible columns and local clip" :fn virtual-input-narrow-layout-requests-visible-columns-and-local-clip})
-(table.insert tests {:name "VirtualInput narrow layout TextState l moves past visible edge" :fn virtual-input-narrow-layout-text-state-l-moves-past-visible-edge})
-(table.insert tests {:name "VirtualInput long-line horizontal navigation keeps caret visible" :fn virtual-input-long-line-horizontal-navigation-keeps-caret-visible})
-(table.insert tests {:name "VirtualInput numeric horizontal jump keeps caret visible" :fn virtual-input-numeric-horizontal-jump-keeps-caret-visible})
-(table.insert tests {:name "VirtualInput arrow vertical preserves logical column outside visible row" :fn virtual-input-arrow-vertical-preserves-logical-column-outside-visible-row})
-(table.insert tests {:name "VirtualInput TextState caret on whitespace-only line matches Input" :fn virtual-input-text-state-caret-on-whitespace-only-line-matches-input})
-(table.insert tests {:name "VirtualInput TextState line edges use full logical long line" :fn virtual-input-text-state-line-edges-use-full-logical-long-line})
-(table.insert tests {:name "VirtualInput TextState j/k preserve logical column over clipped lines" :fn virtual-input-text-state-j-k-preserve-logical-column-over-clipped-lines})
-(table.insert tests {:name "VirtualInput TextState goto and page movement use logical lines" :fn virtual-input-text-state-goto-and-page-movement-use-logical-lines})
-(table.insert tests {:name "VirtualInput editing maintains horizontal and vertical visibility" :fn virtual-input-editing-maintains-horizontal-and-vertical-visibility})
-(table.insert tests {:name "VirtualInput TextState x deletes clamps and keeps caret visible" :fn virtual-input-text-state-x-deletes-clamps-and-keeps-caret-visible})
-(table.insert tests {:name "VirtualInput disconnect normalizes mode like Input" :fn virtual-input-disconnect-normalizes-mode-like-input})
+(table.insert tests {:name "VirtualInput requires explicit build context" :fn virtual-input-requires-explicit-build-context}) (table.insert tests {:name "VirtualInput renders only visible viewport rows" :fn virtual-input-renders-only-visible-viewport-rows})
+(table.insert tests {:name "VirtualInput caret navigation loads lazy rows" :fn virtual-input-caret-navigation-loads-lazy-rows}) (table.insert tests {:name "VirtualInput PageDown keeps subsequent vertical navigation valid" :fn virtual-input-page-down-keeps-subsequent-vertical-navigation-valid})
+(table.insert tests {:name "VirtualInput Shift+PageDown extends selection" :fn virtual-input-shift-page-down-extends-selection}) (table.insert tests {:name "VirtualInput Shift+PageUp extends selection" :fn virtual-input-shift-page-up-extends-selection})
+(table.insert tests {:name "VirtualInput inserts and deletes through lazy buffer" :fn virtual-input-inserts-and-deletes-through-lazy-buffer}) (table.insert tests {:name "VirtualInput copies selected text" :fn virtual-input-copies-selected-text})
+(table.insert tests {:name "VirtualInput save reports success and conflict" :fn virtual-input-save-reports-success-and-conflict}) (table.insert tests {:name "VirtualInput drop tears down owned children" :fn virtual-input-drop-tears-down-owned-children})
+(table.insert tests {:name "VirtualInput click focus routes InputState events" :fn virtual-input-click-focus-routes-input-state-events}) (table.insert tests {:name "VirtualInput TextState i enters insert mode" :fn virtual-input-text-state-i-enters-insert-mode})
+(table.insert tests {:name "VirtualInput state helper clears ignored text input" :fn virtual-input-state-helper-clears-ignored-text-input}) (table.insert tests {:name "VirtualInput TextState h/l move without numeric delta error" :fn virtual-input-text-state-h-l-move-without-numeric-delta-error})
+(table.insert tests {:name "VirtualInput TextState j/k move using lazy rows" :fn virtual-input-text-state-j-k-move-using-lazy-rows}) (table.insert tests {:name "VirtualInput TextState x deletes and clamps" :fn virtual-input-text-state-x-deletes-and-clamps})
+(table.insert tests {:name "VirtualInput InsertState Escape returns to text mode" :fn virtual-input-insert-state-escape-returns-to-text-mode}) (table.insert tests {:name "VirtualInput InsertState Return inserts newline" :fn virtual-input-insert-state-return-inserts-newline})
+(table.insert tests {:name "VirtualInput insertion replaces real buffer selection" :fn virtual-input-insertion-replaces-real-buffer-selection}) (table.insert tests {:name "VirtualInput Backspace deletes active selection" :fn virtual-input-backspace-deletes-active-selection})
+(table.insert tests {:name "VirtualInput Delete deletes active selection" :fn virtual-input-delete-deletes-active-selection}) (table.insert tests {:name "VirtualInput caret navigation scrolls to target row" :fn virtual-input-caret-navigation-scrolls-to-target-row})
+(table.insert tests {:name "VirtualInput horizontal navigation preserves UTF-8 boundaries" :fn virtual-input-horizontal-navigation-preserves-utf8-boundaries}) (table.insert tests {:name "VirtualInput horizontal crossing newline scrolls viewport" :fn virtual-input-horizontal-crossing-newline-scrolls-viewport})
+(table.insert tests {:name "VirtualInput horizontal navigation requires safe buffer API" :fn virtual-input-horizontal-navigation-requires-safe-buffer-api}) (table.insert tests {:name "VirtualInput layout hides off-viewport caret" :fn virtual-input-layout-hides-off-viewport-caret})
+(table.insert tests {:name "VirtualInput narrow layout requests visible columns and local clip" :fn virtual-input-narrow-layout-requests-visible-columns-and-local-clip}) (table.insert tests {:name "VirtualInput narrow layout TextState l moves past visible edge" :fn virtual-input-narrow-layout-text-state-l-moves-past-visible-edge})
+(table.insert tests {:name "VirtualInput long-line horizontal navigation keeps caret visible" :fn virtual-input-long-line-horizontal-navigation-keeps-caret-visible}) (table.insert tests {:name "VirtualInput numeric horizontal jump keeps caret visible" :fn virtual-input-numeric-horizontal-jump-keeps-caret-visible})
+(table.insert tests {:name "VirtualInput arrow vertical preserves logical column outside visible row" :fn virtual-input-arrow-vertical-preserves-logical-column-outside-visible-row}) (table.insert tests {:name "VirtualInput TextState caret on whitespace-only line matches Input" :fn virtual-input-text-state-caret-on-whitespace-only-line-matches-input})
+(table.insert tests {:name "VirtualInput TextState line edges use full logical long line" :fn virtual-input-text-state-line-edges-use-full-logical-long-line}) (table.insert tests {:name "VirtualInput TextState j/k preserve logical column over clipped lines" :fn virtual-input-text-state-j-k-preserve-logical-column-over-clipped-lines})
+(table.insert tests {:name "VirtualInput TextState goto and page movement use logical lines" :fn virtual-input-text-state-goto-and-page-movement-use-logical-lines}) (table.insert tests {:name "VirtualInput editing maintains horizontal and vertical visibility" :fn virtual-input-editing-maintains-horizontal-and-vertical-visibility})
+(table.insert tests {:name "VirtualInput TextState x deletes clamps and keeps caret visible" :fn virtual-input-text-state-x-deletes-clamps-and-keeps-caret-visible}) (table.insert tests {:name "VirtualInput disconnect normalizes mode like Input" :fn virtual-input-disconnect-normalizes-mode-like-input})
 (table.insert tests {:name "VirtualInput h/l after exact dollar on huge line stays bounded" :fn virtual-input-h-l-after-exact-dollar-on-huge-line-stays-bounded})
 (table.insert tests {:name "VirtualInput repeated h/l far into huge line stays bounded" :fn virtual-input-repeated-h-l-far-into-huge-line-stays-bounded})
 (table.insert tests {:name "VirtualInput j/k from far column uses cached target anchors" :fn virtual-input-j-k-from-far-column-uses-cached-target-anchors})
+(table.insert tests {:name "VirtualInput j/k from far column clamps to short target line end" :fn virtual-input-j-k-from-far-column-clamps-to-short-target-line-end})
+(table.insert tests {:name "VirtualInput TextState l stops at cached line end" :fn virtual-input-text-state-l-stops-at-cached-line-end})
 (table.insert tests {:name "VirtualInput refresh after far horizontal scroll uses cached viewport anchor" :fn virtual-input-refresh-after-far-horizontal-scroll-uses-cached-viewport-anchor})
 (table.insert tests {:name "VirtualInput exact dollar A G still work with anchor cache" :fn virtual-input-exact-dollar-A-G-still-work-with-anchor-cache})
-
 (local main
   (fn []
     (local runner (require :tests/runner))
     (runner.run-tests {:name "virtual-input"
                        :tests tests})))
-
 {:name "virtual-input"
  :tests tests
  :main main}
