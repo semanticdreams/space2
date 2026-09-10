@@ -182,6 +182,30 @@
 (fn snapshot-text [buffer]
   (. (buffer:get-viewport {:line 0 :column 0 :lines 1 :columns 80}) :rows 1 :text))
 
+(fn key [value]
+  (string.byte value))
+
+(fn narrow-layout! [input columns lines]
+  (input.layout:measurer)
+  (set input.layout.size
+       (glm.vec3 (+ (* 2 input.padding.x) (* columns input.column-width))
+                 (+ (* 2 input.padding.y) (* lines input.line-height))
+                 0))
+  (input.layout:layouter)
+  input)
+
+(fn assert-caret-visible-inside [input message]
+  (input.layout:layouter)
+  (assert input.caret.visible? (.. message ": caret should be visible"))
+  (local local-x (- input.caret.layout.position.x input.layout.position.x))
+  (local local-y (- input.caret.layout.position.y input.layout.position.y))
+  (assert (>= local-x input.padding.x) (.. message ": caret should be inside left edge"))
+  (assert (<= local-x (- input.layout.size.x input.padding.x))
+          (.. message ": caret should be inside right edge"))
+  (assert (>= local-y input.padding.y) (.. message ": caret should be inside bottom edge"))
+  (assert (<= local-y (- input.layout.size.y input.padding.y))
+          (.. message ": caret should be inside top edge")))
+
 (fn set-test-states []
   (local states (States))
   (states:add-state :normal {})
@@ -730,7 +754,138 @@
   (assert-viewport-calls-bounded buffer.state.viewport-calls
                                  input.visible-line-count
                                  input.visible-column-count
-                                 "numeric horizontal jump should not expand caret discovery requests")
+                                  "numeric horizontal jump should not expand caret discovery requests")
+  (input:drop))
+
+(fn virtual-input-text-state-line-edges-use-full-logical-long-line []
+  (with-virtual-input-states
+    (fn [env]
+      (local states (. env :states))
+      (local text-state (. env :text-state))
+      (local insert-state (. env :insert-state))
+      (local buffer (lazy-buffer "text-state-full-line-edges"
+                                 "  abcdefghijklmnopqrstuvwxyz\nshort\n"))
+      (buffer:move-caret-to-line-column 0 8)
+      (local input (build-input {:buffer buffer :line-count 1 :column-count 4}))
+      (narrow-layout! input 4 1)
+      (input:refresh-viewport)
+      (input:request-focus)
+      (states:set-state :text)
+      (assert (text-state:on-key-down {:key (key "0")})
+              "0 should move to full logical line start")
+      (assert (= buffer.cursor-byte 0) "0 should land at byte 0, not viewport start")
+      (assert (= input.cursor-column 0) "0 should sync logical column 0")
+      (assert (= input.scroll-column 0) "0 should reveal logical start")
+      (assert (text-state:on-key-down {:key (key "$") :mod 1})
+              "$ should move to full logical line end")
+      (assert (= input.cursor-column 27) "$ should use full line length")
+      (assert (= buffer.cursor-byte 27) "$ should place caret on last logical character")
+      (assert (> input.scroll-column 0) "$ should reveal logical line end")
+      (assert-caret-visible-inside input "$")
+      (assert (text-state:on-key-down {:key (key "^") :mod 1})
+              "^ should move to first nonblank in full logical line")
+      (assert (= input.cursor-column 2) "^ should ignore leading spaces")
+      (assert (= buffer.cursor-byte 2) "^ should land at first nonblank byte")
+      (assert (text-state:on-key-down {:key (key "A")})
+              "A should append after full logical line end")
+      (assert (= input.mode :insert) "A should enter insert mode")
+      (assert (= buffer.cursor-byte 28) "A should place insert caret after full line")
+      (assert-caret-visible-inside input "A")
+      (assert (insert-state:on-key-down {:key 27}) "Escape should leave A insert mode")
+      (assert (text-state:on-key-down {:key (key "I")})
+              "I should insert at first nonblank of full logical line")
+      (assert (= input.mode :insert) "I should enter insert mode")
+      (assert (= buffer.cursor-byte 2) "I should land at first nonblank byte")
+      (input:drop))))
+
+(fn virtual-input-text-state-j-k-preserve-logical-column-over-clipped-lines []
+  (with-virtual-input-states
+    (fn [env]
+      (local text-state (. env :text-state))
+      (local buffer (lazy-buffer "text-state-clipped-vertical"
+                                 "0123456789ABCDEFGHIJ\nabcdefghijklmnopqrst\nUVWXYZ0123456789abcd\n"))
+      (buffer:move-caret-to-line-column 0 8)
+      (local input (build-input {:buffer buffer :line-count 2 :column-count 4}))
+      (narrow-layout! input 4 2)
+      (input:refresh-viewport)
+      (input:request-focus)
+      (assert (text-state:on-key-down {:key (key "j")}) "j should move down")
+      (assert (= input.cursor-line 1) "j should move to logical line 1")
+      (assert (= input.cursor-column 8) "j should preserve logical column 8")
+      (assert (> input.scroll-column 0) "j should keep clipped logical column visible")
+      (assert-caret-visible-inside input "j")
+      (assert (text-state:on-key-down {:key (key "k")}) "k should move up")
+      (assert (= input.cursor-line 0) "k should return to logical line 0")
+      (assert (= input.cursor-column 8) "k should preserve logical column 8")
+      (assert-caret-visible-inside input "k")
+      (input:drop))))
+
+(fn virtual-input-text-state-goto-and-page-movement-use-logical-lines []
+  (with-virtual-input-states
+    (fn [env]
+      (local text-state (. env :text-state))
+      (local buffer (lazy-buffer "text-state-goto-page"
+                                 "line0\nline1\nline2\nline3\nline4\nline5\n"))
+      (local input (build-input {:buffer buffer :line-count 2 :column-count 8}))
+      (narrow-layout! input 8 2)
+      (input:on-click {:row-index 1 :column 0})
+      (assert (text-state:on-key-down {:key (key "G")}) "G should move to final logical line")
+      (assert (= input.cursor-line 6) "G should include trailing empty logical line")
+      (assert (= input.scroll-line 5) "G should reveal final line in two-line viewport")
+      (assert-caret-visible-inside input "G")
+      (assert (text-state:on-key-down {:key (key "g")}) "first g should enter prefix")
+      (assert (text-state:on-key-down {:key (key "g")}) "gg should move to first line")
+      (assert (= input.cursor-line 0) "gg should return to logical line 0")
+      (assert (= input.scroll-line 0) "gg should reveal first line")
+      (assert-caret-visible-inside input "gg")
+      (assert (input:on-key-down {:key 1073741902}) "PageDown should be handled")
+      (assert (= input.cursor-line 2) "PageDown should move by visible logical lines")
+      (assert (= input.scroll-line 2) "PageDown should scroll by visible logical lines")
+      (assert-caret-visible-inside input "PageDown")
+      (input:drop))))
+
+(fn virtual-input-editing-maintains-horizontal-and-vertical-visibility []
+  (local buffer (lazy-buffer "edit-both-axis-visibility" "row0\nrow1\nabcdefghij\n"))
+  (buffer:move-caret-to-line-column 2 8)
+  (local input (build-input {:buffer buffer :line-count 2 :column-count 4}))
+  (narrow-layout! input 4 2)
+  (set input.scroll-line 1)
+  (set input.scroll-column 5)
+  (input:refresh-viewport)
+  (assert (input:insert-text "\nZ") "insert should mutate lazy buffer")
+  (assert (= input.cursor-line 3) "inserted newline should update logical line")
+  (assert (= input.cursor-column 1) "inserted text should update logical column")
+  (assert (= input.scroll-line 2) "insert should keep new line visible")
+  (assert (= input.scroll-column 1) "insert should keep new column visible")
+  (assert-caret-visible-inside input "insert")
+  (input:drop))
+
+(fn virtual-input-text-state-x-deletes-clamps-and-keeps-caret-visible []
+  (with-virtual-input-states
+    (fn [env]
+      (local text-state (. env :text-state))
+      (local buffer (lazy-buffer "delete-clamp-visible" "abcdefghij"))
+      (buffer:move-caret-to-line-column 0 9)
+      (local input (build-input {:buffer buffer :line-count 1 :column-count 4}))
+      (narrow-layout! input 4 1)
+      (set input.scroll-column 6)
+      (input:refresh-viewport)
+      (input:request-focus)
+      (assert (text-state:on-key-down {:key (key "x")}) "x should delete at cursor")
+      (assert (= (snapshot-text buffer) "abcdefghi") "x should delete final character")
+      (assert (= input.cursor-column 8) "x should clamp to new final logical char")
+      (assert (= buffer.cursor-byte 8) "x should clamp buffer cursor")
+      (assert-caret-visible-inside input "x")
+      (input:drop))))
+
+(fn virtual-input-disconnect-normalizes-mode-like-input []
+  (local buffer (lazy-buffer "disconnect-normal-mode" "abc"))
+  (local input (build-input {:buffer buffer :line-count 1 :column-count 8}))
+  (input:enter-insert-mode)
+  (input:on-state-connected {})
+  (input:on-state-disconnected {})
+  (assert (= input.connected? false) "disconnect should clear connected flag")
+  (assert (= input.mode :normal) "disconnect should normalize VirtualInput mode")
   (input:drop))
 
 (table.insert tests {:name "VirtualInput requires explicit build context" :fn virtual-input-requires-explicit-build-context})
@@ -763,6 +918,12 @@
 (table.insert tests {:name "VirtualInput narrow layout TextState l moves past visible edge" :fn virtual-input-narrow-layout-text-state-l-moves-past-visible-edge})
 (table.insert tests {:name "VirtualInput long-line horizontal navigation keeps caret visible" :fn virtual-input-long-line-horizontal-navigation-keeps-caret-visible})
 (table.insert tests {:name "VirtualInput numeric horizontal jump keeps caret visible" :fn virtual-input-numeric-horizontal-jump-keeps-caret-visible})
+(table.insert tests {:name "VirtualInput TextState line edges use full logical long line" :fn virtual-input-text-state-line-edges-use-full-logical-long-line})
+(table.insert tests {:name "VirtualInput TextState j/k preserve logical column over clipped lines" :fn virtual-input-text-state-j-k-preserve-logical-column-over-clipped-lines})
+(table.insert tests {:name "VirtualInput TextState goto and page movement use logical lines" :fn virtual-input-text-state-goto-and-page-movement-use-logical-lines})
+(table.insert tests {:name "VirtualInput editing maintains horizontal and vertical visibility" :fn virtual-input-editing-maintains-horizontal-and-vertical-visibility})
+(table.insert tests {:name "VirtualInput TextState x deletes clamps and keeps caret visible" :fn virtual-input-text-state-x-deletes-clamps-and-keeps-caret-visible})
+(table.insert tests {:name "VirtualInput disconnect normalizes mode like Input" :fn virtual-input-disconnect-normalizes-mode-like-input})
 
 (local main
   (fn []
