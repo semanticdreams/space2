@@ -43,6 +43,26 @@
       result
       (error result)))
 
+(fn call-with-large-concat-disabled [limit f arg]
+  (local original-concat table.concat)
+  (set table.concat
+       (fn [items sep i j]
+         (var total 0)
+         (local start (or i 1))
+         (local finish (or j (length items)))
+         (for [index start finish]
+           (local item (. items index))
+           (when (= (type item) :string)
+             (set total (+ total (# item)))))
+         (when (> total limit)
+           (error (.. "table.concat materialized " total " bytes; limit=" limit)))
+         (original-concat items sep i j)))
+  (local (ok result) (pcall f arg))
+  (set table.concat original-concat)
+  (if ok
+      result
+      (error result)))
+
 (fn assert-source-range [file]
   (local source (source-for-file file {:chunk-bytes 4}))
   (assert (= source.path (fs.absolute file)))
@@ -181,6 +201,29 @@
   (assert row.partial? "long newline-free row should report partial metadata")
   (assert (not row.line-end-known?) "line ending should be unknown after bounded scan")
   (assert (<= source.read-count 2) (.. "viewport should not scan to EOF; reads=" source.read-count)))
+
+(fn lazy-text-buffer-line-column-move-does-not-materialize-long-line []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "long-line-move.txt"))
+  (local text (string.rep "abcdefghij" 4096))
+  (fs.write-file file text)
+  (local source (source-for-file file {:chunk-bytes 16}))
+  (local original-read-range source.read-range)
+  (set source.max-requested 0)
+  (set source.read-range
+       (fn [self offset max-bytes]
+         (set self.max-requested (math.max self.max-requested max-bytes))
+         (original-read-range self offset max-bytes)))
+  (local buffer (LazyTextBuffer {:source source :chunk-bytes 16}))
+  (call-with-large-concat-disabled
+    4096
+    (fn [target-buffer]
+      (target-buffer:move-caret-to-line-column 0 (# text)))
+    buffer)
+  (assert (= buffer.cursor-byte buffer.size) "wide line-column move should land at EOF")
+  (assert (<= source.max-requested 16) (.. "line-column move should keep source read requests bounded; max=" source.max-requested))
+  (local snapshot (buffer:get-viewport {:line 0 :column 0 :lines 1 :columns 5}))
+  (assert (= (. snapshot.rows 1 :text) "abcde") "viewport after long-line move should remain clipped"))
 
 (fn lazy-text-buffer-bounds-missing-line-discovery-in-newline-free-file []
   (local root (make-clean-temp-dir))
@@ -516,6 +559,7 @@
 (table.insert tests {:name "lazy text buffer clips nonzero UTF-8 columns with relative offsets" :fn lazy-text-buffer-clips-nonzero-utf8-columns-with-relative-offsets})
 (table.insert tests {:name "lazy text buffer clips before multibyte boundary" :fn lazy-text-buffer-clips-before-multibyte-boundary})
 (table.insert tests {:name "lazy text buffer bounds newline-free viewport source reads" :fn lazy-text-buffer-bounds-newline-free-viewport-source-reads})
+(table.insert tests {:name "lazy text buffer line-column move does not materialize long line" :fn lazy-text-buffer-line-column-move-does-not-materialize-long-line})
 (table.insert tests {:name "lazy text buffer bounds missing line discovery in newline-free file" :fn lazy-text-buffer-bounds-missing-line-discovery-in-newline-free-file})
 (table.insert tests {:name "lazy text buffer bounds far line discovery with many newlines" :fn lazy-text-buffer-bounds-far-line-discovery-with-many-newlines})
 (table.insert tests {:name "lazy text buffer inserts and deletes across piece boundaries" :fn lazy-text-buffer-inserts-and-deletes-across-piece-boundaries})

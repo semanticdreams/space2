@@ -449,8 +449,58 @@
           (local chunk (read-logical-chunk buffer state.pos))
           (if (= (# chunk) 0)
               (set state.pos buffer.size)
-              (advance-codepoint-position-chunk buffer state target chunk)))
-        state.pos)))
+               (advance-codepoint-position-chunk buffer state target chunk)))
+         state.pos)))
+
+(fn line-column-byte-step [buffer chunk index global-byte]
+  (local b (string.byte chunk index))
+  (if (= b 10)
+      (values 0 true)
+      (= b 13)
+      (values 0 true)
+      (do
+        (var advance nil)
+        (var wait? nil)
+        (local (chunk-advance _chunk-cp chunk-wait?) (logical-codepoint-step buffer chunk index global-byte))
+        (set advance chunk-advance)
+        (set wait? chunk-wait?)
+        (when wait?
+          (local extended (read-composed-range buffer global-byte (math.min 4 (- buffer.size global-byte))))
+          (local (extended-advance _extended-cp extended-wait?)
+            (logical-codepoint-step buffer extended 1 global-byte))
+          (set advance extended-advance)
+          (set wait? extended-wait?))
+        (if wait?
+            (values 0 true)
+            (values advance false)))))
+
+(fn byte-for-line-column [buffer start-byte column]
+  (local target-column (math.max 0 (math.floor column)))
+  (var pos start-byte)
+  (var current-column 0)
+  (var done false)
+  (while (and (not done) (< pos buffer.size) (< current-column target-column))
+    (local chunk (read-logical-chunk buffer pos))
+    (if (= (# chunk) 0)
+        (do
+          (set pos buffer.size)
+          (set done true))
+        (do
+          (local chunk-start pos)
+          (var i 1)
+          (while (and (<= i (# chunk)) (not done) (< current-column target-column))
+            (local global-byte (+ chunk-start i -1))
+            (local (advance stop?) (line-column-byte-step buffer chunk i global-byte))
+            (if stop?
+                (do
+                  (set pos global-byte)
+                  (set done true))
+                (do
+                  (set pos (math.min buffer.size (+ global-byte advance)))
+                  (set current-column (+ current-column 1))
+                  (set i (+ i advance -1))))
+            (set i (+ i 1))))))
+  (clamp pos 0 buffer.size))
 
 (fn nearest-anchor [anchors line]
   (var best (. anchors 1))
@@ -793,13 +843,7 @@
 (fn move-caret-to-line-column [buffer line column]
   (local (start known?) (find-line-start buffer line))
   (if known?
-      (do
-        (local row (build-row buffer line start column))
-        (local offsets row.column-byte-offsets)
-        (local byte-offset (if (= (. offsets (+ column 1)) nil)
-                             (. offsets (# offsets))
-                             (. offsets (+ column 1))))
-        (set buffer.cursor-byte (clamp (+ start byte-offset) 0 buffer.size)))
+      (set buffer.cursor-byte (byte-for-line-column buffer start column))
       (set buffer.cursor-byte (clamp start 0 buffer.size)))
   true)
 
