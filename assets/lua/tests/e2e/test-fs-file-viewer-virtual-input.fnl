@@ -152,6 +152,18 @@
   {:x (/ world-x ctx.units-per-pixel)
    :y (- ctx.height (/ world-y ctx.units-per-pixel))})
 
+(fn screen-point-for-input-cell [ctx input row column]
+  (assert input "screen point requires input")
+  (input.layout:layouter)
+  (local world-x (+ input.layout.position.x
+                    input.padding.x
+                    (* (+ column 0.5) input.column-width)))
+  (local world-y (+ input.layout.position.y
+                    input.padding.y
+                    (* (+ row 0.5) input.line-height)))
+  {:x (/ world-x ctx.units-per-pixel)
+   :y (- ctx.height (/ world-y ctx.units-per-pixel))})
+
 (fn clickable-label [object graph-card virtual-input]
   (if (= object virtual-input)
       "VirtualInput"
@@ -233,8 +245,9 @@
   (local graph-card (assert (. graph-view.points node) "GraphView should expand file viewer node"))
   (local view (assert graph-card.view-widget "expanded graph card should embed file viewer preview"))
   (assert view.virtual-input "expanded graph file viewer should expose VirtualInput")
+  (force-narrow-input-allocation view.virtual-input)
   (view.virtual-input.layout:layouter)
-  (local pointer (screen-point-for-layout-center ctx view.virtual-input.layout))
+  (local pointer (screen-point-for-input-cell ctx view.virtual-input 0 5))
   (local down-payload {:x pointer.x :y pointer.y :button 1 :timestamp 10})
   (local up-payload {:x pointer.x :y pointer.y :button 1 :timestamp 20})
   (active-mouse-button-down down-payload)
@@ -276,12 +289,30 @@
           "Escape should return expanded file viewer app state to text")
   (assert (= view.virtual-input.mode :normal)
           "Escape should return expanded file viewer VirtualInput to normal mode")
+  (for [_ 1 12]
+    (assert (active-key-down {:key (string.byte "l")})
+            "expanded file viewer should route repeated l navigation"))
+  (assert (> view.virtual-input.scroll-column 0)
+          "expanded routed long-line navigation should scroll horizontally")
+  (assert-caret-inside-input view.virtual-input)
+  (assert (active-key-down {:key (string.byte "0")})
+          "expanded routed 0 should move to full logical line start")
+  (assert (= view.virtual-input.cursor-column 0)
+          "expanded routed 0 should set logical cursor column 0")
+  (assert (= view.virtual-input.scroll-column 0)
+          "expanded routed 0 should reveal logical line start")
+  (assert-caret-inside-input view.virtual-input)
+  (assert (active-key-down {:key (string.byte "$") :mod 1})
+          "expanded routed $ should move to full logical line end")
+  (local first-summary (view.virtual-input.buffer:get-line-summary 0))
+  (assert (= view.virtual-input.cursor-column
+             (math.max 0 (- first-summary.codepoint-count 1)))
+          "expanded routed $ should use full logical line length")
+  (assert-caret-inside-input view.virtual-input)
   (assert (not (active-text-input {:text "Q"}))
           "text input after Escape in textnav should not insert into expanded file viewer")
   (assert (= (visible-buffer-text view.virtual-input) inserted-text)
           "text input after Escape should not mutate expanded file viewer buffer")
-  (assert (active-key-down {:key (string.byte "l")})
-          "focused expanded graph file viewer VirtualInput should consume h/j/k/l navigation")
   (Harness.cleanup-target target)
   (Harness.cleanup-target hud-target)
   (node:drop)
