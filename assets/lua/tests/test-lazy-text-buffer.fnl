@@ -448,6 +448,65 @@
   (local snapshot (buffer:get-viewport {:line 0 :column 0 :lines 1 :columns 10}))
   (assert (= (. snapshot.rows 1 :text) "x") "backspace should delete the full multibyte character"))
 
+(fn lazy-text-buffer-exposes-logical-query-helpers []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "logical-queries.txt"))
+  (fs.write-file file " \tα\r\nbb\n")
+  (local source (source-for-file file {:chunk-bytes 3}))
+  (local original-read-range source.read-range)
+  (set source.max-requested 0)
+  (set source.read-range
+       (fn [self offset max-bytes]
+         (set self.max-requested (math.max self.max-requested max-bytes))
+         (original-read-range self offset max-bytes)))
+  (local buffer (LazyTextBuffer {:source source :chunk-bytes 3}))
+  (local summary (buffer:get-line-summary 0))
+  (assert (= summary.line 0))
+  (assert summary.known?)
+  (assert (= summary.start-byte 0))
+  (assert (= summary.line-end-byte 4))
+  (assert summary.line-end-known?)
+  (assert (= summary.newline-bytes 2))
+  (assert (= summary.codepoint-count 3))
+  (assert (= summary.first-nonblank-column 2))
+  (assert (= (buffer:get-line-count) 3))
+  (local (line column known?) (buffer:line-column-for-byte 7))
+  (assert known?)
+  (assert (= line 1))
+  (assert (= column 1))
+  (assert (= (buffer:byte-for-codepoint-position -4) 0))
+  (assert (= (buffer:byte-for-codepoint-position 2) 2))
+  (assert (= (buffer:byte-for-codepoint-position 3) 4))
+  (assert (= (buffer:byte-for-codepoint-position 99) buffer.size))
+  (assert (<= source.max-requested 4096) (.. "logical queries should read bounded chunks; max=" source.max-requested)))
+
+(fn lazy-text-buffer-logical-queries-consume-split-crlf-once []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "split-crlf-logical.txt"))
+  (local prefix (string.rep "a" 4095))
+  (fs.write-file file (.. prefix "\r\nb"))
+  (local buffer (buffer-for-file file {:chunk-bytes 4096}))
+  (assert (= (buffer:get-line-count) 2) "split CRLF at logical scan chunk boundary should count as one separator")
+  (local summary (buffer:get-line-summary 1))
+  (assert (= summary.line 1))
+  (assert (= summary.start-byte 4097) "line summary scan should resume after both CR and LF")
+  (assert (= summary.line-end-byte 4098))
+  (assert (= summary.codepoint-count 1)))
+
+(fn lazy-text-buffer-logical-query-required-args-error []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "logical-query-required-args.txt"))
+  (fs.write-file file "abc")
+  (local buffer (buffer-for-file file {:chunk-bytes 4}))
+  (assert-error-contains
+    "LazyTextBuffer line-column-for-byte requires numeric byte"
+    (fn [target-buffer] (target-buffer:line-column-for-byte nil))
+    buffer)
+  (assert-error-contains
+    "LazyTextBuffer byte-for-codepoint-position requires numeric position"
+    (fn [target-buffer] (target-buffer:byte-for-codepoint-position nil))
+    buffer))
+
 (table.insert tests {:name "lazy text source reads bounded byte ranges" :fn lazy-text-source-reads-bounded-byte-ranges})
 (table.insert tests {:name "lazy text source records baseline token" :fn lazy-text-source-records-baseline-token})
 (table.insert tests {:name "lazy text buffer viewport reads only requested rows" :fn lazy-text-buffer-viewport-reads-only-requested-rows})
@@ -474,6 +533,9 @@
 (table.insert tests {:name "lazy text buffer rejects invalid UTF-8 inserted text" :fn lazy-text-buffer-rejects-invalid-utf8-inserted-text})
 (table.insert tests {:name "lazy text buffer moves caret by UTF-8 boundaries" :fn lazy-text-buffer-moves_caret_by_utf8_boundaries})
 (table.insert tests {:name "lazy text buffer deletes UTF-8 codepoints" :fn lazy-text-buffer-deletes_utf8_codepoints})
+(table.insert tests {:name "lazy text buffer exposes logical query helpers" :fn lazy-text-buffer-exposes-logical-query-helpers})
+(table.insert tests {:name "lazy text buffer logical queries consume split CRLF once" :fn lazy-text-buffer-logical-queries-consume-split-crlf-once})
+(table.insert tests {:name "lazy text buffer logical query required args error" :fn lazy-text-buffer-logical-query-required-args-error})
 
 (local main
   (fn []
