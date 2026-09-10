@@ -244,7 +244,7 @@
       (assert (= (. row.column-byte-offsets 4) 3))
       (assert (= (. row.column-byte-offsets 5) 4))
       (assert (= (. row.column-byte-offsets 6) 5))
-      (assert row.partial? "viewport row from anchor should report partial metadata"))
+      (assert (not row.partial?) "viewport row from anchor should preserve fully-known row partial flag"))
     buffer))
 
 (fn lazy-text-buffer-maps-utf8-columns-to-byte-offsets []
