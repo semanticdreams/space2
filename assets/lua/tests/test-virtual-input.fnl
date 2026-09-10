@@ -12,14 +12,11 @@
 (local StateSystemBindings (require :state-system-bindings))
 (local TextState (require :text-state))
 (local InsertState (require :insert-state))
-
 (local tests [])
 (local temp-root "/tmp/space/tests/virtual-input")
-
 (fn codepoints-from-text [text]
   (assert (= (type text) :string) "codepoints-from-text requires text")
   (icollect [_ cp (utf8.codes (or text ""))] cp))
-
 (fn text-from-codepoints [codepoints]
   (assert (= (type codepoints) :table) "text-from-codepoints requires codepoints")
   (table.concat
@@ -326,12 +323,11 @@
   (local state buffer.state)
   (set state.get-line-summary-calls 0)
   (set state.line-column-for-byte-calls 0)
+  (set state.get-line-count-calls 0)
   (set state.get-viewport-calls 0)
-  (set state.logical-scan-calls {:get-line-summary state.get-line-summary-calls
-                                 :line-column-for-byte state.line-column-for-byte-calls
-                                 :get-viewport state.get-viewport-calls})
   (local original-get-line-summary buffer.get-line-summary)
   (local original-line-column-for-byte buffer.line-column-for-byte)
+  (local original-get-line-count buffer.get-line-count)
   (local original-get-viewport buffer.get-viewport)
   (set buffer.get-line-summary
        (fn [self line]
@@ -339,8 +335,12 @@
          (original-get-line-summary self line)))
   (set buffer.line-column-for-byte
        (fn [self byte]
-         (set state.line-column-for-byte-calls (+ state.line-column-for-byte-calls 1))
-         (original-line-column-for-byte self byte)))
+          (set state.line-column-for-byte-calls (+ state.line-column-for-byte-calls 1))
+          (original-line-column-for-byte self byte)))
+  (set buffer.get-line-count
+       (fn [self]
+         (set state.get-line-count-calls (+ state.get-line-count-calls 1))
+         (original-get-line-count self)))
   (set buffer.get-viewport
        (fn [self view]
          (set state.get-viewport-calls (+ state.get-viewport-calls 1))
@@ -350,13 +350,12 @@
   (assert buffer.state "reset-logical-scan-counters! requires instrumented buffer state")
   (set buffer.state.get-line-summary-calls 0)
   (set buffer.state.line-column-for-byte-calls 0)
-  (set buffer.state.get-viewport-calls 0)
-  (set buffer.state.logical-scan-calls {:get-line-summary 0
-                                        :line-column-for-byte 0
-                                        :get-viewport 0}))
+  (set buffer.state.get-line-count-calls 0)
+  (set buffer.state.get-viewport-calls 0))
 (fn assert-no-full-logical-scans [buffer message]
   (assert (= buffer.state.get-line-summary-calls 0) (.. message ": get-line-summary should not be called; calls=" buffer.state.get-line-summary-calls))
-  (assert (= buffer.state.line-column-for-byte-calls 0) (.. message ": line-column-for-byte should not be called; calls=" buffer.state.line-column-for-byte-calls)))
+  (assert (= buffer.state.line-column-for-byte-calls 0) (.. message ": line-column-for-byte should not be called; calls=" buffer.state.line-column-for-byte-calls))
+  (assert (= buffer.state.get-line-count-calls 0) (.. message ": get-line-count should not be called; calls=" buffer.state.get-line-count-calls)))
 (fn seed-viewport-anchor! [buffer line column columns]
   (assert buffer.build-viewport-row-from-anchor "LazyTextBuffer must expose build-viewport-row-from-anchor to seed viewport anchors")
   (buffer:move-caret-to-line-column line column)
@@ -728,15 +727,14 @@
   (input:drop))
 
 (fn virtual-input-horizontal-crossing-newline-scrolls-viewport []
-  (local buffer (lazy-buffer "horizontal-newline-scroll" "aa\nbb\ncc"))
-  (buffer:move-caret-to-byte 5)
+  (local buffer (lazy-buffer "horizontal-newline-scroll" "aa\r\nbb\r\ncc"))
+  (buffer:move-caret-to-line-column 1 2)
   (local input (build-input {:buffer buffer :line-count 2 :column-count 8}))
   (input:refresh-viewport)
   (input:on-key-down {:key 1073741903})
-  (assert (= buffer.cursor-byte 6) "right arrow should cross the newline to next row start")
+  (assert (= buffer.cursor-byte 8) "right arrow should cross CRLF to next row start")
   (assert (= input.scroll-line 1) "crossing below the viewport should scroll target row into view")
   (input:drop))
-
 (fn move-without-safe-horizontal [input]
   (input:on-key-down {:key 1073741903}))
 
@@ -1044,9 +1042,9 @@
       (local input (build-input {:buffer buffer :line-count 1 :column-count 4}))
       (narrow-layout! input 4 1)
       (input:on-click {:row-index 1 :column 0})
-      (assert (text-state:on-key-down {:key (key "$") :mod 1}) "$ should land on the huge logical line end before bounded h/l")
+      (assert (text-state:on-key-down {:key (key "$") :mod 1}) "$ should land on the huge logical line end before bounded h/l") (input:move-caret-to-line-column 0 100000)
       (reset-logical-scan-counters! buffer)
-      (local handled-h (text-state:on-key-down {:key (key "h")}))
+      (assert (= (input:on-key-down {:key 1073741903}) false) "direct right arrow at far line end should return bounded no-move") (local handled-h (text-state:on-key-down {:key (key "h")}))
       (local handled-l (text-state:on-key-down {:key (key "l")}))
       (assert handled-h "h after exact $ should be handled")
       (assert handled-l "l after exact $ should be handled")
@@ -1069,6 +1067,7 @@
         (local command (if (= (% i 2) 1) "h" "l"))
         (assert (text-state:on-key-down {:key (key command)}) (.. command " should be handled during repeated far h/l")))
       (assert (and (>= input.cursor-column 89999) (<= input.cursor-column 90000)) (.. "repeated h/l should stay near the far logical column; column=" input.cursor-column))
+      (assert (and (input:on-key-down {:key 1073741904}) (input:on-key-down {:key 1073741903})) "direct left/right arrows should stay bounded")
       (assert-no-full-logical-scans buffer "repeated far h/l")
       (input:drop))))
 
@@ -1099,6 +1098,7 @@
       (assert (= input.cursor-line 1) "k should return to logical line 1")
       (assert (= input.cursor-column 90000) "k should preserve far preferred column")
       (assert-caret-visible-inside input "k from far cached column")
+      (input:move-caret-to-line-column 1 0) (reset-logical-scan-counters! buffer) (assert (= (input:on-key-down {:key 1073741904}) false) "direct left arrow at far line start should return bounded no-move")
       (assert-no-full-logical-scans buffer "j/k from cached target anchors")
       (input:drop))))
 

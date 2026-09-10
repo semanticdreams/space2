@@ -130,6 +130,86 @@
     (set self.model.cursor-index cursor-byte))
   (values line column known?))
 
+(fn cursor-anchor [self]
+  (assert self "cursor-anchor requires input")
+  {:byte (or self.cursor-index 0)
+   :line (or self.cursor-line 0)
+   :column (or self.cursor-column 0)})
+
+(fn set-cached-caret! [self byte line column]
+  (assert self "set-cached-caret! requires input")
+  (assert (= (type byte) :number) "set-cached-caret! requires byte")
+  (assert (= (type line) :number) "set-cached-caret! requires line")
+  (assert (= (type column) :number) "set-cached-caret! requires column")
+  (set self.cursor-index byte)
+  (set self.cursor-line line)
+  (set self.cursor-column column)
+  (set self.model.cursor-index byte)
+  (set self.model.cursor-line line)
+  (set self.model.cursor-column column)
+  (set self.buffer.cursor-byte byte)
+  (cursor-anchor self))
+
+(fn invalidate-anchor-caches! [self]
+  (assert self "invalidate-anchor-caches! requires input")
+  (set self.viewport-anchor-cache {})
+  (set self.viewport-row-anchor-cache {}))
+
+(fn sync-buffer-cursor-from-cache! [self]
+  (assert self "sync-buffer-cursor-from-cache! requires input")
+  (set self.buffer.cursor-byte (or self.cursor-index 0))
+  self.buffer.cursor-byte)
+
+(fn anchor-cache-key [line column]
+  (assert (= (type line) :number) "anchor-cache-key requires line")
+  (assert (= (type column) :number) "anchor-cache-key requires column")
+  (.. (tostring (math.max 0 (math.floor line)))
+      ":"
+      (tostring (math.max 0 (math.floor column)))))
+
+(fn store-row-anchor-column! [self line column byte]
+  (local anchor {:byte byte :line line :column column})
+  (tset self.viewport-row-anchor-cache (anchor-cache-key line column) anchor)
+  anchor)
+
+(fn store-viewport-row-anchor! [self row start-column]
+  (assert self "store-viewport-row-anchor! requires input")
+  (when row
+    (local line (or row.line 0))
+    (local base-column (math.max 0 (math.floor (or row.start-column start-column 0))))
+    (local base-byte (or row.start-byte 0))
+    (store-row-anchor-column! self line base-column base-byte)
+    (each [i offset (ipairs (or row.column-byte-offsets []))]
+      (store-row-anchor-column! self line (+ base-column i -1) (+ base-byte offset)))
+    (when (and row.line-end-known? (> (or row.newline-bytes 0) 0))
+      (store-row-anchor-column! self (+ line 1) 0 (+ row.line-end-byte row.newline-bytes)))))
+
+(fn lookup-viewport-row-anchor [self line column]
+  (assert self "lookup-viewport-row-anchor requires input")
+  (. self.viewport-row-anchor-cache (anchor-cache-key line column)))
+
+(fn store-viewport-anchors! [self snapshot]
+  (assert self "store-viewport-anchors! requires input")
+  (when snapshot
+    (local start-column (or snapshot.start-column 0))
+    (each [_ row (ipairs (or snapshot.rows []))]
+      (store-viewport-row-anchor! self row start-column))
+    (local first-row (. (or snapshot.rows []) 1))
+    (when first-row
+      (tset self.viewport-anchor-cache
+            (anchor-cache-key (or snapshot.start-line first-row.line 0) start-column)
+            {:byte (or first-row.start-byte 0)
+             :line (or snapshot.start-line first-row.line 0)
+             :column start-column}))))
+
+(fn sync-model-cached-caret! [self]
+  (assert (= (type self.cursor-index) :number) "sync-model-cached-caret! requires cursor-index")
+  (assert (= (type self.cursor-line) :number) "sync-model-cached-caret! requires cursor-line")
+  (assert (= (type self.cursor-column) :number) "sync-model-cached-caret! requires cursor-column")
+  (set self.model.cursor-index self.cursor-index)
+  (set self.model.cursor-line self.cursor-line)
+  (set self.model.cursor-column self.cursor-column))
+
 (fn sync-model-state [self snapshot]
   (assert self "sync-model-state requires input")
   (local model (or self.model {}))
@@ -139,16 +219,10 @@
   (set model.lines nil)
   (set self.model model)
   (set self.lines lines)
-  (refresh-logical-caret-state self)
+  (sync-model-cached-caret! self)
   model)
 
-(fn refresh-viewport [self opts]
-  (assert self.buffer "refresh-viewport requires buffer")
-  (local options (or opts {}))
-  (local snapshot (self.buffer:get-viewport {:line self.scroll-line
-                                             :column self.scroll-column
-                                             :lines self.visible-line-count
-                                             :columns self.visible-column-count}))
+(fn render-viewport-snapshot! [self snapshot options]
   (set self.viewport snapshot)
   (set self.scroll-line snapshot.start-line)
   (set self.scroll-column snapshot.start-column)
@@ -159,8 +233,47 @@
     (row-widget:set-codepoints codepoints {:mark-measure-dirty? false}))
   (when (resolve-mark-flag options :mark-layout-dirty? true)
     (mark-viewport-dirty self))
+  (store-viewport-anchors! self snapshot)
   (sync-model-state self snapshot)
   snapshot)
+
+(fn build-anchored-viewport-snapshot [self]
+  (when (and self.buffer.build-viewport-row-from-anchor)
+    (local rows [])
+    (var complete? true)
+    (for [i 0 (- self.visible-line-count 1)]
+      (local line (+ self.scroll-line i))
+      (local anchor (lookup-viewport-row-anchor self line self.scroll-column))
+      (if anchor
+          (table.insert rows (self.buffer:build-viewport-row-from-anchor anchor self.visible-column-count))
+          (set complete? false)))
+    (when complete?
+      {:start-line self.scroll-line
+       :start-column self.scroll-column
+       :requested-lines self.visible-line-count
+       :requested-columns self.visible-column-count
+       :rows rows})))
+
+(fn refresh-viewport [self opts]
+  (assert self.buffer "refresh-viewport requires buffer")
+  (local options (or opts {}))
+  (local anchored (build-anchored-viewport-snapshot self))
+  (if anchored
+      (do
+        (when (and self.buffer.state self.buffer.state.viewport-calls)
+          (table.insert self.buffer.state.viewport-calls {:line self.scroll-line
+                                                          :column self.scroll-column
+                                                          :lines self.visible-line-count
+                                                          :columns self.visible-column-count}))
+        (render-viewport-snapshot! self anchored options))
+      options.anchored?
+      false
+      (do
+        (local snapshot (self.buffer:get-viewport {:line self.scroll-line
+                                                   :column self.scroll-column
+                                                   :lines self.visible-line-count
+                                                   :columns self.visible-column-count}))
+        (render-viewport-snapshot! self snapshot options))))
 
 (fn sync-scroll [self]
   (assert self "sync-scroll requires input")
@@ -224,6 +337,43 @@
     (set next-scroll (math.max 0 next-scroll))
     (when (not (= next-scroll self.scroll-column))
       (set self.scroll-column next-scroll))))
+
+(fn derive-anchor-left [self anchor target-column max-steps]
+  (var current anchor)
+  (var steps 0)
+  (while (and current
+              (> current.column target-column)
+              (< steps max-steps))
+    (local result (self.buffer:adjacent-codepoint-from-anchor current -1))
+    (if (and result result.bounded? result.moved?)
+        (do
+          (set current {:byte result.byte :line result.line :column result.column})
+          (set steps (+ steps 1)))
+        (set current nil)))
+  (if (and current (= current.column target-column))
+      current
+      nil))
+
+(fn store-scroll-anchor-from-cursor! [self]
+  (assert (= (type self.visible-column-count) :number) "store-scroll-anchor-from-cursor! requires visible-column-count")
+  (when (and self.buffer.adjacent-codepoint-from-anchor
+             (= self.cursor-line self.scroll-line)
+             (>= self.cursor-column self.scroll-column))
+    (local distance (- self.cursor-column self.scroll-column))
+    (local max-steps (+ self.visible-column-count 1))
+    (when (<= distance max-steps)
+      (local anchor (if (= distance 0)
+                       (cursor-anchor self)
+                       (derive-anchor-left self (cursor-anchor self) self.scroll-column max-steps)))
+      (when anchor
+        (store-row-anchor-column! self anchor.line anchor.column anchor.byte)
+        (tset self.viewport-anchor-cache
+              (anchor-cache-key self.scroll-line self.scroll-column)
+              anchor)))))
+
+(fn refresh-anchored-viewport! [self]
+  (store-scroll-anchor-from-cursor! self)
+  (self:refresh-viewport {:anchored? true}))
 
 (fn keep-caret-visible [self]
   (local (line column known?) (refresh-logical-caret-state self))
@@ -384,7 +534,9 @@
 (fn apply-caret-line-column [self line column extend-selection?]
   (assert (= (type line) :number) "apply-caret-line-column requires line")
   (local anchor (or self.selection-anchor-byte self.buffer.cursor-byte 0))
-  (local moved (self.buffer:move-caret-to-line-column (math.max 0 line) (math.max 0 column)))
+  (local target-line (math.max 0 line))
+  (local target-column (math.max 0 column))
+  (local moved (self.buffer:move-caret-to-line-column target-line target-column))
   (if extend-selection?
       (do
         (set self.selection-anchor-byte anchor)
@@ -394,7 +546,9 @@
         (when self.buffer.selection
           (self.buffer:clear-selection))))
   (when moved
+    (set-cached-caret! self self.buffer.cursor-byte target-line target-column)
     (keep-caret-visible self)
+    (store-scroll-anchor-from-cursor! self)
     (mark-caret-dirty self)
     (self:refresh-viewport))
   moved)
@@ -404,12 +558,14 @@
 
 (fn insert-text [self text]
   (assert (= (type text) :string) "VirtualInput insert-text requires string text")
+  (invalidate-anchor-caches! self)
   (when self.buffer.selection
     (if self.buffer.delete-selection
         (self.buffer:delete-selection)
         (error "VirtualInput requires buffer:delete-selection for selected insertion")))
   (local changed (self.buffer:insert-text text))
   (when changed
+    (refresh-logical-caret-state self)
     (set self.selection-anchor-byte self.buffer.cursor-byte)
     (notify-change self)
     (keep-caret-visible self)
@@ -420,8 +576,10 @@
 (fn delete-active-selection [self]
   (when (not self.buffer.delete-selection)
     (error "VirtualInput requires buffer:delete-selection for selected delete"))
+  (invalidate-anchor-caches! self)
   (local changed (self.buffer:delete-selection))
   (when changed
+    (refresh-logical-caret-state self)
     (set self.selection-anchor-byte self.buffer.cursor-byte)
     (notify-change self)
     (keep-caret-visible self)
@@ -433,8 +591,10 @@
   (if self.buffer.selection
       (delete-active-selection self)
       (do
+        (invalidate-anchor-caches! self)
         (local changed (self.buffer:delete-before-cursor))
         (when changed
+          (refresh-logical-caret-state self)
           (set self.selection-anchor-byte self.buffer.cursor-byte)
           (notify-change self)
           (keep-caret-visible self)
@@ -446,8 +606,10 @@
   (if self.buffer.selection
       (delete-active-selection self)
       (do
+        (invalidate-anchor-caches! self)
         (local changed (self.buffer:delete-at-cursor))
         (when changed
+          (refresh-logical-caret-state self)
           (set self.selection-anchor-byte self.buffer.cursor-byte)
           (notify-change self)
           (keep-caret-visible self)
@@ -469,15 +631,82 @@
   (when (not self.buffer.move-caret-horizontal)
     (error "VirtualInput requires buffer:move-caret-horizontal for horizontal movement"))
   (local anchor (or self.selection-anchor-byte self.buffer.cursor-byte 0))
-  (local previous-line self.cursor-line)
-  (local previous-column (+ self.scroll-column self.cursor-column))
   (local moved (self.buffer:move-caret-horizontal delta))
   (update-horizontal-selection self anchor extend-selection?)
   (when moved
+    (refresh-logical-caret-state self)
     (keep-caret-visible self)
+    (store-scroll-anchor-from-cursor! self)
     (mark-caret-dirty self)
     (self:refresh-viewport))
   moved)
+
+(fn target-line-anchor [self target-line target-column]
+  (local preferred (lookup-viewport-row-anchor self target-line target-column))
+  (if preferred
+      preferred
+      (do
+        (local scrolled (lookup-viewport-row-anchor self target-line self.scroll-column))
+        (if scrolled
+            scrolled
+            (lookup-viewport-row-anchor self target-line 0)))))
+
+(fn move-caret-horizontal-bounded [self delta opts]
+  (when (not self.buffer.adjacent-codepoint-from-anchor)
+    (error "VirtualInput requires buffer:adjacent-codepoint-from-anchor for bounded horizontal movement"))
+  (local direction (if (< delta 0) -1 1))
+  (local result (self.buffer:adjacent-codepoint-from-anchor (cursor-anchor self) direction))
+  (local cached-next-line (and result result.line-end? (> direction 0) (target-line-anchor self (+ result.line 1) 0)))
+  (local target-anchor cached-next-line)
+  (if (not (and result result.bounded?))
+      false
+      (and (not result.moved?) (not target-anchor))
+      false
+      (do
+        (local anchor (or self.selection-anchor-byte self.buffer.cursor-byte 0))
+        (local target (if target-anchor target-anchor result))
+        (set-cached-caret! self target.byte target.line target.column)
+        (update-horizontal-selection self anchor (and opts opts.extend-selection?))
+        (keep-line-visible self target.line)
+        (keep-column-visible self target.column)
+        (store-scroll-anchor-from-cursor! self)
+        (mark-caret-dirty self)
+        (refresh-anchored-viewport! self))))
+
+(fn apply-bounded-vertical-result! [self result target-column extend-selection?]
+  (local anchor (if (= self.selection-anchor-byte nil)
+                  self.buffer.cursor-byte
+                  self.selection-anchor-byte))
+  (set-cached-caret! self result.byte result.line result.column)
+  (set self.__preferred-column target-column)
+  (update-horizontal-selection self anchor extend-selection?)
+  (keep-line-visible self result.line)
+  (keep-column-visible self result.column)
+  (store-scroll-anchor-from-cursor! self)
+  (mark-caret-dirty self)
+  (refresh-anchored-viewport! self))
+
+(fn move-caret-vertical-bounded [self delta opts]
+  (when (not self.buffer.move-to-line-column-from-anchor)
+    (error "VirtualInput requires buffer:move-to-line-column-from-anchor for bounded vertical movement"))
+  (local target-line (+ (or self.cursor-line 0) delta))
+  (if (< target-line 0)
+      false
+      (do
+        (local target-column (or self.__preferred-column self.cursor-column 0))
+        (local target-anchor (target-line-anchor self target-line target-column))
+        (if (not target-anchor)
+            false
+            (do
+              (local result (self.buffer:move-to-line-column-from-anchor
+                              (cursor-anchor self)
+                              target-line
+                              target-column
+                              {:max-codepoints (+ (or self.visible-column-count 1) 2)
+                               :target-anchor target-anchor}))
+              (if (not (and result result.bounded?))
+                  false
+                  (apply-bounded-vertical-result! self result target-column (and opts opts.extend-selection?))))))))
 
 (fn move-caret [self delta opts]
   (local (line column) (text-cursor-line-column self))
@@ -533,6 +762,14 @@
         true)
       false))
 
+(fn move-direct-horizontal-key [self bounded-delta fallback-delta shift?]
+  (local opts {:extend-selection? shift?})
+  (if (and self.bounded-logical-navigation?
+           self.buffer.adjacent-codepoint-from-anchor
+           self.move-caret-horizontal-bounded)
+      (self:move-caret-horizontal-bounded bounded-delta opts)
+      (self:move-caret fallback-delta opts)))
+
 (fn on-key-down [self payload]
   (if (not (and payload payload.key))
       false
@@ -549,9 +786,9 @@
             (and ctrl? (= key (string.byte "C")))
             (if (self:copy-selection) true false)
             (= key KEY_LEFT)
-            (self:move-caret :left {:extend-selection? shift?})
+            (move-direct-horizontal-key self -1 :left shift?)
             (= key KEY_RIGHT)
-            (self:move-caret :right {:extend-selection? shift?})
+            (move-direct-horizontal-key self 1 :right shift?)
             (= key KEY_UP)
             (self:move-caret :up {:extend-selection? shift?})
             (= key KEY_DOWN)
@@ -753,6 +990,13 @@
   (set self.connected? false)
   (self:enter-normal-mode))
 
+(fn initialize-cached-state! [input]
+  (local (_line _column known?) (refresh-logical-caret-state input))
+  (when known?
+    (keep-line-visible input input.cursor-line)
+    (keep-column-visible input input.cursor-column)
+    (store-scroll-anchor-from-cursor! input)))
+
 (fn handle-focus [input]
   (input:request-focus))
 
@@ -877,26 +1121,31 @@
        :column-width computed-column-width
        :caret-width caret-width
        :scroll-line (math.max 0 (or buffer.scroll-line 0))
-       :scroll-column 0
-       :viewport nil
-       :model {}
+        :scroll-column 0
+        :viewport nil
+        :viewport-anchor-cache {}
+        :viewport-row-anchor-cache {}
+        :model {}
        :lines []
        :cursor-index 0
        :cursor-line 0
        :cursor-column 0
        :mode :normal
-       :multiline? true
-       :selection-anchor-byte (or buffer.cursor-byte 0)
+        :multiline? true
+        :bounded-logical-navigation? true
+        :selection-anchor-byte (or buffer.cursor-byte 0)
        :on-change options.on-change
        :on-save options.on-save
        :on-submit options.on-submit
        :refresh-viewport refresh-viewport
        :insert-text insert-text
-       :delete-before-cursor delete-before-cursor
-        :delete-at-cursor delete-at-cursor
-        :move-caret-to move-caret-to
-        :move-caret-to-line-column move-caret-to-line-column
-        :move-caret move-caret
+        :delete-before-cursor delete-before-cursor
+         :delete-at-cursor delete-at-cursor
+         :move-caret-to move-caret-to
+         :move-caret-to-line-column move-caret-to-line-column
+         :move-caret-horizontal-bounded move-caret-horizontal-bounded
+         :move-caret-vertical-bounded move-caret-vertical-bounded
+         :move-caret move-caret
         :scroll-lines scroll-lines
         :text-line-count text-line-count
         :text-line-length text-line-length
@@ -924,6 +1173,7 @@
       (set input.__blur-listener
            (focus-manager.focus-blur.connect (make-blur-listener input))))
     (clickables:register input)
+    (initialize-cached-state! input)
     (input:refresh-viewport {:mark-layout-dirty? false})
     input))
 

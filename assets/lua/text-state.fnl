@@ -144,14 +144,18 @@
        input.move-caret-to-line-column))
 
 (fn logical-current-line-index [input]
-  (if (has-logical-navigation? input)
+  (if input.bounded-logical-navigation?
+      (current-line-index input)
+      (has-logical-navigation? input)
       (do
         (local (line _column) (input:text-cursor-line-column))
         (math.max 0 (if (= line nil) 0 line)))
       (current-line-index input)))
 
 (fn logical-current-column [input]
-  (if (has-logical-navigation? input)
+  (if input.bounded-logical-navigation?
+      (current-column input)
+      (has-logical-navigation? input)
       (do
         (local (_line column) (input:text-cursor-line-column))
         (math.max 0 (if (= column nil) 0 column)))
@@ -183,6 +187,23 @@
   (if (= input.__preferred-column nil)
       (logical-current-column input)
       input.__preferred-column))
+
+(fn bounded-hot-key? [input key]
+  (if (not (and input input.bounded-logical-navigation?))
+      false
+      (= key KEY.h)
+      true
+      (= key KEY.l)
+      true
+      (= key KEY.j)
+      true
+      (= key KEY.k)
+      true
+      (= key SDLK_LEFT)
+      true
+      (= key SDLK_RIGHT)
+      true
+      false))
 
 (fn move-to-line-column [input line-index column]
   (local lines (input-lines input))
@@ -282,47 +303,57 @@
       (move-to-line-column input (- total 1) (preferred-column input))))
 
 (fn move-horizontal [input delta]
-  (local model (input-model input))
-  (local lines (input-lines input))
-  (if (if (not model) true (and (not lines) (not (has-logical-navigation? input))))
-      (input:move-caret delta)
+  (if (and input.bounded-logical-navigation? input.move-caret-horizontal-bounded)
       (do
-        (local column (logical-current-column input))
-        (local line-index (logical-current-line-index input))
-        (local line-size (logical-line-length input lines line-index))
-        (local max-column (last-valid-column line-size))
-        (if (< delta 0)
-            (if (> column 0)
-                (do
-                  (local moved (input:move-caret delta))
-                  (when moved
-                    (remember-column input nil))
-                  moved)
-                false)
-            (if (and (> line-size 0)
-                     (< column max-column))
-                (do
-                  (local moved (input:move-caret delta))
-                  (when moved
-                    (remember-column input nil))
-                  moved)
-                false)))))
+        (local moved (input:move-caret-horizontal-bounded delta))
+        (when moved
+          (remember-column input nil))
+        moved)
+      (do
+        (local model (input-model input))
+        (local lines (input-lines input))
+        (if (if (not model) true (and (not lines) (not (has-logical-navigation? input))))
+            (input:move-caret delta)
+            (do
+              (local column (logical-current-column input))
+              (local line-index (logical-current-line-index input))
+              (local line-size (logical-line-length input lines line-index))
+              (local max-column (last-valid-column line-size))
+              (if (< delta 0)
+                  (if (> column 0)
+                      (do
+                        (local moved (input:move-caret delta))
+                        (when moved
+                          (remember-column input nil))
+                        moved)
+                      false)
+                  (if (and (> line-size 0)
+                           (< column max-column))
+                      (do
+                        (local moved (input:move-caret delta))
+                        (when moved
+                          (remember-column input nil))
+                        moved)
+                      false)))))))
 
 (fn move-vertical [input delta]
   (remember-column input nil)
-  (local lines (input-lines input))
-  (if (and (not lines) (not (has-logical-navigation? input)))
-      false
+  (if (and input.bounded-logical-navigation? input.move-caret-vertical-bounded)
+      (input:move-caret-vertical-bounded delta)
       (do
-        (local total (logical-line-count input lines))
-        (if (<= total 0)
+        (local lines (input-lines input))
+        (if (and (not lines) (not (has-logical-navigation? input)))
             false
             (do
-              (local current (logical-clamp-line-index input lines (logical-current-line-index input)))
-              (local target (math.max 0 (math.min (+ current delta) (- total 1))))
-              (if (= target current)
+              (local total (logical-line-count input lines))
+              (if (<= total 0)
                   false
-                  (move-to-line-column input target (preferred-column input))))))))
+                  (do
+                    (local current (logical-clamp-line-index input lines (logical-current-line-index input)))
+                    (local target (math.max 0 (math.min (+ current delta) (- total 1))))
+                    (if (= target current)
+                        false
+                        (move-to-line-column input target (preferred-column input))))))))))
 
 (fn clamp-caret-to-current-line [input]
   (local lines (input-lines input))
@@ -535,8 +566,9 @@
   (if (not input)
       false
       (do
-        (clamp-caret-to-current-line input)
         (local key (resolve-key payload))
+        (when (and key (not (bounded-hot-key? input key)))
+          (clamp-caret-to-current-line input))
         (if (not key)
             false
             (handle-key-command ctx state input key)))))
