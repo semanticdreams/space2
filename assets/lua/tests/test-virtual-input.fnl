@@ -237,10 +237,11 @@
   (fs.write-file path content)
   path)
 
-(fn lazy-buffer [name content]
+(fn lazy-buffer [name content opts]
   (local path (make-temp-file name content))
-  (LazyTextBuffer {:source (LazyTextSource.file path {:chunk-bytes 4})
-                   :chunk-bytes 4}))
+  (local chunk-bytes (if (and opts opts.chunk-bytes) opts.chunk-bytes 4))
+  (LazyTextBuffer {:source (LazyTextSource.file path {:chunk-bytes chunk-bytes})
+                   :chunk-bytes chunk-bytes}))
 
 (fn snapshot-text [buffer]
   (. (buffer:get-viewport {:line 0 :column 0 :lines 1 :columns 80}) :rows 1 :text))
@@ -315,9 +316,57 @@
   (set buffer.state {:viewport-calls []})
   (set buffer.get-viewport
        (fn [self view]
-         (table.insert self.state.viewport-calls view)
+          (table.insert self.state.viewport-calls view)
+          (original-get-viewport self view)))
+  buffer)
+
+(fn instrument-logical-scans [buffer]
+  (assert buffer "instrument-logical-scans requires buffer")
+  (when (= buffer.state nil) (set buffer.state {}))
+  (local state buffer.state)
+  (set state.get-line-summary-calls 0)
+  (set state.line-column-for-byte-calls 0)
+  (set state.get-viewport-calls 0)
+  (set state.logical-scan-calls {:get-line-summary state.get-line-summary-calls
+                                 :line-column-for-byte state.line-column-for-byte-calls
+                                 :get-viewport state.get-viewport-calls})
+  (local original-get-line-summary buffer.get-line-summary)
+  (local original-line-column-for-byte buffer.line-column-for-byte)
+  (local original-get-viewport buffer.get-viewport)
+  (set buffer.get-line-summary
+       (fn [self line]
+         (set state.get-line-summary-calls (+ state.get-line-summary-calls 1))
+         (original-get-line-summary self line)))
+  (set buffer.line-column-for-byte
+       (fn [self byte]
+         (set state.line-column-for-byte-calls (+ state.line-column-for-byte-calls 1))
+         (original-line-column-for-byte self byte)))
+  (set buffer.get-viewport
+       (fn [self view]
+         (set state.get-viewport-calls (+ state.get-viewport-calls 1))
          (original-get-viewport self view)))
   buffer)
+(fn reset-logical-scan-counters! [buffer]
+  (assert buffer.state "reset-logical-scan-counters! requires instrumented buffer state")
+  (set buffer.state.get-line-summary-calls 0)
+  (set buffer.state.line-column-for-byte-calls 0)
+  (set buffer.state.get-viewport-calls 0)
+  (set buffer.state.logical-scan-calls {:get-line-summary 0
+                                        :line-column-for-byte 0
+                                        :get-viewport 0}))
+(fn assert-no-full-logical-scans [buffer message]
+  (assert (= buffer.state.get-line-summary-calls 0) (.. message ": get-line-summary should not be called; calls=" buffer.state.get-line-summary-calls))
+  (assert (= buffer.state.line-column-for-byte-calls 0) (.. message ": line-column-for-byte should not be called; calls=" buffer.state.line-column-for-byte-calls)))
+(fn seed-viewport-anchor! [buffer line column columns]
+  (assert buffer.build-viewport-row-from-anchor "LazyTextBuffer must expose build-viewport-row-from-anchor to seed viewport anchors")
+  (buffer:move-caret-to-line-column line column)
+  (local row (buffer:build-viewport-row-from-anchor {:byte buffer.cursor-byte :line line :column column} columns))
+  (assert row "seed-viewport-anchor! expected a viewport row from bounded anchor API")
+  row)
+(fn assert-input-cursor [input buffer line column message]
+  (assert (= input.cursor-index buffer.cursor-byte) (.. message ": input cursor byte should match buffer"))
+  (assert (= input.cursor-line line) (.. message ": cursor line should match expected"))
+  (assert (= input.cursor-column column) (.. message ": cursor column should match expected")))
 
 (fn assert-viewport-calls-bounded [calls max-lines max-columns message]
   (each [i view (ipairs (or calls []))]
@@ -987,6 +1036,114 @@
   (assert (= input.mode :normal) "disconnect should normalize VirtualInput mode")
   (input:drop))
 
+(fn virtual-input-h-l-after-exact-dollar-on-huge-line-stays-bounded []
+  (with-virtual-input-states
+    (fn [env]
+      (local text-state (. env :text-state))
+      (local buffer (instrument-logical-scans (lazy-buffer "hot-hl-after-dollar" (string.rep "a" 100000) {:chunk-bytes 65536})))
+      (local input (build-input {:buffer buffer :line-count 1 :column-count 4}))
+      (narrow-layout! input 4 1)
+      (input:on-click {:row-index 1 :column 0})
+      (assert (text-state:on-key-down {:key (key "$") :mod 1}) "$ should land on the huge logical line end before bounded h/l")
+      (reset-logical-scan-counters! buffer)
+      (local handled-h (text-state:on-key-down {:key (key "h")}))
+      (local handled-l (text-state:on-key-down {:key (key "l")}))
+      (assert handled-h "h after exact $ should be handled")
+      (assert handled-l "l after exact $ should be handled")
+      (assert-no-full-logical-scans buffer "h/l after exact $")
+      (assert-caret-visible-inside input "h/l after exact $")
+      (assert (> input.scroll-column 0) "h/l after exact $ should keep far horizontal scroll")
+      (input:drop))))
+
+(fn virtual-input-repeated-h-l-far-into-huge-line-stays-bounded []
+  (with-virtual-input-states
+    (fn [env]
+      (local text-state (. env :text-state))
+      (local buffer (instrument-logical-scans (lazy-buffer "hot-repeated-hl" (string.rep "a" 100000) {:chunk-bytes 65536})))
+      (local input (build-input {:buffer buffer :line-count 1 :column-count 4}))
+      (narrow-layout! input 4 1)
+      (input:move-caret-to-line-column 0 90000)
+      (input:request-focus)
+      (reset-logical-scan-counters! buffer)
+      (for [i 1 25]
+        (local command (if (= (% i 2) 1) "h" "l"))
+        (assert (text-state:on-key-down {:key (key command)}) (.. command " should be handled during repeated far h/l")))
+      (assert (and (>= input.cursor-column 89999) (<= input.cursor-column 90000)) (.. "repeated h/l should stay near the far logical column; column=" input.cursor-column))
+      (assert-no-full-logical-scans buffer "repeated far h/l")
+      (input:drop))))
+
+(fn virtual-input-j-k-from-far-column-uses-cached-target-anchors []
+  (with-virtual-input-states
+    (fn [env]
+      (local text-state (. env :text-state))
+      (local huge-line (string.rep "a" 100000))
+      (local buffer (instrument-logical-scans (lazy-buffer "hot-jk-cached-anchors" (.. huge-line "\n" huge-line "\n" huge-line) {:chunk-bytes 65536})))
+      (local input (build-input {:buffer buffer :line-count 3 :column-count 4}))
+      (narrow-layout! input 4 3)
+      (input:move-caret-to-line-column 1 90000)
+      (set input.scroll-line 1)
+      (set buffer.scroll-line 1)
+      (set input.scroll-column 89997)
+      (input:refresh-viewport)
+      (seed-viewport-anchor! buffer 0 90000 4)
+      (seed-viewport-anchor! buffer 2 90000 4)
+      (input:move-caret-to-line-column 1 90000)
+      (input:request-focus)
+      (reset-logical-scan-counters! buffer)
+      (assert (text-state:on-key-down {:key (key "j")}) "j from far cached anchor column should be handled")
+      (assert (= input.cursor-line 2) "j should move to logical line 2")
+      (assert (= input.cursor-column 90000) "j should preserve far preferred column")
+      (assert (= input.__preferred-column 90000) "j should preserve preferred column cache")
+      (assert-caret-visible-inside input "j from far cached column")
+      (assert (text-state:on-key-down {:key (key "k")}) "k from far cached anchor column should be handled")
+      (assert (= input.cursor-line 1) "k should return to logical line 1")
+      (assert (= input.cursor-column 90000) "k should preserve far preferred column")
+      (assert-caret-visible-inside input "k from far cached column")
+      (assert-no-full-logical-scans buffer "j/k from cached target anchors")
+      (input:drop))))
+
+(fn virtual-input-refresh-after-far-horizontal-scroll-uses-cached-viewport-anchor []
+  (local buffer (instrument-logical-scans (lazy-buffer "hot-refresh-horizontal-anchor" (string.rep "a" 100000) {:chunk-bytes 65536})))
+  (local input (build-input {:buffer buffer :line-count 1 :column-count 4}))
+  (narrow-layout! input 4 1)
+  (input:move-caret-to-line-column 0 90000)
+  (set input.scroll-column 89997)
+  (input:refresh-viewport)
+  (reset-logical-scan-counters! buffer)
+  (input:refresh-viewport)
+  (local rendered-row (. input.viewport.rows 1))
+  (assert (and rendered-row (>= rendered-row.start-byte input.scroll-column)) "far horizontal refresh should render from the horizontal scroll anchor")
+  (assert-no-full-logical-scans buffer "refresh after far horizontal scroll")
+  (input:drop))
+
+(fn virtual-input-exact-dollar-A-G-still-work-with-anchor-cache []
+  (with-virtual-input-states
+    (fn [env]
+      (local text-state (. env :text-state))
+      (local insert-state (. env :insert-state))
+      (local long-line (string.rep "a" 100000))
+      (local buffer (instrument-logical-scans (lazy-buffer "exact-commands-anchor-cache" (.. long-line "\n" "final!") {:chunk-bytes 65536})))
+      (local input (build-input {:buffer buffer :line-count 2 :column-count 4}))
+      (narrow-layout! input 4 2)
+      (input:on-click {:row-index 1 :column 0})
+      (assert (text-state:on-key-down {:key (key "$") :mod 1}) "$ should be handled on a long line")
+      (assert (= buffer.cursor-byte 99999) "$ should land at the last logical character")
+      (assert-input-cursor input buffer 0 99999 "$")
+      (assert (text-state:on-key-down {:key (key "A")}) "A should be handled after long-line $")
+      (assert (= input.mode :insert) "A should enter insert mode")
+      (assert (= buffer.cursor-byte 100000) "A should place caret after line end")
+      (assert-input-cursor input buffer 0 100000 "A")
+      (assert (insert-state:on-key-down {:key 27}) "Escape should leave insert after A")
+      (assert (= input.mode :normal) "Escape should return VirtualInput to normal mode")
+      (assert (= buffer.cursor-byte 99999) "Escape after A should move caret back onto final character")
+      (assert-input-cursor input buffer 0 99999 "Escape")
+      (assert (text-state:on-key-down {:key (key "G")}) "G should be handled with anchor cache populated")
+      (assert (= input.cursor-line 1) "G should land on the final logical line")
+      (assert (= input.cursor-column 5) "G should clamp to final line end")
+      (assert (= buffer.cursor-byte 100006) "G should move buffer cursor to final logical line end")
+      (assert-input-cursor input buffer 1 5 "G")
+      (input:drop))))
+
 (table.insert tests {:name "VirtualInput requires explicit build context" :fn virtual-input-requires-explicit-build-context})
 (table.insert tests {:name "VirtualInput renders only visible viewport rows" :fn virtual-input-renders-only-visible-viewport-rows})
 (table.insert tests {:name "VirtualInput caret navigation loads lazy rows" :fn virtual-input-caret-navigation-loads-lazy-rows})
@@ -1025,6 +1182,11 @@
 (table.insert tests {:name "VirtualInput editing maintains horizontal and vertical visibility" :fn virtual-input-editing-maintains-horizontal-and-vertical-visibility})
 (table.insert tests {:name "VirtualInput TextState x deletes clamps and keeps caret visible" :fn virtual-input-text-state-x-deletes-clamps-and-keeps-caret-visible})
 (table.insert tests {:name "VirtualInput disconnect normalizes mode like Input" :fn virtual-input-disconnect-normalizes-mode-like-input})
+(table.insert tests {:name "VirtualInput h/l after exact dollar on huge line stays bounded" :fn virtual-input-h-l-after-exact-dollar-on-huge-line-stays-bounded})
+(table.insert tests {:name "VirtualInput repeated h/l far into huge line stays bounded" :fn virtual-input-repeated-h-l-far-into-huge-line-stays-bounded})
+(table.insert tests {:name "VirtualInput j/k from far column uses cached target anchors" :fn virtual-input-j-k-from-far-column-uses-cached-target-anchors})
+(table.insert tests {:name "VirtualInput refresh after far horizontal scroll uses cached viewport anchor" :fn virtual-input-refresh-after-far-horizontal-scroll-uses-cached-viewport-anchor})
+(table.insert tests {:name "VirtualInput exact dollar A G still work with anchor cache" :fn virtual-input-exact-dollar-A-G-still-work-with-anchor-cache})
 
 (local main
   (fn []
