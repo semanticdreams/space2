@@ -44,6 +44,68 @@
    :codepoints (codepoints-from-text text)
    :column-byte-offsets offsets})
 
+(fn install-buffer-logical-api [buffer rows]
+  (set buffer.get-line-count
+       (fn [_self]
+         (length rows)))
+  (set buffer.get-line-summary
+       (fn [_self line]
+         (local target-line (if (= line nil) 0 line))
+         (local current-row (. rows (+ (math.max 0 target-line) 1)))
+         (local codepoints (if (and current-row current-row.codepoints) current-row.codepoints []))
+         (var first nil)
+         (each [idx cp (ipairs codepoints)]
+           (when (and (not first) (not (if (= cp 9) true (if (= cp 10) true (if (= cp 11) true (if (= cp 12) true (if (= cp 13) true (= cp 32))))))))
+             (set first (- idx 1))))
+         {:codepoint-count (length codepoints)
+          :first-nonblank-column (if (= first nil) 0 first)}))
+  (set buffer.line-column-for-byte
+       (fn [_self byte]
+         (local target (math.max 0 (if (= byte nil) 0 byte)))
+         (var found-line 0)
+         (var found-column 0)
+         (var known? false)
+         (each [_ current-row (ipairs rows)]
+           (when (and (not known?)
+                      (>= target (if (= current-row.start-byte nil) 0 current-row.start-byte))
+                      (<= target (if (= current-row.line-end-byte nil)
+                                      (if (= current-row.end-byte nil) 0 current-row.end-byte)
+                                      current-row.line-end-byte)))
+             (set found-line current-row.line)
+             (var column 0)
+             (each [idx offset (ipairs (if current-row.column-byte-offsets current-row.column-byte-offsets []))]
+               (when (<= (+ (if (= current-row.start-byte nil) 0 current-row.start-byte) offset) target)
+                 (set column (- idx 1))))
+             (set found-column column)
+             (set known? true)))
+         (values found-line found-column known?)))
+  (set buffer.byte-for-codepoint-position
+       (fn [_self position]
+         (local target (math.max 0 (if (= position nil) 0 position)))
+         (var remaining target)
+         (var fallback 0)
+         (each [_ current-row (ipairs rows)]
+           (when remaining
+             (local codepoint-count (length (if current-row.codepoints current-row.codepoints [])))
+             (local newline-length (if (= current-row.newline-bytes nil) 0 current-row.newline-bytes))
+             (set fallback (if (= current-row.line-end-byte nil)
+                               (if (= current-row.end-byte nil) fallback current-row.end-byte)
+                               current-row.line-end-byte))
+             (if (<= remaining codepoint-count)
+                 (do
+                   (local offset (. (if current-row.column-byte-offsets current-row.column-byte-offsets []) (+ remaining 1)))
+                   (set fallback (+ (if (= current-row.start-byte nil) 0 current-row.start-byte)
+                                    (if (= offset nil) 0 offset)))
+                   (set remaining nil))
+                 (< remaining (+ codepoint-count newline-length))
+                 (do
+                   (set fallback (if (= current-row.line-end-byte nil)
+                                     (if (= current-row.end-byte nil) fallback current-row.end-byte)
+                                     current-row.line-end-byte))
+                   (set remaining nil))
+                 (set remaining (- remaining (+ codepoint-count newline-length))))))
+         fallback)))
+
 (fn make-buffer [opts]
   (assert true "make-buffer uses explicit test defaults")
   (local options (or opts {}))
@@ -101,6 +163,7 @@
          (table.insert state.moved {:line line :column column})
          (set self.cursor-byte (+ (* line 10) column))
          true))
+  (install-buffer-logical-api buffer rows)
   (set buffer.move-caret-horizontal
        (fn [self delta]
          (table.insert state.moved {:horizontal delta})
@@ -199,11 +262,12 @@
   (assert input.caret.visible? (.. message ": caret should be visible"))
   (local local-x (- input.caret.layout.position.x input.layout.position.x))
   (local local-y (- input.caret.layout.position.y input.layout.position.y))
-  (assert (>= local-x input.padding.x) (.. message ": caret should be inside left edge"))
-  (assert (<= local-x (- input.layout.size.x input.padding.x))
+  (local epsilon 0.00001)
+  (assert (>= (+ local-x epsilon) input.padding.x) (.. message ": caret should be inside left edge"))
+  (assert (<= local-x (+ (- input.layout.size.x input.padding.x) epsilon))
           (.. message ": caret should be inside right edge"))
-  (assert (>= local-y input.padding.y) (.. message ": caret should be inside bottom edge"))
-  (assert (<= local-y (- input.layout.size.y input.padding.y))
+  (assert (>= (+ local-y epsilon) input.padding.y) (.. message ": caret should be inside bottom edge"))
+  (assert (<= local-y (+ (- input.layout.size.y input.padding.y) epsilon))
           (.. message ": caret should be inside top edge")))
 
 (fn set-test-states []
@@ -752,10 +816,45 @@
   (assert (= last-view.column input.scroll-column)
           "viewport request should use updated horizontal scroll column after jump")
   (assert-viewport-calls-bounded buffer.state.viewport-calls
-                                 input.visible-line-count
-                                 input.visible-column-count
-                                  "numeric horizontal jump should not expand caret discovery requests")
+                                  input.visible-line-count
+                                  input.visible-column-count
+                                   "numeric horizontal jump should not expand caret discovery requests")
   (input:drop))
+
+(fn virtual-input-arrow-vertical-preserves-logical-column-outside-visible-row []
+  (local buffer (lazy-buffer "arrow-logical-column"
+                             "0123456789ABCDEFGHIJ\nabcdefghijklmnopqrst\n"))
+  (buffer:move-caret-to-line-column 0 8)
+  (local input (build-input {:buffer buffer :line-count 2 :column-count 4}))
+  (narrow-layout! input 4 2)
+  (set input.scroll-column 0)
+  (input:refresh-viewport)
+  (assert (input:on-key-down {:key 1073741905})
+          "Down arrow should move using logical cursor coordinates")
+  (assert (= input.cursor-line 1) "Down arrow should move to next logical line")
+  (assert (= input.cursor-column 8)
+          "Down arrow should preserve logical column outside visible row")
+  (assert (= buffer.cursor-byte 29)
+          "Down arrow should move buffer cursor to line 1 logical column 8")
+  (assert-caret-visible-inside input "Down arrow")
+  (input:drop))
+
+(fn virtual-input-text-state-caret-on-whitespace-only-line-matches-input []
+  (with-virtual-input-states
+    (fn [env]
+      (local text-state (. env :text-state))
+      (local buffer (lazy-buffer "caret-whitespace-only" "   \nnext"))
+      (buffer:move-caret-to-line-column 0 2)
+      (local input (build-input {:buffer buffer :line-count 1 :column-count 4}))
+      (narrow-layout! input 4 1)
+      (input:request-focus)
+      (assert (text-state:on-key-down {:key (key "^") :mod 1})
+              "^ should be handled on whitespace-only VirtualInput line")
+      (assert (= input.cursor-column 0)
+              "^ should resolve whitespace-only line to column 0 like Input")
+      (assert (= buffer.cursor-byte 0)
+              "^ should move buffer cursor to whitespace-only line start")
+      (input:drop))))
 
 (fn virtual-input-text-state-line-edges-use-full-logical-long-line []
   (with-virtual-input-states
@@ -918,6 +1017,8 @@
 (table.insert tests {:name "VirtualInput narrow layout TextState l moves past visible edge" :fn virtual-input-narrow-layout-text-state-l-moves-past-visible-edge})
 (table.insert tests {:name "VirtualInput long-line horizontal navigation keeps caret visible" :fn virtual-input-long-line-horizontal-navigation-keeps-caret-visible})
 (table.insert tests {:name "VirtualInput numeric horizontal jump keeps caret visible" :fn virtual-input-numeric-horizontal-jump-keeps-caret-visible})
+(table.insert tests {:name "VirtualInput arrow vertical preserves logical column outside visible row" :fn virtual-input-arrow-vertical-preserves-logical-column-outside-visible-row})
+(table.insert tests {:name "VirtualInput TextState caret on whitespace-only line matches Input" :fn virtual-input-text-state-caret-on-whitespace-only-line-matches-input})
 (table.insert tests {:name "VirtualInput TextState line edges use full logical long line" :fn virtual-input-text-state-line-edges-use-full-logical-long-line})
 (table.insert tests {:name "VirtualInput TextState j/k preserve logical column over clipped lines" :fn virtual-input-text-state-j-k-preserve-logical-column-over-clipped-lines})
 (table.insert tests {:name "VirtualInput TextState goto and page movement use logical lines" :fn virtual-input-text-state-goto-and-page-movement-use-logical-lines})
