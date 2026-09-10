@@ -24,6 +24,11 @@
   (fs.write-file path "abcdefghijklmnopqrstuvwxyz\nsecond line\n")
   (fs.absolute path))
 
+(fn write-large-single-line-temp-file [dir]
+  (local path (fs.join-path dir "large-viewer.txt"))
+  (fs.write-file path (string.rep "a" 100000))
+  (fs.absolute path))
+
 (fn active-key-down [payload]
   (local state (assert (app.states:active-state) "E2E requires active app state"))
   (assert state.on-key-down "E2E active state requires on-key-down")
@@ -325,14 +330,65 @@
   (node:drop)
   (fs.remove-all dir))
 
+(fn run-expanded-graph-far-horizontal-navigation [ctx]
+  (local dir (make-temp-dir))
+  (local file (write-large-single-line-temp-file dir))
+  (local node (FsFileViewerNode {:path file}))
+  (local graph-ref {})
+  (local view-ref {})
+  (local hud-target (install-state-hud! ctx))
+  (local target (make-expanded-graph-target ctx node graph-ref view-ref hud-target.focus-manager))
+  (target:update)
+  (local graph-view (assert view-ref.graph-view "E2E should build GraphView for large file"))
+  (local graph-card (assert (. graph-view.points node) "GraphView should expand large file viewer node"))
+  (local view (assert graph-card.view-widget "expanded graph card should embed large file viewer preview"))
+  (assert view.virtual-input "expanded graph large file viewer should expose VirtualInput")
+  (force-narrow-input-allocation view.virtual-input)
+  (view.virtual-input.layout:layouter)
+  (local pointer (screen-point-for-input-cell ctx view.virtual-input 0 0))
+  (local down-payload {:x pointer.x :y pointer.y :button 1 :timestamp 30})
+  (local up-payload {:x pointer.x :y pointer.y :button 1 :timestamp 40})
+  (active-mouse-button-down down-payload)
+  (active-mouse-button-up up-payload)
+  (assert (= (InputState.active-input) view.virtual-input)
+          "routed click should focus expanded large file viewer VirtualInput")
+  (assert (= (app.states:active-name) :text)
+          "routed click should enter text state for expanded large file viewer")
+  (assert (active-key-down {:key (string.byte "$") :mod 1})
+          "expanded large file viewer should route exact $ to far line end")
+  (local line-summary (view.virtual-input.buffer:get-line-summary 0))
+  (local far-column (math.max 0 (- line-summary.codepoint-count 1)))
+  (assert (= view.virtual-input.cursor-column far-column)
+          (.. "expanded large file viewer $ should land on far line end; column="
+              (tostring view.virtual-input.cursor-column)))
+  (assert (> view.virtual-input.scroll-column 0)
+          "expanded large file viewer $ should scroll horizontally")
+  (assert-caret-inside-input view.virtual-input)
+  (assert (active-key-down {:key (string.byte "h")})
+          "expanded large file viewer should route ordinary h after far $")
+  (assert (= view.virtual-input.cursor-column (- far-column 1))
+          "ordinary h after far $ should move cursor column left by one")
+  (assert (active-key-down {:key (string.byte "l")})
+          "expanded large file viewer should route ordinary l after far h")
+  (assert (= view.virtual-input.cursor-column far-column)
+          "ordinary l after far h should return cursor column to far line end")
+  (target:update)
+  (assert-caret-inside-input view.virtual-input)
+  (Harness.cleanup-target target)
+  (Harness.cleanup-target hud-target)
+  (node:drop)
+  (fs.remove-all dir))
+
 (fn run-main [ctx]
   (run ctx)
-  (run-expanded-graph-routed-click ctx))
+  (run-expanded-graph-routed-click ctx)
+  (run-expanded-graph-far-horizontal-navigation ctx))
 
 (fn main []
   (Harness.with-app {:width 960 :height 720} run-main)
   (print "E2E fs file viewer VirtualInput usability complete"))
 
 {:run run
- :run-expanded-graph-routed-click run-expanded-graph-routed-click
- :main main}
+  :run-expanded-graph-routed-click run-expanded-graph-routed-click
+  :run-expanded-graph-far-horizontal-navigation run-expanded-graph-far-horizontal-navigation
+  :main main}
