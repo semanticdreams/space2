@@ -128,6 +128,7 @@
     :tests.test-morphs
     :tests.test-graph-extension-morphs
     :tests.test-graph-extension-registry
+    :tests.test-graph-extension-units
     :tests.test-world-nodes
     :tests.test-world-skybox-node
     :tests.test-world-background-node

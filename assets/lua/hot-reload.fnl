@@ -443,7 +443,8 @@
            (logging.info (string.format
                            "[hot-reload] restore target=%s"
                            target-unit.id))
-          (target-unit:restore snapshot reload-ctx))))
+           (target-unit:restore snapshot reload-ctx)
+           (Units.refresh-graph-extensions-for-unit! target-unit.id))))
     (when app
       (set app.__hot-reload-ctx previous-reload-ctx))
     (if ok

@@ -14,6 +14,11 @@
   (icollect [_ item (ipairs (or items []))]
     item))
 
+(fn refresh-graph-extensions-for-unit! [unit-id]
+  (when (and app app.graph-extension-registry app.graph-extension-registry.refresh-unit)
+    (app.graph-extension-registry:refresh-unit unit-id))
+  true)
+
 (fn Unit [opts]
   (local spec (or opts {}))
   (local id (assert spec.id "Unit requires :id"))
@@ -51,11 +56,13 @@
                (snapshot-fn ctx))
    :restore (fn [_self state ctx]
               (restore-fn state ctx))
-   :reload (fn [self ctx]
-             (local state (self:snapshot ctx))
-             (self:unload ctx)
-             (self:load ctx)
-             (self:restore state ctx))
+    :reload (fn [self ctx]
+              (local state (self:snapshot ctx))
+              (self:unload ctx)
+              (self:load ctx)
+              (local restored (self:restore state ctx))
+              (refresh-graph-extensions-for-unit! id)
+              restored)
    :connect-signal (fn [self name signal handler]
                      (when (. connected-signals name)
                        (error (.. "Signal " name " already connected on unit " id)))
@@ -323,5 +330,6 @@
   self)
 
 {:Unit Unit
- :ModuleUnit ModuleUnit
- :SourceUnit SourceUnit}
+  :ModuleUnit ModuleUnit
+  :SourceUnit SourceUnit
+  :refresh-graph-extensions-for-unit! refresh-graph-extensions-for-unit!}
