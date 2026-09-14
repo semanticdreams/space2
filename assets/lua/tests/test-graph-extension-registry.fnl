@@ -88,6 +88,25 @@
              {:owner-id ctx.owner-id :extension-id ctx.extension-id}))
      returned)})
 
+(fn make-invalid-extra-key-multi-handle-descriptor [version-ref]
+  {:id "invalid-extra-key-extension"
+   :unit-id "user-invalid-extra-key-extension"
+   :schemes ["extra-node" "late-node"]
+   :install-loaders
+   (fn [graph ctx]
+     (local returned [])
+     (tset returned "extra"
+           (graph:register-key-loader
+             "extra-node"
+             (make-demo-node-loader version-ref)
+             {:owner-id ctx.owner-id :extension-id ctx.extension-id}))
+     (tset returned 2
+           (graph:register-key-loader
+             "late-node"
+             (make-demo-node-loader version-ref)
+             {:owner-id ctx.owner-id :extension-id ctx.extension-id}))
+     returned)})
+
 (fn extension-registry-installs-into-live-and-future-runtime []
   (local registry (GraphExtensionRegistry.GraphExtensionRegistry {}))
   (local runtime-a (make-runtime))
@@ -190,6 +209,22 @@
           "rejected sparse handle return should roll back registered loader")
   (runtime:drop))
 
+(fn extension-registry-records-all-handles-before-extra-key-failure []
+  (local registry (GraphExtensionRegistry.GraphExtensionRegistry {}))
+  (local runtime (make-runtime))
+  (registry:install-runtime runtime)
+  (local (ok err)
+    (pcall #(registry:register-extension
+              (make-invalid-extra-key-multi-handle-descriptor {:value "v1"}))))
+  (assert (not ok) "invalid extra-key installer return should fail registration")
+  (assert (string.find (tostring err) "must return a non-empty sequential table" 1 true)
+          (.. "extra-key failure should explain sequential handle contract, got: " (tostring err)))
+  (assert (= (runtime.graph:create-node-by-key "extra-node:a") nil)
+          "rejected extra-key return should roll back extra-key loader")
+  (assert (= (runtime.graph:create-node-by-key "late-node:a") nil)
+          "rejected extra-key return should roll back later scanned loader")
+  (runtime:drop))
+
 (fn extension-registry-refreshes-visible-adapters-by-scheme []
   (local registry (GraphExtensionRegistry.GraphExtensionRegistry {}))
   (local runtime (make-runtime))
@@ -224,9 +259,11 @@
 (table.insert tests {:name "extension-registry-rejects-bare-handle-return-and-rolls-back"
                       :fn extension-registry-rejects-bare-handle-return-and-rolls-back})
 (table.insert tests {:name "extension-registry-rejects-sparse-handle-return-and-rolls-back"
-                     :fn extension-registry-rejects-sparse-handle-return-and-rolls-back})
+                      :fn extension-registry-rejects-sparse-handle-return-and-rolls-back})
+(table.insert tests {:name "extension-registry-records-all-handles-before-extra-key-failure"
+                     :fn extension-registry-records-all-handles-before-extra-key-failure})
 (table.insert tests {:name "extension-registry-refreshes-visible-adapters-by-scheme"
-                       :fn extension-registry-refreshes-visible-adapters-by-scheme})
+                        :fn extension-registry-refreshes-visible-adapters-by-scheme})
 
 (local main
   (fn []
