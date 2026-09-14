@@ -779,7 +779,9 @@
           (self:insert-text payload.text))
         true)
       false))
-
+(fn update-caret-visual [self]
+  (when self.caret
+    (set self.caret.color (if (= self.mode :insert) self.colors.caret-insert self.colors.caret-normal))))
 (fn move-direct-horizontal-key [self bounded-delta fallback-delta shift?]
   (local opts {:extend-selection? shift? :allow-line-cross? true :allow-after-line-end? true})
   (if (and self.bounded-logical-navigation?
@@ -829,11 +831,13 @@
 
 (fn enter-insert-mode [self]
   (set self.mode :insert)
+  (update-caret-visual self)
   (mark-caret-dirty self)
   true)
 
 (fn enter-normal-mode [self]
   (set self.mode :normal)
+  (update-caret-visual self)
   (mark-caret-dirty self)
   true)
 
@@ -853,8 +857,11 @@
   (self:request-focus)
   (local point (local-point-from-event self event))
   (local row-index (if (and event event.row-index)
-                     event.row-index
-                     (+ 1 (math.floor (/ (math.max 0 (- point.y self.padding.y)) self.line-height)))))
+                      event.row-index
+                      (do
+                        (local size (assert (or self.layout.size self.layout.measure) "VirtualInput click requires measured layout size"))
+                        (local top-y (- size.y self.padding.y))
+                        (+ 1 (math.floor (/ (math.max 0 (- top-y point.y)) self.line-height))))))
   (local viewport (ensure-viewport self))
   (local row (. viewport.rows row-index))
   (when row
@@ -938,27 +945,19 @@
   (set child.layout.depth-offset-index depth)
   (set child.layout.clip-region clip)
   (child.layout:layouter))
-
-(fn caret-position [input position rotation line column]
-  (local visible-row (+ (- line input.scroll-line) 1))
-  (+ position
-     (rotation:rotate (glm.vec3 (+ input.padding.x (* (- column input.scroll-column) input.column-width))
-                                 (+ input.padding.y (* (- visible-row 1) input.line-height))
-                                 0))))
-
+(fn row-y-offset [input size visible-row] (assert input "row-y-offset requires input") (assert size "row-y-offset requires size") (- size.y input.padding.y (* visible-row input.line-height)))
+(fn caret-width-for-mode [input row column]
+  (if (= input.mode :insert) input.caret-width (do
+    (local row-widget (. input.rows (+ (- row.line input.scroll-line) 1))) (local style (assert (and row-widget row-widget.style) "VirtualInput caret width requires row text style")) (local font (assert style.font "VirtualInput caret width requires row text font"))
+    (local codepoints (assert row.codepoints "VirtualInput caret width requires row codepoints")) (local codepoint (. codepoints (+ (- column input.scroll-column) 1))) (local glyph (fallback-glyph font (or codepoint 32))) (local block-width (and glyph (* glyph.advance style.scale)))
+    (if (and block-width (> block-width 0)) block-width input.caret-width))))
+(fn caret-position [input position rotation size line column] (+ position (rotation:rotate (glm.vec3 (+ input.padding.x (* (- column input.scroll-column) input.column-width)) (row-y-offset input size (+ (- line input.scroll-line) 1)) 0))))
 (fn show-caret [input position rotation size depth clip line column]
-  (set input.caret.visible? true)
-  (layout-child input.caret
-                (caret-position input position rotation line column)
-                rotation
-                (glm.vec3 input.caret-width input.line-height size.z)
-                depth
-                clip))
-
+  (set input.caret.visible? true) (local (_caret-line _caret-column row) (caret-line-column input)) (assert row "VirtualInput show-caret requires visible caret row") (update-caret-visual input)
+  (layout-child input.caret (caret-position input position rotation size line column) rotation (glm.vec3 (caret-width-for-mode input row column) input.line-height size.z) depth clip))
 (fn hide-caret [input position rotation size depth clip]
   (set input.caret.visible? false)
   (layout-child input.caret position rotation (glm.vec3 0 0 size.z) depth clip))
-
 (fn layout-caret [input position rotation size depth clip]
   (local (line column row) (caret-line-column input))
   (if (and row
@@ -979,8 +978,8 @@
   (layout-child input.background position rotation size (+ depth 1) clip)
   (each [i row-widget (ipairs input.rows)]
     (local row-pos (+ position (rotation:rotate (glm.vec3 input.padding.x
-                                                          (+ input.padding.y (* (- i 1) input.line-height))
-                                                          0))))
+                                                          (row-y-offset input size i)
+                                                           0))))
     (layout-child row-widget row-pos rotation (glm.vec3 (- size.x (* 2 input.padding.x)) input.line-height size.z) (+ depth 3) clip))
   (layout-caret input position rotation size (+ depth 2) clip))
 
@@ -1103,7 +1102,7 @@
     (for [_ 1 line-count]
       (table.insert row-widgets ((Text {:codepoints [] :style text-style}) ctx)))
     (local background ((Rectangle {:color colors.background}) ctx))
-    (local caret ((Rectangle {:color colors.caret-insert}) ctx))
+    (local caret ((Rectangle {:color colors.caret-normal}) ctx))
     (local computed-line-height (resolve-line-height* text-style))
     (local computed-column-width (resolve-column-width* text-style caret-width))
     (local child-layouts [background.layout caret.layout])
@@ -1135,9 +1134,10 @@
         :local-clip-region nil
         :local-clip-region-id (next-virtual-input-clip-region-id)
         :padding padding
-       :line-height computed-line-height
-       :column-width computed-column-width
-       :caret-width caret-width
+        :line-height computed-line-height
+        :column-width computed-column-width
+        :caret-width caret-width
+        :colors colors
        :scroll-line (math.max 0 (or buffer.scroll-line 0))
         :scroll-column 0
         :viewport nil

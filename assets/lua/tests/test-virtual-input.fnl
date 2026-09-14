@@ -1,17 +1,8 @@
-(local _ (require :main))
-(local glm (require :glm))
-(local gl (require :gl))
-(local BuildContext (require :build-context))
-(local VirtualInput (require :virtual-input))
-(local fs (require :fs))
-(local LazyTextSource (require :lazy-text-source))
-(local LazyTextBuffer (require :lazy-text-buffer))
-(local InputState (require :input-state-router))
-(local Runtime (require :state-runtime))
-(local States (require :states))
-(local StateSystemBindings (require :state-system-bindings))
-(local TextState (require :text-state))
-(local InsertState (require :insert-state))
+(local _ (require :main)) (local glm (require :glm)) (local gl (require :gl))
+(local BuildContext (require :build-context)) (local VirtualInput (require :virtual-input)) (local fs (require :fs))
+(local LazyTextSource (require :lazy-text-source)) (local LazyTextBuffer (require :lazy-text-buffer))
+(local InputState (require :input-state-router)) (local Runtime (require :state-runtime)) (local States (require :states))
+(local StateSystemBindings (require :state-system-bindings)) (local TextState (require :text-state)) (local InsertState (require :insert-state))
 (local tests [])
 (local temp-root "/tmp/space/tests/virtual-input")
 (fn codepoints-from-text [text]
@@ -200,10 +191,14 @@
   buffer)
 
 (fn make-clickables-stub []
-  (local state {:register 0 :unregister 0})
+  (local state {:register 0 :unregister 0 :register-right 0 :unregister-right 0 :register-double 0 :unregister-double 0})
   (local stub {:state state})
   (set stub.register (fn [_self _obj] (set state.register (+ state.register 1))))
   (set stub.unregister (fn [_self _obj] (set state.unregister (+ state.unregister 1))))
+  (set stub.register-right-click (fn [_self _obj] (set state.register-right (+ state.register-right 1))))
+  (set stub.unregister-right-click (fn [_self _obj] (set state.unregister-right (+ state.unregister-right 1))))
+  (set stub.register-double-click (fn [_self _obj] (set state.register-double (+ state.register-double 1))))
+  (set stub.unregister-double-click (fn [_self _obj] (set state.unregister-double (+ state.unregister-double 1))))
   stub)
 
 (fn make-hoverables-stub []
@@ -1188,6 +1183,7 @@
 (table.insert tests {:name "VirtualInput TextState l stops at cached line end" :fn virtual-input-text-state-l-stops-at-cached-line-end})
 (table.insert tests {:name "VirtualInput refresh after far horizontal scroll uses cached viewport anchor" :fn virtual-input-refresh-after-far-horizontal-scroll-uses-cached-viewport-anchor})
 (table.insert tests {:name "VirtualInput exact dollar A G still work with anchor cache" :fn virtual-input-exact-dollar-A-G-still-work-with-anchor-cache})
+(each [_ test (ipairs (require :tests/virtual-input-parity))] (table.insert tests test))
 (each [_ test (ipairs (require :tests/virtual-input-word-motion))] (table.insert tests test))
 (local main
   (fn []
