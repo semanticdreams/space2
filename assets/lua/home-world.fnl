@@ -1089,15 +1089,22 @@
     (local graph (Graph {:with-start false :entity-events? false}))
     (register-runtime-graph-loaders graph world)
     (local restore-runtime {:graph graph})
+    (var restore-runtime-installed? false)
     (when app.graph-extension-registry
       (local (install-ok install-result) (pcall #(app.graph-extension-registry:install-runtime restore-runtime)))
-      (when (not install-ok) (graph:drop) (error install-result)))
-    (local graph-map-manager (GraphMapManager.GraphMapManager
-                                {:graph graph
-                                 :state (or world.state.graph {})
-                                 :data-dir world.dir}))
-    (when app.graph-extension-registry
+      (if install-ok
+          (set restore-runtime-installed? true)
+          (do (graph:drop) (error install-result))))
+    (local (map-manager-ok graph-map-manager)
+      (pcall #(GraphMapManager.GraphMapManager
+                {:graph graph
+                 :state (or world.state.graph {})
+                 :data-dir world.dir})))
+    (when restore-runtime-installed?
       (app.graph-extension-registry:uninstall-runtime restore-runtime))
+    (when (not map-manager-ok)
+      (graph:drop)
+      (error graph-map-manager))
     (local graph-map (graph-map-manager:get-active-map))
     (local scene-scope
       (do

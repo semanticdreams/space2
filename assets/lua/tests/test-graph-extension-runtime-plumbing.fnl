@@ -43,6 +43,16 @@
                      :selected_node_keys ["demo-node:a"]
                      :focused_node_key "demo-node:b"}]}}))
 
+(fn write-world-state-with-invalid-active-map! [dir]
+  (JsonUtils.write-json!
+    (fs.join-path dir "world.json")
+    {:graph {:active_map_id "missing-map"
+             :next_map_id 2
+             :maps [{:id "main"
+                     :name "Main"
+                     :nodes ["demo-node:a"]
+                     :edges []}]}}))
+
 (fn with-restored-app-registry [f]
   (local saved-registry app.graph-extension-registry)
   (set app.graph-extension-registry nil)
@@ -182,6 +192,45 @@
   (set app.graph-extension-registry saved-registry)
   (if ok result (error result)))
 
+(fn temporary-pre-restore-runtime-uninstalls-when-map-restore-fails []
+  (local saved-registry app.graph-extension-registry)
+  (local registry (GraphExtensionRegistry.GraphExtensionRegistry {:app app}))
+  (local temp-dir (tempfile.TemporaryDirectory {:prefix "home-world-runtime-map-restore-failure-"}))
+  (local focus-manager (Focus.FocusManager {:root-name "runtime-map-restore-failure"}))
+  (local saved-create-default-projection app.create-default-projection)
+  (local saved-next-frame app.next-frame)
+  (set app.graph-extension-registry registry)
+  (set app.create-default-projection (fn [_viewport] {}))
+  (set app.next-frame (fn [callback] (callback)))
+  (fs.create-dirs temp-dir.path)
+  (write-world-state-with-invalid-active-map! temp-dir.path)
+  (registry:register-extension
+    {:id "demo-extension"
+     :unit-id "user-demo-extension"
+     :schemes ["demo-node"]
+     :install-loaders demo-runtime-install-loaders})
+  (local world (HomeWorld {:id "world-a"
+                          :name "home"
+                          :type "home"
+                          :dir temp-dir.path
+                          :graph-world-manager {}
+                          :asset-path-resolver identity-path}))
+  (local ctx {:focus-manager focus-manager
+              :focus-root (focus-manager:get-root-scope)})
+  (local (ok err)
+    (pcall activate-world! world ctx))
+  (local registry-state (registry:debug-state))
+  (focus-manager:drop)
+  (temp-dir:drop)
+  (set app.create-default-projection saved-create-default-projection)
+  (set app.next-frame saved-next-frame)
+  (set app.graph-extension-registry saved-registry)
+  (assert (not ok) "invalid graph map state should fail HomeWorld activation")
+  (assert (string.find (tostring err) "active_map_id does not reference a map" 1 true)
+          (.. "map restore failure should surface GraphMapManager error, got: " (tostring err)))
+  (assert (= registry-state.runtime-count 0)
+          "failed map restore should uninstall temporary pre-restore runtime"))
+
 (table.insert tests {:name "main-ensures-graph-extension-registry"
                      :fn main-ensures-graph-extension-registry})
 (table.insert tests {:name "registry-installed-runtime-debug-state-is-visible"
@@ -189,7 +238,9 @@
 (table.insert tests {:name "failing-runtime-install-rolls-back-home-world-resources"
                       :fn failing-runtime-install-rolls-back-home-world-resources})
 (table.insert tests {:name "existing-extensions-install-before-home-world-graph-map-restore"
-                     :fn existing-extensions-install-before-home-world-graph-map-restore})
+                      :fn existing-extensions-install-before-home-world-graph-map-restore})
+(table.insert tests {:name "temporary-pre-restore-runtime-uninstalls-when-map-restore-fails"
+                     :fn temporary-pre-restore-runtime-uninstalls-when-map-restore-fails})
 
 (local main
   (fn []

@@ -46,11 +46,7 @@
   (when (= (type returned.unregister) "function")
     (returned:unregister)
     (error (.. context " must return a non-empty sequential table of registration handles, not a bare handle")))
-  (assert (> (length returned) 0)
-          (.. context " must return a non-empty sequential table of registration handles"))
-  (var sequential-count 0)
-  (each [_ handle (ipairs returned)]
-    (set sequential-count (+ sequential-count 1))
+  (fn record-handle! [handle]
     (assert (= (type handle) "table") (.. context " returned non-table handle"))
     (assert (= (type handle.unregister) "function")
             (.. context " returned handle without unregister"))
@@ -60,8 +56,21 @@
         (set already-recorded? true)))
     (when (not already-recorded?)
       (table.insert target handle)))
-  (assert (= sequential-count (length returned))
+  (var count 0)
+  (var max-index 0)
+  (each [key handle (pairs returned)]
+    (record-handle! handle)
+    (assert (and (= (type key) "number") (= key (math.floor key)) (> key 0))
+            (.. context " must return a non-empty sequential table of registration handles"))
+    (set count (+ count 1))
+    (set max-index (math.max max-index key)))
+  (assert (> count 0)
           (.. context " must return a non-empty sequential table of registration handles"))
+  (assert (= count max-index)
+          (.. context " must return a non-empty sequential table of registration handles"))
+  (for [i 1 max-index]
+    (assert (not (= (. returned i) nil))
+            (.. context " must return a non-empty sequential table of registration handles")))
   target)
 
 (fn sorted-extension-ids [extensions]
