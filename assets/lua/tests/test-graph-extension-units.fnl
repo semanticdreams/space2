@@ -27,8 +27,12 @@
 (fn make-temp-dir []
   (tempfile.TemporaryDirectory {:prefix "graph-extension-units-test-"}))
 
-(fn demo-unit-source [version]
+(fn demo-unit-source [version missing-id]
   (local v (tostring version))
+  (local missing-expr
+    (if missing-id
+        (string.format "%q" (tostring missing-id))
+        "nil"))
   (.. "(local Graph (require :graph/init))\n"
       "(local KeyLoaderUtils (require :graph/key-loader-utils))\n"
       "(var extension-handle nil)\n"
@@ -51,7 +55,7 @@
       "     :node-key target.key}))\n"
       "(fn make-node [key]\n"
       "  (local id (KeyLoaderUtils.extract-id \"demo-node\" key))\n"
-      "  (when id\n"
+      "  (when (and id (not (= id " missing-expr ")))\n"
       "    (local node (Graph.GraphNode {:key key\n"
       "                                  :label (.. \"Demo " v " \" id)\n"
       "                                  :preview demo-preview\n"
@@ -212,6 +216,21 @@
           "hot reload should not reconstruct root graph runtime")
   true)
 
+(fn make-demo-hot-reload-controller [root ctx]
+  (local root-unit (Units.Unit {:id "app-root"
+                                :owned-paths [root]
+                                :load count-root-reload
+                                :unload noop-unload}))
+  (HotReload.HotReloadController
+    {:unit root-unit
+     :units [ctx.unit]
+     :root-unit-id "app-root"
+     :watch-paths [root]
+     :preserve-modules ["hot-reload" "units" "tests.test-graph-extension-units"]
+     :debounce-ms 0
+     :startup-ignore-ms 0
+     :generic? true}))
+
 (fn run-hot-reload-refresh-assertions [root ctx]
   (local saved-engine app.engine)
   (set fallback-now-ms 10000)
@@ -221,23 +240,49 @@
   (local node-a (graph-map:load-by-key "demo-node:a"))
   (assert-demo-node-version node-a "v1" "a" "node before hot reload")
   (set app.__graph_extension_unit_root_reload_count 0)
-  (local root-unit (Units.Unit {:id "app-root"
-                                :owned-paths [root]
-                                :load count-root-reload
-                                :unload noop-unload}))
-  (local controller
-    (HotReload.HotReloadController
-      {:unit root-unit
-       :units [ctx.unit]
-       :root-unit-id "app-root"
-       :watch-paths [root]
-       :preserve-modules ["hot-reload" "units" "tests.test-graph-extension-units"]
-       :debounce-ms 0
-       :startup-ignore-ms 0
-       :generic? true}))
+  (local controller (make-demo-hot-reload-controller root ctx))
   (local (ok result)
     (pcall perform-hot-controller-reload-and-assert
            {:ctx ctx :controller controller :graph-map graph-map :node-a node-a}))
+  (controller:drop)
+  (set app.engine saved-engine)
+  (if ok result (error result)))
+
+(fn assert-v1-runtime-after-failed-reload [ctx graph graph-map _node-a]
+  (assert-demo-node-version (graph-map:lookup "demo-node:a") "v1" "a" "node after failed hot reload")
+  (fs.write-file ctx.init-path (demo-unit-source "v2"))
+  true)
+
+(fn assert-v2-runtime-after-subsequent-reload [graph graph-map]
+  (assert-demo-node-version (graph-map:lookup "demo-node:a") "v2" "a" "node after subsequent reload")
+  (assert-demo-node-version (graph:create-node-by-key "demo-node:c") "v2" "c" "new node after subsequent reload")
+  (local morph-result (graph.morphs:apply {:key "demo-node:a"} {:to-scheme "demo-node"} {}))
+  (assert (= morph-result.key "demo-node:a-morphed-v2") "subsequent reload should restore v2 morph"))
+
+(fn perform-failed-refresh-rollback-sequence [state]
+  (fs.write-file state.ctx.init-path (demo-unit-source "v2" "a"))
+  (assert (= (state.controller:reload-now! {:changes [{:path state.ctx.init-path :action "modified"}]}) false)
+          "refresh failure should return false after rollback")
+  (assert-v1-runtime-after-failed-reload state.ctx state.graph state.graph-map state.node-a)
+  (assert (state.controller:reload-now! {:changes [{:path state.ctx.init-path :action "modified"}]})
+          "subsequent valid reload should not hit duplicate registration")
+  (assert-v2-runtime-after-subsequent-reload state.graph state.graph-map)
+  true)
+
+(fn run-hot-reload-refresh-failure-rollback-assertions [root ctx]
+  (local saved-engine app.engine)
+  (set fallback-now-ms 10000)
+  (when (not app.engine)
+    (set app.engine {:now-ms fallback-engine-now-ms}))
+  (local graph ctx.runtime.graph)
+  (local graph-map (ctx.runtime.graph-map-manager:get-active-map))
+  (local node-a (graph-map:load-by-key "demo-node:a"))
+  (assert-demo-node-version node-a "v1" "a" "node before failed hot reload")
+  (set app.__graph_extension_unit_root_reload_count 0)
+  (local controller (make-demo-hot-reload-controller root ctx))
+  (local (ok result)
+    (pcall perform-failed-refresh-rollback-sequence
+           {:ctx ctx :controller controller :graph graph :graph-map graph-map :node-a node-a}))
   (controller:drop)
   (set app.engine saved-engine)
   (if ok result (error result)))
@@ -258,10 +303,20 @@
   (handle:drop)
   (if ok result (error result)))
 
+(fn hot-reload-refresh-failure-rolls-back-demo-extension-unit []
+  (local handle (make-temp-dir))
+  (local ctx (setup-demo-runtime! handle.path))
+  (local (ok result) (pcall run-hot-reload-refresh-failure-rollback-assertions handle.path ctx))
+  (ctx:drop)
+  (handle:drop)
+  (if ok result (error result)))
+
 (table.insert tests {:name "reloadable-demo-graph-extension-unit-refreshes-visible-node-without-root-reload"
                      :fn reloadable-demo-graph-extension-unit-refreshes-visible-node-without-root-reload})
 (table.insert tests {:name "hot-reload-controller-refreshes-demo-extension-unit"
-                     :fn hot-reload-controller-refreshes-demo-extension-unit})
+                      :fn hot-reload-controller-refreshes-demo-extension-unit})
+(table.insert tests {:name "hot-reload-refresh-failure-rolls-back-demo-extension-unit"
+                     :fn hot-reload-refresh-failure-rolls-back-demo-extension-unit})
 
 (local main
   (fn []
