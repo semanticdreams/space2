@@ -45,6 +45,11 @@
         (set input.__focus-policy-blurring? false)
         true)))
 
+(fn handle-state-disconnected [input]
+  (assert input "FocusPolicy.handle-state-disconnected requires input")
+  (normalize-blurred input)
+  true)
+
 (fn request-focus [input]
   (assert input "FocusPolicy.request-focus requires input")
   (if input.focus-node
@@ -94,5 +99,6 @@
 {:request-focus request-focus
  :handle-focus handle-focus
  :handle-blur handle-blur
+ :handle-state-disconnected handle-state-disconnected
  :connect-focus-listeners connect-focus-listeners
  :disconnect-focus-listeners disconnect-focus-listeners}

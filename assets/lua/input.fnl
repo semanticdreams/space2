@@ -865,10 +865,10 @@
            (sync-from-model self)))
 
     (set input.on-state-disconnected
-          (fn [self event]
-            (model:on-state-disconnected event)
-            (apply-mode-change self)
-            (FocusPolicy.handle-blur self)))
+         (fn [self event]
+           (model:on-state-disconnected event)
+           (apply-mode-change self)
+           (FocusPolicy.handle-state-disconnected self)))
 
     (set input.intersect
          (fn [self ray]

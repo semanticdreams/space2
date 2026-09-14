@@ -967,7 +967,7 @@
   (set self.connected? true))
 
 (fn on-state-disconnected [self _event]
-  (FocusPolicy.handle-blur self))
+  (FocusPolicy.handle-state-disconnected self))
 
 (fn initialize-cached-state! [input]
   (local (_line _column known?) (refresh-logical-caret-state input))

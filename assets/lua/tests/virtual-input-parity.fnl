@@ -8,6 +8,7 @@
 (local LazyTextSource (require :lazy-text-source))
 (local LazyTextBuffer (require :lazy-text-buffer))
 (local States (require :states))
+(local InputState (require :input-state-router))
 (local StateSystemBindings (require :state-system-bindings))
 (local {: fallback-glyph} (require :text-utils))
 (local Geometry (require :text-input-geometry))
@@ -162,6 +163,36 @@
     (local original-drop row-widget.drop)
     (set row-widget.drop (fn [self] (set input.__child-drop-started? true) (original-drop self))))
   (input:drop)
+  (focus.manager:drop))
+
+(fn count-router-disconnects [input activate]
+  (local original-disconnected input.on-state-disconnected)
+  (var disconnected-count 0)
+  (set input.on-state-disconnected
+       (fn [self event]
+         (set disconnected-count (+ disconnected-count 1))
+         (original-disconnected self event)))
+  (activate input)
+  (assert (= (InputState.active-input) input) "focused input should be router-active")
+  (InputState.disconnect-input input)
+  disconnected-count)
+
+(fn router-disconnect-invokes-shared-policy-users-once []
+  (set-test-states)
+  (local focus (make-focus-ctx))
+  (local eager ((Input {}) focus.ctx))
+  (local virtual ((VirtualInput {:buffer (lazy-buffer "disconnect-once" "abc" {:chunk-bytes 4})
+                                :line-count 1
+                                :column-count 8}) (make-ctx)))
+  (local eager-count (count-router-disconnects eager (fn [input] (input:request-focus))))
+  (local virtual-count (count-router-disconnects virtual (fn [input] (input:on-click {:row-index 1 :column 0}))))
+  (assert (= eager-count 1)
+          (.. "router disconnect should invoke Input on-state-disconnected once, got " eager-count))
+  (assert (= virtual-count 1)
+          (.. "router disconnect should invoke VirtualInput on-state-disconnected once, got " virtual-count))
+  (assert (not (InputState.active-input)) "router disconnect should clear active input")
+  (eager:drop)
+  (virtual:drop)
   (focus.manager:drop))
 
 (fn file-backed-lazy-rows-use-logical-text-and-visual-downward-layout []
@@ -345,6 +376,7 @@
 [{:name "VirtualInput file-backed lazy rows use logical text and visual downward layout" :fn file-backed-lazy-rows-use-logical-text-and-visual-downward-layout}
  {:name "VirtualInput file-backed focus lifecycle matches eager Input" :fn file-backed-focus-lifecycle-matches-eager-input}
  {:name "VirtualInput focused drop blurs before child teardown" :fn focused-virtual-input-drop-blurs-before-child-teardown}
+ {:name "Text input shared policy router disconnect invokes state disconnected once" :fn router-disconnect-invokes-shared-policy-users-once}
  {:name "VirtualInput file-backed caret mode matches eager Input" :fn file-backed-caret-mode-matches-eager-input}
   {:name "VirtualInput file-backed caret visual update matches eager Input" :fn file-backed-caret-visual-update-matches-eager-input}
   {:name "VirtualInput direct normal edit keys do not edit" :fn direct-normal-edit-keys-do-not-edit}
