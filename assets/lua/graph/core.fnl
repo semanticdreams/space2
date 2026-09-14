@@ -57,7 +57,8 @@
     (local registration (. key-loaders handle.scheme))
     (if registration
         (do
-            (when (not (= registration.registration-id handle.registration-id))
+            (when (or (not (= registration.registration-id handle.registration-id))
+                      (not (= registration.handle handle)))
                 (error (.. "key loader for scheme " handle.scheme " belongs to another registration")))
             (set registration.active? false)
             (set (. key-loaders handle.scheme) nil)

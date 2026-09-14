@@ -311,6 +311,23 @@
             "Stale unregister must not remove the newer owner")
     (graph:drop))
 
+(fn graph-core-key-loader-foreign-handle-cannot-remove-registration []
+    (local graph-a (Graph {:with-start false}))
+    (local graph-b (Graph {:with-start false}))
+    (local handle-a
+        (graph-a:register-key-loader "ext" make-ext-node-a {:owner-id "unit-a"}))
+    (graph-b:register-key-loader "ext" make-ext-node-b {:owner-id "unit-b"})
+    (local (ok err) (pcall #(graph-b:unregister-key-loader handle-a)))
+    (assert (not ok) "foreign handle should not remove another graph registration")
+    (assert (string.find (tostring err) "belongs to another registration" 1 true)
+            "Foreign handle error should use stale-registration diagnostic")
+    (assert (= (graph-b:key-loader-owner "ext") "unit-b")
+            "Foreign unregister must not remove graph-b owner")
+    (assert (graph-b:has-key-loader-for-key "ext:item")
+            "Foreign unregister must leave graph-b loader active")
+    (graph-a:drop)
+    (graph-b:drop))
+
 (table.insert tests {:name "Graph core adds nodes and edges" :fn graph-core-adds-nodes-and-edges})
 (table.insert tests {:name "Graph core replaces nodes and updates edges" :fn graph-core-replaces-node-and-updates-edges})
 (table.insert tests {:name "Graph core removes nodes and edges" :fn graph-core-removes-nodes-and-edges})
@@ -333,6 +350,8 @@
                      :fn graph-core-key-loader-duplicate-active-loader-fails})
 (table.insert tests {:name "Graph core key-loader stale handle cannot remove new owner"
                      :fn graph-core-key-loader-stale-handle-cannot-remove-new-owner})
+(table.insert tests {:name "Graph core key-loader foreign handle cannot remove registration"
+                     :fn graph-core-key-loader-foreign-handle-cannot-remove-registration})
 
 (local main
   (fn []
