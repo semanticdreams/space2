@@ -1,4 +1,5 @@
 (local {: codepoints-from-text} (require :text-utils))
+(local {: codepoint-class} (require :text-editing-port))
 (local fs (require :fs))
 
 (fn valid-utf8? [text]
@@ -1070,6 +1071,91 @@
         (set buffer.dirty? true)
         (error result))))
 
+(fn advance-word-codepoint! [buffer state cp advance]
+  (if (= cp 10)
+      (do
+        (set state.line (+ state.line 1))
+        (set state.column 0)
+        (set state.pos (+ state.pos advance)))
+      (= cp 13)
+      (do
+        (set state.line (+ state.line 1))
+        (set state.column 0)
+        (set state.pos (+ state.pos advance))
+        (when (= (byte-at buffer state.pos) 10)
+          (set state.pos (+ state.pos 1))))
+      (do
+        (set state.column (+ state.column 1))
+        (set state.pos (+ state.pos advance)))))
+(fn word-anchor-result [anchor moved?]
+  {:bounded? true
+   :moved? moved?
+   :byte anchor.pos
+   :line anchor.line
+   :column anchor.column})
+
+(fn initialize-word-scan! [scan class]
+  (set scan.first-class class)
+  (set scan.phase (if (= class :whitespace) :skip-whitespace :skip-current-run)))
+(fn advance-word-scan-codepoint! [buffer state scan cp advance]
+  (local class (codepoint-class cp))
+  (when (= scan.phase nil)
+    (initialize-word-scan! scan class))
+  (if (and (= scan.phase :skip-current-run) (= class scan.first-class))
+      (advance-word-codepoint! buffer state cp advance)
+      (and (= scan.phase :skip-current-run) (= class :whitespace))
+      (set scan.phase :skip-whitespace)
+      (and (= scan.phase :skip-whitespace) (= class :whitespace))
+      (advance-word-codepoint! buffer state cp advance)
+      (do
+        (set scan.result (word-anchor-result state true))
+        (set scan.done? true))))
+(fn scan-word-chunk! [buffer state scan chunk chunk-start]
+  (var status nil)
+  (var i 1)
+  (while (and (<= i (# chunk)) (not status) (not scan.done?))
+    (local (advance cp needs-more?) (logical-codepoint-step buffer chunk i state.pos))
+    (if needs-more?
+        (set status :needs-more)
+        (do
+          (advance-word-scan-codepoint! buffer state scan cp advance)
+          (set i (+ (- state.pos chunk-start) 1)))))
+  status)
+(fn scan-extended-word-codepoint! [buffer state scan]
+  (local chunk-start state.pos)
+  (local chunk (read-composed-range buffer chunk-start (math.min 4 (- buffer.size chunk-start))))
+  (if (= (# chunk) 0)
+      (set scan.done? true)
+      (do
+        (local (advance cp needs-more?) (logical-codepoint-step buffer chunk 1 state.pos))
+        (if needs-more?
+            (error "LazyTextBuffer next-word-start: unable to read complete UTF-8 codepoint")
+            (advance-word-scan-codepoint! buffer state scan cp advance)))))
+(fn next-word-start-from-anchor [buffer anchor opts]
+  (local _options opts)
+  (local normalized (normalize-anchor buffer anchor))
+  (if (>= normalized.byte buffer.size)
+      false
+      (do
+        (local state {:pos normalized.byte
+                      :line normalized.line
+                      :column normalized.column})
+        (local scan {:phase nil :first-class nil :result nil :done? false})
+        (while (and (not scan.done?) (< state.pos buffer.size))
+          (local chunk-start state.pos)
+          (local chunk (read-composed-range buffer chunk-start (math.min buffer.chunk-bytes (- buffer.size chunk-start))))
+          (if (= (# chunk) 0)
+              (set scan.done? true)
+              (= (scan-word-chunk! buffer state scan chunk chunk-start) :needs-more)
+              (scan-extended-word-codepoint! buffer state scan)))
+        (if scan.result
+            scan.result
+            {:bounded? true
+             :moved? false
+             :byte normalized.byte
+             :line normalized.line
+             :column normalized.column}))))
+
 (fn LazyTextBuffer [opts]
   (local source (assert opts.source "LazyTextBuffer requires source"))
   (local chunk-bytes (if (not= opts.chunk-bytes nil)
@@ -1091,9 +1177,10 @@
      :get-viewport get-viewport
      :get-line-summary get-line-summary
      :get-line-count get-line-count
-      :line-column-for-byte line-column-for-byte
-      :byte-for-codepoint-position byte-for-codepoint-position
-      :adjacent-codepoint-from-anchor adjacent-codepoint-from-anchor
+       :line-column-for-byte line-column-for-byte
+       :byte-for-codepoint-position byte-for-codepoint-position
+       :next-word-start-from-anchor next-word-start-from-anchor
+       :adjacent-codepoint-from-anchor adjacent-codepoint-from-anchor
       :move-to-line-column-from-anchor move-to-line-column-from-anchor
       :build-viewport-row-from-anchor build-viewport-row-from-anchor
       :insert-text insert-text

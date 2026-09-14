@@ -133,6 +133,8 @@
     :tests.test-perlin-terrain
     :tests.test-focus
     :tests.test-input-model
+    :tests.test-text-editing-port
+    :tests.test-text-normal-commands
     :tests.test-lazy-text-buffer
     :tests.test-virtual-input
     :tests.test-dial-type

@@ -22,7 +22,6 @@
   (table.concat
     (icollect [_ cp (ipairs (or codepoints []))]
               (utf8.char cp))))
-
 (fn row [line text start]
   (assert (= (type line) :number) "row requires line")
   (local start-byte (or start 0))
@@ -243,9 +242,9 @@
 (fn snapshot-text [buffer]
   (. (buffer:get-viewport {:line 0 :column 0 :lines 1 :columns 80}) :rows 1 :text))
 
-(fn key [value]
-  (string.byte value))
+(fn key [value] (string.byte value))
 
+(fn fail-arrow-bypass [_self _payload] (error "left/right arrows should route through TextNormalCommands first"))
 (fn narrow-layout! [input columns lines]
   (input.layout:measurer)
   (set input.layout.size
@@ -577,16 +576,16 @@
 (fn virtual-input-text-state-h-l-move-without-numeric-delta-error []
   (with-virtual-input-states
     (fn [env]
-      (local text-state (. env :text-state))
-      (local buffer (lazy-buffer "text-state-horizontal" "abcd"))
-      (local input (build-input {:buffer buffer :line-count 1 :column-count 8}))
-      (input:on-click {:row-index 1 :column 1})
-      (assert (text-state:on-key-down {:key (string.byte "l")})
-              "TextState l should move right")
+      (local text-state (. env :text-state)) (local buffer (lazy-buffer "text-state-horizontal" "abcd"))
+      (local input (build-input {:buffer buffer :line-count 1 :column-count 8})) (input:on-click {:row-index 1 :column 1})
+      (assert (text-state:on-key-down {:key (string.byte "l")}) "TextState l should move right")
       (assert (= buffer.cursor-byte 2) "l should move one UTF-8 codepoint right")
-      (assert (text-state:on-key-down {:key (string.byte "h")})
-              "TextState h should move left")
+      (assert (text-state:on-key-down {:key (string.byte "h")}) "TextState h should move left")
       (assert (= buffer.cursor-byte 1) "h should move one UTF-8 codepoint left")
+      (set input.on-key-down fail-arrow-bypass) (assert (text-state:on-key-down {:key 1073741903}) "TextState right arrow should be handled")
+      (assert (= buffer.cursor-byte 2) "right arrow should move one codepoint through shared port")
+      (assert (text-state:on-key-down {:key 1073741904}) "TextState left arrow should be handled")
+      (assert (= buffer.cursor-byte 1) "left arrow should move one codepoint through shared port")
       (input:drop))))
 
 (fn virtual-input-text-state-j-k-move-using-lazy-rows []
@@ -1169,7 +1168,7 @@
 (table.insert tests {:name "VirtualInput inserts and deletes through lazy buffer" :fn virtual-input-inserts-and-deletes-through-lazy-buffer}) (table.insert tests {:name "VirtualInput copies selected text" :fn virtual-input-copies-selected-text})
 (table.insert tests {:name "VirtualInput save reports success and conflict" :fn virtual-input-save-reports-success-and-conflict}) (table.insert tests {:name "VirtualInput drop tears down owned children" :fn virtual-input-drop-tears-down-owned-children})
 (table.insert tests {:name "VirtualInput click focus routes InputState events" :fn virtual-input-click-focus-routes-input-state-events}) (table.insert tests {:name "VirtualInput TextState i enters insert mode" :fn virtual-input-text-state-i-enters-insert-mode})
-(table.insert tests {:name "VirtualInput state helper clears ignored text input" :fn virtual-input-state-helper-clears-ignored-text-input}) (table.insert tests {:name "VirtualInput TextState h/l move without numeric delta error" :fn virtual-input-text-state-h-l-move-without-numeric-delta-error})
+(table.insert tests {:name "VirtualInput state helper clears ignored text input" :fn virtual-input-state-helper-clears-ignored-text-input}) (table.insert tests {:name "VirtualInput TextState h/l/arrows move through command engine" :fn virtual-input-text-state-h-l-move-without-numeric-delta-error})
 (table.insert tests {:name "VirtualInput TextState j/k move using lazy rows" :fn virtual-input-text-state-j-k-move-using-lazy-rows}) (table.insert tests {:name "VirtualInput TextState x deletes and clamps" :fn virtual-input-text-state-x-deletes-and-clamps})
 (table.insert tests {:name "VirtualInput InsertState Escape returns to text mode" :fn virtual-input-insert-state-escape-returns-to-text-mode}) (table.insert tests {:name "VirtualInput InsertState Return inserts newline" :fn virtual-input-insert-state-return-inserts-newline})
 (table.insert tests {:name "VirtualInput insertion replaces real buffer selection" :fn virtual-input-insertion-replaces-real-buffer-selection}) (table.insert tests {:name "VirtualInput Backspace deletes active selection" :fn virtual-input-backspace-deletes-active-selection})
@@ -1189,6 +1188,7 @@
 (table.insert tests {:name "VirtualInput TextState l stops at cached line end" :fn virtual-input-text-state-l-stops-at-cached-line-end})
 (table.insert tests {:name "VirtualInput refresh after far horizontal scroll uses cached viewport anchor" :fn virtual-input-refresh-after-far-horizontal-scroll-uses-cached-viewport-anchor})
 (table.insert tests {:name "VirtualInput exact dollar A G still work with anchor cache" :fn virtual-input-exact-dollar-A-G-still-work-with-anchor-cache})
+(each [_ test (ipairs (require :tests/virtual-input-word-motion))] (table.insert tests test))
 (local main
   (fn []
     (local runner (require :tests/runner))
