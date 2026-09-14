@@ -122,6 +122,7 @@
   built.layout-name)
 
 (fn assert-demo-node-version [node version id context]
+  (assert node (.. context " should load node"))
   (assert (= node.label (.. "Demo " version " " id))
           (.. context " should have v" version " label"))
   (assert (= (build-layout-name node.preview node) (.. "preview-" version "-" id))
@@ -248,8 +249,17 @@
   (set app.engine saved-engine)
   (if ok result (error result)))
 
-(fn assert-v1-runtime-after-failed-reload [ctx graph graph-map _node-a]
-  (assert-demo-node-version (graph-map:lookup "demo-node:a") "v1" "a" "node after failed hot reload")
+(fn assert-v1-runtime-after-failed-reload [ctx graph graph-map node-a]
+  (local restored-a (graph-map:lookup "demo-node:a"))
+  (assert (not (= restored-a node-a)) "rollback refresh should replace visible node a adapter")
+  (assert-demo-node-version restored-a "v1" "a" "node after failed hot reload")
+  (assert-demo-node-version (graph:create-node-by-key "demo-node:c") "v1" "c" "new node after failed hot reload")
+  (local targets (graph.morphs:target-items {:key "demo-node:a"}))
+  (assert (= (length targets) 1) "rollback should restore exactly one v1 self morph")
+  (local morph-source (graph:create-node-by-key "demo-node:morph-source"))
+  (local morph-result (graph.morphs:apply morph-source {:to-scheme "demo-node"} {}))
+  (assert (= morph-result.key "demo-node:morph-source-morphed-v1") "rollback should restore v1 morph target")
+  (assert-demo-node-version (graph:create-node-by-key morph-result.key) "v1" "morph-source-morphed-v1" "morphed node after failed hot reload")
   (fs.write-file ctx.init-path (demo-unit-source "v2"))
   true)
 
