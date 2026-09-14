@@ -59,9 +59,12 @@
 (fn narrow-layout! [input columns lines]
   (input.layout:measurer)
   (set input.layout.size (glm.vec3 (+ (* 2 input.padding.x) (* columns input.column-width))
-                                   (+ (* 2 input.padding.y) (* lines input.line-height)) 0))
+                                    (+ (* 2 input.padding.y) (* lines input.line-height)) 0))
   (input.layout:layouter)
   input)
+
+(fn snapshot-text [buffer]
+  (. (buffer:get-viewport {:line 0 :column 0 :lines 1 :columns 80}) :rows 1 :text))
 
 (fn set-test-states []
   (local states (States))
@@ -204,11 +207,42 @@
   (input:update-caret-visual {:mark-layout-dirty? false})
   (eager:update-caret-visual {:mark-layout-dirty? false})
   (assert (= input.caret.visible? eager.caret.visible?)
-          "blurred VirtualInput update-caret-visual should hide like Input")
+           "blurred VirtualInput update-caret-visual should hide like Input")
   (eager:drop) (input:drop))
+
+(fn direct-normal-edit-keys-do-not-edit []
+  (local buffer (lazy-buffer "direct-normal-gate" "abc\ndef" {:chunk-bytes 4}))
+  (local input ((VirtualInput {:buffer buffer :line-count 2 :column-count 8}) (make-ctx)))
+  (narrow-layout! input 8 2)
+  (local before (snapshot-text buffer))
+  (assert (= input.mode :normal) "precondition: VirtualInput should start in normal mode")
+  (assert (= (input:on-key-down {:key 8}) false) "direct Backspace should not edit in normal mode")
+  (assert (= (input:on-key-down {:key 127}) false) "direct Delete should not edit in normal mode")
+  (assert (= (input:on-key-down {:key 13}) false) "direct Return should not insert newline in normal mode")
+  (assert (= (snapshot-text buffer) before) "normal-mode direct edit keys should not mutate lazy text")
+  (input:drop))
+
+(fn direct-normal-arrows-do-not-move-caret []
+  (local buffer (lazy-buffer "direct-normal-arrows" "abc\ndef" {:chunk-bytes 4}))
+  (local input ((VirtualInput {:buffer buffer :line-count 2 :column-count 8}) (make-ctx)))
+  (narrow-layout! input 8 2)
+  (input:move-caret-to-line-column 0 1)
+  (local before-byte buffer.cursor-byte)
+  (local before-line input.cursor-line)
+  (local before-column input.cursor-column)
+  (assert (= (input:on-key-down {:key 1073741904}) false) "direct Left should not move in normal mode")
+  (assert (= (input:on-key-down {:key 1073741903}) false) "direct Right should not move in normal mode")
+  (assert (= (input:on-key-down {:key 1073741906}) false) "direct Up should not move in normal mode")
+  (assert (= (input:on-key-down {:key 1073741905}) false) "direct Down should not move in normal mode")
+  (assert (= buffer.cursor-byte before-byte) "normal-mode direct arrows should not move buffer cursor")
+  (assert (= input.cursor-line before-line) "normal-mode direct arrows should not change cursor line")
+  (assert (= input.cursor-column before-column) "normal-mode direct arrows should not change cursor column")
+  (input:drop))
 
 [{:name "VirtualInput file-backed lazy rows use logical text and visual downward layout" :fn file-backed-lazy-rows-use-logical-text-and-visual-downward-layout}
  {:name "VirtualInput file-backed focus lifecycle matches eager Input" :fn file-backed-focus-lifecycle-matches-eager-input}
  {:name "VirtualInput focused drop blurs before child teardown" :fn focused-virtual-input-drop-blurs-before-child-teardown}
  {:name "VirtualInput file-backed caret mode matches eager Input" :fn file-backed-caret-mode-matches-eager-input}
- {:name "VirtualInput file-backed caret visual update matches eager Input" :fn file-backed-caret-visual-update-matches-eager-input}]
+ {:name "VirtualInput file-backed caret visual update matches eager Input" :fn file-backed-caret-visual-update-matches-eager-input}
+ {:name "VirtualInput direct normal edit keys do not edit" :fn direct-normal-edit-keys-do-not-edit}
+ {:name "VirtualInput direct normal arrows do not move caret" :fn direct-normal-arrows-do-not-move-caret}]
