@@ -1099,7 +1099,7 @@
                    :completed? false
                    :start-scheduled? false
                    :scene-panels (clone-table (and sandbox-scene-state sandbox-scene-state.panels []))
-        :scene-panel-index 1}})
+        :scene-panel-index 1}}) (when app.graph-extension-registry (app.graph-extension-registry:install-runtime runtime))
     ;; Install presentation provider on the runtime so renderers and input
     ;; helpers can query activity-owned cameras and render targets.
     (set runtime.presentation (Presentation.for-runtime runtime))
@@ -1156,7 +1156,7 @@
       (capture-runtime-state world ctx {:reason (or reason "clear-runtime")})
       (clear-active-runtime-containment! world)
       (runtime:unload-canvas-runtime)
-      (set runtime.drawing-controller nil)
+      (set runtime.drawing-controller nil) (when app.graph-extension-registry (app.graph-extension-registry:uninstall-runtime runtime))
       (when runtime.scene
         (runtime.scene:drop)
         (set runtime.scene nil))

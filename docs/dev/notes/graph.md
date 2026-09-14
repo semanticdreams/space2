@@ -30,6 +30,7 @@ Related objects become graph-visible only through explicit preview, view, search
 
 - `graph/core.fnl`: nodes are lightweight records (key, label, color, view ref, graph ref). `capture-state` stores node keys and edge source/target keys only — no domain data.
 - `graph/key-loaders.fnl`: each loader adapts its owning store/system into a graph node on demand via `load-by-key`. Entity loaders adapt entity stores; LLM loaders adapt the LLM store; world activity and surface loaders adapt `world-manager` and `WorldData`.
+- `graph/extension-registry.fnl`: reloadable units register graph extension descriptors that install owner-safe key-loader and morph handles into live and future world runtimes. See [Reloadable Graph Extension Units](/dev/features/reloadable-graph-extension-units).
 - `graph/map.fnl`: graph maps hold the visible topology a user has materialized in that interaction context. Preview/search/action code loads keys through the active `GraphMap` and inserts explicit display edges when the user asks to reveal related records.
 - `graph/world-data.fnl`: activity-owned scene/HUD/canvas state is resolved from `world.state.activity.sessions.<activity-id>` through `WorldData` helpers. Activity-owned graph keys include both `world-id` and `activity-id` (for example `activity-scene:<world-id>:<activity-id>`, `activity-background:<world-id>:<activity-id>`, and `activity-terrain:<world-id>:<activity-id>:<terrain-id>`). Updates mutate the owning activity surface state, then sync to the active surface and persist world. Graph nodes are projections, not the source of truth.
 - Activity hierarchy keys expose `world:<world-id>` → `world-activities:<world-id>` → `world-activity:<world-id>:<activity-id>` → `activity-surfaces:<world-id>:<activity-id>` before reaching concrete surface nodes such as scene, HUD, or canvas.
@@ -80,3 +81,4 @@ Graph node adapters may expose `kind-badge` presentation metadata for preview-ca
 ## See also
 
 - [Graph Foundation](/dev/features/graph-foundation), [Graph as Universal Interface](/dev/adrs/adr-graph-as-universal-model)
+- [Reloadable Graph Extension Units](/dev/features/reloadable-graph-extension-units)

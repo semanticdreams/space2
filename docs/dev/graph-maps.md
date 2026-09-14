@@ -19,6 +19,7 @@ Implemented:
 - `GraphMap` provides map-local node/edge membership, selection/focus state, unresolved restored state, mount/unmount behavior, and capture/restore/drop APIs.
 - Shared `Graph:create-node-by-key` creates node adapter instances without mutating shared graph state.
 - `GraphMap:load-by-key` resolves keys through the shared graph and inserts fresh map-local adapters.
+- `GraphMap:refresh-adapters-by-scheme` rebuilds visible map-local adapters for a key scheme during graph extension unit reload, preserving topology keys while replacing runtime adapter tables and retargeting explicit map edges.
 - Related objects are added explicitly by preview/view/action/search controls that load selected keys into the active map; graph maps do not perform hidden relationship-hook expansion.
 - `GraphMapManager` owns map records, active map id, legacy migration, create/rename/delete/switch, hydration pruning, capture, and metadata cleanup.
 - `GraphView` attaches to the active `GraphMap`, scopes persistence by map id, and captures/drops/restores runtime view state around map switching.
@@ -184,6 +185,7 @@ Required methods:
 (graph-map:load-by-key key)
 (graph-map:resolve-key key opts)
 (graph-map:resolve-node key-or-node opts)
+(graph-map:refresh-adapters-by-scheme scheme)
 (graph-map:capture-state)
 (graph-map:restore-state state)
 (graph-map:drop)
