@@ -4,7 +4,7 @@
 
 The lazy editor stack supports file-scale text viewing and editing without loading the whole file into a Fennel string, an `InputModel`, or a single `Text` widget. Use it for graph filesystem file viewer nodes and other features that must open large source, log, or plain-text files while keeping reads and rendered widgets bounded to the active viewport.
 
-This stack is intentionally plain text only in this iteration. `VirtualInput` participates in the [Shared Text Interaction Engine](shared-text-interaction-engine.md) through the Text-editing port while preserving lazy viewport and file-scale invariants, but the lazy editor stack does not provide full modal-editor features such as syntax highlighting, undo/redo history, multi-cursor behavior, whole-file search/replace, binary editing, or collaborative editing.
+This stack is intentionally plain text only in this iteration. `VirtualInput` participates in the [Shared Text Interaction Engine](shared-text-interaction-engine.md) through the Text-editing port and the [shared text input policies](text-input-policies.md) while preserving lazy viewport and file-scale invariants, but the lazy editor stack does not provide full modal-editor features such as syntax highlighting, undo/redo history, multi-cursor behavior, whole-file search/replace, binary editing, or collaborative editing.
 
 ## File source and save primitives
 
@@ -35,6 +35,13 @@ Viewport construction reads composed ranges in bounded chunks and marks long row
 `VirtualInput` is the file-scale text widget. It renders a bounded set of visible rows by feeding each visible row's codepoints to child `Text` widgets, routes keyboard editing to `LazyTextBuffer`, tracks viewport scroll, handles selection/copy, and exposes save handling for buffers that support saving.
 
 `VirtualInput` exposes a deliberately bounded `Input`-compatible surface to the shared text interaction engine and `InsertState` modal routes. Shared normal-mode commands are implemented through the Text-editing port rather than through a separate `VirtualInput` command path. File-scale editors should rely on this bounded port-backed surface instead of converting the document into an `InputModel`.
+
+Eager `Input`/`InputModel` behavior remains the oracle for shared interaction,
+focus, caret, normal-command, and insert-routing semantics. `VirtualInput` reuses
+the shared focus, caret, direct-key, and geometry policies for storage-neutral
+rules. It keeps lazy storage/rendering responsibilities local: file-backed
+pieces, viewport rows, byte anchors, bounded movement APIs, selection, save, and
+per-row rendering stay in `VirtualInput` and `LazyTextBuffer`.
 
 `VirtualInput` owns the authoritative cached logical cursor tuple: `cursor-index` (byte offset), `cursor-line`, and `cursor-column`. It mirrors that tuple to the compatibility model after updates, but ordinary file-scale navigation should treat the widget cache as the source of truth. Ordinary `h`, `l`, `j`, and `k` navigation uses the cached cursor and viewport anchors to call bounded `LazyTextBuffer` movement APIs such as adjacent-codepoint and line/column-from-anchor movement. Exact commands that intentionally need document-wide knowledge, including `$`, `A`, and `G`, may still use exact scan paths, but they must update the cached cursor tuple and viewport anchors afterward before returning to ordinary navigation.
 
@@ -71,3 +78,9 @@ Validation for this stack should cover the full ladder because it spans native f
 - The standard full `make test` command with keyring skipped, audio disabled, and `SPACE_ASSETS_PATH` set to the absolute assets directory.
 
 Regression tests should prove bounded reads, piece-table editing, viewport-only rendering, save success, conflict detection with `file changed` errors, graph viewer integration, and continued `Input`/`InputModel` compatibility.
+
+Future `VirtualInput` interaction changes should include file-backed lazy parity
+coverage. Do not prove huge-file behavior by materializing the file into a
+whole-buffer string, eager `InputModel`, or complete line cache; use fixtures that
+force lazy chunking, sparse anchors, narrow viewport rendering, or bounded
+movement instead.

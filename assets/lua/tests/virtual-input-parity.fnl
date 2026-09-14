@@ -3,12 +3,15 @@
 (local BuildContext (require :build-context))
 (local Input (require :input))
 (local VirtualInput (require :virtual-input))
+(local {: FocusManager} (require :focus))
 (local fs (require :fs))
 (local LazyTextSource (require :lazy-text-source))
 (local LazyTextBuffer (require :lazy-text-buffer))
 (local States (require :states))
+(local InputState (require :input-state-router))
 (local StateSystemBindings (require :state-system-bindings))
 (local {: fallback-glyph} (require :text-utils))
+(local Geometry (require :text-input-geometry))
 (local MathUtils (require :math-utils))
 (local approx (. MathUtils :approx))
 (local temp-root "/tmp/space/tests/virtual-input-parity")
@@ -28,7 +31,19 @@
 (fn make-ctx []
   (local ptr (assert (pointer-stub) "test pointer stub required"))
   (local hover (assert (hover-stub) "test hover stub required"))
-  (BuildContext {:clickables ptr :hoverables hover}))
+  (BuildContext {:clickables ptr
+                 :hoverables hover}))
+
+(fn make-focus-ctx []
+  (local manager (FocusManager {:root-name "virtual-input-drop-focus"}))
+  (local root (manager:get-root-scope))
+  (local scope (manager:create-scope {:name "virtual-input-drop-scope"}))
+  (manager:attach scope root)
+  {:ctx (BuildContext {:focus-manager manager
+                       :focus-scope scope
+                       :clickables (pointer-stub)
+                       :hoverables (hover-stub)})
+   :manager manager})
 
 (fn make-temp-file [name content]
   (local dir (fs.join-path temp-root (.. name "-" (os.time))))
@@ -46,9 +61,63 @@
 (fn narrow-layout! [input columns lines]
   (input.layout:measurer)
   (set input.layout.size (glm.vec3 (+ (* 2 input.padding.x) (* columns input.column-width))
-                                   (+ (* 2 input.padding.y) (* lines input.line-height)) 0))
+                                    (+ (* 2 input.padding.y) (* lines input.line-height)) 0))
   (input.layout:layouter)
   input)
+
+(fn snapshot-text [buffer]
+  (. (buffer:get-viewport {:line 0 :column 0 :lines 1 :columns 80}) :rows 1 :text))
+
+(fn instrument-lazy-buffer [buffer]
+  (assert buffer "instrument-lazy-buffer requires buffer")
+  (local state {:viewport-calls []
+                :get-line-summary-calls 0
+                :line-column-for-byte-calls 0
+                :get-line-count-calls 0})
+  (local original-get-viewport buffer.get-viewport)
+  (local original-get-line-summary buffer.get-line-summary)
+  (local original-line-column-for-byte buffer.line-column-for-byte)
+  (local original-get-line-count buffer.get-line-count)
+  (set buffer.state state)
+  (set buffer.get-viewport
+       (fn [self view]
+         (table.insert state.viewport-calls view)
+         (original-get-viewport self view)))
+  (set buffer.get-line-summary
+       (fn [self line]
+         (set state.get-line-summary-calls (+ state.get-line-summary-calls 1))
+         (original-get-line-summary self line)))
+  (set buffer.line-column-for-byte
+       (fn [self byte]
+         (set state.line-column-for-byte-calls (+ state.line-column-for-byte-calls 1))
+         (original-line-column-for-byte self byte)))
+  (set buffer.get-line-count
+       (fn [self]
+         (set state.get-line-count-calls (+ state.get-line-count-calls 1))
+         (original-get-line-count self)))
+  buffer)
+
+(fn reset-lazy-buffer-counters! [buffer]
+  (assert buffer.state "reset-lazy-buffer-counters! requires instrumented buffer")
+  (set buffer.state.viewport-calls [])
+  (set buffer.state.get-line-summary-calls 0)
+  (set buffer.state.line-column-for-byte-calls 0)
+  (set buffer.state.get-line-count-calls 0))
+
+(fn assert-viewport-calls-bounded [buffer max-lines max-columns message]
+  (each [i view (ipairs (or (and buffer.state buffer.state.viewport-calls) []))]
+    (assert (<= view.lines max-lines)
+            (.. message ": viewport call " i " requested too many lines: " view.lines))
+    (assert (<= view.columns max-columns)
+            (.. message ": viewport call " i " requested too many columns: " view.columns))))
+
+(fn assert-logical-scans-bounded [buffer max-calls message]
+  (assert (<= buffer.state.get-line-summary-calls max-calls)
+          (.. message ": get-line-summary calls should stay bounded; calls=" buffer.state.get-line-summary-calls))
+  (assert (<= buffer.state.line-column-for-byte-calls max-calls)
+          (.. message ": line-column-for-byte calls should stay bounded; calls=" buffer.state.line-column-for-byte-calls))
+  (assert (<= buffer.state.get-line-count-calls max-calls)
+          (.. message ": get-line-count calls should stay bounded; calls=" buffer.state.get-line-count-calls)))
 
 (fn set-test-states []
   (local states (States))
@@ -57,6 +126,92 @@
   (states:set-state :normal)
   (StateSystemBindings.bind-states-host states)
   states)
+
+(fn file-backed-focus-lifecycle-matches-eager-input []
+  (local states (set-test-states))
+  (local buffer (lazy-buffer "focus-parity" "alpha\nbravo" {:chunk-bytes 4}))
+  (local input ((VirtualInput {:buffer buffer :line-count 2 :column-count 8}) (make-ctx)))
+  (local eager ((Input {:text "alpha\nbravo" :multiline? true :line-wrap? false :line-count 2 :column-count 8}) (make-ctx)))
+  (narrow-layout! input 8 2)
+  (eager.layout:measurer) (set eager.layout.size eager.layout.measure) (eager.layout:layouter)
+  (assert (= input.focused? eager.focused?) "VirtualInput should start unfocused like Input")
+  (assert (= input.caret.visible? eager.caret.visible?) "unfocused VirtualInput caret should be hidden like Input")
+  (input:on-click {:row-index 1 :column 0})
+  (input.layout:layouter)
+  (assert (= (states:active-name) :text) "click should enter text state")
+  (assert input.focused? "click/focus should mark VirtualInput focused")
+  (assert input.caret.visible? "focused VirtualInput caret should be visible")
+  (input:on-state-disconnected {:state :text})
+  (input.layout:layouter)
+  (assert (= input.focused? false) "disconnect should clear focused flag")
+  (assert (= input.mode :normal) "disconnect should normalize mode")
+  (assert (= input.caret.visible? false) "blurred VirtualInput caret should hide")
+  (eager:drop) (input:drop))
+
+(fn focused-virtual-input-drop-blurs-before-child-teardown []
+  (local focus (make-focus-ctx))
+  (local input ((VirtualInput {:buffer (lazy-buffer "drop-focus-order" "alpha" {:chunk-bytes 4}) :line-count 1 :column-count 8}) focus.ctx))
+  (set-test-states)
+  (narrow-layout! input 8 1)
+  (input:request-focus)
+  (local original-update input.update-focus-visual)
+  (set input.update-focus-visual
+       (fn [self opts]
+         (assert (not self.__child-drop-started?) "drop should blur before child teardown")
+         (original-update self opts)))
+  (each [_ row-widget (ipairs input.rows)]
+    (local original-drop row-widget.drop)
+    (set row-widget.drop (fn [self] (set input.__child-drop-started? true) (original-drop self))))
+  (input:drop)
+  (focus.manager:drop))
+
+(fn count-router-disconnects [input activate]
+  (local original-disconnected input.on-state-disconnected)
+  (var disconnected-count 0)
+  (set input.on-state-disconnected
+       (fn [self event]
+         (set disconnected-count (+ disconnected-count 1))
+         (original-disconnected self event)))
+  (activate input)
+  (assert (= (InputState.active-input) input) "focused input should be router-active")
+  (InputState.disconnect-input input)
+  disconnected-count)
+
+(fn router-disconnect-invokes-shared-policy-users-once []
+  (set-test-states)
+  (local focus (make-focus-ctx))
+  (local eager ((Input {}) focus.ctx))
+  (local virtual ((VirtualInput {:buffer (lazy-buffer "disconnect-once" "abc" {:chunk-bytes 4})
+                                :line-count 1
+                                :column-count 8}) (make-ctx)))
+  (local eager-count (count-router-disconnects eager (fn [input] (input:request-focus))))
+  (local virtual-count (count-router-disconnects virtual (fn [input] (input:on-click {:row-index 1 :column 0}))))
+  (assert (= eager-count 1)
+          (.. "router disconnect should invoke Input on-state-disconnected once, got " eager-count))
+  (assert (= virtual-count 1)
+          (.. "router disconnect should invoke VirtualInput on-state-disconnected once, got " virtual-count))
+  (assert (not (InputState.active-input)) "router disconnect should clear active input")
+  (eager:drop)
+  (virtual:drop)
+  (focus.manager:drop))
+
+(fn active-drop-invokes-router-disconnect-once-with-states-host []
+  (set-test-states)
+  (local focus (make-focus-ctx))
+  (local input ((Input {}) focus.ctx))
+  (local original-disconnected input.on-state-disconnected)
+  (var disconnected-count 0)
+  (set input.on-state-disconnected
+       (fn [self event]
+         (set disconnected-count (+ disconnected-count 1))
+         (original-disconnected self event)))
+  (input:request-focus)
+  (assert (= (InputState.active-input) input) "precondition: Input should be active before drop")
+  (input:drop)
+  (assert (= disconnected-count 1)
+          (.. "active Input drop should invoke one router disconnect callback, got " disconnected-count))
+  (assert (not (InputState.active-input)) "active Input drop should clear router active input")
+  (focus.manager:drop))
 
 (fn file-backed-lazy-rows-use-logical-text-and-visual-downward-layout []
   (local content "alpha\nbravo\ncharlie\ndelta")
@@ -81,8 +236,13 @@
   (local buffer (lazy-buffer "caret-mode" "Aardvark\nBee" {:chunk-bytes 4}))
   (local input ((VirtualInput {:buffer buffer :line-count 2 :column-count 8}) (make-ctx)))
   (local eager ((Input {:text "A" :line-count 1 :column-count 8}) (make-ctx)))
+  (set-test-states)
   (narrow-layout! input 8 2)
   (eager.layout:measurer) (set eager.layout.size eager.layout.measure) (eager.layout:layouter)
+  (eager:request-focus)
+  (input:request-focus)
+  (input.layout:layouter)
+  (eager.layout:layouter)
   (local font (assert (and eager.text eager.text.style eager.text.style.font) "caret parity test requires eager font"))
   (local glyph (assert (fallback-glyph font (string.byte "A")) "caret parity test requires glyph A"))
   (local expected-block-width (* glyph.advance eager.text.style.scale))
@@ -96,5 +256,149 @@
   (assert (= input.caret.color eager.caret.color) "returning to normal should restore normal caret color")
   (eager:drop) (input:drop))
 
+(fn file-backed-caret-visual-update-matches-eager-input []
+  (local content "Wombat\nBee")
+  (local buffer (lazy-buffer "caret-visual" content {:chunk-bytes 3}))
+  (local input ((VirtualInput {:buffer buffer :line-count 2 :column-count 8}) (make-ctx)))
+  (local eager ((Input {:text content :multiline? true :line-wrap? false :line-count 2 :column-count 8}) (make-ctx)))
+  (set-test-states)
+  (narrow-layout! input 8 2)
+  (narrow-layout! eager 8 2)
+  (eager:move-caret-to 0)
+  (eager:request-focus)
+  (eager:update-caret-visual {:mark-layout-dirty? false})
+  (local expected-focused-visible? eager.caret.visible?)
+  (input:request-focus)
+  (input:update-caret-visual {:mark-layout-dirty? false})
+  (assert (= input.caret.visible? expected-focused-visible?)
+          (.. "focused VirtualInput update-caret-visual should unhide like Input; virtual="
+              (tostring input.caret.visible?)
+              " expected="
+              (tostring expected-focused-visible?)
+              " focused="
+              (tostring input.focused?)))
+  (input.layout:layouter)
+  (eager.layout:layouter)
+  (assert (= input.caret.visible? expected-focused-visible?)
+          "focused VirtualInput caret should stay visible after layout like Input")
+  (assert (= input.caret.color eager.caret.color)
+          "normal caret color should match eager Input")
+  (assert (approx input.caret.layout.size.x eager.caret.layout.size.x)
+          "normal caret width should match eager Input for the same current glyph")
+  (input:enter-insert-mode)
+  (eager:enter-insert-mode)
+  (input.layout:layouter)
+  (eager.layout:layouter)
+  (assert (= input.caret.visible? expected-focused-visible?)
+          "insert caret visibility should match eager Input")
+  (assert (= input.caret.color eager.caret.color)
+          "insert caret color should match eager Input")
+  (assert (approx input.caret.layout.size.x eager.caret.layout.size.x)
+          "insert caret width should match eager Input")
+  (input:enter-normal-mode)
+  (eager:enter-normal-mode)
+  (input.layout:layouter)
+  (eager.layout:layouter)
+  (assert (= input.caret.color eager.caret.color)
+          "restored normal caret color should match eager Input")
+  (assert (approx input.caret.layout.size.x eager.caret.layout.size.x)
+          "restored normal caret width should match eager Input")
+  (input:on-state-disconnected {:state :text})
+  (eager:on-state-disconnected {:state :text})
+  (input:update-caret-visual {:mark-layout-dirty? false})
+  (eager:update-caret-visual {:mark-layout-dirty? false})
+  (assert (= input.caret.visible? eager.caret.visible?)
+           "blurred VirtualInput update-caret-visual should hide like Input")
+  (eager:drop) (input:drop))
+
+(fn direct-normal-edit-keys-do-not-edit []
+  (local buffer (lazy-buffer "direct-normal-gate" "abc\ndef" {:chunk-bytes 4}))
+  (local input ((VirtualInput {:buffer buffer :line-count 2 :column-count 8}) (make-ctx)))
+  (narrow-layout! input 8 2)
+  (local before (snapshot-text buffer))
+  (assert (= input.mode :normal) "precondition: VirtualInput should start in normal mode")
+  (assert (= (input:on-key-down {:key 8}) false) "direct Backspace should not edit in normal mode")
+  (assert (= (input:on-key-down {:key 127}) false) "direct Delete should not edit in normal mode")
+  (assert (= (input:on-key-down {:key 13}) false) "direct Return should not insert newline in normal mode")
+  (assert (= (snapshot-text buffer) before) "normal-mode direct edit keys should not mutate lazy text")
+  (input:drop))
+
+(fn direct-normal-arrows-do-not-move-caret []
+  (local buffer (lazy-buffer "direct-normal-arrows" "abc\ndef" {:chunk-bytes 4}))
+  (local input ((VirtualInput {:buffer buffer :line-count 2 :column-count 8}) (make-ctx)))
+  (narrow-layout! input 8 2)
+  (input:move-caret-to-line-column 0 1)
+  (local before-byte buffer.cursor-byte)
+  (local before-line input.cursor-line)
+  (local before-column input.cursor-column)
+  (assert (= (input:on-key-down {:key 1073741904}) false) "direct Left should not move in normal mode")
+  (assert (= (input:on-key-down {:key 1073741903}) false) "direct Right should not move in normal mode")
+  (assert (= (input:on-key-down {:key 1073741906}) false) "direct Up should not move in normal mode")
+  (assert (= (input:on-key-down {:key 1073741905}) false) "direct Down should not move in normal mode")
+  (assert (= buffer.cursor-byte before-byte) "normal-mode direct arrows should not move buffer cursor")
+  (assert (= input.cursor-line before-line) "normal-mode direct arrows should not change cursor line")
+  (assert (= input.cursor-column before-column) "normal-mode direct arrows should not change cursor column")
+  (input:drop))
+
+(fn large-file-geometry-and-horizontal-scroll-stay-lazy []
+  (local long-line (string.rep "a" 100000))
+  (local content (.. "top\n" long-line "\ntail"))
+  (local buffer (instrument-lazy-buffer (lazy-buffer "large-geometry" content {:chunk-bytes 16})))
+  (local input ((VirtualInput {:buffer buffer :line-count 3 :column-count 4}) (make-ctx)))
+  (set-test-states)
+  (narrow-layout! input 4 3)
+  (local first-row (. input.rows 1))
+  (local second-row (. input.rows 2))
+  (local third-row (. input.rows 3))
+  (assert (= (codepoints->text (first-row:get-codepoints)) "top")
+          "large lazy viewport should render the first logical row first")
+  (assert (= (codepoints->text (second-row:get-codepoints)) "aaaa")
+          "large lazy viewport should render only the visible slice of the long row")
+  (assert (< third-row.layout.position.y second-row.layout.position.y)
+          "large lazy viewport should preserve downward row order after the long row")
+  (local world (Geometry.screen-point-for-row-column input 2 2))
+  (input:on-click {:local-point (- world input.layout.position)})
+  (assert (= input.cursor-line 1) "geometry click should target the long lazy row")
+  (assert (= input.cursor-column 2) "geometry click should target the requested visible column")
+  (input.layout:layouter)
+  (assert (= input.caret.layout.position.y second-row.layout.position.y)
+          "caret y should align with the clicked row widget")
+  (reset-lazy-buffer-counters! buffer)
+  (for [_ 1 8]
+    (assert (input:move-caret-horizontal-bounded 1 {:allow-line-cross? true})
+            "bounded horizontal movement should handle repeated l-style moves")
+    (input.layout:layouter))
+  (assert (> input.scroll-column 0)
+          "repeated horizontal movement should scroll the large lazy row")
+  (assert-viewport-calls-bounded buffer input.visible-line-count input.visible-column-count
+                                 "large-file geometry/horizontal scroll")
+  (assert-logical-scans-bounded buffer 1 "large-file geometry/horizontal scroll")
+  (input:drop))
+
+(fn rotated-layout-click-point-targets-shared-geometry-cell []
+  (local buffer (lazy-buffer "rotated-geometry" "alpha\nbravo\ncharlie" {:chunk-bytes 4}))
+  (local input ((VirtualInput {:buffer buffer :line-count 3 :column-count 8}) (make-ctx)))
+  (set-test-states)
+  (narrow-layout! input 8 3)
+  (set input.layout.position (glm.vec3 7 11 0))
+  (set input.layout.rotation (glm.quat (math.rad 90) (glm.vec3 0 0 1)))
+  (input.layout:layouter)
+  (local point (Geometry.screen-point-for-row-column input 2 3))
+  (input:on-click {:point point})
+  (assert (= input.cursor-line 1)
+          "rotated event.point click should target the second logical row")
+  (assert (= input.cursor-column 3)
+          "rotated event.point click should target the requested column")
+  (input:drop))
+
 [{:name "VirtualInput file-backed lazy rows use logical text and visual downward layout" :fn file-backed-lazy-rows-use-logical-text-and-visual-downward-layout}
- {:name "VirtualInput file-backed caret mode matches eager Input" :fn file-backed-caret-mode-matches-eager-input}]
+ {:name "VirtualInput file-backed focus lifecycle matches eager Input" :fn file-backed-focus-lifecycle-matches-eager-input}
+ {:name "VirtualInput focused drop blurs before child teardown" :fn focused-virtual-input-drop-blurs-before-child-teardown}
+ {:name "Text input shared policy router disconnect invokes state disconnected once" :fn router-disconnect-invokes-shared-policy-users-once}
+ {:name "Text input active drop invokes router disconnect once with states host" :fn active-drop-invokes-router-disconnect-once-with-states-host}
+ {:name "VirtualInput file-backed caret mode matches eager Input" :fn file-backed-caret-mode-matches-eager-input}
+  {:name "VirtualInput file-backed caret visual update matches eager Input" :fn file-backed-caret-visual-update-matches-eager-input}
+  {:name "VirtualInput direct normal edit keys do not edit" :fn direct-normal-edit-keys-do-not-edit}
+  {:name "VirtualInput direct normal arrows do not move caret" :fn direct-normal-arrows-do-not-move-caret}
+  {:name "VirtualInput large-file geometry and horizontal scroll stay lazy" :fn large-file-geometry-and-horizontal-scroll-stay-lazy}
+  {:name "VirtualInput rotated layout click point targets shared geometry cell" :fn rotated-layout-click-point-targets-shared-geometry-cell}]
