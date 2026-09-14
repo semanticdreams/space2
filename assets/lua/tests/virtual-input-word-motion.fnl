@@ -218,9 +218,28 @@
 (fn virtual-input-text-state-w-huge-line-stays-lazy []
   (with-virtual-input-states assert-huge-word-motion))
 
+(fn virtual-input-text-state-w-refreshes-preferred-column-before-vertical-move []
+  (with-virtual-input-states
+    (fn [env]
+      (local buffer (lazy-buffer "word-refreshes-preferred-column" "aa alpha beta\n0123456789" {:chunk-bytes 4}))
+      (buffer:move-caret-to-line-column 0 1)
+      (local input (build-input {:buffer buffer :line-count 2 :column-count 12}))
+      (local text-state (. env :text-state))
+      (input:request-focus)
+      (assert (text-state:on-key-down {:key (key "j")}) "j should establish preferred column")
+      (assert-input-cursor input buffer 1 1 "initial j")
+      (assert (text-state:on-key-down {:key (key "k")}) "k should return with stale preferred column set")
+      (assert-input-cursor input buffer 0 1 "initial k")
+      (assert (text-state:on-key-down {:key (key "w")}) "w should move to the next word column")
+      (assert-input-cursor input buffer 0 3 "w after stale preferred column")
+      (assert (text-state:on-key-down {:key (key "j")}) "j after w should use w column")
+      (assert-input-cursor input buffer 1 3 "j after w should use refreshed preferred column")
+      (input:drop))))
+
 [{:name "VirtualInput TextState w moves within word" :fn virtual-input-text-state-w-moves-within-word}
  {:name "VirtualInput TextState w moves from whitespace" :fn virtual-input-text-state-w-moves-from-whitespace}
  {:name "VirtualInput TextState w respects punctuation boundaries" :fn virtual-input-text-state-w-respects-punctuation-boundaries}
  {:name "VirtualInput TextState w crosses newline" :fn virtual-input-text-state-w-crosses-newline}
  {:name "VirtualInput TextState w at EOF does not move" :fn virtual-input-text-state-w-at-eof-does-not-move}
- {:name "VirtualInput TextState w huge line stays lazy" :fn virtual-input-text-state-w-huge-line-stays-lazy}]
+ {:name "VirtualInput TextState w huge line stays lazy" :fn virtual-input-text-state-w-huge-line-stays-lazy}
+ {:name "VirtualInput TextState w refreshes preferred column before vertical move" :fn virtual-input-text-state-w-refreshes-preferred-column-before-vertical-move}]

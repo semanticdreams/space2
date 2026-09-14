@@ -717,7 +717,7 @@
       false
       (do
         (local anchor (or self.selection-anchor-byte self.buffer.cursor-byte 0))
-        (set-cached-caret! self result.byte result.line result.column)
+        (set-cached-caret! self result.byte result.line result.column) (set self.__preferred-column result.column)
         (update-horizontal-selection self anchor (and opts opts.extend-selection?))
         (keep-line-visible self result.line)
         (keep-column-visible self result.column)
