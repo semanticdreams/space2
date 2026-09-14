@@ -120,7 +120,11 @@
         (if (= found nil) 0 found))))
 
 (fn current-line-index [input]
-  (if (has-logical-navigation? input)
+  (if (and input input.bounded-logical-navigation? (not (= input.cursor-line nil)))
+      (do
+        (local model (input-model input))
+        (math.max 0 (if (and model model.cursor-line) model.cursor-line 0)))
+      (has-logical-navigation? input)
       (do
         (local (line _column) (input:text-cursor-line-column))
         (math.max 0 (if (= line nil) 0 line)))
@@ -129,7 +133,11 @@
         (math.max 0 (if (and model model.cursor-line) model.cursor-line 0)))))
 
 (fn current-column [input]
-  (if (has-logical-navigation? input)
+  (if (and input input.bounded-logical-navigation? (not (= input.cursor-column nil)))
+      (do
+        (local model (input-model input))
+        (math.max 0 (if (and model model.cursor-column) model.cursor-column 0)))
+      (has-logical-navigation? input)
       (do
         (local (_line column) (input:text-cursor-line-column))
         (math.max 0 (if (= column nil) 0 column)))
@@ -178,6 +186,17 @@
   (if (= input.__preferred-column nil)
       (current-column input)
       input.__preferred-column))
+
+(local BOUNDED_HOT_KEYS {})
+(tset BOUNDED_HOT_KEYS (string.byte "h") true)
+(tset BOUNDED_HOT_KEYS (string.byte "l") true)
+(tset BOUNDED_HOT_KEYS (string.byte "j") true)
+(tset BOUNDED_HOT_KEYS (string.byte "k") true)
+(tset BOUNDED_HOT_KEYS 1073741904 true)
+(tset BOUNDED_HOT_KEYS 1073741903 true)
+
+(fn bounded-hot-key? [input key]
+  (and input input.bounded-logical-navigation? (. BOUNDED_HOT_KEYS key)))
 
 (fn move-to-line-column [input line-index column]
   (local lines (input-lines input))
@@ -330,6 +349,9 @@
   (set port.move-horizontal
        (fn [_self delta]
          (move-horizontal input delta)))
+  (set port.move-caret
+       (fn [_self delta]
+         (delegate input :move-caret "move-caret" delta)))
   (set port.move-vertical
        (fn [_self delta]
          (move-vertical input delta)))
@@ -348,6 +370,11 @@
   (set port.clamp-caret-to-current-line
        (fn [_self]
          (clamp-caret-to-current-line input)))
+  (set port.clamp-before-command-key
+       (fn [_self key]
+         (if (bounded-hot-key? input key)
+             false
+             (clamp-caret-to-current-line input))))
   (set port.insert-text
        (fn [_self text]
          (delegate input :insert-text "insert-text" text)))
@@ -366,6 +393,9 @@
   (set port.submit
        (fn [_self payload]
          (delegate input :submit "submit" payload)))
+  (set port.multiline?
+       (fn [_self]
+         (= input.multiline? true)))
   (set port.move-next-word-start
        (fn [_self]
          (missing! input "move-next-word-start")))
