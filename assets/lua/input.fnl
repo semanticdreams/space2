@@ -10,15 +10,10 @@
 (local {: fallback-glyph
         : line-height
         : newline-codepoint} (require :text-utils))
-(local InputState (require :input-state-router))
+(local FocusPolicy (require :text-input-focus-policy))
 (local ExternalEditor (require :external-editor))
 (local {: resolve-input-colors
         : resolve-padding} (require :widget-theme-utils))
-
-(fn current-active-input []
-  (and InputState
-       InputState.active-input
-       (InputState.active-input)))
 
 (fn standard-context-menu [input _event]
   [{:name "Copy"
@@ -640,16 +635,6 @@
         (self.caret.layout:layouter))
       (set self.layout-happened? true))
 
-    (fn connect-to-state [self]
-      (when (and (not self.connected?) InputState)
-        (InputState.connect-input self)
-        (set self.connected? true)))
-
-    (fn disconnect-from-state [self]
-      (when (and self.connected? InputState)
-        (InputState.disconnect-input self)
-        (set self.connected? false)))
-
     (set layout
          (Layout {:name (or options.name "input")
                   :measurer (fn [layout-self]
@@ -843,9 +828,8 @@
            (refresh-virtual-text self true)))
 
     (set input.request-focus
-         (fn [self]
-           (when self.focus-node
-             (self.focus-node:request-focus))))
+          (fn [self]
+            (FocusPolicy.request-focus self)))
 
     (set input.submit
          (fn [self payload]
@@ -913,9 +897,10 @@
            (sync-from-model self)))
 
     (set input.on-state-disconnected
-         (fn [self event]
-           (model:on-state-disconnected event)
-           (apply-mode-change self)))
+          (fn [self event]
+            (model:on-state-disconnected event)
+            (apply-mode-change self)
+            (FocusPolicy.handle-blur self)))
 
     (set input.intersect
          (fn [self ray]
@@ -927,46 +912,7 @@
 
     (hoverables:register input)
 
-    (fn handle-focus [self]
-      (when (not self.focused?)
-        (set self.focused? true)
-        (self:enter-normal-mode)
-        (connect-to-state self)
-        (when (not (= (InputState.current-state-name) :text))
-          (InputState.set-state :text))
-        (self:update-focus-visual)))
-
-    (fn handle-blur [self]
-      (when self.focused?
-        (set self.focused? false)
-        (disconnect-from-state self)
-        (when (and InputState
-                   InputState.active-input
-                   InputState.release-active-input
-                   (= (InputState.active-input) self))
-          (InputState.release-active-input))
-        (local state-name (InputState.current-state-name))
-        (when (or (= state-name :text)
-                  (= state-name :insert))
-          (InputState.set-state :normal))
-        (self:enter-normal-mode)
-        (self:update-focus-visual)))
-
-    (when focus-manager
-      (set input.__focus-listener
-           (focus-manager.focus-focus.connect
-             (fn [event]
-               (local node input.focus-node)
-               (when (and node event (= event.current node))
-                 (handle-focus input)))))
-      (set input.__blur-listener
-           (focus-manager.focus-blur.connect
-             (fn [event]
-               (local node input.focus-node)
-               (when (and node event (= event.previous node))
-                 (handle-blur input))))))
-    (when (and focus-manager input.focus-node (= (focus-manager:get-focused-node) input.focus-node))
-      (handle-focus input))
+    (FocusPolicy.connect-focus-listeners input)
 
     (set input.__model-changed
          (model.changed:connect
@@ -997,7 +943,7 @@
          (fn [self]
            (assert (not self.__dropped) "Input dropped twice")
            (set self.__dropped true)
-           (disconnect-from-state self)
+            (FocusPolicy.handle-blur self)
            (clickables:unregister self)
            (clickables:unregister-right-click self)
            (clickables:unregister-double-click self)
@@ -1011,17 +957,8 @@
            (when self.submitted
              (self.submitted:clear))
            (self.model:drop)
-           (when self.__focus-listener
-             (local manager self.focus-manager)
-             (when (and manager manager.focus-focus)
-               (manager.focus-focus.disconnect self.__focus-listener true))
-             (set self.__focus-listener nil))
-           (when self.__blur-listener
-             (local manager self.focus-manager)
-             (when (and manager manager.focus-blur)
-               (manager.focus-blur.disconnect self.__blur-listener true))
-             (set self.__blur-listener nil))
-           (when self.focus-node
+            (FocusPolicy.disconnect-focus-listeners self)
+            (when self.focus-node
              (self.focus-node:drop)
              (set self.focus-node nil))
            (self.text:drop)

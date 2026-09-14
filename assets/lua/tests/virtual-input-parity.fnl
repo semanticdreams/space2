@@ -3,6 +3,7 @@
 (local BuildContext (require :build-context))
 (local Input (require :input))
 (local VirtualInput (require :virtual-input))
+(local {: FocusManager} (require :focus))
 (local fs (require :fs))
 (local LazyTextSource (require :lazy-text-source))
 (local LazyTextBuffer (require :lazy-text-buffer))
@@ -28,7 +29,19 @@
 (fn make-ctx []
   (local ptr (assert (pointer-stub) "test pointer stub required"))
   (local hover (assert (hover-stub) "test hover stub required"))
-  (BuildContext {:clickables ptr :hoverables hover}))
+  (BuildContext {:clickables ptr
+                 :hoverables hover}))
+
+(fn make-focus-ctx []
+  (local manager (FocusManager {:root-name "virtual-input-drop-focus"}))
+  (local root (manager:get-root-scope))
+  (local scope (manager:create-scope {:name "virtual-input-drop-scope"}))
+  (manager:attach scope root)
+  {:ctx (BuildContext {:focus-manager manager
+                       :focus-scope scope
+                       :clickables (pointer-stub)
+                       :hoverables (hover-stub)})
+   :manager manager})
 
 (fn make-temp-file [name content]
   (local dir (fs.join-path temp-root (.. name "-" (os.time))))
@@ -58,6 +71,44 @@
   (StateSystemBindings.bind-states-host states)
   states)
 
+(fn file-backed-focus-lifecycle-matches-eager-input []
+  (local states (set-test-states))
+  (local buffer (lazy-buffer "focus-parity" "alpha\nbravo" {:chunk-bytes 4}))
+  (local input ((VirtualInput {:buffer buffer :line-count 2 :column-count 8}) (make-ctx)))
+  (local eager ((Input {:text "alpha\nbravo" :multiline? true :line-wrap? false :line-count 2 :column-count 8}) (make-ctx)))
+  (narrow-layout! input 8 2)
+  (eager.layout:measurer) (set eager.layout.size eager.layout.measure) (eager.layout:layouter)
+  (assert (= input.focused? eager.focused?) "VirtualInput should start unfocused like Input")
+  (assert (= input.caret.visible? eager.caret.visible?) "unfocused VirtualInput caret should be hidden like Input")
+  (input:on-click {:row-index 1 :column 0})
+  (input.layout:layouter)
+  (assert (= (states:active-name) :text) "click should enter text state")
+  (assert input.focused? "click/focus should mark VirtualInput focused")
+  (assert input.caret.visible? "focused VirtualInput caret should be visible")
+  (input:on-state-disconnected {:state :text})
+  (input.layout:layouter)
+  (assert (= input.focused? false) "disconnect should clear focused flag")
+  (assert (= input.mode :normal) "disconnect should normalize mode")
+  (assert (= input.caret.visible? false) "blurred VirtualInput caret should hide")
+  (eager:drop) (input:drop))
+
+(fn focused-virtual-input-drop-blurs-before-child-teardown []
+  (local focus (make-focus-ctx))
+  (local input ((VirtualInput {:buffer (lazy-buffer "drop-focus-order" "alpha" {:chunk-bytes 4}) :line-count 1 :column-count 8}) focus.ctx))
+  (set-test-states)
+  (narrow-layout! input 8 1)
+  (input:request-focus)
+  (local original-update input.update-focus-visual)
+  (set input.update-focus-visual
+       (fn [self opts]
+         (assert (not self.__child-drop-started?) "drop should blur before child teardown")
+         (original-update self opts)))
+  (each [_ row-widget (ipairs input.rows)]
+    (local original-drop row-widget.drop)
+    (set row-widget.drop (fn [self] (set input.__child-drop-started? true) (original-drop self))))
+  (input:drop)
+  (focus.manager:drop))
+
 (fn file-backed-lazy-rows-use-logical-text-and-visual-downward-layout []
   (local content "alpha\nbravo\ncharlie\ndelta")
   (local buffer (lazy-buffer "row-layout" content {:chunk-bytes 4}))
@@ -81,8 +132,13 @@
   (local buffer (lazy-buffer "caret-mode" "Aardvark\nBee" {:chunk-bytes 4}))
   (local input ((VirtualInput {:buffer buffer :line-count 2 :column-count 8}) (make-ctx)))
   (local eager ((Input {:text "A" :line-count 1 :column-count 8}) (make-ctx)))
+  (set-test-states)
   (narrow-layout! input 8 2)
   (eager.layout:measurer) (set eager.layout.size eager.layout.measure) (eager.layout:layouter)
+  (eager:request-focus)
+  (input:request-focus)
+  (input.layout:layouter)
+  (eager.layout:layouter)
   (local font (assert (and eager.text eager.text.style eager.text.style.font) "caret parity test requires eager font"))
   (local glyph (assert (fallback-glyph font (string.byte "A")) "caret parity test requires glyph A"))
   (local expected-block-width (* glyph.advance eager.text.style.scale))
@@ -97,4 +153,6 @@
   (eager:drop) (input:drop))
 
 [{:name "VirtualInput file-backed lazy rows use logical text and visual downward layout" :fn file-backed-lazy-rows-use-logical-text-and-visual-downward-layout}
+ {:name "VirtualInput file-backed focus lifecycle matches eager Input" :fn file-backed-focus-lifecycle-matches-eager-input}
+ {:name "VirtualInput focused drop blurs before child teardown" :fn focused-virtual-input-drop-blurs-before-child-teardown}
  {:name "VirtualInput file-backed caret mode matches eager Input" :fn file-backed-caret-mode-matches-eager-input}]

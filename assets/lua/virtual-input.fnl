@@ -7,7 +7,7 @@
 (local BoundsUtils (require :bounds-utils))
 (local gl (require :gl))
 (local Modifiers (require :input-modifiers))
-(local InputState (require :input-state-router))
+(local FocusPolicy (require :text-input-focus-policy))
 (local {: fallback-glyph : line-height} (require :text-utils))
 (local {: resolve-input-colors : resolve-padding} (require :widget-theme-utils))
 
@@ -779,9 +779,19 @@
           (self:insert-text payload.text))
         true)
       false))
-(fn update-caret-visual [self]
+(fn update-caret-visual [self opts]
   (when self.caret
-    (set self.caret.color (if (= self.mode :insert) self.colors.caret-insert self.colors.caret-normal))))
+    (set self.caret.color (if (= self.mode :insert) self.colors.caret-insert self.colors.caret-normal))
+    (when (not self.focused?)
+      (self.caret:set-visible false {:mark-layout-dirty? (resolve-mark-flag opts :mark-layout-dirty? true)}))))
+
+(fn update-focus-visual [self opts]
+  (local mark-layout-dirty? (resolve-mark-flag opts :mark-layout-dirty? true))
+  (when self.background
+    (set self.background.color (if self.focused? self.colors.focused-background self.colors.background))
+    (when (and mark-layout-dirty? self.background.layout)
+      (self.background.layout:mark-layout-dirty)))
+  (update-caret-visual self {:mark-layout-dirty? mark-layout-dirty?}))
 (fn move-direct-horizontal-key [self bounded-delta fallback-delta shift?]
   (local opts {:extend-selection? shift? :allow-line-cross? true :allow-after-line-end? true})
   (if (and self.bounded-logical-navigation?
@@ -953,14 +963,23 @@
     (if (and block-width (> block-width 0)) block-width input.caret-width))))
 (fn caret-position [input position rotation size line column] (+ position (rotation:rotate (glm.vec3 (+ input.padding.x (* (- column input.scroll-column) input.column-width)) (row-y-offset input size (+ (- line input.scroll-line) 1)) 0))))
 (fn show-caret [input position rotation size depth clip line column]
-  (set input.caret.visible? true) (local (_caret-line _caret-column row) (caret-line-column input)) (assert row "VirtualInput show-caret requires visible caret row") (update-caret-visual input)
-  (layout-child input.caret (caret-position input position rotation size line column) rotation (glm.vec3 (caret-width-for-mode input row column) input.line-height size.z) depth clip))
+  (local (_caret-line _caret-column row) (caret-line-column input))
+  (assert row "VirtualInput show-caret requires visible caret row")
+  (update-caret-visual input {:mark-layout-dirty? false})
+  (if input.focused?
+      (do
+        (set input.caret.visible? true)
+        (layout-child input.caret (caret-position input position rotation size line column) rotation (glm.vec3 (caret-width-for-mode input row column) input.line-height size.z) depth clip))
+      (do
+        (set input.caret.visible? false)
+        (layout-child input.caret position rotation (glm.vec3 0 0 size.z) depth clip))))
 (fn hide-caret [input position rotation size depth clip]
   (set input.caret.visible? false)
   (layout-child input.caret position rotation (glm.vec3 0 0 size.z) depth clip))
 (fn layout-caret [input position rotation size depth clip]
   (local (line column row) (caret-line-column input))
-  (if (and row
+  (if (and input.focused?
+           row
            (>= column input.scroll-column)
            (<= column (+ input.scroll-column input.visible-column-count)))
       (show-caret input position rotation size depth clip line column)
@@ -993,19 +1012,13 @@
   (self.layout:intersect ray))
 
 (fn request-focus [self]
-  (when self.focus-node
-    (self.focus-node:request-focus))
-  (when (and InputState (not self.connected?))
-    (InputState.connect-input self)
-    (InputState.set-state :text))
-  true)
+  (FocusPolicy.request-focus self))
 
 (fn on-state-connected [self _event]
   (set self.connected? true))
 
 (fn on-state-disconnected [self _event]
-  (set self.connected? false)
-  (self:enter-normal-mode))
+  (FocusPolicy.handle-blur self))
 
 (fn initialize-cached-state! [input]
   (local (_line _column known?) (refresh-logical-caret-state input))
@@ -1014,52 +1027,19 @@
     (keep-column-visible input input.cursor-column)
     (store-scroll-anchor-from-cursor! input)))
 
-(fn handle-focus [input]
-  (input:request-focus))
-
-(fn handle-blur [input]
-  (when input.connected?
-    (InputState.disconnect-input input)))
-
-(fn focus-event-current? [input event]
-  (= (and event event.current) input.focus-node))
-
-(fn focus-event-previous? [input event]
-  (= (and event event.previous) input.focus-node))
-
-(fn make-focus-listener [input]
-  (fn [event]
-    (when (focus-event-current? input event)
-      (handle-focus input))))
-
-(fn make-blur-listener [input]
-  (fn [event]
-    (when (focus-event-previous? input event)
-      (handle-blur input))))
-
 (fn drop [self]
   (assert (not self.__dropped) "VirtualInput dropped twice")
   (set self.__dropped true)
+  (FocusPolicy.handle-blur self)
+  (FocusPolicy.disconnect-focus-listeners self)
   (self.clickables:unregister self)
+  (when self.focus-node
+    (self.focus-node:drop)
+    (set self.focus-node nil))
   (each [_ row-widget (ipairs self.rows)]
     (row-widget:drop))
   (self.background:drop)
   (self.caret:drop)
-  (when self.focus-node
-    (self.focus-node:drop)
-    (set self.focus-node nil))
-  (when (and self.connected? InputState)
-    (InputState.disconnect-input self))
-  (when self.__focus-listener
-    (local manager self.focus-manager)
-    (when (and manager manager.focus-focus)
-      (manager.focus-focus.disconnect self.__focus-listener true))
-    (set self.__focus-listener nil))
-  (when self.__blur-listener
-    (local manager self.focus-manager)
-    (when (and manager manager.focus-blur)
-      (manager.focus-blur.disconnect self.__blur-listener true))
-    (set self.__blur-listener nil))
   (self.layout:drop))
 
 (fn resolve-line-height* [text-style]
@@ -1103,6 +1083,7 @@
       (table.insert row-widgets ((Text {:codepoints [] :style text-style}) ctx)))
     (local background ((Rectangle {:color colors.background}) ctx))
     (local caret ((Rectangle {:color colors.caret-normal}) ctx))
+    (caret:set-visible false {:mark-layout-dirty? false})
     (local computed-line-height (resolve-line-height* text-style))
     (local computed-column-width (resolve-column-width* text-style caret-width))
     (local child-layouts [background.layout caret.layout])
@@ -1124,7 +1105,8 @@
         :pointer-target pointer-target
         :focus-node focus-node
         :focus-manager focus-manager
-        :connected? false
+         :connected? false
+         :focused? false
         :line-count line-count
         :column-count column-count
         :configured-line-count line-count
@@ -1177,20 +1159,18 @@
        :submit submit
        :on-text-input on-text-input
        :on-key-down on-key-down
-       :on-click on-click
-       :request-focus request-focus
-       :on-state-connected on-state-connected
+        :on-click on-click
+        :request-focus request-focus
+        :update-focus-visual update-focus-visual
+        :update-caret-visual update-caret-visual
+        :on-state-connected on-state-connected
        :on-state-disconnected on-state-disconnected
        :intersect intersect-virtual-input
        :drop drop})
     (set layout.virtual-input input)
     (when (and focus-node focus-context layout)
       (focus-context:attach-bounds focus-node {:layout layout}))
-    (when focus-manager
-      (set input.__focus-listener
-           (focus-manager.focus-focus.connect (make-focus-listener input)))
-      (set input.__blur-listener
-           (focus-manager.focus-blur.connect (make-blur-listener input))))
+    (FocusPolicy.connect-focus-listeners input)
     (clickables:register input)
     (initialize-cached-state! input)
     (input:refresh-viewport {:mark-layout-dirty? false})
