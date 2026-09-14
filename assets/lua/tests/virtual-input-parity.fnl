@@ -195,6 +195,24 @@
   (virtual:drop)
   (focus.manager:drop))
 
+(fn active-drop-invokes-router-disconnect-once-with-states-host []
+  (set-test-states)
+  (local focus (make-focus-ctx))
+  (local input ((Input {}) focus.ctx))
+  (local original-disconnected input.on-state-disconnected)
+  (var disconnected-count 0)
+  (set input.on-state-disconnected
+       (fn [self event]
+         (set disconnected-count (+ disconnected-count 1))
+         (original-disconnected self event)))
+  (input:request-focus)
+  (assert (= (InputState.active-input) input) "precondition: Input should be active before drop")
+  (input:drop)
+  (assert (= disconnected-count 1)
+          (.. "active Input drop should invoke one router disconnect callback, got " disconnected-count))
+  (assert (not (InputState.active-input)) "active Input drop should clear router active input")
+  (focus.manager:drop))
+
 (fn file-backed-lazy-rows-use-logical-text-and-visual-downward-layout []
   (local content "alpha\nbravo\ncharlie\ndelta")
   (local buffer (lazy-buffer "row-layout" content {:chunk-bytes 4}))
@@ -377,6 +395,7 @@
  {:name "VirtualInput file-backed focus lifecycle matches eager Input" :fn file-backed-focus-lifecycle-matches-eager-input}
  {:name "VirtualInput focused drop blurs before child teardown" :fn focused-virtual-input-drop-blurs-before-child-teardown}
  {:name "Text input shared policy router disconnect invokes state disconnected once" :fn router-disconnect-invokes-shared-policy-users-once}
+ {:name "Text input active drop invokes router disconnect once with states host" :fn active-drop-invokes-router-disconnect-once-with-states-host}
  {:name "VirtualInput file-backed caret mode matches eager Input" :fn file-backed-caret-mode-matches-eager-input}
   {:name "VirtualInput file-backed caret visual update matches eager Input" :fn file-backed-caret-visual-update-matches-eager-input}
   {:name "VirtualInput direct normal edit keys do not edit" :fn direct-normal-edit-keys-do-not-edit}

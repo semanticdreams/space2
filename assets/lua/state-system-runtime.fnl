@@ -11,13 +11,17 @@
   (set runtime.states-provider provider)
   provider)
 
-(fn states-host [owner action]
+(fn maybe-states-host []
   (local provider runtime.states-provider)
-  (local states (and provider
-                     (provider)))
+  (and provider
+       (provider)))
+
+(fn states-host [owner action]
+  (local states (maybe-states-host))
   (assert states
           (.. owner " requires a states host for " action))
   states)
 
 {:set-states-provider set-states-provider
+ :maybe-states-host maybe-states-host
  :states-host states-host}

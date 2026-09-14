@@ -911,7 +911,7 @@
          (fn [self]
            (assert (not self.__dropped) "Input dropped twice")
            (set self.__dropped true)
-            (FocusPolicy.handle-blur self)
+            (FocusPolicy.handle-drop self)
            (clickables:unregister self)
            (clickables:unregister-right-click self)
            (clickables:unregister-double-click self)

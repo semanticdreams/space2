@@ -23,15 +23,22 @@
           "InputStateRouter states host must expose :active-name")
   (states:active-name))
 
+(fn states-host-available? []
+  (not (not (StateSystemRuntime.maybe-states-host))))
+
 (fn release-active-input []
   (when active-input
+    (local state-name (current-state-name))
     (local handler active-input.on-state-disconnected)
     (when handler
-      (active-input:on-state-disconnected {:state (current-state-name)}))
+      (active-input:on-state-disconnected {:state state-name}))
     (set active-input nil)
     (set-text-input-enabled false)
-    (when (or (= (current-state-name) :text)
-              (= (current-state-name) :insert))
+    (when (if (= state-name :text)
+              true
+              (= state-name :insert)
+              true
+              false)
       (set-state :normal))))
 
 (fn connect-input [input]
@@ -50,6 +57,12 @@
     (release-active-input))
   active-input)
 
+(fn clear-active-input-for-teardown [input]
+  (when (and active-input (= input active-input))
+    (set active-input nil)
+    (set-text-input-enabled false)
+    true))
+
 (fn reset []
   (set active-input nil)
   (set-text-input-enabled false)
@@ -66,6 +79,8 @@
  :dispatch-input dispatch-input
  :active-input (fn [] active-input)
  :current-state-name current-state-name
+ :states-host-available? states-host-available?
+ :clear-active-input-for-teardown clear-active-input-for-teardown
  :set-state set-state
  :set-states-provider set-states-provider
  :reset reset

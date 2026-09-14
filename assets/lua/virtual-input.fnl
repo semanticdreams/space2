@@ -979,7 +979,7 @@
 (fn drop [self]
   (assert (not self.__dropped) "VirtualInput dropped twice")
   (set self.__dropped true)
-  (FocusPolicy.handle-blur self)
+  (FocusPolicy.handle-drop self)
   (FocusPolicy.disconnect-focus-listeners self)
   (self.clickables:unregister self)
   (when self.focus-node

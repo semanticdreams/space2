@@ -1,5 +1,8 @@
 (local BuildContext (require :build-context))
 (local FennelInterpreterView (require :fennel-interpreter-view))
+(local InputState (require :input-state-router))
+(local States (require :states))
+(local StateSystemBindings (require :state-system-bindings))
 
 (local tests [])
 
@@ -90,8 +93,25 @@
           {:prefix "< "
            :content "alpha beta gamma delta"}))
       (assert (string.find line "\n" 1 true)
-              "Expected wrapped output line to include newline"))
+               "Expected wrapped output line to include newline"))
     {:output-wrap-columns 10}))
+
+(fn set-test-states []
+  (local states (States))
+  (states:add-state :normal {})
+  (states:add-state :text {})
+  (states:set-state :normal)
+  (StateSystemBindings.bind-states-host states)
+  states)
+
+(fn interpreter-drop-active-input-without-states-host-does-not-assert []
+  (set-test-states)
+  (with-view
+    (fn [view]
+      (InputState.connect-input view.input)
+      (assert (= (InputState.active-input) view.input)
+              "precondition: interpreter input should be active")
+      (StateSystemBindings.bind-states-host nil))))
 
 (table.insert tests {:name "FennelInterpreterView runs source on Ctrl+Enter"
                      :fn interpreter-runs-source-on-ctrl-enter})
@@ -100,7 +120,9 @@
 (table.insert tests {:name "FennelInterpreterView clear output removes entries"
                      :fn interpreter-clear-output-removes-entries})
 (table.insert tests {:name "FennelInterpreterView wraps output lines"
-                     :fn interpreter-wraps-output-lines})
+                      :fn interpreter-wraps-output-lines})
+(table.insert tests {:name "FennelInterpreterView drops active input without states host"
+                     :fn interpreter-drop-active-input-without-states-host-does-not-assert})
 
 (local main
   (fn []

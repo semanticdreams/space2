@@ -22,10 +22,12 @@
     (set input.focused? true)
     (when input.enter-normal-mode
       (input:enter-normal-mode))
-    (when (and InputState (not input.connected?))
+    (when (and InputState (InputState.states-host-available?) (not input.connected?))
       (InputState.connect-input input)
       (set input.connected? true))
-    (when (and InputState (not (= (InputState.current-state-name) :text)))
+    (when (and InputState
+               (InputState.states-host-available?)
+               (not (= (InputState.current-state-name) :text)))
       (InputState.set-state :text))
     (when input.update-focus-visual
       (input:update-focus-visual {:mark-layout-dirty? true})))
@@ -49,6 +51,19 @@
   (assert input "FocusPolicy.handle-state-disconnected requires input")
   (normalize-blurred input)
   true)
+
+(fn handle-drop [input]
+  (assert input "FocusPolicy.handle-drop requires input")
+  (if (and InputState (= (current-active-input) input))
+      (if (InputState.states-host-available?)
+          (handle-blur input)
+          (do
+            (InputState.clear-active-input-for-teardown input)
+            (normalize-blurred input)
+            true))
+      (do
+        (normalize-blurred input)
+        true)))
 
 (fn request-focus [input]
   (assert input "FocusPolicy.request-focus requires input")
@@ -100,5 +115,6 @@
  :handle-focus handle-focus
  :handle-blur handle-blur
  :handle-state-disconnected handle-state-disconnected
+ :handle-drop handle-drop
  :connect-focus-listeners connect-focus-listeners
  :disconnect-focus-listeners disconnect-focus-listeners}
