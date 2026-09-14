@@ -7,6 +7,7 @@
 (local {:FsFileViewerNode FsFileViewerNode} (require :graph/nodes/fs-file-viewer))
 (local FsFileViewerNodeView (require :graph/view/views/fs-file-viewer))
 (local {:Layout Layout} (require :layout))
+(local Geometry (require :text-input-geometry))
 
 (var temp-counter 0)
 (local temp-root (fs.join-path "/tmp/space/tests" "e2e-fs-file-viewer-virtual-input"))
@@ -160,13 +161,9 @@
 (fn screen-point-for-input-cell [ctx input row column]
   (assert input "screen point requires input")
   (input.layout:layouter)
-  (local world-x (+ input.layout.position.x
-                     input.padding.x
-                     (* (+ column 0.5) input.column-width)))
-  (local local-y (- input.layout.size.y
-                    input.padding.y
-                    (* (+ row 0.5) input.line-height)))
-  (local world-y (+ input.layout.position.y local-y))
+  (local world (Geometry.screen-point-for-row-column input (+ row 1) column))
+  (local world-x world.x)
+  (local world-y world.y)
   {:x (/ world-x ctx.units-per-pixel)
    :y (- ctx.height (/ world-y ctx.units-per-pixel))})
 

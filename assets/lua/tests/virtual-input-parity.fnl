@@ -10,6 +10,7 @@
 (local States (require :states))
 (local StateSystemBindings (require :state-system-bindings))
 (local {: fallback-glyph} (require :text-utils))
+(local Geometry (require :text-input-geometry))
 (local MathUtils (require :math-utils))
 (local approx (. MathUtils :approx))
 (local temp-root "/tmp/space/tests/virtual-input-parity")
@@ -65,6 +66,57 @@
 
 (fn snapshot-text [buffer]
   (. (buffer:get-viewport {:line 0 :column 0 :lines 1 :columns 80}) :rows 1 :text))
+
+(fn instrument-lazy-buffer [buffer]
+  (assert buffer "instrument-lazy-buffer requires buffer")
+  (local state {:viewport-calls []
+                :get-line-summary-calls 0
+                :line-column-for-byte-calls 0
+                :get-line-count-calls 0})
+  (local original-get-viewport buffer.get-viewport)
+  (local original-get-line-summary buffer.get-line-summary)
+  (local original-line-column-for-byte buffer.line-column-for-byte)
+  (local original-get-line-count buffer.get-line-count)
+  (set buffer.state state)
+  (set buffer.get-viewport
+       (fn [self view]
+         (table.insert state.viewport-calls view)
+         (original-get-viewport self view)))
+  (set buffer.get-line-summary
+       (fn [self line]
+         (set state.get-line-summary-calls (+ state.get-line-summary-calls 1))
+         (original-get-line-summary self line)))
+  (set buffer.line-column-for-byte
+       (fn [self byte]
+         (set state.line-column-for-byte-calls (+ state.line-column-for-byte-calls 1))
+         (original-line-column-for-byte self byte)))
+  (set buffer.get-line-count
+       (fn [self]
+         (set state.get-line-count-calls (+ state.get-line-count-calls 1))
+         (original-get-line-count self)))
+  buffer)
+
+(fn reset-lazy-buffer-counters! [buffer]
+  (assert buffer.state "reset-lazy-buffer-counters! requires instrumented buffer")
+  (set buffer.state.viewport-calls [])
+  (set buffer.state.get-line-summary-calls 0)
+  (set buffer.state.line-column-for-byte-calls 0)
+  (set buffer.state.get-line-count-calls 0))
+
+(fn assert-viewport-calls-bounded [buffer max-lines max-columns message]
+  (each [i view (ipairs (or (and buffer.state buffer.state.viewport-calls) []))]
+    (assert (<= view.lines max-lines)
+            (.. message ": viewport call " i " requested too many lines: " view.lines))
+    (assert (<= view.columns max-columns)
+            (.. message ": viewport call " i " requested too many columns: " view.columns))))
+
+(fn assert-logical-scans-bounded [buffer max-calls message]
+  (assert (<= buffer.state.get-line-summary-calls max-calls)
+          (.. message ": get-line-summary calls should stay bounded; calls=" buffer.state.get-line-summary-calls))
+  (assert (<= buffer.state.line-column-for-byte-calls max-calls)
+          (.. message ": line-column-for-byte calls should stay bounded; calls=" buffer.state.line-column-for-byte-calls))
+  (assert (<= buffer.state.get-line-count-calls max-calls)
+          (.. message ": get-line-count calls should stay bounded; calls=" buffer.state.get-line-count-calls)))
 
 (fn set-test-states []
   (local states (States))
@@ -239,10 +291,63 @@
   (assert (= input.cursor-column before-column) "normal-mode direct arrows should not change cursor column")
   (input:drop))
 
+(fn large-file-geometry-and-horizontal-scroll-stay-lazy []
+  (local long-line (string.rep "a" 100000))
+  (local content (.. "top\n" long-line "\ntail"))
+  (local buffer (instrument-lazy-buffer (lazy-buffer "large-geometry" content {:chunk-bytes 16})))
+  (local input ((VirtualInput {:buffer buffer :line-count 3 :column-count 4}) (make-ctx)))
+  (set-test-states)
+  (narrow-layout! input 4 3)
+  (local first-row (. input.rows 1))
+  (local second-row (. input.rows 2))
+  (local third-row (. input.rows 3))
+  (assert (= (codepoints->text (first-row:get-codepoints)) "top")
+          "large lazy viewport should render the first logical row first")
+  (assert (= (codepoints->text (second-row:get-codepoints)) "aaaa")
+          "large lazy viewport should render only the visible slice of the long row")
+  (assert (< third-row.layout.position.y second-row.layout.position.y)
+          "large lazy viewport should preserve downward row order after the long row")
+  (local world (Geometry.screen-point-for-row-column input 2 2))
+  (input:on-click {:local-point (- world input.layout.position)})
+  (assert (= input.cursor-line 1) "geometry click should target the long lazy row")
+  (assert (= input.cursor-column 2) "geometry click should target the requested visible column")
+  (input.layout:layouter)
+  (assert (= input.caret.layout.position.y second-row.layout.position.y)
+          "caret y should align with the clicked row widget")
+  (reset-lazy-buffer-counters! buffer)
+  (for [_ 1 8]
+    (assert (input:move-caret-horizontal-bounded 1 {:allow-line-cross? true})
+            "bounded horizontal movement should handle repeated l-style moves")
+    (input.layout:layouter))
+  (assert (> input.scroll-column 0)
+          "repeated horizontal movement should scroll the large lazy row")
+  (assert-viewport-calls-bounded buffer input.visible-line-count input.visible-column-count
+                                 "large-file geometry/horizontal scroll")
+  (assert-logical-scans-bounded buffer 1 "large-file geometry/horizontal scroll")
+  (input:drop))
+
+(fn rotated-layout-click-point-targets-shared-geometry-cell []
+  (local buffer (lazy-buffer "rotated-geometry" "alpha\nbravo\ncharlie" {:chunk-bytes 4}))
+  (local input ((VirtualInput {:buffer buffer :line-count 3 :column-count 8}) (make-ctx)))
+  (set-test-states)
+  (narrow-layout! input 8 3)
+  (set input.layout.position (glm.vec3 7 11 0))
+  (set input.layout.rotation (glm.quat (math.rad 90) (glm.vec3 0 0 1)))
+  (input.layout:layouter)
+  (local point (Geometry.screen-point-for-row-column input 2 3))
+  (input:on-click {:point point})
+  (assert (= input.cursor-line 1)
+          "rotated event.point click should target the second logical row")
+  (assert (= input.cursor-column 3)
+          "rotated event.point click should target the requested column")
+  (input:drop))
+
 [{:name "VirtualInput file-backed lazy rows use logical text and visual downward layout" :fn file-backed-lazy-rows-use-logical-text-and-visual-downward-layout}
  {:name "VirtualInput file-backed focus lifecycle matches eager Input" :fn file-backed-focus-lifecycle-matches-eager-input}
  {:name "VirtualInput focused drop blurs before child teardown" :fn focused-virtual-input-drop-blurs-before-child-teardown}
  {:name "VirtualInput file-backed caret mode matches eager Input" :fn file-backed-caret-mode-matches-eager-input}
- {:name "VirtualInput file-backed caret visual update matches eager Input" :fn file-backed-caret-visual-update-matches-eager-input}
- {:name "VirtualInput direct normal edit keys do not edit" :fn direct-normal-edit-keys-do-not-edit}
- {:name "VirtualInput direct normal arrows do not move caret" :fn direct-normal-arrows-do-not-move-caret}]
+  {:name "VirtualInput file-backed caret visual update matches eager Input" :fn file-backed-caret-visual-update-matches-eager-input}
+  {:name "VirtualInput direct normal edit keys do not edit" :fn direct-normal-edit-keys-do-not-edit}
+  {:name "VirtualInput direct normal arrows do not move caret" :fn direct-normal-arrows-do-not-move-caret}
+  {:name "VirtualInput large-file geometry and horizontal scroll stay lazy" :fn large-file-geometry-and-horizontal-scroll-stay-lazy}
+  {:name "VirtualInput rotated layout click point targets shared geometry cell" :fn rotated-layout-click-point-targets-shared-geometry-cell}]

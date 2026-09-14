@@ -10,6 +10,7 @@
 (local FocusPolicy (require :text-input-focus-policy))
 (local CaretPolicy (require :text-input-caret-policy))
 (local KeyPolicy (require :text-input-key-policy))
+(local Geometry (require :text-input-geometry))
 (local {: resolve-input-colors : resolve-padding} (require :widget-theme-utils))
 
 (var virtual-input-clip-region-seq 0)
@@ -33,15 +34,6 @@
   (if (= offset nil)
       (or row.end-byte row.line-end-byte row.start-byte 0)
       (+ (or row.start-byte 0) offset)))
-(fn column-for-x [input row local-x]
-  (assert input "column-for-x requires input")
-  (local raw-column (if (> input.column-width 0)
-                      (math.floor (/ (math.max 0 local-x) input.column-width))
-                      0))
-  (math.max 0 (math.min raw-column (length (or row.codepoints [])))))
-(fn row-visible-column-count [input row]
-  (assert row "row-visible-column-count requires row")
-  (math.min input.visible-column-count (length (or row.codepoints []))))
 (fn mark-row-layouts-dirty [input]
   (each [_ row-widget (ipairs input.rows)]
     (when (and row-widget row-widget.layout)
@@ -799,28 +791,24 @@
       (self.on-submit self payload)
       false))
 
-(fn local-point-from-event [self event]
-  (if (and event event.local-point)
-      event.local-point
-      (if (and event event.point self.layout)
-          (- event.point self.layout.position)
-          (glm.vec3 0 0 0))))
-
 (fn on-click [self event]
   (self:request-focus)
-  (local point (local-point-from-event self event))
+  (local explicit-position? (and event event.row-index event.column))
+  (local point (if explicit-position?
+                 nil
+                 (Geometry.local-point-from-event self event)))
   (local row-index (if (and event event.row-index)
-                      event.row-index
-                      (do
-                        (local size (assert (or self.layout.size self.layout.measure) "VirtualInput click requires measured layout size"))
-                        (local top-y (- size.y self.padding.y))
-                        (+ 1 (math.floor (/ (math.max 0 (- top-y point.y)) self.line-height))))))
+                       event.row-index
+                       (Geometry.row-index-for-point self point)))
   (local viewport (ensure-viewport self))
   (local row (. viewport.rows row-index))
   (when row
+    (local row-codepoints (assert row.codepoints "VirtualInput click requires row codepoints"))
     (local column (if (and event event.column)
                     event.column
-                    (column-for-x self row (- point.x self.padding.x))))
+                    (Geometry.column-for-x self.column-width
+                                           (- point.x self.padding.x)
+                                           (length row-codepoints))))
     (apply-caret-byte self (byte-for-column row column) (and event (Modifiers.shift-held? event.mod))))
   true)
 
@@ -898,7 +886,8 @@
   (set child.layout.depth-offset-index depth)
   (set child.layout.clip-region clip)
   (child.layout:layouter))
-(fn row-y-offset [input size visible-row] (assert input "row-y-offset requires input") (assert size "row-y-offset requires size") (- size.y input.padding.y (* visible-row input.line-height)))
+(fn row-y-offset [input size visible-row]
+  (Geometry.row-y-offset size input.padding input.line-height visible-row))
 (fn caret-row-style [input row]
   (assert input "VirtualInput caret row style requires input")
   (assert row "VirtualInput caret row style requires row")
@@ -917,7 +906,12 @@
                                 (caret-row-codepoint input row column)
                                 input.caret-width
                                 input.mode))
-(fn caret-position [input position rotation size line column] (+ position (rotation:rotate (glm.vec3 (+ input.padding.x (* (- column input.scroll-column) input.column-width)) (row-y-offset input size (+ (- line input.scroll-line) 1)) 0))))
+(fn caret-position [input position rotation size line column]
+  (+ position
+     (rotation:rotate
+       (glm.vec3 (+ input.padding.x (* (- column input.scroll-column) input.column-width))
+                 (Geometry.row-y-offset size input.padding input.line-height (+ (- line input.scroll-line) 1))
+                 0))))
 (fn show-caret [input position rotation size depth clip line column]
   (local (_caret-line _caret-column row) (caret-line-column input))
   (assert row "VirtualInput show-caret requires visible caret row")
