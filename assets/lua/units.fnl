@@ -41,10 +41,10 @@
    :source (or spec.source :user)
    :owned-paths (clone-list spec.owned-paths)
    :has-snapshot? has-snapshot?
-   :loaded? (fn [_self] loaded?)
-   :load (fn [self ctx]
-           (load-fn ctx)
-           (set loaded? true))
+    :loaded? (fn [_self] loaded?)
+    :load (fn [self ctx]
+            (local (ok result) (pcall load-fn ctx)) (when (not ok) (disconnect-all-signals) (local (cleanup-ok cleanup-err) (pcall unload-fn ctx)) (set loaded? false) (when (not cleanup-ok) (error (.. (tostring result) " (cleanup after failed load also failed: " (tostring cleanup-err) ")"))) (error result))
+            (set loaded? true))
    :unload (fn [self ctx]
              (disconnect-all-signals)
              (local (ok err) (pcall unload-fn ctx))

@@ -92,11 +92,42 @@
       "  true)\n"
       "{:init init :drop drop}\n"))
 
+(fn failing-demo-unit-source []
+  (.. "(var extension-handle nil)\n"
+      "(fn make-node [key]\n"
+      "  {:key key :label \"leaked\"})\n"
+      "(fn init []\n"
+      "  (assert app.graph-extension-registry \"demo extension requires app.graph-extension-registry\")\n"
+      "  (set extension-handle\n"
+      "       (app.graph-extension-registry:register-extension\n"
+      "         {:id \"demo-extension\"\n"
+      "          :unit-id \"user-demo-extension\"\n"
+      "          :schemes [\"demo-node\"]\n"
+      "          :install-loaders\n"
+      "          (fn [graph ctx]\n"
+      "            [(graph:register-key-loader \"demo-node\" make-node\n"
+      "                                        {:owner-id ctx.owner-id\n"
+      "                                         :extension-id ctx.extension-id})])}))\n"
+      "  (error \"intentional init failure after graph extension registration\"))\n"
+      "(fn drop []\n"
+      "  (when extension-handle\n"
+      "    (extension-handle:unregister)\n"
+      "    (set extension-handle nil))\n"
+      "  true)\n"
+      "{:init init :drop drop}\n"))
+
 (fn write-demo-unit! [root version]
   (local unit-dir (fs.join-path root "demo_extension"))
   (fs.create-dirs unit-dir)
   (local init-path (fs.join-path unit-dir "init.fnl"))
   (fs.write-file init-path (demo-unit-source version))
+  init-path)
+
+(fn write-failing-demo-unit! [root]
+  (local unit-dir (fs.join-path root "demo_extension"))
+  (fs.create-dirs unit-dir)
+  (local init-path (fs.join-path unit-dir "init.fnl"))
+  (fs.write-file init-path (failing-demo-unit-source))
   init-path)
 
 (fn make-runtime []
@@ -321,12 +352,49 @@
   (handle:drop)
   (if ok result (error result)))
 
+(fn failed-init-registration-is-cleaned-before-subsequent-load []
+  (local handle (make-temp-dir))
+  (local saved-registry app.graph-extension-registry)
+  (local saved-manager app.unit-manager)
+  (local runtime (make-runtime))
+  (local registry (GraphExtensionRegistry.GraphExtensionRegistry {:app app}))
+  (local manager (UnitManager {}))
+  (set app.graph-extension-registry registry)
+  (set app.unit-manager manager)
+  (registry:install-runtime runtime)
+  (local init-path (write-failing-demo-unit! handle.path))
+  (local unit (make-demo-unit handle.path init-path))
+  (manager:register unit)
+  (local (load-ok load-err) (pcall #(unit:load {})))
+  (manager:unregister "user-demo-extension")
+  (assert (not load-ok) "failing demo unit load should throw")
+  (assert (string.find (tostring load-err) "intentional init failure" 1 true)
+          (.. "failing demo unit should surface init failure, got: " (tostring load-err)))
+  (assert (= (runtime.graph:create-node-by-key "demo-node:a") nil)
+          "failed init should not leave demo loader installed")
+  (local registry-state (registry:debug-state))
+  (assert (= (length registry-state.extensions) 0)
+          "failed init should not leave registered extension")
+  (fs.write-file init-path (demo-unit-source "v1"))
+  (local fixed-unit (make-demo-unit handle.path init-path))
+  (manager:register fixed-unit)
+  (fixed-unit:load {})
+  (assert-demo-node-version (runtime.graph:create-node-by-key "demo-node:a") "v1" "a" "fixed unit after failed init")
+  (manager:clear)
+  (registry:uninstall-runtime runtime)
+  (runtime:drop)
+  (set app.graph-extension-registry saved-registry)
+  (set app.unit-manager saved-manager)
+  (handle:drop))
+
 (table.insert tests {:name "reloadable-demo-graph-extension-unit-refreshes-visible-node-without-root-reload"
                      :fn reloadable-demo-graph-extension-unit-refreshes-visible-node-without-root-reload})
 (table.insert tests {:name "hot-reload-controller-refreshes-demo-extension-unit"
                       :fn hot-reload-controller-refreshes-demo-extension-unit})
 (table.insert tests {:name "hot-reload-refresh-failure-rolls-back-demo-extension-unit"
-                     :fn hot-reload-refresh-failure-rolls-back-demo-extension-unit})
+                      :fn hot-reload-refresh-failure-rolls-back-demo-extension-unit})
+(table.insert tests {:name "failed-init-registration-is-cleaned-before-subsequent-load"
+                     :fn failed-init-registration-is-cleaned-before-subsequent-load})
 
 (local main
   (fn []

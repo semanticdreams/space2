@@ -1028,7 +1028,8 @@
     true)
 
   (fn setup-created-runtime! [world runtime graph-map-manager]
-    (when app.graph-extension-registry
+    (when (and app.graph-extension-registry
+               (not runtime.graph-extension-registry-installed?))
       (app.graph-extension-registry:install-runtime runtime)
       (set runtime.graph-extension-registry-installed? true))
     ;; Install presentation provider on the runtime so renderers and input
@@ -1087,10 +1088,16 @@
     (local activity-state (or (and world.state world.state.activity) {}))
     (local graph (Graph {:with-start false :entity-events? false}))
     (register-runtime-graph-loaders graph world)
+    (local restore-runtime {:graph graph})
+    (when app.graph-extension-registry
+      (local (install-ok install-result) (pcall #(app.graph-extension-registry:install-runtime restore-runtime)))
+      (when (not install-ok) (graph:drop) (error install-result)))
     (local graph-map-manager (GraphMapManager.GraphMapManager
-                               {:graph graph
-                                :state (or world.state.graph {})
-                                :data-dir world.dir}))
+                                {:graph graph
+                                 :state (or world.state.graph {})
+                                 :data-dir world.dir}))
+    (when app.graph-extension-registry
+      (app.graph-extension-registry:uninstall-runtime restore-runtime))
     (local graph-map (graph-map-manager:get-active-map))
     (local scene-scope
       (do

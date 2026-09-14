@@ -60,8 +60,19 @@
          "demo-node"
          (make-demo-node-loader version-ref)
          {:owner-id ctx.owner-id :extension-id ctx.extension-id}))
-     (ctx:record-handle handle)
-     (error "intentional failure after loader registration"))})
+      (ctx:record-handle handle)
+      (error "intentional failure after loader registration"))})
+
+(fn make-bare-handle-return-descriptor [version-ref]
+  {:id "bare-handle-extension"
+   :unit-id "user-bare-handle-extension"
+   :schemes ["bare-node"]
+   :install-loaders
+   (fn [graph ctx]
+     (graph:register-key-loader
+       "bare-node"
+       (make-demo-node-loader version-ref)
+       {:owner-id ctx.owner-id :extension-id ctx.extension-id}))})
 
 (fn extension-registry-installs-into-live-and-future-runtime []
   (local registry (GraphExtensionRegistry.GraphExtensionRegistry {}))
@@ -134,7 +145,21 @@
   (assert (= handle.active? false)
           "unregister by id should mark the stored handle inactive")
   (assert (registry:unregister-extension handle)
-          "re-unregistering original handle after id unregister should be idempotent")
+           "re-unregistering original handle after id unregister should be idempotent")
+  (runtime:drop))
+
+(fn extension-registry-rejects-bare-handle-return-and-rolls-back []
+  (local registry (GraphExtensionRegistry.GraphExtensionRegistry {}))
+  (local runtime (make-runtime))
+  (registry:install-runtime runtime)
+  (local (ok err)
+    (pcall #(registry:register-extension
+              (make-bare-handle-return-descriptor {:value "v1"}))))
+  (assert (not ok) "bare handle installer return should fail registration")
+  (assert (string.find (tostring err) "must return a non-empty sequential table" 1 true)
+          (.. "bare handle failure should explain sequential handle contract, got: " (tostring err)))
+  (assert (= (runtime.graph:create-node-by-key "bare-node:a") nil)
+          "rejected bare handle return should roll back registered loader")
   (runtime:drop))
 
 (fn extension-registry-refreshes-visible-adapters-by-scheme []
@@ -167,9 +192,11 @@
 (table.insert tests {:name "extension-registry-rolls-back-same-installer-handle-before-throw"
                      :fn extension-registry-rolls-back-same-installer-handle-before-throw})
 (table.insert tests {:name "extension-registry-unregister-by-id-marks-handle-inactive"
-                     :fn extension-registry-unregister-by-id-marks-handle-inactive})
+                      :fn extension-registry-unregister-by-id-marks-handle-inactive})
+(table.insert tests {:name "extension-registry-rejects-bare-handle-return-and-rolls-back"
+                     :fn extension-registry-rejects-bare-handle-return-and-rolls-back})
 (table.insert tests {:name "extension-registry-refreshes-visible-adapters-by-scheme"
-                     :fn extension-registry-refreshes-visible-adapters-by-scheme})
+                      :fn extension-registry-refreshes-visible-adapters-by-scheme})
 
 (local main
   (fn []
