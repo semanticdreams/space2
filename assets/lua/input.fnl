@@ -8,9 +8,9 @@
 (local gl (require :gl))
 (local {: Layout : resolve-mark-flag : finite-constraint?} (require :layout))
 (local {: fallback-glyph
-        : line-height
         : newline-codepoint} (require :text-utils))
 (local FocusPolicy (require :text-input-focus-policy))
+(local CaretPolicy (require :text-input-caret-policy))
 (local ExternalEditor (require :external-editor))
 (local {: resolve-input-colors
         : resolve-padding} (require :widget-theme-utils))
@@ -90,19 +90,9 @@
     (local placeholder ((Text {:text placeholder-text
                                :style placeholder-style}) ctx))
     (local computed-line-height
-      (let [value (line-height text-style)]
-        (if (and value (> value 0))
-            value
-            min-height)))
+      (CaretPolicy.resolve-line-height text-style min-height))
     (local computed-column-width
-      (let [font (and text-style text-style.font)]
-        (if font
-            (let [glyph (fallback-glyph font 32)
-                  advance (* glyph.advance text-style.scale)]
-              (if (and advance (> advance 0))
-                  advance
-                  caret-width))
-            caret-width)))
+      (CaretPolicy.resolve-column-width text-style caret-width))
     (var layout nil)
     (local pointer-target (and ctx ctx.pointer-target))
     (local clickables (assert ctx.clickables "Input requires ctx.clickables"))
@@ -371,26 +361,13 @@
                         width)))))))
 
     (fn caret-width-for-mode [self]
-      (if (= self.mode :insert)
-          self.caret-width
-          (do
-            (local style self.text.style)
-            (local font (and style style.font))
-            (local codepoint (. self.codepoints (+ self.cursor-index 1)))
-            (if font
-                (do
-                  (local glyph (fallback-glyph font (or codepoint 32)))
-                  (if glyph
-                      (do
-                        (local block-width (* glyph.advance style.scale))
-                        (if (> block-width 0)
-                            block-width
-                            self.caret-width))
-                      self.caret-width))
-                self.caret-width))))
+      (CaretPolicy.mode-caret-width self.text.style
+                                    (. self.codepoints (+ self.cursor-index 1))
+                                    self.caret-width
+                                    self.mode))
 
     (fn caret-height-for-inner [self inner-height]
-      (math.max 0.0001 (math.min self.line-height inner-height)))
+      (CaretPolicy.caret-height self.line-height inner-height))
 
     (fn update-caret-layout [self opts]
       (local mark-layout-dirty? (resolve-mark-flag opts :mark-layout-dirty? true))
@@ -481,16 +458,7 @@
       (apply-caret-change self opts))
 
     (fn update-caret-visual [self opts]
-      (local mark-layout-dirty? (resolve-mark-flag opts :mark-layout-dirty? true))
-      (when self.caret
-        (self.caret:set-visible (and self.focused? true)
-                                {:mark-layout-dirty? mark-layout-dirty?})
-        (set self.caret.color
-             (if (= self.mode :insert)
-                 self.colors.caret-insert
-                 self.colors.caret-normal))
-        (when (and mark-layout-dirty? self.caret.layout)
-          (self.caret.layout:mark-layout-dirty))))
+      (CaretPolicy.apply-caret-visual self opts))
 
     (fn update-focus-visual [self opts]
       (local mark-layout-dirty? (resolve-mark-flag opts :mark-layout-dirty? true))

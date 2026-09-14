@@ -152,7 +152,63 @@
   (assert (= input.caret.color eager.caret.color) "returning to normal should restore normal caret color")
   (eager:drop) (input:drop))
 
+(fn file-backed-caret-visual-update-matches-eager-input []
+  (local content "Wombat\nBee")
+  (local buffer (lazy-buffer "caret-visual" content {:chunk-bytes 3}))
+  (local input ((VirtualInput {:buffer buffer :line-count 2 :column-count 8}) (make-ctx)))
+  (local eager ((Input {:text content :multiline? true :line-wrap? false :line-count 2 :column-count 8}) (make-ctx)))
+  (set-test-states)
+  (narrow-layout! input 8 2)
+  (narrow-layout! eager 8 2)
+  (eager:move-caret-to 0)
+  (eager:request-focus)
+  (eager:update-caret-visual {:mark-layout-dirty? false})
+  (local expected-focused-visible? eager.caret.visible?)
+  (input:request-focus)
+  (input:update-caret-visual {:mark-layout-dirty? false})
+  (assert (= input.caret.visible? expected-focused-visible?)
+          (.. "focused VirtualInput update-caret-visual should unhide like Input; virtual="
+              (tostring input.caret.visible?)
+              " expected="
+              (tostring expected-focused-visible?)
+              " focused="
+              (tostring input.focused?)))
+  (input.layout:layouter)
+  (eager.layout:layouter)
+  (assert (= input.caret.visible? expected-focused-visible?)
+          "focused VirtualInput caret should stay visible after layout like Input")
+  (assert (= input.caret.color eager.caret.color)
+          "normal caret color should match eager Input")
+  (assert (approx input.caret.layout.size.x eager.caret.layout.size.x)
+          "normal caret width should match eager Input for the same current glyph")
+  (input:enter-insert-mode)
+  (eager:enter-insert-mode)
+  (input.layout:layouter)
+  (eager.layout:layouter)
+  (assert (= input.caret.visible? expected-focused-visible?)
+          "insert caret visibility should match eager Input")
+  (assert (= input.caret.color eager.caret.color)
+          "insert caret color should match eager Input")
+  (assert (approx input.caret.layout.size.x eager.caret.layout.size.x)
+          "insert caret width should match eager Input")
+  (input:enter-normal-mode)
+  (eager:enter-normal-mode)
+  (input.layout:layouter)
+  (eager.layout:layouter)
+  (assert (= input.caret.color eager.caret.color)
+          "restored normal caret color should match eager Input")
+  (assert (approx input.caret.layout.size.x eager.caret.layout.size.x)
+          "restored normal caret width should match eager Input")
+  (input:on-state-disconnected {:state :text})
+  (eager:on-state-disconnected {:state :text})
+  (input:update-caret-visual {:mark-layout-dirty? false})
+  (eager:update-caret-visual {:mark-layout-dirty? false})
+  (assert (= input.caret.visible? eager.caret.visible?)
+          "blurred VirtualInput update-caret-visual should hide like Input")
+  (eager:drop) (input:drop))
+
 [{:name "VirtualInput file-backed lazy rows use logical text and visual downward layout" :fn file-backed-lazy-rows-use-logical-text-and-visual-downward-layout}
  {:name "VirtualInput file-backed focus lifecycle matches eager Input" :fn file-backed-focus-lifecycle-matches-eager-input}
  {:name "VirtualInput focused drop blurs before child teardown" :fn focused-virtual-input-drop-blurs-before-child-teardown}
- {:name "VirtualInput file-backed caret mode matches eager Input" :fn file-backed-caret-mode-matches-eager-input}]
+ {:name "VirtualInput file-backed caret mode matches eager Input" :fn file-backed-caret-mode-matches-eager-input}
+ {:name "VirtualInput file-backed caret visual update matches eager Input" :fn file-backed-caret-visual-update-matches-eager-input}]

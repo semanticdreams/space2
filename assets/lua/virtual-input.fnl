@@ -8,7 +8,7 @@
 (local gl (require :gl))
 (local Modifiers (require :input-modifiers))
 (local FocusPolicy (require :text-input-focus-policy))
-(local {: fallback-glyph : line-height} (require :text-utils))
+(local CaretPolicy (require :text-input-caret-policy))
 (local {: resolve-input-colors : resolve-padding} (require :widget-theme-utils))
 
 (local KEY_BACKSPACE 8)
@@ -780,10 +780,7 @@
         true)
       false))
 (fn update-caret-visual [self opts]
-  (when self.caret
-    (set self.caret.color (if (= self.mode :insert) self.colors.caret-insert self.colors.caret-normal))
-    (when (not self.focused?)
-      (self.caret:set-visible false {:mark-layout-dirty? (resolve-mark-flag opts :mark-layout-dirty? true)}))))
+  (CaretPolicy.apply-caret-visual self opts))
 
 (fn update-focus-visual [self opts]
   (local mark-layout-dirty? (resolve-mark-flag opts :mark-layout-dirty? true))
@@ -956,11 +953,24 @@
   (set child.layout.clip-region clip)
   (child.layout:layouter))
 (fn row-y-offset [input size visible-row] (assert input "row-y-offset requires input") (assert size "row-y-offset requires size") (- size.y input.padding.y (* visible-row input.line-height)))
+(fn caret-row-style [input row]
+  (assert input "VirtualInput caret row style requires input")
+  (assert row "VirtualInput caret row style requires row")
+  (local row-widget (. input.rows (+ (- row.line input.scroll-line) 1)))
+  (assert (and row-widget row-widget.style) "VirtualInput caret width requires row text style"))
+(fn caret-row-codepoint [input row column]
+  (assert input "VirtualInput caret codepoint requires input")
+  (assert row "VirtualInput caret codepoint requires row")
+  (local codepoints (assert row.codepoints "VirtualInput caret width requires row codepoints"))
+  (. codepoints (+ (- column input.scroll-column) 1)))
 (fn caret-width-for-mode [input row column]
-  (if (= input.mode :insert) input.caret-width (do
-    (local row-widget (. input.rows (+ (- row.line input.scroll-line) 1))) (local style (assert (and row-widget row-widget.style) "VirtualInput caret width requires row text style")) (local font (assert style.font "VirtualInput caret width requires row text font"))
-    (local codepoints (assert row.codepoints "VirtualInput caret width requires row codepoints")) (local codepoint (. codepoints (+ (- column input.scroll-column) 1))) (local glyph (fallback-glyph font (or codepoint 32))) (local block-width (and glyph (* glyph.advance style.scale)))
-    (if (and block-width (> block-width 0)) block-width input.caret-width))))
+  (local style (caret-row-style input row))
+  (when (and (not (= input.mode :insert)) (not style.font))
+    (error "VirtualInput caret width requires row text font"))
+  (CaretPolicy.mode-caret-width style
+                                (caret-row-codepoint input row column)
+                                input.caret-width
+                                input.mode))
 (fn caret-position [input position rotation size line column] (+ position (rotation:rotate (glm.vec3 (+ input.padding.x (* (- column input.scroll-column) input.column-width)) (row-y-offset input size (+ (- line input.scroll-line) 1)) 0))))
 (fn show-caret [input position rotation size depth clip line column]
   (local (_caret-line _caret-column row) (caret-line-column input))
@@ -968,8 +978,7 @@
   (update-caret-visual input {:mark-layout-dirty? false})
   (if input.focused?
       (do
-        (set input.caret.visible? true)
-        (layout-child input.caret (caret-position input position rotation size line column) rotation (glm.vec3 (caret-width-for-mode input row column) input.line-height size.z) depth clip))
+        (layout-child input.caret (caret-position input position rotation size line column) rotation (glm.vec3 (caret-width-for-mode input row column) (CaretPolicy.caret-height input.line-height (- size.y (* 2 input.padding.y))) size.z) depth clip))
       (do
         (set input.caret.visible? false)
         (layout-child input.caret position rotation (glm.vec3 0 0 size.z) depth clip))))
@@ -1042,19 +1051,6 @@
   (self.caret:drop)
   (self.layout:drop))
 
-(fn resolve-line-height* [text-style]
-  (local value (line-height text-style))
-  (if (and value (> value 0)) value 1.6))
-
-(fn resolve-column-width* [text-style caret-width]
-  (local font (and text-style text-style.font))
-  (if font
-      (do
-        (local glyph (fallback-glyph font 32))
-        (local advance (* glyph.advance text-style.scale))
-        (if (and advance (> advance 0)) advance caret-width))
-      caret-width))
-
 (fn VirtualInput [opts]
   (local options (or opts {}))
   (local buffer (assert options.buffer "VirtualInput requires opts.buffer"))
@@ -1084,8 +1080,8 @@
     (local background ((Rectangle {:color colors.background}) ctx))
     (local caret ((Rectangle {:color colors.caret-normal}) ctx))
     (caret:set-visible false {:mark-layout-dirty? false})
-    (local computed-line-height (resolve-line-height* text-style))
-    (local computed-column-width (resolve-column-width* text-style caret-width))
+    (local computed-line-height (CaretPolicy.resolve-line-height text-style 1.6))
+    (local computed-column-width (CaretPolicy.resolve-column-width text-style caret-width))
     (local child-layouts [background.layout caret.layout])
     (each [_ row-widget (ipairs row-widgets)]
       (table.insert child-layouts row-widget.layout))
