@@ -49,6 +49,20 @@
   (registry:register-extension
     (make-descriptor {:value "v1"} {:fail-on-install-count 2})))
 
+(fn make-loader-that-throws-after-recording [version-ref]
+  {:id "demo-extension"
+   :unit-id "user-demo-extension"
+   :schemes ["demo-node"]
+   :install-loaders
+   (fn [graph ctx]
+     (local handle
+       (graph:register-key-loader
+         "demo-node"
+         (make-demo-node-loader version-ref)
+         {:owner-id ctx.owner-id :extension-id ctx.extension-id}))
+     (ctx:record-handle handle)
+     (error "intentional failure after loader registration"))})
+
 (fn extension-registry-installs-into-live-and-future-runtime []
   (local registry (GraphExtensionRegistry.GraphExtensionRegistry {}))
   (local runtime-a (make-runtime))
@@ -97,6 +111,32 @@
   (runtime-a:drop)
   (runtime-b:drop))
 
+(fn extension-registry-rolls-back-same-installer-handle-before-throw []
+  (local registry (GraphExtensionRegistry.GraphExtensionRegistry {}))
+  (local runtime (make-runtime))
+  (registry:install-runtime runtime)
+  (local (ok _err)
+    (pcall #(registry:register-extension
+              (make-loader-that-throws-after-recording {:value "v1"}))))
+  (assert (not ok) "installer throw should fail registration")
+  (assert (= (runtime.graph:create-node-by-key "demo-node:a") nil)
+          "same-installer failure should roll back the already registered loader")
+  (runtime:drop))
+
+(fn extension-registry-unregister-by-id-marks-handle-inactive []
+  (local registry (GraphExtensionRegistry.GraphExtensionRegistry {}))
+  (local runtime (make-runtime))
+  (registry:install-runtime runtime)
+  (local handle (registry:register-extension (make-descriptor {:value "v1"})))
+  (assert (= handle.active? true) "registered extension handle should start active")
+  (assert (registry:unregister-extension "demo-extension")
+          "unregister by id should remove the extension")
+  (assert (= handle.active? false)
+          "unregister by id should mark the stored handle inactive")
+  (assert (registry:unregister-extension handle)
+          "re-unregistering original handle after id unregister should be idempotent")
+  (runtime:drop))
+
 (fn extension-registry-refreshes-visible-adapters-by-scheme []
   (local registry (GraphExtensionRegistry.GraphExtensionRegistry {}))
   (local runtime (make-runtime))
@@ -124,6 +164,10 @@
                      :fn extension-registry-unregister-cleans-loaders-and-morphs})
 (table.insert tests {:name "extension-registry-rolls-back-partial-install"
                      :fn extension-registry-rolls-back-partial-install})
+(table.insert tests {:name "extension-registry-rolls-back-same-installer-handle-before-throw"
+                     :fn extension-registry-rolls-back-same-installer-handle-before-throw})
+(table.insert tests {:name "extension-registry-unregister-by-id-marks-handle-inactive"
+                     :fn extension-registry-unregister-by-id-marks-handle-inactive})
 (table.insert tests {:name "extension-registry-refreshes-visible-adapters-by-scheme"
                      :fn extension-registry-refreshes-visible-adapters-by-scheme})
 

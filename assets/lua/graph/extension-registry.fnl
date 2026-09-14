@@ -47,7 +47,12 @@
     (assert (= (type handle) "table") (.. context " returned non-table handle"))
     (assert (= (type handle.unregister) "function")
             (.. context " returned handle without unregister"))
-    (table.insert target handle))
+    (var already-recorded? false)
+    (each [_ existing (ipairs target)]
+      (when (= existing handle)
+        (set already-recorded? true)))
+    (when (not already-recorded?)
+      (table.insert target handle)))
   target)
 
 (fn sorted-extension-ids [extensions]
@@ -57,18 +62,22 @@
   (table.sort ids)
   ids)
 
-(fn runtime-context [descriptor app]
+(fn recording-runtime-context [descriptor app handles]
   {:owner-id descriptor.unit-id
    :unit-id descriptor.unit-id
    :extension-id descriptor.id
-   :app app})
+   :app app
+   :record-handle (fn [maybe-ctx maybe-handle]
+                    (local handle (if maybe-handle maybe-handle maybe-ctx))
+                    (append-handles handles [handle] "record-handle")
+                    handle)})
 
 (fn install-extension-into-runtime [descriptor runtime app]
   (assert (= (type runtime) "table") "graph extension runtime must be a table")
   (local graph (assert runtime.graph "graph extension runtime requires :graph"))
   (assert graph.register-key-loader "graph extension runtime graph requires register-key-loader")
-  (local ctx (runtime-context descriptor app))
   (local handles [])
+  (local ctx (recording-runtime-context descriptor app handles))
   (local (ok result)
     (pcall
       (fn []
@@ -209,8 +218,7 @@
                (when state
                  (uninstall-extension-from-state state extension-id)))
              (set (. data.extensions extension-id) nil)
-             (when (= (type handle-or-id) "table")
-               (set handle-or-id.active? false))
+             (set extension.handle.active? false)
              true))))
 
 (fn install-existing-extensions-into-runtime [data state installed-extension-ids]
