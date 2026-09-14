@@ -161,11 +161,12 @@
   (assert input "screen point requires input")
   (input.layout:layouter)
   (local world-x (+ input.layout.position.x
-                    input.padding.x
-                    (* (+ column 0.5) input.column-width)))
-  (local world-y (+ input.layout.position.y
+                     input.padding.x
+                     (* (+ column 0.5) input.column-width)))
+  (local local-y (- input.layout.size.y
                     input.padding.y
                     (* (+ row 0.5) input.line-height)))
+  (local world-y (+ input.layout.position.y local-y))
   {:x (/ world-x ctx.units-per-pixel)
    :y (- ctx.height (/ world-y ctx.units-per-pixel))})
 
