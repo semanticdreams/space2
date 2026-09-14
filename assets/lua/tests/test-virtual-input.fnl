@@ -22,7 +22,6 @@
   (table.concat
     (icollect [_ cp (ipairs (or codepoints []))]
               (utf8.char cp))))
-
 (fn row [line text start]
   (assert (= (type line) :number) "row requires line")
   (local start-byte (or start 0))
@@ -1189,6 +1188,7 @@
 (table.insert tests {:name "VirtualInput TextState l stops at cached line end" :fn virtual-input-text-state-l-stops-at-cached-line-end})
 (table.insert tests {:name "VirtualInput refresh after far horizontal scroll uses cached viewport anchor" :fn virtual-input-refresh-after-far-horizontal-scroll-uses-cached-viewport-anchor})
 (table.insert tests {:name "VirtualInput exact dollar A G still work with anchor cache" :fn virtual-input-exact-dollar-A-G-still-work-with-anchor-cache})
+(each [_ test (ipairs (require :tests/virtual-input-word-motion))] (table.insert tests test))
 (local main
   (fn []
     (local runner (require :tests/runner))

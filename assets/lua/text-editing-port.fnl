@@ -9,6 +9,26 @@
 (fn whitespace? [codepoint]
   (and codepoint (. whitespace-codepoints codepoint)))
 
+(fn keyword? [codepoint]
+  (if (not codepoint)
+      false
+      (and (>= codepoint 65) (<= codepoint 90))
+      true
+      (and (>= codepoint 97) (<= codepoint 122))
+      true
+      (and (>= codepoint 48) (<= codepoint 57))
+      true
+      (= codepoint 95)
+      true
+      false))
+
+(fn codepoint-class [codepoint]
+  (if (whitespace? codepoint)
+      :whitespace
+      (keyword? codepoint)
+      :keyword
+      :punctuation))
+
 (fn input-model [input]
   (if (and input input.model)
       input.model
@@ -192,6 +212,7 @@
 (tset BOUNDED_HOT_KEYS (string.byte "l") true)
 (tset BOUNDED_HOT_KEYS (string.byte "j") true)
 (tset BOUNDED_HOT_KEYS (string.byte "k") true)
+(tset BOUNDED_HOT_KEYS (string.byte "w") true)
 (tset BOUNDED_HOT_KEYS 1073741904 true)
 (tset BOUNDED_HOT_KEYS 1073741903 true)
 
@@ -313,9 +334,77 @@
                         (do
                           (local target-column (preferred-column input))
                           (local moved (move-to-line-column input target target-column))
-                          (when moved
-                            (set input.__preferred-column target-column))
-                          moved)))))))))
+                    (when moved
+                      (set input.__preferred-column target-column))
+                    moved)))))))))
+
+(fn eager-position-codepoint [lines position]
+  (local line (. lines (+ position.line 1)))
+  (local codepoints (if (and line line.codepoints) line.codepoints []))
+  (local line-size (length codepoints))
+  (local newline-length (if (and line (not (= line.newline-length nil))) line.newline-length 0))
+  (if (< position.column line-size)
+      (. codepoints (+ position.column 1))
+      (> newline-length 0)
+      10
+      nil))
+
+(fn eager-advance-position [lines position]
+  (local line (. lines (+ position.line 1)))
+  (local codepoints (if (and line line.codepoints) line.codepoints []))
+  (local line-size (length codepoints))
+  (local newline-length (if (and line (not (= line.newline-length nil))) line.newline-length 0))
+  (if (< position.column line-size)
+      {:line position.line :column (+ position.column 1)}
+      (> newline-length 0)
+      {:line (+ position.line 1) :column 0}
+      position))
+
+(fn eager-find-next-word-start [input]
+  (local lines (input-lines input))
+  (if (not lines)
+      (missing! input "move-next-word-start")
+      (do
+        (local start {:line (current-line-index input)
+                      :column (current-column input)})
+        (local first-cp (eager-position-codepoint lines start))
+        (if (= first-cp nil)
+            false
+            (do
+              (local first-class (codepoint-class first-cp))
+              (var pos start)
+              (var phase (if (= first-class :whitespace) :skip-whitespace :skip-current-run))
+              (var done false)
+              (var target nil)
+              (while (not done)
+                (local cp (eager-position-codepoint lines pos))
+                (if (= cp nil)
+                    (set done true)
+                    (do
+                      (local class (codepoint-class cp))
+                      (if (= phase :skip-current-run)
+                          (if (= class first-class)
+                              (set pos (eager-advance-position lines pos))
+                              (= class :whitespace)
+                              (set phase :skip-whitespace)
+                              (do
+                                (set target pos)
+                                (set done true)))
+                          (= class :whitespace)
+                          (set pos (eager-advance-position lines pos))
+                          (do
+                            (set target pos)
+                            (set done true))))))
+              (if target
+                  (move-to-line-column input target.line target.column)
+                  false))))))
+
+(fn move-next-word-start [input opts]
+  (if (has-logical-navigation? input)
+      (do
+        (local method (require-method input input :move-next-word-start "move-next-word-start"))
+        (method input opts))
+      (eager-find-next-word-start input)))
 
 (fn clamp-caret-to-current-line [input]
   (local current (clamp-line-index input (input-lines input) (current-line-index input)))
@@ -397,8 +486,9 @@
        (fn [_self]
          (= input.multiline? true)))
   (set port.move-next-word-start
-       (fn [_self]
-         (missing! input "move-next-word-start")))
+       (fn [_self opts]
+          (move-next-word-start input opts)))
   port)
 
-{:from-input from-input}
+{:from-input from-input
+ :codepoint-class codepoint-class}

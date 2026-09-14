@@ -22,13 +22,10 @@
 (local KEY_END 1073741901)
 (local KEY_PAGEUP 1073741899)
 (local KEY_PAGEDOWN 1073741902)
-
 (var virtual-input-clip-region-seq 0)
-
 (fn next-virtual-input-clip-region-id []
   (set virtual-input-clip-region-seq (+ virtual-input-clip-region-seq 1))
   virtual-input-clip-region-seq)
-
 (fn clip-codepoints [items max-count]
   (assert (= (type max-count) :number) "clip-codepoints requires max-count")
   (local out [])
@@ -38,7 +35,6 @@
     (table.insert out (. items i))
     (set i (+ i 1)))
   out)
-
 (fn byte-for-column [row column]
   (assert row "byte-for-column requires row")
   (local offsets (or row.column-byte-offsets [0]))
@@ -47,31 +43,25 @@
   (if (= offset nil)
       (or row.end-byte row.line-end-byte row.start-byte 0)
       (+ (or row.start-byte 0) offset)))
-
 (fn column-for-x [input row local-x]
   (assert input "column-for-x requires input")
   (local raw-column (if (> input.column-width 0)
                       (math.floor (/ (math.max 0 local-x) input.column-width))
                       0))
   (math.max 0 (math.min raw-column (length (or row.codepoints [])))))
-
 (fn row-visible-column-count [input row]
   (assert row "row-visible-column-count requires row")
   (math.min input.visible-column-count (length (or row.codepoints []))))
-
 (fn mark-row-layouts-dirty [input]
   (each [_ row-widget (ipairs input.rows)]
     (when (and row-widget row-widget.layout)
       (row-widget.layout:mark-layout-dirty))))
-
 (fn mark-caret-dirty [input]
   (when (and input.caret input.caret.layout)
     (input.caret.layout:mark-layout-dirty)))
-
 (fn mark-viewport-dirty [input]
   (mark-row-layouts-dirty input)
   (mark-caret-dirty input))
-
 (fn adapter-row [row]
   (assert row "adapter-row requires row")
   (local codepoints (clip-codepoints (or row.codepoints []) (+ (length (or row.codepoints [])) 1)))
@@ -87,9 +77,8 @@
    :newline-length (or row.newline-bytes 0)
    :text row.text
    :codepoints codepoints
-   :partial? row.partial?
-   :column-byte-offsets (or row.column-byte-offsets [0])})
-
+    :partial? row.partial?
+    :column-byte-offsets (or row.column-byte-offsets [0])})
 (fn adapter-line-start-index [lines idx]
   (assert lines "adapter-line-start-index requires lines")
   (var total 0)
@@ -99,10 +88,9 @@
     (when line
       (set total (+ total
                    (length (or line.codepoints []))
-                   (or line.newline-length 0))))
+      (or line.newline-length 0))))
     (set i (+ i 1)))
   total)
-
 (fn cursor-column-for-row [row cursor]
   (assert row "cursor-column-for-row requires row")
   (var column 0)
@@ -110,13 +98,11 @@
     (when (<= (+ (or row.start-byte 0) offset) cursor)
       (set column (- i 1))))
   column)
-
 (fn require-logical-buffer-api [self method]
   (assert self "VirtualInput logical navigation requires input")
   (assert self.buffer "VirtualInput logical navigation requires buffer")
   (when (not (. self.buffer method))
     (error (.. "VirtualInput requires buffer:" (tostring method) " for logical navigation"))))
-
 (fn refresh-logical-caret-state [self]
   (require-logical-buffer-api self :line-column-for-byte)
   (local cursor-byte (if (= self.buffer.cursor-byte nil) 0 self.buffer.cursor-byte))
@@ -129,13 +115,11 @@
     (set self.model.cursor-column column)
     (set self.model.cursor-index cursor-byte))
   (values line column known?))
-
 (fn cursor-anchor [self]
   (assert self "cursor-anchor requires input")
   {:byte (or self.cursor-index 0)
    :line (or self.cursor-line 0)
    :column (or self.cursor-column 0)})
-
 (fn set-cached-caret! [self byte line column]
   (assert self "set-cached-caret! requires input")
   (assert (= (type byte) :number) "set-cached-caret! requires byte")
@@ -149,12 +133,10 @@
   (set self.model.cursor-column column)
   (set self.buffer.cursor-byte byte)
   (cursor-anchor self))
-
 (fn invalidate-anchor-caches! [self]
   (assert self "invalidate-anchor-caches! requires input")
   (set self.viewport-anchor-cache {})
   (set self.viewport-row-anchor-cache {}))
-
 (fn sync-buffer-cursor-from-cache! [self]
   (assert self "sync-buffer-cursor-from-cache! requires input")
   (set self.buffer.cursor-byte (or self.cursor-index 0))
@@ -727,6 +709,23 @@
                   false
                   (apply-bounded-vertical-result! self result target-column (and opts opts.extend-selection?))))))))
 
+(fn move-next-word-start [self opts]
+  (when (not self.buffer.next-word-start-from-anchor)
+    (error "VirtualInput requires buffer:next-word-start-from-anchor for word movement"))
+  (local result (self.buffer:next-word-start-from-anchor (cursor-anchor self) opts))
+  (if (not (and result result.moved?))
+      false
+      (do
+        (local anchor (or self.selection-anchor-byte self.buffer.cursor-byte 0))
+        (set-cached-caret! self result.byte result.line result.column)
+        (update-horizontal-selection self anchor (and opts opts.extend-selection?))
+        (keep-line-visible self result.line)
+        (keep-column-visible self result.column)
+        (store-scroll-anchor-from-cursor! self)
+        (mark-caret-dirty self)
+        (refresh-anchored-viewport! self)
+        true)))
+
 (fn move-caret [self delta opts]
   (local (line column) (text-cursor-line-column self))
   (local extend? (and opts opts.extend-selection?))
@@ -1162,9 +1161,10 @@
          :delete-at-cursor delete-at-cursor
          :move-caret-to move-caret-to
          :move-caret-to-line-column move-caret-to-line-column
-         :move-caret-horizontal-bounded move-caret-horizontal-bounded
-         :move-caret-vertical-bounded move-caret-vertical-bounded
-         :move-caret move-caret
+          :move-caret-horizontal-bounded move-caret-horizontal-bounded
+          :move-caret-vertical-bounded move-caret-vertical-bounded
+          :move-next-word-start move-next-word-start
+          :move-caret move-caret
         :scroll-lines scroll-lines
         :text-line-count text-line-count
         :text-line-length text-line-length

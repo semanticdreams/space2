@@ -136,6 +136,43 @@
   (assert (handle ctx state input (string.byte "k")) "k should move up")
   (assert-cursor input 0 1 "k"))
 
+(local word-motion-cases
+  [{:text "alpha beta" :cursor 0 :expected-line 0 :expected-column 6 :handled? true :label "single space"}
+   {:text "alpha  beta" :cursor 5 :expected-line 0 :expected-column 7 :handled? true :label "from whitespace"}
+   {:text "foo.bar baz" :cursor 0 :sequence [[0 3] [0 4] [0 8]] :handled? true :label "punctuation boundaries"}
+   {:text "alpha\nbeta" :cursor 0 :expected-line 1 :expected-column 0 :handled? true :label "across newline"}
+   {:text "alpha" :cursor 0 :expected-line 0 :expected-column 0 :handled? false :label "no next word"}])
+
+(fn lowercase-w-moves-to-next-word-start []
+  (Runtime.reset)
+  (each [_ scenario (ipairs word-motion-cases)]
+    (local input (make-input {:text scenario.text :cursor scenario.cursor :multiline? true}))
+    (local ctx (make-ctx))
+    (local state (TextNormalCommands.make-state))
+    (if scenario.sequence
+        (each [idx expected (ipairs scenario.sequence)]
+          (assert (handle ctx state input (string.byte "w"))
+                  (.. scenario.label " w " idx " should be handled"))
+          (assert-cursor input (. expected 1) (. expected 2) (.. scenario.label " w " idx)))
+        (do
+          (local handled (handle ctx state input (string.byte "w")))
+          (assert (= handled scenario.handled?) (.. scenario.label " handled"))
+          (assert-cursor input scenario.expected-line scenario.expected-column scenario.label))))
+  (Runtime.reset))
+
+(fn shifted-w-is-unhandled []
+  (Runtime.reset)
+  (local input (make-input {:text "alpha beta" :cursor 0 :multiline? true}))
+  (local ctx (make-ctx))
+  (local handled (handle ctx (TextNormalCommands.make-state) input (string.byte "w") {:shift? true}))
+  (assert (not handled) "Shift+w should not resolve to lowercase w")
+  (assert-cursor input 0 0 "Shift+w no move")
+  (local uppercase-handled (handle ctx (TextNormalCommands.make-state) input (string.byte "W")))
+  (assert (not uppercase-handled) "Uppercase W should be unhandled")
+  (assert-cursor input 0 0 "uppercase W no move")
+  (assert (= ctx.executed 0) "Shift+w should not mark command executed")
+  (Runtime.reset))
+
 (fn line-jump-first-nonblank-and-delete-commands []
   (Runtime.reset)
   (local input (make-input {:text "one\n  two\nthree" :multiline? true :cursor 5}))
@@ -200,6 +237,7 @@
   (assert (= (entry-priority entries "right") 31) "l priority should be preserved")
   (assert (= (entry-priority entries "down") 32) "j priority should be preserved")
   (assert (= (entry-priority entries "up") 33) "k priority should be preserved")
+  (assert (= (entry-priority entries "next-word") 34) "w priority should be present")
   (assert (= (entry-priority entries "line-start") 40) "0 priority should be preserved")
   (assert (= (entry-priority entries "line-end") 41) "$ priority should be preserved")
   (assert (= (entry-priority entries "first-nonblank") 42) "^ priority should be preserved")
@@ -221,6 +259,8 @@
 (table.insert tests {:name "Text normal commands insert and append" :fn insert-commands-enter-insert-mode})
 (table.insert tests {:name "Text normal commands linewise insert and open lines" :fn linewise-insert-and-open-commands})
 (table.insert tests {:name "Text normal commands navigate through port" :fn navigation-commands-use-port})
+(table.insert tests {:name "Text normal commands lowercase w moves to next word start" :fn lowercase-w-moves-to-next-word-start})
+(table.insert tests {:name "Text normal commands shifted w is unhandled" :fn shifted-w-is-unhandled})
 (table.insert tests {:name "Text normal commands line jumps first-nonblank and delete" :fn line-jump-first-nonblank-and-delete-commands})
 (table.insert tests {:name "Text normal commands prefix fallback and cancel" :fn prefix-fallback-and-cancel-clear_pending_keymap})
 (table.insert tests {:name "Text normal commands ignore unbound keys without port side effects" :fn unbound-keys-do-not-create_port_or_clamp})

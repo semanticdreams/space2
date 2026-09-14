@@ -134,6 +134,15 @@
 (fn virtual-submit [self payload]
   (table.insert self.calls [:submit payload]))
 
+(fn virtual-move-next-word-start [self]
+  (table.insert self.calls :move-next-word-start)
+  (if self.next-word-result
+      (do
+        (set self.line self.next-word-line)
+        (set self.column self.next-word-column)
+        true)
+      false))
+
 (fn make-virtual-stub []
   (local calls [])
   (local input {:bounded-logical-navigation? true
@@ -152,6 +161,7 @@
   (set input.enter-insert-mode virtual-enter-insert-mode)
   (set input.enter-normal-mode virtual-enter-normal-mode)
   (set input.submit virtual-submit)
+  (set input.move-next-word-start virtual-move-next-word-start)
   input)
 
 (fn call-at [calls idx]
@@ -231,15 +241,42 @@
                                                  :move-caret-to eager-move-caret-to}))
   (assert-missing-error "insert%-text" input-port call-insert-text "insert" "input"))
 
-(fn move-next-word-start-is-explicitly-unsupported []
-  (local port (TextEditingPort.from-input (make-input "abc def")))
-  (assert-missing-error "move%-next%-word%-start" port call-move-next-word-start "word motion" "input"))
+(local word-motion-cases
+  [{:text "alpha beta" :cursor 0 :expected-line 0 :expected-column 6 :moved? true :label "single space"}
+   {:text "alpha  beta" :cursor 5 :expected-line 0 :expected-column 7 :moved? true :label "from whitespace"}
+   {:text "foo.bar baz" :cursor 0 :sequence [[0 3] [0 4] [0 8]] :moved? true :label "punctuation boundaries"}
+   {:text "alpha\nbeta" :cursor 0 :expected-line 1 :expected-column 0 :moved? true :label "across newline"}
+   {:text "alpha" :cursor 0 :expected-line 0 :expected-column 0 :moved? false :label "no next word"}])
+
+(fn port-move-next-word-start-parity []
+  (each [_ scenario (ipairs word-motion-cases)]
+    (local eager (make-input scenario.text))
+    (eager.model:move-caret-to scenario.cursor)
+    (local eager-port (TextEditingPort.from-input eager))
+    (if scenario.sequence
+        (each [idx expected (ipairs scenario.sequence)]
+          (assert (eager-port:move-next-word-start) (.. scenario.label " eager w " idx " should move"))
+          (assert-cursor eager-port (. expected 1) (. expected 2) (.. scenario.label " eager w " idx)))
+        (do
+          (assert (= (eager-port:move-next-word-start) scenario.moved?) (.. scenario.label " eager moved"))
+          (assert-cursor eager-port scenario.expected-line scenario.expected-column (.. scenario.label " eager"))))
+
+    (local virtual (make-virtual-stub))
+    (set virtual.line 0)
+    (set virtual.column (or scenario.cursor 0))
+    (set virtual.next-word-result scenario.moved?)
+    (set virtual.next-word-line scenario.expected-line)
+    (set virtual.next-word-column scenario.expected-column)
+    (local virtual-port (TextEditingPort.from-input virtual))
+    (when (not scenario.sequence)
+      (assert (= (virtual-port:move-next-word-start) scenario.moved?) (.. scenario.label " virtual moved"))
+      (assert-cursor virtual-port scenario.expected-line scenario.expected-column (.. scenario.label " virtual")))))
 
 (table.insert tests {:name "Text editing port exposes eager InputModel navigation" :fn eager-port-exposes-input-model-navigation})
 (table.insert tests {:name "Text editing port preserves preferred column and delete clamp" :fn eager-port-preserves-preferred-column-and_delete-clamps})
 (table.insert tests {:name "Text editing port routes virtual inputs through logical methods" :fn virtual-port-routes-to-logical-and-bounded-methods})
 (table.insert tests {:name "Text editing port reports explicit missing operations" :fn missing-operation-errors-name-operation-and-kind})
-(table.insert tests {:name "Text editing port reports word motion unsupported" :fn move-next-word-start-is-explicitly-unsupported})
+(table.insert tests {:name "Text editing port move next word start parity" :fn port-move-next-word-start-parity})
 
 (local main
   (fn []

@@ -16,10 +16,11 @@
    :g (string.byte "g")
    :G (string.byte "G")
    :h (string.byte "h")
-   :j (string.byte "j")
-   :k (string.byte "k")
-   :l (string.byte "l")
-   :x (string.byte "x")
+    :j (string.byte "j")
+    :k (string.byte "k")
+    :l (string.byte "l")
+    :w (string.byte "w")
+    :x (string.byte "x")
    :zero (string.byte "0")
    :dollar (string.byte "$")
    :caret (string.byte "^")})
@@ -35,9 +36,11 @@
 (fn resolve-key [payload]
   (local key (and payload payload.key))
   (if (and key (Runtime.shift-held? payload))
-      (if (= (. shifted-key-map key) nil)
-          key
-          (. shifted-key-map key))
+      (if (= key KEY.w)
+          nil
+          (if (= (. shifted-key-map key) nil)
+              key
+              (. shifted-key-map key)))
       key))
 
 (fn port-for [input]
@@ -116,6 +119,9 @@
 
 (fn command-delete-forward [port _state]
   (port:delete-at-cursor))
+
+(fn command-next-word [port _state]
+  (port:move-next-word-start))
 
 (fn binding-handler [binding]
   (if (= (type binding) "table")
@@ -204,6 +210,8 @@
   (table.insert root-entries (hint "j" "down" 32))
   (bind keymap KEY.k {:handler move-up})
   (table.insert root-entries (hint "k" "up" 33))
+  (bind keymap KEY.w {:handler command-next-word})
+  (table.insert root-entries (hint "w" "next-word" 34))
   (bind keymap KEY.zero {:handler line-start})
   (table.insert root-entries (hint "0" "line-start" 40 {:show-collapsed? false}))
   (bind keymap KEY.dollar {:handler line-end})

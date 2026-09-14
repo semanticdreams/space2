@@ -200,7 +200,65 @@
   (assert (<= source.read-count 4)
           (.. "near anchor move should use a bounded number of source reads; reads=" source.read-count))
   (assert (<= source.bytes-requested read-budget)
-          (.. "near anchor move should keep total requested bytes bounded; bytes=" source.bytes-requested)))
+           (.. "near anchor move should keep total requested bytes bounded; bytes=" source.bytes-requested)))
+
+(fn lazy-text-buffer-next-word-start-streams_long_line []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "next-word-long-line.txt"))
+  (fs.write-file file (.. (string.rep "a" 100000) " next"))
+  (local source (instrument-source-reads (source-for-file file {:chunk-bytes 16})))
+  (local buffer (LazyTextBuffer {:source source :chunk-bytes 16}))
+  (local result
+    (call-with-large-concat-disabled
+      4096
+      (fn [target-buffer]
+        (target-buffer:next-word-start-from-anchor {:byte 0 :line 0 :column 0}))
+      buffer))
+  (assert result "next word start should return a result")
+  (assert result.moved? "next word start should report moved")
+  (assert (= result.column 100001) (.. "next word should land after long run and space; column=" result.column))
+  (assert (<= source.max-requested 16)
+          (.. "word motion should keep source read requests bounded; max=" source.max-requested)))
+
+(fn lazy-text-buffer-next-word-start-counts_utf8_punctuation_as_codepoint []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "next-word-utf8-punctuation.txt"))
+  (fs.write-file file "λ next")
+  (local source (instrument-source-reads (source-for-file file {:chunk-bytes 4})))
+  (local buffer (LazyTextBuffer {:source source :chunk-bytes 4}))
+  (local result (buffer:next-word-start-from-anchor {:byte 0 :line 0 :column 0}))
+  (assert result "UTF-8 punctuation word motion should return a result")
+  (assert result.moved? "UTF-8 punctuation word motion should move")
+  (assert (= result.byte 3) (.. "UTF-8 punctuation w should land at byte 3; byte=" result.byte))
+  (assert (= result.column 2) (.. "UTF-8 punctuation w should land at column 2; column=" result.column)))
+
+(fn lazy-text-buffer-next-word-start-completes_utf8_across_chunk_boundary []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "next-word-utf8-chunk-boundary.txt"))
+  (fs.write-file file "λ next")
+  (local source (instrument-source-reads (source-for-file file {:chunk-bytes 1})))
+  (local buffer (LazyTextBuffer {:source source :chunk-bytes 1}))
+  (local result (buffer:next-word-start-from-anchor {:byte 0 :line 0 :column 0}))
+  (assert result "UTF-8 boundary word motion should return a result")
+  (assert result.moved? "UTF-8 boundary word motion should move")
+  (assert (= result.byte 3) (.. "UTF-8 boundary w should land at byte 3; byte=" result.byte))
+  (assert (= result.column 2) (.. "UTF-8 boundary w should land at column 2; column=" result.column))
+  (assert (<= source.max-requested 4)
+          (.. "UTF-8 boundary retry should request at most one UTF-8 codepoint; max=" source.max-requested)))
+
+(fn lazy-text-buffer-next-word-start-handles_adjacent_multibyte_punctuation_boundaries []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "next-word-adjacent-utf8-punctuation.txt"))
+  (fs.write-file file "λ🙂 next")
+  (local source (instrument-source-reads (source-for-file file {:chunk-bytes 1})))
+  (local buffer (LazyTextBuffer {:source source :chunk-bytes 1}))
+  (local result (buffer:next-word-start-from-anchor {:byte 0 :line 0 :column 0}))
+  (assert result "adjacent UTF-8 punctuation word motion should return a result")
+  (assert result.moved? "adjacent UTF-8 punctuation word motion should move")
+  (assert (= result.byte 7) (.. "adjacent UTF-8 punctuation w should land at byte 7; byte=" result.byte))
+  (assert (= result.column 3) (.. "adjacent UTF-8 punctuation w should land at column 3; column=" result.column))
+  (assert (<= source.max-requested 4)
+          (.. "adjacent UTF-8 retry should request at most one UTF-8 codepoint; max=" source.max-requested)))
 
 (fn lazy-text-buffer-line-column-from-far-line-start-reports-unbounded []
   (local root (make-clean-temp-dir))
@@ -703,6 +761,10 @@
 (table.insert tests {:name "lazy text buffer direct line request handles CRLF split across chunks" :fn lazy-text-buffer-direct-line-request-handles-crlf-split-across-chunks})
 (table.insert tests {:name "lazy text buffer adjacent codepoint from anchor stays within line" :fn lazy-text-buffer-adjacent-codepoint-from-anchor-stays-within-line})
 (table.insert tests {:name "lazy text buffer line-column from near anchor is bounded" :fn lazy-text-buffer-line-column-from-near-anchor-is-bounded})
+(table.insert tests {:name "lazy text buffer next word start streams long line" :fn lazy-text-buffer-next-word-start-streams_long_line})
+(table.insert tests {:name "lazy text buffer next word start counts UTF-8 punctuation as one codepoint" :fn lazy-text-buffer-next-word-start-counts_utf8_punctuation_as_codepoint})
+(table.insert tests {:name "lazy text buffer next word start completes UTF-8 across chunk boundary" :fn lazy-text-buffer-next-word-start-completes_utf8_across_chunk_boundary})
+(table.insert tests {:name "lazy text buffer next word start handles adjacent multibyte punctuation boundaries" :fn lazy-text-buffer-next-word-start-handles_adjacent_multibyte_punctuation_boundaries})
 (table.insert tests {:name "lazy text buffer line-column from far line start reports unbounded" :fn lazy-text-buffer-line-column-from-far-line-start-reports-unbounded})
 (table.insert tests {:name "lazy text buffer builds viewport row from anchor without prefix materialization" :fn lazy-text-buffer-builds-viewport-row-from-anchor-without-prefix-materialization})
 (table.insert tests {:name "lazy text buffer maps UTF-8 columns to byte offsets" :fn lazy-text-buffer-maps-utf8-columns-to-byte-offsets})
