@@ -26,30 +26,27 @@
                                  :extension-id (if options.extension-id options.extension-id ctx.extension-id)}))})
 
 (fn install-loaders [options graph ctx]
-  (local workflow-store options.workflow-store)
-  (if (not workflow-store)
-      []
-      (do
-        (local code-store options.code-store)
-        (local workflow-runner options.workflow-runner)
-        (local safe-graph (owner-safe-graph graph ctx))
-        (local handles [])
-        (fn add! [handle]
-          (assert (= (type handle) "table") "workflow descriptor expected handle")
-          (assert (= (type handle.unregister) "function") "workflow descriptor expected handle.unregister")
-          (table.insert handles handle))
-        (add! (WorkflowsNode.register-loader safe-graph {:store workflow-store :runner workflow-runner :code-store code-store}))
-        (when workflow-runner
-          (add! (WorkflowDefinitionNode.register-loader safe-graph {:store workflow-store :runner workflow-runner :code-store code-store}))
-          (add! (WorkflowRunNode.register-loader safe-graph {:store workflow-store :runner workflow-runner})))
-        (add! (WorkflowStepNode.register-loader safe-graph {:store workflow-store}))
-        (add! (WorkflowStepExplorerNode.register-loader safe-graph {:store workflow-store}))
-        (add! (WorkflowRunExplorerNode.register-loader safe-graph {:store workflow-store}))
-        (add! (WorkflowRunStepNode.register-loader safe-graph {:store workflow-store}))
-        (add! (WorkflowRunEventNode.register-loader safe-graph {:store workflow-store}))
-        (add! (WorkflowRunTimelineNode.register-loader safe-graph {:store workflow-store}))
-        (add! (AgentSessionNode.register-loader safe-graph {:store workflow-store}))
-        handles)))
+  (local workflow-store (assert options.workflow-store "builtin-graph-workflows requires :workflow-store"))
+  (local code-store options.code-store)
+  (local workflow-runner options.workflow-runner)
+  (local safe-graph (owner-safe-graph graph ctx))
+  (local handles [])
+  (fn add! [handle]
+    (assert (= (type handle) "table") "workflow descriptor expected handle")
+    (assert (= (type handle.unregister) "function") "workflow descriptor expected handle.unregister")
+    (table.insert handles handle))
+  (add! (WorkflowsNode.register-loader safe-graph {:store workflow-store :runner workflow-runner :code-store code-store}))
+  (when workflow-runner
+    (add! (WorkflowDefinitionNode.register-loader safe-graph {:store workflow-store :runner workflow-runner :code-store code-store}))
+    (add! (WorkflowRunNode.register-loader safe-graph {:store workflow-store :runner workflow-runner})))
+  (add! (WorkflowStepNode.register-loader safe-graph {:store workflow-store}))
+  (add! (WorkflowStepExplorerNode.register-loader safe-graph {:store workflow-store}))
+  (add! (WorkflowRunExplorerNode.register-loader safe-graph {:store workflow-store}))
+  (add! (WorkflowRunStepNode.register-loader safe-graph {:store workflow-store}))
+  (add! (WorkflowRunEventNode.register-loader safe-graph {:store workflow-store}))
+  (add! (WorkflowRunTimelineNode.register-loader safe-graph {:store workflow-store}))
+  (add! (AgentSessionNode.register-loader safe-graph {:store workflow-store}))
+  handles)
 
 (fn descriptors [opts]
   (local options (if opts opts {}))

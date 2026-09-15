@@ -56,10 +56,79 @@
   (table.sort expected)
   (assert-same-schemes actual expected))
 
+(fn workflow-descriptor [opts]
+  (local Workflows (require :graph/extensions/builtins/workflows))
+  (. (Workflows.descriptors opts) 1))
+
+(fn unregister-test-handle [_handle]
+  true)
+
+(fn make-recording-graph []
+  (local registrations [])
+  (fn register-key-loader [_self scheme loader-fn opts]
+    (assert (= (type loader-fn) "function") "test graph expected loader function")
+    (table.insert registrations {:scheme scheme :opts opts})
+    {:scheme scheme
+     :unregister unregister-test-handle})
+  {:registrations registrations
+   :register-key-loader register-key-loader})
+
+(fn registered-schemes [graph]
+  (icollect [_ registration (ipairs graph.registrations)] registration.scheme))
+
+(fn assert-registered-schemes [graph expected]
+  (local actual (registered-schemes graph))
+  (assert-same-schemes actual expected))
+
+(fn assert-owner-registration [graph]
+  (each [_ registration (ipairs graph.registrations)]
+    (assert (= registration.opts.owner-id "builtin-graph-workflows")
+            "workflow loader should use descriptor owner id")
+    (assert (= registration.opts.extension-id "builtin-graph-workflows")
+            "workflow loader should use descriptor extension id")))
+
+(fn workflow-descriptor-registers-store-only-schemes-without-runner []
+  (local graph (make-recording-graph))
+  (local descriptor (workflow-descriptor {:workflow-store {}}))
+  (local handles (descriptor.install-loaders graph
+                   {:owner-id descriptor.unit-id :extension-id descriptor.id}))
+  (assert (= (length handles) 8) "workflow store without runner should install eight handles")
+  (assert-registered-schemes graph ["workflows" "workflow-step" "workflow-step-explorer"
+                                    "workflow-run-explorer" "workflow-run-step"
+                                    "workflow-run-event" "workflow-run-timeline" "agent-session"])
+  (assert-owner-registration graph))
+
+(fn workflow-descriptor-registers-runner-schemes-when-runner-present []
+  (local graph (make-recording-graph))
+  (local descriptor (workflow-descriptor {:workflow-store {} :workflow-runner {}}))
+  (local handles (descriptor.install-loaders graph
+                   {:owner-id descriptor.unit-id :extension-id descriptor.id}))
+  (assert (= (length handles) 10) "workflow store with runner should install ten handles")
+  (assert-registered-schemes graph ["workflows" "workflow-definition" "workflow-run"
+                                    "workflow-step" "workflow-step-explorer"
+                                    "workflow-run-explorer" "workflow-run-step"
+                                    "workflow-run-event" "workflow-run-timeline" "agent-session"])
+  (assert-owner-registration graph))
+
+(fn workflow-descriptor-requires-workflow-store-explicitly []
+  (local graph (make-recording-graph))
+  (local descriptor (workflow-descriptor {}))
+  (local (ok err) (pcall descriptor.install-loaders graph
+                   {:owner-id descriptor.unit-id :extension-id descriptor.id}))
+  (assert (not ok) "workflow descriptor should reject missing workflow-store")
+  (assert (string.find (tostring err) "builtin-graph-workflows requires :workflow-store" 1 true)
+          (.. "missing workflow-store error should be explicit, got: " (tostring err))))
+
 (table.insert tests {:name "built-in descriptors have required shape"
                      :fn builtin-descriptors-have-required-shape})
 (table.insert tests {:name "built-in descriptors expose exact scheme coverage"
                      :fn builtin-descriptors-expose-exact-scheme-coverage})
+(table.insert tests {:name "workflow descriptor registers store-only schemes without runner"
+                     :fn workflow-descriptor-registers-store-only-schemes-without-runner})
+(table.insert tests {:name "workflow descriptor registers runner schemes when runner present"
+                     :fn workflow-descriptor-registers-runner-schemes-when-runner-present})
+(table.insert tests {:name "workflow descriptor requires workflow-store explicitly"
+                     :fn workflow-descriptor-requires-workflow-store-explicitly})
 
 (local main
   (fn []
