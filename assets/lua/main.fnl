@@ -42,6 +42,8 @@
 (local Units (require :units))
 (local UnitManager (require :unit-manager))
 
+(set fennel.macro-path runtime.fennel-path)
+
 (set app.unit-manager (or app.unit-manager (UnitManager {})))
 (set app.launcher (or app.launcher (Launcher {})))
 (app.launcher:clear-runtime)
