@@ -128,6 +128,7 @@
     :tests.test-morphs
     :tests.test-graph-extension-morphs
     :tests.test-graph-extension-registry
+    :tests.test-builtin-graph-extensions
     :tests.test-graph-extension-units
     :tests.test-graph-extension-runtime-plumbing
     :tests.test-world-nodes
