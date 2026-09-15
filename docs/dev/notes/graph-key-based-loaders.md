@@ -44,7 +44,7 @@ Loading is explicit via `graph:load-by-key(key)`. The existing `graph:lookup(key
 
 ### Node-Owned Registration
 
-Node modules can register their own loaders, but the app also provides a centralized registry for built-in node types (`assets/lua/graph/key-loaders.fnl`) so graph creation can register everything in one place.
+Node modules can register their own low-level loaders, but app/runtime setup installs built-in node types as graph extension descriptors through `graph/extensions/builtins` and `app.graph-extension-registry`. There is no centralized built-in key-loader registrar or fallback module.
 
 In practice, schemes should be treated as stable identifiers. This repo uses schemes that match the node type/module name (e.g. `hackernews-story`, `llm-message`, `string-entity`) so it’s easy to find the implementation and avoid drift.
 
@@ -146,17 +146,17 @@ Each node type that supports key-based loading exports a `register-loader` funct
 
 Same pattern for `list-entity.fnl` and `link-entity.fnl`.
 
-### Step 4: Register Loaders on Graph Creation
+### Step 4: Register Built-in Descriptors on App Initialization
 
 **`assets/lua/main.fnl`**:
 
-After graph creation, register built-in loaders:
+During app initialization, register built-in graph extension descriptors and install them into graph runtimes:
 
 ```fennel
-(local GraphKeyLoaders (require :graph/key-loaders))
+(local BuiltInGraphExtensions (require :graph/extensions/builtins))
 
-;; After: (set app.graph (Graph {}))
-(GraphKeyLoaders.register app.graph)
+;; During app setup, with app.graph-extension-registry initialized:
+(BuiltInGraphExtensions.register! app.graph-extension-registry opts)
 ```
 
 ### Step 5: Update ListEntityNode to Use load-by-key
@@ -252,11 +252,11 @@ Example for a hypothetical `BookmarkNode`:
 |------|--------|
 | `assets/lua/graph/core.fnl` | Add key-loaders registry, scheme parsing, safety assertions, and link-entity integration via load-by-key |
 | `assets/lua/graph/key-loader-utils.fnl` | Shared helper for store-backed loaders (safe on bare keys) |
-| `assets/lua/graph/key-loaders.fnl` | Central registration for built-in node loaders |
+| `assets/lua/graph/extensions/builtins/` | Built-in graph extension descriptors that install built-in node loaders |
 | `assets/lua/graph/nodes/string-entity.fnl` | Scheme key, add register-loader |
 | `assets/lua/graph/nodes/list-entity.fnl` | Scheme key, add register-loader, use load-by-key |
 | `assets/lua/graph/nodes/link-entity.fnl` | Scheme key, add register-loader |
-| `assets/lua/main.fnl` | Register built-in graph key loaders |
+| `assets/lua/main.fnl` | Register built-in graph extension descriptors through the app registry |
 
 ## Testing
 

@@ -46,8 +46,8 @@ Example:
   - supports opening target from identity node
 
 ### Loader registration
-- File: `assets/lua/graph/key-loaders.fnl`
-- `identity` scheme loader is registered with the graph key-loader registry.
+- Built-in descriptor family: `assets/lua/graph/extensions/builtins/entities.fnl`
+- The `identity` scheme loader is installed through the app graph extension registry.
 
 ### Graph-level resolution
 - File: `assets/lua/graph/core.fnl`

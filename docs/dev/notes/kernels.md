@@ -177,7 +177,7 @@ New views:
 - `assets/lua/graph/view/views/kernel.fnl`
 - `assets/lua/graph/view/views/kernel-instance.fnl`
 
-Key loader registrations in `assets/lua/graph/key-loaders.fnl`:
+Built-in graph extension descriptor registrations:
 - Exact key: `kernels`
 - Prefix: `kernel:`
 - Prefix: `kernel-instance:`

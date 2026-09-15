@@ -4,6 +4,7 @@
 (local Templates (require :workflows/templates))
 (local WorkflowEvents (require :llm/agent/workflow-events))
 (local AgentSessionGraphNode (require :graph/nodes/agent-session))
+(local BuiltinGraphTestHelpers (require :tests/graph-builtin-extension-helpers))
 
 (local _main (require :main))
 
@@ -52,22 +53,23 @@
   (local {:WorkflowStore WorkflowStore} (require :workflows/store))
   (local CodeEntityStore (require :entities/code))
   (local Graph (require :graph/init))
-  (local GraphKeyLoaders (require :graph/key-loaders))
   (local workflow-store (WorkflowStore {:base-dir (fs.join-path dir "workflow")}))
   (local code-store (CodeEntityStore.CodeEntityStore {:base-dir (fs.join-path dir "code")}))
   (local runner (make-runner workflow-store))
   (local graph (Graph {:with-start false}))
-  (GraphKeyLoaders.register graph {:code-store code-store
-                                   :workflow-store workflow-store
-                                   :workflow-runner runner})
+  (local builtins (BuiltinGraphTestHelpers.install-builtins! graph {:code-store code-store
+                                                                    :workflow-store workflow-store
+                                                                    :workflow-runner runner}))
   {:store workflow-store
    :code-store code-store
    :runner runner
-   :graph graph})
+   :graph graph
+   :builtins builtins})
 
 (fn with-runtime-dir [f dir]
   (local runtime (make-runtime dir))
   (local (ok result) (pcall f runtime))
+  (runtime.builtins:drop)
   (runtime.graph:drop)
   (if ok result (error result)))
 
@@ -1025,7 +1027,6 @@
   (local {:WorkflowRunner WorkflowRunner} (require :workflows/runner))
   (local CodeEntityStore (require :entities/code))
   (local Graph (require :graph/init))
-  (local GraphKeyLoaders (require :graph/key-loaders))
   (local previous-code-store (and app app.code-store))
   (local workflow-store (WorkflowStore {:base-dir (fs.join-path dir "workflow-shared-code")}))
   (local code-store (CodeEntityStore.CodeEntityStore {:base-dir (fs.join-path dir "code-shared")}))
@@ -1033,7 +1034,9 @@
   (local executor (WorkflowCodeExecutor {:code-store app.code-store :app app}))
   (local runner (WorkflowRunner {:store workflow-store :executor executor :app app}))
   (local graph (Graph {:with-start false}))
-  (GraphKeyLoaders.register graph {:workflow-store workflow-store :workflow-runner runner})
+  (local builtins (BuiltinGraphTestHelpers.install-builtins! graph {:code-store code-store
+                                                                    :workflow-store workflow-store
+                                                                    :workflow-runner runner}))
   (local code (code-store:create-entity {:id "step-code" :name "Step" :source (workflow-step-source 1)}))
   (local definition (workflow-store:create-definition {:id "wf-shared-code"
                                                        :name "Shared code"
@@ -1050,6 +1053,7 @@
   (runner:tick-run second-run.id {})
   (assert (= (. (workflow-store:get-run second-run.id) :output :step :value) 2)
           "workflow execution should observe graph-authored code edits after executor cached the entity")
+  (builtins:drop)
   (graph:drop)
   (set app.code-store previous-code-store))
 

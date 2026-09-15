@@ -1,7 +1,7 @@
 (local glm (require :glm))
 (local Graph (require :graph/init))
 (local GraphMap (require :graph/map))
-(local GraphKeyLoaders (require :graph/key-loaders))
+(local BuiltinGraphTestHelpers (require :tests/graph-builtin-extension-helpers))
 (local GraphView (require :graph/view))
 (local BuildContext (require :build-context))
 (local ObjectSelector (require :object-selector))
@@ -580,7 +580,7 @@
                     (local fnl-file (fs.join-path root "main.fnl"))
                     (fs.write-file fnl-file "(local x 1)\n")
                     (local graph (Graph {:with-start false}))
-                    (GraphKeyLoaders.register graph {})
+                    (local builtins (BuiltinGraphTestHelpers.install-builtins! graph {}))
                     (local graph-map (GraphMap.GraphMap {:graph graph :id "code-actions"}))
                     (local dir-key (.. "fs:" (fs.absolute root)))
                     (local dir-node (graph-map:load-by-key dir-key))
@@ -607,6 +607,7 @@
                     (assert (graph-map:lookup module-key)
                             "Open as Fennel Module should add fnl-module node to GraphMap")
                     (graph-map:drop)
+                    (builtins:drop)
                     (graph:drop))))))
 
 (fn fnl-module-node-view-adds-required-module-node []
@@ -4443,9 +4444,9 @@
 
 (fn fs-node-uppercase-module-interactions-restore-through-key-loaders []
   (with-fs-interaction-test-dir
-    (fn [root]
+      (fn [root]
       (local source-graph (Graph {:with-start false}))
-      (GraphKeyLoaders.register source-graph {})
+      (local source-builtins (BuiltinGraphTestHelpers.install-builtins! source-graph {}))
       (local file-cases
         [{:name "MAIN.FNL"
           :label "Open as Fennel Module"
@@ -4468,7 +4469,7 @@
                 (.. file-case.name " should add module node before persistence")))
       (local state (source-graph:capture-state))
       (local restored-graph (Graph {:with-start false}))
-      (GraphKeyLoaders.register restored-graph {})
+      (local restored-builtins (BuiltinGraphTestHelpers.install-builtins! restored-graph {}))
       (restored-graph:restore-state state)
       (each [_ file-case (ipairs file-cases)]
         (local module-key (.. file-case.prefix (fs.absolute (fs.join-path root file-case.name))))
@@ -4476,7 +4477,9 @@
                 (.. file-case.name " module key should restore through key loader")))
       (assert (= (restored-graph:edge-count) 2)
               "Restored uppercase module graph should preserve edges")
+      (restored-builtins:drop)
       (restored-graph:drop)
+      (source-builtins:drop)
       (source-graph:drop))))
 
 (fn fs-node-relative-directory-open-entry-preserves-relative-child-key []

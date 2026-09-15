@@ -1,7 +1,7 @@
 (local fs (require :fs))
 (local Signal (require :signal))
 (local Graph (require :graph/init))
-(local GraphKeyLoaders (require :graph/key-loaders))
+(local BuiltinGraphTestHelpers (require :tests/graph-builtin-extension-helpers))
 (local LightSystemModule (require :light-system))
 (local SkyboxState (require :skybox-state))
 
@@ -253,16 +253,17 @@
   (assert (= node.label "skybox") "SkyboxNode label should be 'skybox'")
   (node:drop))
 
-(fn graph-key-loaders-load-skybox-node []
+(fn built-in-graph-extensions-load-skybox-node []
   (with-temp-dir
     (fn [_dir]
       (local graph (Graph {:with-start false}))
-      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world"})
-                                       :asset-path-resolver asset-path-resolver})
+      (local builtins (BuiltinGraphTestHelpers.install-builtins! graph {:world-manager (make-world-manager {:id "test-world"})
+                                                                        :asset-path-resolver asset-path-resolver}))
       (local result (graph:load-by-key "activity-skybox:test-world:sandbox"))
       (assert result "skybox loader should create node")
       (assert (= result.key "activity-skybox:test-world:sandbox") "skybox key should match")
       (result:drop)
+      (builtins:drop)
       (graph:drop))))
 
 (fn skybox-node-isolates-activity-state []
@@ -428,8 +429,8 @@
                      :fn skybox-state-rejects-out-of-range-tint})
 (table.insert tests {:name "skybox node has correct key"
                      :fn skybox-node-has-correct-key})
-(table.insert tests {:name "graph key loaders load skybox node"
-                      :fn graph-key-loaders-load-skybox-node})
+(table.insert tests {:name "built-in graph extensions load skybox node"
+                       :fn built-in-graph-extensions-load-skybox-node})
 (table.insert tests {:name "skybox node isolates activity state"
                      :fn skybox-node-isolates-activity-state})
 (table.insert tests {:name "skybox node available items use injected resolver"

@@ -1,4 +1,5 @@
 (local fs (require :fs))
+(local BuiltinGraphTestHelpers (require :tests/graph-builtin-extension-helpers))
 
 (local tests [])
 
@@ -110,11 +111,10 @@
 
 (fn world-backed-loaders-return-nil-for-missing-objects []
   (local Graph (require :graph/init))
-  (local GraphKeyLoaders (require :graph/key-loaders))
   (local graph (Graph {:with-start false}))
   (local world-manager {:get-world-entry (fn [_self _id] nil)
                         :list-tabs (fn [_self] [])})
-  (GraphKeyLoaders.register graph {:world-manager world-manager})
+  (local builtins (BuiltinGraphTestHelpers.install-builtins! graph {:world-manager world-manager}))
   (local keys ["world:missing"
                "activity-terrain:missing:sandbox:t1"
                "activity-terrain-editor:missing:sandbox:t1"
@@ -127,6 +127,7 @@
     (local (ok result) (pcall (fn [] (graph:create-node-by-key key))))
     (assert ok (.. "Missing world-backed key should not throw: " key))
     (assert (= result nil) (.. "Missing world-backed key should return nil: " key)))
+  (builtins:drop)
   (graph:drop))
 
 (fn multiple-loaders-match-by-scheme []
@@ -459,7 +460,7 @@
       (loaded-string-node:drop)
       (graph:drop))))
 
-(fn graph-key-loaders-registers-and-loads-nodes []
+(fn built-in-graph-extensions-register-and-load-nodes []
   (with-temp-dir
     (fn [dir]
       (local StringEntityStore (require :entities/string))
@@ -475,7 +476,6 @@
       (local kernels (Kernels.Kernels {:base-dir (fs.join-path dir "kernels")
                                        :defer-callbacks false}))
       (local llm-store (LlmStore.Store {:base-dir (fs.join-path dir "llm")}))
-      (local GraphKeyLoaders (require :graph/key-loaders))
       (local Graph (require :graph/init))
       (local graph (Graph {:with-start false :link-store link-store}))
 
@@ -499,13 +499,14 @@
                                      :karma 0
                                      :about ""}))})
 
-      (GraphKeyLoaders.register graph {:string-store string-store
-                                       :list-store list-store
-                                       :link-store link-store
-                                       :notebook-store notebook-store
-                                       :kernels kernels
-                                       :llm-store llm-store
-                                       :hackernews-ensure-client (fn [] hn-client)})
+      (local builtins
+        (BuiltinGraphTestHelpers.install-builtins! graph {:string-store string-store
+                                                          :list-store list-store
+                                                          :link-store link-store
+                                                          :notebook-store notebook-store
+                                                          :kernels kernels
+                                                          :llm-store llm-store
+                                                          :hackernews-ensure-client (fn [] hn-client)}))
 
       (fn assert-has-preview [node context]
         (assert node (.. "missing node for preview assertion: " context))
@@ -598,16 +599,16 @@
       (assert (= hn-user.key "hackernews-user:jl") "hackernews user key should match")
       (assert-has-preview hn-user "hackernews-user")
 
+      (builtins:drop)
       (graph:drop)
       (kernels:drop))))
 
 (fn fs-loader-returns-nil-for-missing-path []
   (with-temp-dir
     (fn [dir]
-      (local GraphKeyLoaders (require :graph/key-loaders))
       (local Graph (require :graph/init))
       (local graph (Graph {:with-start false}))
-      (GraphKeyLoaders.register graph {})
+      (local builtins (BuiltinGraphTestHelpers.install-builtins! graph {}))
       (local existing-key (.. "fs:" dir))
       (local existing-node (graph:load-by-key existing-key))
       (assert existing-node "fs loader should resolve an existing path")
@@ -615,6 +616,7 @@
       (local missing-node (graph:create-node-by-key missing-key))
       (assert (= missing-node nil)
               "fs loader should return nil for a missing path")
+      (builtins:drop)
       (graph:drop))))
 
 (fn hackernews-ensure-client-propagates-to-child-nodes []
@@ -648,9 +650,8 @@
 
 (fn activity-hierarchy-loaders-resolve-existing-session []
   (local Graph (require :graph/init))
-  (local GraphKeyLoaders (require :graph/key-loaders))
   (local graph (Graph {:with-start false}))
-  (GraphKeyLoaders.register graph {:world-manager (make-activity-world-manager) :asset-path-resolver (fn [_name] nil)})
+  (local builtins (BuiltinGraphTestHelpers.install-builtins! graph {:world-manager (make-activity-world-manager) :asset-path-resolver (fn [_name] nil)}))
   (each [_ key (ipairs ["world-activities:test-world" "world-activity:test-world:sandbox" "activity-surfaces:test-world:sandbox" "activity-scene:test-world:sandbox" "activity-scene-panels:test-world:sandbox" "activity-terrains:test-world:sandbox" "activity-skybox:test-world:sandbox" "activity-background:test-world:sandbox" "activity-lights:test-world:sandbox" "activity-scene-panel:test-world:sandbox:1" "activity-terrain:test-world:sandbox:terrain-a" "activity-terrain-editor:test-world:sandbox:terrain-a" "activity-terrain-tool:test-world:sandbox:terrain-a:apply-perlin" "activity-light-type:test-world:sandbox:point" "activity-light:test-world:sandbox:point:point-1"])]
     (local node (graph:load-by-key key))
     (assert node (.. "loader should resolve " key))
@@ -659,14 +660,14 @@
   (assert (= (graph:load-by-key "activity-canvas:test-world:sandbox") nil) "activity-canvas loader should return nil when session has no canvas")
   (each [_ key (ipairs ["scene-panels:test-world" "terrains:test-world" "skybox:test-world" "background:test-world" "lights:test-world"])]
     (assert (= (graph:load-by-key key) nil) (.. "legacy scene category loader should be absent: " key)))
+  (builtins:drop)
   (graph:drop))
 
 (fn legacy-scene-detail-loaders-are-absent-after-map-key-migration []
   "Legacy persisted detail keys migrate in GraphMapManager; loaders should not keep aliases."
   (local Graph (require :graph/init))
-  (local GraphKeyLoaders (require :graph/key-loaders))
   (local graph (Graph {:with-start false}))
-  (GraphKeyLoaders.register graph {:world-manager (make-activity-world-manager) :asset-path-resolver (fn [_name] nil)})
+  (local builtins (BuiltinGraphTestHelpers.install-builtins! graph {:world-manager (make-activity-world-manager) :asset-path-resolver (fn [_name] nil)}))
   (each [_ key (ipairs ["scene-panel:test-world:1"
                         "terrain:test-world:terrain-a"
                         "terrain-editor:test-world:terrain-a"
@@ -675,6 +676,7 @@
                         "light:test-world:point:point-1"])]
     (assert (= (graph:load-by-key key) nil)
             (.. "legacy scene detail loader should be absent: " key)))
+  (builtins:drop)
   (graph:drop))
 
 (table.insert tests {:name "graph has register-key-loader"
@@ -749,8 +751,8 @@
                      :fn link-entity-integration-readds-edge-after-node-removal})
 (table.insert tests {:name "list entity node loads items via load-by-key"
                      :fn list-entity-node-loads-items-via-load-by-key})
-(table.insert tests {:name "graph key loaders registers and loads nodes"
-                      :fn graph-key-loaders-registers-and-loads-nodes})
+(table.insert tests {:name "built-in graph extensions register and load nodes"
+                       :fn built-in-graph-extensions-register-and-load-nodes})
 (table.insert tests {:name "fs loader returns nil for missing path"
                      :fn fs-loader-returns-nil-for-missing-path})
 (table.insert tests {:name "hackernews ensure-client propagates to child nodes"

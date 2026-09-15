@@ -187,6 +187,10 @@
   (set app.builtin-graph-extension-handles saved-handles)
   true)
 
+(fn graph-key-loaders-module-is-not-present []
+  (local (ok _module) (pcall require :graph/key-loaders))
+  (assert (not ok) "graph/key-loaders module should not be present"))
+
 (table.insert tests {:name "built-in descriptors have required shape"
                      :fn builtin-descriptors-have-required-shape})
 (table.insert tests {:name "built-in descriptors expose exact scheme coverage"
@@ -198,7 +202,9 @@
 (table.insert tests {:name "workflow descriptor requires workflow-store explicitly"
                       :fn workflow-descriptor-requires-workflow-store-explicitly})
 (table.insert tests {:name "built-in-registration-through-registry-loads-representative-families"
-                     :fn built-in-registration-through-registry-loads-representative-families})
+                      :fn built-in-registration-through-registry-loads-representative-families})
+(table.insert tests {:name "graph-key-loaders-module-is-not-present"
+                     :fn graph-key-loaders-module-is-not-present})
 
 (local main
   (fn []
