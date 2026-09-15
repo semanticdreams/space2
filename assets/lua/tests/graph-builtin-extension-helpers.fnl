@@ -54,6 +54,33 @@
     (set (. options key) value))
   options)
 
+(fn make-scheme-set [schemes]
+  (when schemes
+    (local scheme-set {})
+    (each [_ scheme (ipairs schemes)]
+      (set (. scheme-set scheme) true))
+    scheme-set))
+
+(fn unregister-noop-handle [handle-self]
+  (set handle-self.active? false)
+  true)
+
+(fn noop-loader-handle []
+  {:active? true
+   :unregister unregister-noop-handle})
+
+(fn filtered-register-key-loader [target allowed-schemes _self scheme loader-fn opts]
+  (if (. allowed-schemes scheme)
+      (target:register-key-loader scheme loader-fn opts)
+      (noop-loader-handle)))
+
+(fn make-filtered-graph [graph allowed-schemes]
+  (if allowed-schemes
+      {:register-key-loader
+       (fn [_self scheme loader-fn opts]
+         (filtered-register-key-loader graph allowed-schemes _self scheme loader-fn opts))}
+      graph))
+
 (fn unregister-handles [handles]
   (for [i (length handles) 1 -1]
     (local handle (. handles i))
@@ -65,7 +92,8 @@
   (local dir (make-temp-dir))
   (local options (make-default-options dir opts))
   (local registry (Registry.GraphExtensionRegistry {:app options.app}))
-  (local runtime {:graph graph :graph-map-manager options.graph-map-manager})
+  (local runtime {:graph (make-filtered-graph graph (make-scheme-set options.only-schemes))
+                  :graph-map-manager options.graph-map-manager})
   (local handles (BuiltInGraphExtensions.register! registry options))
   (registry:install-runtime runtime)
   {:registry registry

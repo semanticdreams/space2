@@ -1,5 +1,6 @@
 (local fs (require :fs))
 (local GraphMap (require :graph/map))
+(local BuiltinGraphTestHelpers (require :tests/graph-builtin-extension-helpers))
 (local _main (require :main))
 
 (local tests [])
@@ -37,10 +38,14 @@
 (fn make-graph-with-workflow-loaders [runtime loader-names]
   (local Graph (require :graph/init))
   (local graph (Graph {:with-start false}))
-  (each [_ loader-name (ipairs loader-names)]
-    (local module (require (.. :graph/nodes/ loader-name)))
-    (local store (if (= loader-name :code-entity) runtime.code-store runtime.store))
-    (module.register-loader graph {:store store :runner runtime.runner :code-store runtime.code-store}))
+  (local builtins (BuiltinGraphTestHelpers.install-builtins! graph {:workflow-store runtime.store
+                                                                    :workflow-runner runtime.runner
+                                                                    :code-store runtime.code-store
+                                                                    :only-schemes loader-names}))
+  (local original-drop graph.drop)
+  (set graph.drop (fn [self]
+                    (builtins:drop)
+                    (original-drop self)))
   graph)
 
 (fn workflows-root-new-workflow-without-required-loaders-does-not-persist-workflow-or-code-case [runtime]
