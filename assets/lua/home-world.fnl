@@ -1028,9 +1028,9 @@
     true)
 
   (fn setup-created-runtime! [world runtime graph-map-manager]
-    (when (and app.graph-extension-registry
-               (not runtime.graph-extension-registry-installed?))
-      (app.graph-extension-registry:install-runtime runtime)
+    (local registry (assert app.graph-extension-registry "HomeWorld requires app.graph-extension-registry"))
+    (when (not runtime.graph-extension-registry-installed?)
+      (registry:install-runtime runtime)
       (set runtime.graph-extension-registry-installed? true))
     ;; Install presentation provider on the runtime so renderers and input
     ;; helpers can query activity-owned cameras and render targets.
@@ -1090,18 +1090,18 @@
 
     (local restore-runtime {:graph graph})
     (var restore-runtime-installed? false)
-    (when app.graph-extension-registry
-      (local (install-ok install-result) (pcall #(app.graph-extension-registry:install-runtime restore-runtime)))
-      (if install-ok
-          (set restore-runtime-installed? true)
-          (do (graph:drop) (error install-result))))
+    (local registry (assert app.graph-extension-registry "HomeWorld requires app.graph-extension-registry before graph map restore"))
+    (local (install-ok install-result) (pcall #(registry:install-runtime restore-runtime)))
+    (if install-ok
+        (set restore-runtime-installed? true)
+        (do (graph:drop) (error install-result)))
     (local (map-manager-ok graph-map-manager)
       (pcall #(GraphMapManager.GraphMapManager
                 {:graph graph
                  :state (or world.state.graph {})
                  :data-dir world.dir})))
     (when restore-runtime-installed?
-      (app.graph-extension-registry:uninstall-runtime restore-runtime))
+      (registry:uninstall-runtime restore-runtime))
     (when (not map-manager-ok)
       (graph:drop)
       (error graph-map-manager))

@@ -267,6 +267,36 @@
   (set app.builtin-graph-extension-handles saved-handles)
   (if ok result (error result)))
 
+(fn homeworld-requires-graph-extension-registry-before-map-restore []
+  (local saved-registry app.graph-extension-registry)
+  (local saved-create-default-projection app.create-default-projection)
+  (local saved-next-frame app.next-frame)
+  (local temp-dir (tempfile.TemporaryDirectory {:prefix "home-world-missing-registry-"}))
+  (local focus-manager (Focus.FocusManager {:root-name "missing-registry"}))
+  (set app.graph-extension-registry nil)
+  (set app.create-default-projection (fn [_viewport] {}))
+  (set app.next-frame (fn [callback] (callback)))
+  (fs.create-dirs temp-dir.path)
+  (write-world-state-with-built-in-map! temp-dir.path)
+  (local world-manager (fake-world-manager))
+  (local world (HomeWorld {:id "world-a"
+                          :name "home"
+                          :type "home"
+                          :dir temp-dir.path
+                          :graph-world-manager world-manager
+                          :asset-path-resolver identity-path}))
+  (local ctx {:focus-manager focus-manager
+              :focus-root (focus-manager:get-root-scope)})
+  (local (ok err) (pcall activate-world! world ctx))
+  (focus-manager:drop)
+  (temp-dir:drop)
+  (set app.create-default-projection saved-create-default-projection)
+  (set app.next-frame saved-next-frame)
+  (set app.graph-extension-registry saved-registry)
+  (assert (not ok) "HomeWorld should fail when graph extension registry is missing")
+  (assert (string.find (tostring err) "HomeWorld requires app.graph-extension-registry" 1 true)
+          (.. "missing registry error should be explicit, got: " (tostring err))))
+
 (fn temporary-pre-restore-runtime-uninstalls-when-map-restore-fails []
   (local saved-registry app.graph-extension-registry)
   (local registry (GraphExtensionRegistry.GraphExtensionRegistry {:app app}))
@@ -316,6 +346,8 @@
                        :fn existing-extensions-install-before-home-world-graph-map-restore})
 (table.insert tests {:name "built-in-graph-extensions-install-before-homeworld-map-restore"
                      :fn built-in-graph-extensions-install-before-homeworld-map-restore})
+(table.insert tests {:name "homeworld-requires-graph-extension-registry-before-map-restore"
+                     :fn homeworld-requires-graph-extension-registry-before-map-restore})
 (table.insert tests {:name "temporary-pre-restore-runtime-uninstalls-when-map-restore-fails"
                      :fn temporary-pre-restore-runtime-uninstalls-when-map-restore-fails})
 
