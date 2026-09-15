@@ -111,22 +111,38 @@
   (node:mount {:graph {:link-store stores.link-store}})
   (local action (find-action node "Create child"))
   (assert-error-contains (fn [] (invoke-action action))
-                         "StringEntityNode.create-child requires mounted GraphMap with load-by-key")
+                         "StringEntityNode.create-child requires a graph map")
   (assert (= (length (stores.string-store:list-entities)) 1) "must not create child without load-by-key")
   (assert (= (length (stores.link-store:list-entities)) 0) "must not create link without load-by-key")
   (node:drop))
 
-(fn create-child-load-failure-fails-loudly-case [dir]
+(fn create-child-shared-graph-fails-case [dir]
   (local stores (make-stores dir))
+  (local graph (Graph {:with-start false
+                       :string-store stores.string-store
+                       :link-store stores.link-store}))
+  (register-string-loader graph {:store stores.string-store})
   (local parent (stores.string-store:create-entity {:value "parent"}))
   (local node (StringEntityNode {:entity-id parent.id
-                                 :store stores.string-store}))
-  (node:mount {:graph {:link-store stores.link-store}
-               :load-by-key (fn [_self _key] nil)})
+                                  :store stores.string-store}))
+  (node:mount graph)
   (local action (find-action node "Create child"))
   (assert-error-contains (fn [] (invoke-action action))
-                         "StringEntityNode.create-child failed to load child key into GraphMap")
-  (node:drop))
+                         "StringEntityNode.create-child requires a graph map")
+  (assert (= (length (stores.string-store:list-entities)) 1) "must not create child on shared Graph mount failure")
+  (assert (= (length (stores.link-store:list-entities)) 0) "must not create link on shared Graph mount failure")
+  (node:drop)
+  (graph:drop))
+
+(fn create-child-load-failure-fails-loudly-case [ctx]
+  (local original-load-by-key ctx.graph-map.load-by-key)
+  (set ctx.graph-map.load-by-key (fn [_self _key] nil))
+  (local action (find-action ctx.parent-node "Create child"))
+  (assert-error-contains (fn [] (invoke-action action))
+                          "StringEntityNode.create-child failed to load child key into GraphMap")
+  (assert (= (length (ctx.stores.string-store:list-entities)) 1) "must roll back child string entity on load failure")
+  (assert (= (length (ctx.stores.link-store:list-entities)) 0) "must roll back link entity on load failure")
+  (set ctx.graph-map.load-by-key original-load-by-key))
 
 (fn test-create-child-success []
   (with-real-graph-map create-child-success-case))
@@ -137,12 +153,16 @@
 (fn test-create-child-without-load-by-key-fails []
   (with-temp-dir create-child-without-load-by-key-fails-case))
 
+(fn test-create-child-shared-graph-fails []
+  (with-temp-dir create-child-shared-graph-fails-case))
+
 (fn test-create-child-load-failure-fails-loudly []
-  (with-temp-dir create-child-load-failure-fails-loudly-case))
+  (with-real-graph-map create-child-load-failure-fails-loudly-case))
 
 (table.insert tests {:name "Create child creates child link and derived edge" :fn test-create-child-success})
 (table.insert tests {:name "Create child fails when unmounted" :fn test-create-child-unmounted-fails})
 (table.insert tests {:name "Create child fails without load-by-key" :fn test-create-child-without-load-by-key-fails})
+(table.insert tests {:name "Create child rejects shared Graph mount" :fn test-create-child-shared-graph-fails})
 (table.insert tests {:name "Create child fails when child load fails" :fn test-create-child-load-failure-fails-loudly})
 
 (local main

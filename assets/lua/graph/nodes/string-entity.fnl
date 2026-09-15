@@ -19,13 +19,12 @@
       (or (and entity entity.id) "string entity")))
 
 (local LinkEntityStore (require :entities/link))
+(local GraphMapContext (require :graph/map-context))
 
 (fn require-graph-map [node]
   (local graph-map node.graph)
   (assert graph-map "StringEntityNode.create-child requires mounted GraphMap")
-  (assert (= (type graph-map.load-by-key) "function")
-          "StringEntityNode.create-child requires mounted GraphMap with load-by-key")
-  graph-map)
+  (GraphMapContext.assert-graph-map graph-map "StringEntityNode.create-child"))
 
 (fn resolve-link-store [graph-map]
   (local store
@@ -40,6 +39,21 @@
   (assert entity (.. context " failed to create entity"))
   (assert entity.id (.. context " created entity is missing id"))
   entity)
+
+(fn rollback-created-child [string-store link-store child link]
+  (when (and link link.id)
+    (link-store:delete-entity link.id))
+  (when (and child child.id)
+    (string-store:delete-entity child.id)))
+
+(fn load-created-child [graph-map string-store link-store child link child-key]
+  (local (load-ok child-node) (pcall graph-map.load-by-key graph-map child-key))
+  (when (or (not load-ok) (not child-node))
+    (rollback-created-child string-store link-store child link)
+    (if load-ok
+        (error (.. "StringEntityNode.create-child failed to load child key into GraphMap: " child-key))
+        (error child-node)))
+  child-node)
 
 (fn StringEntityNode [opts]
   (local options (or opts {}))
@@ -98,9 +112,7 @@
                        (link-store:create-entity {:source-key self.key
                                                   :target-key child-key})
                        "StringEntityNode.create-child link store"))
-         (local child-node (graph-map:load-by-key child-key))
-         (assert child-node
-                 (.. "StringEntityNode.create-child failed to load child key into GraphMap: " child-key))
+         (local child-node (load-created-child graph-map self.store link-store child link child-key))
          {:child child
           :child-key child-key
           :child-node child-node
