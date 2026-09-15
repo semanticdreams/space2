@@ -61,8 +61,8 @@ def _is_no_pr_view_result(result: Any) -> bool:
     no_pr_markers = (
         "no pull requests found",
         "no pull request found",
-        "not found",
-        "could not find",
+        "could not find any pull requests",
+        "could not find any pull request",
     )
     return any(marker in output for marker in no_pr_markers)
 

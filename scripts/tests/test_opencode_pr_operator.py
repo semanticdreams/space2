@@ -216,6 +216,33 @@ def test_create_current_unsafe_view_failure_preserves_command_details_and_does_n
     ]
 
 
+def test_create_current_generic_not_found_view_failure_does_not_create(monkeypatch, trusted_repo: Path) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(args, cwd: Path, check: bool = True):
+        del cwd, check
+        args = list(args)
+        calls.append(args)
+        if args == ["git", "branch", "--show-current"]:
+            return command_result(args, "feature/opencode-capabilities\n")
+        if args == ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS]:
+            return command_result(args, returncode=1, stderr="HTTP 404: Not Found")
+        raise AssertionError(f"unexpected create attempt: {args}")
+
+    monkeypatch.setattr(pr_operator, "run_command", fake_run)
+
+    result = pr_operator.create_current_pr(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert result["evidence"]["returncode"] == 1
+    assert result["evidence"]["stderr"] == "HTTP 404: Not Found"
+    assert result["evidence"]["args"] == ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS]
+    assert calls == [
+        ["git", "branch", "--show-current"],
+        ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS],
+    ]
+
+
 def test_create_current_create_failure_preserves_command_details(monkeypatch, trusted_repo: Path) -> None:
     calls: list[list[str]] = []
 
