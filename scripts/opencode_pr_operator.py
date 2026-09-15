@@ -50,6 +50,23 @@ def _json_loads(text: str) -> Any:
     return json.loads(text) if text.strip() else None
 
 
+def _command_result_evidence(result: Any, branch: str) -> dict[str, object]:
+    return {"branch": branch, "args": result.args, "returncode": result.returncode, "stderr": result.stderr.strip()}
+
+
+def _is_no_pr_view_result(result: Any) -> bool:
+    if result.returncode == 0:
+        return False
+    output = f"{result.stdout}\n{result.stderr}".lower()
+    no_pr_markers = (
+        "no pull requests found",
+        "no pull request found",
+        "not found",
+        "could not find",
+    )
+    return any(marker in output for marker in no_pr_markers)
+
+
 def _required_checks_include_test(required_checks: Any) -> bool:
     if not isinstance(required_checks, dict):
         return False
@@ -257,7 +274,21 @@ def create_current_pr(repo_root: Path) -> dict[str, object]:
         branch, unsafe = _safe_current_branch(action, repo)
         if unsafe is not None:
             return unsafe
-        result = run_command(["gh", "pr", "create", "--base", "main", "--head", branch, "--fill"], repo)
+        view_result = run_command(["gh", "pr", "view", branch, "--json", PR_VIEW_FIELDS], repo, check=False)
+        if view_result.returncode == 0:
+            data = _json_loads(view_result.stdout)
+            if not isinstance(data, dict):
+                return human_decision(action, "GitHub PR view response was ambiguous", _command_result_evidence(view_result, branch))
+            return success(
+                action,
+                "Pull request already exists targeting main",
+                {"branch": branch, "url": data.get("url"), "state": data.get("state"), "pr": data, "args": view_result.args},
+            )
+        if not _is_no_pr_view_result(view_result):
+            return human_decision(action, "Could not determine whether pull request already exists", _command_result_evidence(view_result, branch))
+        result = run_command(["gh", "pr", "create", "--base", "main", "--head", branch, "--fill"], repo, check=False)
+        if result.returncode != 0:
+            return human_decision(action, "Could not create pull request safely", _command_result_evidence(result, branch))
         return success(action, "Created pull request targeting main", {"branch": branch, "url": result.stdout.strip(), "args": result.args})
     except CapabilityError as error:
         return human_decision(action, error.message, {"code": error.code, "details": error.details})
