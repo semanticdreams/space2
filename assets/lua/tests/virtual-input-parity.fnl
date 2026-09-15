@@ -3,6 +3,7 @@
 (local BuildContext (require :build-context))
 (local Input (require :input))
 (local VirtualInput (require :virtual-input))
+(local TextStyle (require :text-style))
 (local {: FocusManager} (require :focus))
 (local fs (require :fs))
 (local LazyTextSource (require :lazy-text-source))
@@ -13,6 +14,7 @@
 (local {: fallback-glyph} (require :text-utils))
 (local Geometry (require :text-input-geometry))
 (local MathUtils (require :math-utils))
+(local {: LayoutRoot} (require :layout))
 (local approx (. MathUtils :approx))
 (local temp-root "/tmp/space/tests/virtual-input-parity")
 
@@ -61,9 +63,29 @@
 (fn narrow-layout! [input columns lines]
   (input.layout:measurer)
   (set input.layout.size (glm.vec3 (+ (* 2 input.padding.x) (* columns input.column-width))
-                                    (+ (* 2 input.padding.y) (* lines input.line-height)) 0))
+                                     (+ (* 2 input.padding.y) (* lines input.line-height)) 0))
   (input.layout:layouter)
   input)
+
+(fn rooted-input [buffer columns lines]
+  (local root (LayoutRoot {:log-dirt? false}))
+  (local input ((VirtualInput {:buffer buffer :line-count lines :column-count columns}) (make-ctx)))
+  (input.layout:set-root root)
+  (narrow-layout! input columns lines)
+  {:root root :input input})
+
+(fn caret-local-x [input]
+  (- input.caret.layout.position.x input.layout.position.x))
+
+(fn caret-local-y [input]
+  (- input.caret.layout.position.y input.layout.position.y))
+
+(fn expected-caret-y [input visible-row]
+  (- input.layout.size.y input.padding.y (* visible-row input.line-height)))
+
+(fn assert-near [actual expected message]
+  (assert (approx actual expected)
+          (.. message "; expected=" (tostring expected) " actual=" (tostring actual))))
 
 (fn snapshot-text [buffer]
   (. (buffer:get-viewport {:line 0 :column 0 :lines 1 :columns 80}) :rows 1 :text))
@@ -103,6 +125,137 @@
   (set buffer.state.get-line-summary-calls 0)
   (set buffer.state.line-column-for-byte-calls 0)
   (set buffer.state.get-line-count-calls 0))
+
+(fn variable-width-style []
+  (fn glyph [advance]
+    {:planeBounds {:left 0 :right advance :bottom -0.2 :top 0.8}
+     :atlasBounds {:left 0 :right 10 :bottom 0 :top 10}
+     :advance advance})
+  (local fallback (glyph 0.6))
+  (TextStyle {:scale 1.0
+              :font {:glyph-map {32 fallback
+                                  87 (glyph 1.0)
+                                  105 (glyph 0.2)
+                                  97 (glyph 0.6)
+                                  98 (glyph 0.6)
+                                  99 (glyph 0.6)
+                                  100 (glyph 0.6)
+                                  101 (glyph 0.6)
+                                  102 (glyph 0.6)
+                                  103 (glyph 0.6)
+                                  104 (glyph 0.6)
+                                  65533 fallback}
+                     :metadata {:metrics {:lineHeight 1.0
+                                           :ascender 0.8
+                                           :descender -0.2}
+                                :atlas {:width 64 :height 64 :distanceRange 4}}
+                     :texture {:id 1 :ready true}}}))
+
+(fn layout-caret-parity-inputs [content line column]
+  (local style (variable-width-style))
+  (local buffer (lazy-buffer (.. "variable-caret-" (tostring line) "-" (tostring column)) content {:chunk-bytes 4}))
+  (local input ((VirtualInput {:buffer buffer :line-count 2 :column-count 8 :text-style style}) (make-ctx)))
+  (local eager ((Input {:text content :multiline? true :line-wrap? false :line-count 2 :column-count 8 :text-style style}) (make-ctx)))
+  (narrow-layout! input 8 2)
+  (narrow-layout! eager 8 2)
+  (eager:request-focus)
+  (input:request-focus)
+  (var eager-index column)
+  (each [idx cp (utf8.codes content)]
+    (when (and (> line 0) (= cp (string.byte "\n")) (<= idx (length content)))
+      (set eager-index (+ idx column))))
+  (eager:move-caret-to eager-index)
+  (input:move-caret-to-line-column line column)
+  (input.layout:layouter)
+  (eager.layout:layouter)
+  {:input input :eager eager})
+
+(fn assert-caret-x-parity [content column message]
+  (local pair (layout-caret-parity-inputs content 0 column))
+  (local virtual-x pair.input.caret.layout.position.x)
+  (local eager-x pair.eager.caret.layout.position.x)
+  (assert (approx virtual-x eager-x)
+          (.. message "; virtual x=" (tostring virtual-x) " eager x=" (tostring eager-x)))
+  (pair.eager:drop)
+  (pair.input:drop))
+
+(fn variable-width-caret-x-matches-eager-input []
+  (assert-caret-x-parity "iiiiWWWW" 4 "VirtualInput caret x should sum narrow glyph advances before wide glyphs")
+  (assert-caret-x-parity "WWWWiiii" 4 "VirtualInput caret x should sum wide glyph advances before narrow glyphs"))
+
+(fn multiline-caret-y-still-matches-eager-input []
+  (local pair (layout-caret-parity-inputs "abcd\nefgh" 1 2))
+  (local virtual-y pair.input.caret.layout.position.y)
+  (local eager-y pair.eager.caret.layout.position.y)
+  (assert (approx virtual-y eager-y)
+          (.. "VirtualInput multiline caret y should match eager Input; virtual y=" (tostring virtual-y) " eager y=" (tostring eager-y)))
+  (pair.eager:drop)
+  (pair.input:drop))
+
+(fn ascii-row [line text start-column visible-columns]
+  (assert (= (type start-column) :number) "ascii-row requires start-column")
+  (assert (= (type visible-columns) :number) "ascii-row requires visible-columns")
+  (local start (math.max 0 start-column))
+  (local columns (math.max 0 visible-columns))
+  (local codepoints [])
+  (local offsets [0])
+  (for [column start (- (+ start columns) 1)]
+    (local byte-index (+ column 1))
+    (when (<= byte-index (# text))
+      (table.insert codepoints (string.byte text byte-index))
+      (table.insert offsets (length codepoints))))
+  {:line line
+   :start-column start
+   :start-byte start
+   :end-byte (+ start (length codepoints))
+   :line-end-byte (# text)
+   :line-end-known? true
+   :newline-bytes 0
+   :text (string.sub text (+ start 1) (+ start (length codepoints)))
+   :codepoints codepoints
+   :column-byte-offsets offsets})
+
+(fn anchored-start-column-buffer [text start-column visible-columns]
+  (local row (ascii-row 0 text start-column visible-columns))
+  (local state {:viewport-calls []})
+  {:cursor-byte 0
+   :scroll-line 0
+   :state state
+   :get-viewport (fn [_self view]
+                   (table.insert state.viewport-calls view)
+                   {:start-line 0
+                    :start-column 0
+                    :requested-lines view.lines
+                    :requested-columns view.columns
+                    :rows [row]})
+   :line-column-for-byte (fn [_self byte]
+                           (assert (= (type byte) :number) "test buffer line-column-for-byte requires byte")
+                           (values 0 (math.max 0 byte) true))
+   :get-line-count (fn [_self] 1)
+   :get-line-summary (fn [_self _line]
+                       {:codepoint-count (# text)
+                        :first-nonblank-column 0})
+   :move-caret-to-line-column (fn [self _line column]
+                                (set self.cursor-byte (math.max 0 column))
+                                true)})
+
+(fn anchored-row-start-column-is-caret-visible-base []
+  (local style (variable-width-style))
+  (local buffer (anchored-start-column-buffer "iiiiWWWW" 4 4))
+  (local input ((VirtualInput {:buffer buffer :line-count 1 :column-count 4 :text-style style}) (make-ctx)))
+  (narrow-layout! input 4 1)
+  (input:request-focus)
+  (input:move-caret-to-line-column 0 6)
+  (input.layout:layouter)
+  (local row (. input.viewport.rows 1))
+  (assert (= input.scroll-column 0) "test precondition: viewport requested/global scroll column stays 0")
+  (assert (= row.start-column 4) "test precondition: row start-column is the authoritative visible base")
+  (assert input.caret.visible? "caret at logical column 6 should remain visible within row columns 4..8")
+  (assert (approx input.caret.layout.position.x (+ input.padding.x 2.0))
+          (.. "caret x should use row.start-column base; x=" (tostring input.caret.layout.position.x)))
+  (assert (approx input.caret.layout.size.x 1.0)
+          (.. "normal-mode block caret width should use row.start-column glyph; width=" (tostring input.caret.layout.size.x)))
+  (input:drop))
 
 (fn assert-viewport-calls-bounded [buffer max-lines max-columns message]
   (each [i view (ipairs (or (and buffer.state buffer.state.viewport-calls) []))]
@@ -256,6 +409,41 @@
   (assert (= input.caret.color eager.caret.color) "returning to normal should restore normal caret color")
   (eager:drop) (input:drop))
 
+(fn root-update-after-focus-lays-out-caret []
+  (local env (rooted-input (lazy-buffer "root-focus-caret" "alpha\nbeta" {:chunk-bytes 4}) 6 2))
+  (local input env.input)
+  (input:request-focus)
+  (env.root:update)
+  (assert input.caret.visible? "root update after focus should show VirtualInput caret")
+  (assert (> input.caret.layout.size.x 0) "root update after focus should give caret nonzero width")
+  (assert (> input.caret.layout.size.y 0) "root update after focus should give caret nonzero height")
+  (assert-near (caret-local-x input) input.padding.x "focused caret x should match column zero")
+  (assert-near (caret-local-y input) (expected-caret-y input 1) "focused caret y should match first row")
+  (input:drop))
+
+(fn root-update-after-insert-mode-lays-out-thin-caret []
+  (local env (rooted-input (lazy-buffer "root-mode-caret" "alpha\nbeta" {:chunk-bytes 4}) 6 2))
+  (local input env.input)
+  (input:request-focus)
+  (input.layout:layouter)
+  (local normal-width input.caret.layout.size.x)
+  (input:enter-insert-mode)
+  (env.root:update)
+  (assert (> normal-width input.caret-width) "normal caret should start as a block")
+  (assert-near input.caret.layout.size.x input.caret-width "root update after insert mode should apply thin caret width")
+  (input:drop))
+
+(fn root-update-after-cursor-move-lays-out-caret-position []
+  (local env (rooted-input (lazy-buffer "root-move-caret" "alpha\nbeta" {:chunk-bytes 4}) 6 2))
+  (local input env.input)
+  (input:request-focus)
+  (input.layout:layouter)
+  (assert (input:move-caret-to-line-column 1 2) "precondition: caret move should succeed")
+  (env.root:update)
+  (assert-near (caret-local-x input) (+ input.padding.x (* 2 input.column-width)) "root update after move should place caret at column two")
+  (assert-near (caret-local-y input) (expected-caret-y input 2) "root update after move should place caret on second row")
+  (input:drop))
+
 (fn file-backed-caret-visual-update-matches-eager-input []
   (local content "Wombat\nBee")
   (local buffer (lazy-buffer "caret-visual" content {:chunk-bytes 3}))
@@ -396,8 +584,14 @@
  {:name "VirtualInput focused drop blurs before child teardown" :fn focused-virtual-input-drop-blurs-before-child-teardown}
  {:name "Text input shared policy router disconnect invokes state disconnected once" :fn router-disconnect-invokes-shared-policy-users-once}
  {:name "Text input active drop invokes router disconnect once with states host" :fn active-drop-invokes-router-disconnect-once-with-states-host}
- {:name "VirtualInput file-backed caret mode matches eager Input" :fn file-backed-caret-mode-matches-eager-input}
-  {:name "VirtualInput file-backed caret visual update matches eager Input" :fn file-backed-caret-visual-update-matches-eager-input}
+  {:name "VirtualInput file-backed caret mode matches eager Input" :fn file-backed-caret-mode-matches-eager-input}
+   {:name "VirtualInput variable-width caret x matches eager Input" :fn variable-width-caret-x-matches-eager-input}
+   {:name "VirtualInput multiline caret y still matches eager Input" :fn multiline-caret-y-still-matches-eager-input}
+   {:name "VirtualInput anchored row start-column is caret visible base" :fn anchored-row-start-column-is-caret-visible-base}
+   {:name "VirtualInput root update after focus lays out caret" :fn root-update-after-focus-lays-out-caret}
+   {:name "VirtualInput root update after insert mode lays out thin caret" :fn root-update-after-insert-mode-lays-out-thin-caret}
+   {:name "VirtualInput root update after cursor move lays out caret position" :fn root-update-after-cursor-move-lays-out-caret-position}
+   {:name "VirtualInput file-backed caret visual update matches eager Input" :fn file-backed-caret-visual-update-matches-eager-input}
   {:name "VirtualInput direct normal edit keys do not edit" :fn direct-normal-edit-keys-do-not-edit}
   {:name "VirtualInput direct normal arrows do not move caret" :fn direct-normal-arrows-do-not-move-caret}
   {:name "VirtualInput large-file geometry and horizontal scroll stay lazy" :fn large-file-geometry-and-horizontal-scroll-stay-lazy}
