@@ -11,6 +11,7 @@
 (local CaretPolicy (require :text-input-caret-policy))
 (local KeyPolicy (require :text-input-key-policy))
 (local Geometry (require :text-input-geometry))
+(local {: fallback-glyph} (require :text-utils))
 (local {: resolve-input-colors : resolve-padding} (require :widget-theme-utils))
 
 (var virtual-input-clip-region-seq 0)
@@ -382,6 +383,16 @@
       (values (if (= self.cursor-line nil) 0 self.cursor-line)
               (if (= self.cursor-column nil) 0 self.cursor-column))))
 
+(fn row-visible-base [input row]
+  (assert input "VirtualInput row-visible-base requires input")
+  (assert row "VirtualInput row-visible-base requires row")
+  (local base (if (not (= row.start-column nil))
+                row.start-column
+                (if (not (= input.scroll-column nil))
+                    input.scroll-column
+                    0)))
+  (math.max 0 (math.floor base)))
+
 (fn locate-caret-in-row [self row]
   (assert self "locate-caret-in-row requires input")
   (assert row "locate-caret-in-row requires row")
@@ -389,7 +400,7 @@
   (local row-start (or row.start-byte 0))
   (local row-end (or row.end-byte row.line-end-byte row-start))
   (when (and (>= cursor row-start) (<= cursor row-end))
-    (values row.line (+ self.scroll-column (cursor-column-for-row row cursor)) row)))
+    (values row.line (+ (row-visible-base self row) (cursor-column-for-row row cursor)) row)))
 
 (fn locate-caret-in-full-line [self line]
   (assert self "locate-caret-in-full-line requires input")
@@ -407,7 +418,7 @@
     (when (and row
                (>= cursor (or row.start-byte 0))
                (<= cursor (or row.end-byte row.start-byte 0)))
-      (values row.line (+ self.scroll-column (cursor-column-for-row row cursor)) row))))
+      (values row.line (+ (row-visible-base self row) (cursor-column-for-row row cursor)) row))))
 
 (fn locate-caret-line-column [self]
   (assert self "locate-caret-line-column requires input")
@@ -897,7 +908,30 @@
   (assert input "VirtualInput caret codepoint requires input")
   (assert row "VirtualInput caret codepoint requires row")
   (local codepoints (assert row.codepoints "VirtualInput caret width requires row codepoints"))
-  (. codepoints (+ (- column input.scroll-column) 1)))
+  (. codepoints (+ (- column (row-visible-base input row)) 1)))
+(fn caret-glyph-advance [style codepoint]
+  (local font (and style style.font))
+  (if (not font)
+      0
+      (do
+        (local glyph (fallback-glyph font codepoint))
+        (if (and glyph glyph.advance)
+            (* glyph.advance style.scale)
+            0))))
+(fn caret-prefix-width [input row column]
+  (assert input "VirtualInput caret prefix width requires input")
+  (assert row "VirtualInput caret prefix width requires row")
+  (local style (caret-row-style input row))
+  (local codepoints (assert row.codepoints "VirtualInput caret prefix width requires row codepoints"))
+  (local visible-count (length codepoints))
+  (local target (math.min visible-count
+                          (math.max 0 (- column (row-visible-base input row)))))
+  (var width 0.0)
+  (for [i 1 target]
+    (local codepoint (. codepoints i))
+    (when codepoint
+      (set width (+ width (caret-glyph-advance style codepoint)))))
+  width)
 (fn caret-width-for-mode [input row column]
   (local style (caret-row-style input row))
   (when (and (not (= input.mode :insert)) (not style.font))
@@ -906,19 +940,19 @@
                                 (caret-row-codepoint input row column)
                                 input.caret-width
                                 input.mode))
-(fn caret-position [input position rotation size line column]
+(fn caret-position [input position rotation size line column row]
   (+ position
      (rotation:rotate
-       (glm.vec3 (+ input.padding.x (* (- column input.scroll-column) input.column-width))
-                 (Geometry.row-y-offset size input.padding input.line-height (+ (- line input.scroll-line) 1))
-                 0))))
+        (glm.vec3 (+ input.padding.x (caret-prefix-width input row column))
+                  (Geometry.row-y-offset size input.padding input.line-height (+ (- line input.scroll-line) 1))
+                  0))))
 (fn show-caret [input position rotation size depth clip line column]
   (local (_caret-line _caret-column row) (caret-line-column input))
   (assert row "VirtualInput show-caret requires visible caret row")
   (update-caret-visual input {:mark-layout-dirty? false})
   (if input.focused?
       (do
-        (layout-child input.caret (caret-position input position rotation size line column) rotation (glm.vec3 (caret-width-for-mode input row column) (CaretPolicy.caret-height input.line-height (- size.y (* 2 input.padding.y))) size.z) depth clip))
+        (layout-child input.caret (caret-position input position rotation size line column row) rotation (glm.vec3 (caret-width-for-mode input row column) (CaretPolicy.caret-height input.line-height (- size.y (* 2 input.padding.y))) size.z) depth clip))
       (do
         (set input.caret.visible? false)
         (layout-child input.caret position rotation (glm.vec3 0 0 size.z) depth clip))))
@@ -927,10 +961,11 @@
   (layout-child input.caret position rotation (glm.vec3 0 0 size.z) depth clip))
 (fn layout-caret [input position rotation size depth clip]
   (local (line column row) (caret-line-column input))
+  (local base (and row (row-visible-base input row)))
   (if (and input.focused?
-           row
-           (>= column input.scroll-column)
-           (<= column (+ input.scroll-column input.visible-column-count)))
+            row
+            (>= column base)
+            (<= column (+ base input.visible-column-count)))
       (show-caret input position rotation size depth clip line column)
       (hide-caret input position rotation size depth clip)))
 
