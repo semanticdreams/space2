@@ -10,7 +10,7 @@ The graph is intended to provide one uniform interface to many kinds of things: 
 
 `GraphMap` is the named, persistent interaction context for a task or workflow. A graph map owns the visible references, display edges, arrangement, and interaction state that a user has explicitly materialized. It does not own the underlying objects.
 
-This keeps the existing graph-as-universal-model direction while avoiding multiple independent `Graph` instances that duplicate shared store subscriptions and shared key-loader behavior.
+This keeps the existing graph-as-universal-model direction while avoiding multiple independent `Graph` instances that duplicate shared store subscriptions and registry-installed key-loader behavior.
 
 ## Current Status
 
@@ -40,7 +40,7 @@ Remaining:
 
 ## Terminology
 
-- `Graph`: the shared graph-addressable object resolver/catalog. It owns key loader registration and shared backing-store integration. During the migration, keep the existing module name and avoid a broad rename.
+- `Graph`: the shared graph-addressable object resolver/catalog. It exposes the low-level key-loader registration primitive used by graph extension descriptor installers and provides shared backing-store integration. During the migration, keep the existing module name and avoid a broad rename.
 - `GraphMap`: a persistent interaction context over shared graph-addressable objects. It owns included node keys, explicit map edges, map-local node adapter instances, layout, expanded cards, selection/focus, and graph-owned panels.
 - `GraphView`: runtime renderer/controller for the active graph map. It owns rendering handles, force-layout instance, focus/click/movable registrations, drag state, and batching.
 - `Remove from Map`: non-destructive operation. Removes a node reference and its map-local UI state from the active graph map.
@@ -70,7 +70,7 @@ Graph maps should share the key/object universe but keep their own interaction s
 Shared between all graph maps:
 
 - Key namespace and key semantics.
-- Key loader registration.
+- Key-loader handles installed by graph extension descriptors through the registry.
 - Backing stores and persisted objects.
 - Identity resolution.
 - Link entities as underlying relationships.
@@ -435,7 +435,7 @@ Destructive object actions should remain explicit and node-specific:
 
 Do not silently delete backing objects when removing from a map.
 
-`Add Start` is map membership recovery, not automatic start-node re-seeding. It uses the `start` key loader through the active `GraphMap` and does not delete or mutate backing domain objects.
+`Add Start` is map membership recovery, not automatic start-node re-seeding. It uses the registry-installed `start` key loader through the active `GraphMap` and does not delete or mutate backing domain objects.
 
 ## Migration Phases
 

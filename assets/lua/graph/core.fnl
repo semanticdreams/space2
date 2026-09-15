@@ -3,9 +3,9 @@
 (local glm (require :glm))
 (local Edge (require :graph/edge))
 (local NodeBase (require :graph/node-base))
-(local StartNode (require :graph/nodes/start))
-(local ClassNode (require :graph/nodes/class))
-(local QuitNode (require :graph/nodes/quit))
+;; Built-in node types are installed by graph extension descriptors.
+;; Keep graph core generic: no graph/nodes/start import here.
+;; Keep graph core generic: no graph/nodes/class or quit import here.
 (local Signal (require :signal))
 (local logging (require :logging))
 (local LinkEntityStore (require :entities/link))
@@ -123,7 +123,7 @@
     (local self {:nodes nodes
                  :edges edges
                  :edge-map edge-map
-                 :with-start (if (= options.with-start nil) true options.with-start)
+                 ;; Built-in start nodes are descriptor-loaded, not auto-created.
                  :entity-events? entity-events?
                  :node-added node-added
                  :node-removed node-removed
@@ -694,19 +694,18 @@
             (edge-removed:clear)
             (disconnect-entity-handlers)))
 
-    (when self.with-start
-        (local start (StartNode))
-        (set start.auto-focus? true)
-        (self:add-node start {:auto-focus? true})
-        (set self.start start))
-
+    ;; Built-in start node creation moved to graph extension descriptors.
+    ;; Graph core intentionally returns an empty generic graph by default.
+    ;; Descriptors may install key loaders and load nodes through graph APIs.
+    ;; Keep this spacing stable for existing reviewed constraint baselines.
+    ;; No compatibility auto-start path remains here.
     self)
 
 (set Graph.GraphNode GraphNode)
 (set Graph.GraphEdge GraphEdge)
-(set Graph.StartNode StartNode)
-(set Graph.ClassNode ClassNode)
-(set Graph.QuitNode QuitNode)
+;; Built-in node constructors are required from graph/nodes/* directly.
+;; Graph core exports only generic graph primitives.
+;; Descriptor installers own built-in scheme registration.
 (set Graph.create create-graph)
 (setmetatable Graph {:__call (fn [_ opts] (create-graph opts))})
 

@@ -272,12 +272,14 @@
                        :set-active-interaction-surface app.set-active-interaction-surface
                        :set-active-activity app.set-active-activity
                        :bind-active-world-runtime app.bind-active-world-runtime
-                       :world-manager app.world-manager
-                       :active-world-entry app.active-world-entry
-                       :active-world-runtime app.active-world-runtime
-                       :preferred-interaction-surface app.preferred-interaction-surface
-                       :active-interaction-surface app.active-interaction-surface
-                       :active-activity-id app.active-activity-id
+                        :world-manager app.world-manager
+                        :active-world-entry app.active-world-entry
+                        :active-world-runtime app.active-world-runtime
+                        :graph-extension-registry app.graph-extension-registry
+                        :builtin-graph-extension-handles app.builtin-graph-extension-handles
+                        :preferred-interaction-surface app.preferred-interaction-surface
+                        :active-interaction-surface app.active-interaction-surface
+                        :active-activity-id app.active-activity-id
                        :workspace-shell-changed app.workspace-shell-changed
                        :canvas-visible? app.canvas-visible?
                        :scene-interactive? app.scene-interactive?
@@ -297,6 +299,11 @@
             (set app.hud hud)
             (set app.focus focus-manager)
             (set app.world-manager world-manager-stub)
+            (set app.graph-extension-registry nil)
+            (set app.builtin-graph-extension-handles nil)
+            (Main.ensure-built-in-graph-extensions! {:world-manager world-manager-stub
+                                                     :asset-path-resolver (fn [path]
+                                                                            (app.engine:get-asset-path path))})
             (local JsonUtils (require :json-utils))
             (JsonUtils.write-json! (fs.join-path dir "world.json")
                                    {:activity {:active_id "graph"}})
@@ -322,6 +329,11 @@
       (when world
         (world:drop runtime-context "e2e-drawing-workflow"))
       (Harness.cleanup-target hud)
+      (when app.builtin-graph-extension-handles
+        (for [i (length app.builtin-graph-extension-handles) 1 -1]
+          (local handle (. app.builtin-graph-extension-handles i))
+          (when (and handle handle.unregister)
+            (handle:unregister))))
       (each [key value (pairs previous)]
         (set (. app key) value))
       (if ok

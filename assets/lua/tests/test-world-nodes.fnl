@@ -2,7 +2,6 @@
 (local glm (require :glm))
 (local Signal (require :signal))
 (local Graph (require :graph/init))
-(local GraphKeyLoaders (require :graph/key-loaders))
 (local LightSystemModule (require :light-system))
 (local SkyboxState (require :skybox-state))
 (local BackgroundState (require :background-state))
@@ -25,6 +24,12 @@
   (local (ok result) (pcall f dir))
   (fs.remove-all dir)
   (if ok result (error result)))
+
+(fn install-world-builtins! [graph world-manager opts]
+  (local options {:world-manager world-manager})
+  (each [key value (pairs (if opts opts {}))]
+    (set (. options key) value))
+  ((. (require :tests/graph-builtin-extension-helpers) :install-builtins!) graph options))
 
 (fn make-skybox-state [opts]
   (local options (or opts {}))
@@ -2172,7 +2177,7 @@
   (with-temp-dir
     (fn [dir]
       (local graph (Graph {:with-start false}))
-      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world"})})
+      (install-world-builtins! graph (make-world-manager {:id "test-world"}))
       (local result (graph:load-by-key "activity-scene-panels:test-world:sandbox"))
       (assert result "scene-panels loader should create node")
       (assert (= result.key "activity-scene-panels:test-world:sandbox") "scene-panels key should match")
@@ -2183,7 +2188,7 @@
   (with-temp-dir
     (fn [dir]
       (local graph (Graph {:with-start false}))
-      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world"})})
+      (install-world-builtins! graph (make-world-manager {:id "test-world"}))
       (local result (graph:load-by-key "hud-panels:test-world"))
       (assert result "hud-panels loader should create node")
       (assert (= result.key "hud-panels:test-world") "hud-panels key should match")
@@ -2194,7 +2199,7 @@
   (with-temp-dir
     (fn [dir]
       (local graph (Graph {:with-start false}))
-      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world"})})
+      (install-world-builtins! graph (make-world-manager {:id "test-world"}))
       (local result (graph:load-by-key "activity-terrains:test-world:sandbox"))
       (assert result "terrains loader should create node")
       (assert (= result.key "activity-terrains:test-world:sandbox") "terrains key should match")
@@ -2216,7 +2221,7 @@
                                                       :skybox (make-skybox-state)
                                                       :background (make-background-state)}
                                               :hud {:panels []}}}))
-      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
+      (install-world-builtins! graph (make-world-manager {:id "test-world" :entry entry}))
       (local result (graph:load-by-key "activity-scene-panel:test-world:sandbox:5"))
       (assert result "scene-panel loader should create node")
       (assert (= result.key "activity-scene-panel:test-world:sandbox:5") "scene-panel key should match")
@@ -2237,7 +2242,7 @@
                                               :hud {:panels [{:kind "h1" :layer "float"}
                                                              {:kind "h2" :layer "float"}
                                                              {:kind "h3" :layer "float"}]}}}))
-      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
+      (install-world-builtins! graph (make-world-manager {:id "test-world" :entry entry}))
       (local result (graph:load-by-key "hud-panel:test-world:float:3"))
       (assert result "hud-panel loader should create node")
       (assert (= result.key "hud-panel:test-world:float:3") "hud-panel key should match")
@@ -2254,7 +2259,7 @@
                                       :state {:scene {:panels []
                                                       :terrains [(make-heightfield-terrain-record {:id "terrain-abc"})]}
                                               :hud {:panels []}}}))
-      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
+      (install-world-builtins! graph (make-world-manager {:id "test-world" :entry entry}))
       (local result (graph:load-by-key "activity-terrain:test-world:sandbox:terrain-abc"))
       (assert result "terrain loader should create node")
       (assert (= result.key "activity-terrain:test-world:sandbox:terrain-abc") "terrain key should match")
@@ -2270,7 +2275,7 @@
                                       :state {:scene {:panels []
                                                       :terrains [(make-heightfield-terrain-record {:id "terrain-abc"})]}
                                               :hud {:panels []}}}))
-      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
+      (install-world-builtins! graph (make-world-manager {:id "test-world" :entry entry}))
       (local result (graph:load-by-key "activity-terrain-editor:test-world:sandbox:terrain-abc"))
       (assert result "terrain editor loader should create node")
       (assert (= result.key "activity-terrain-editor:test-world:sandbox:terrain-abc") "terrain editor key should match")
@@ -2287,7 +2292,7 @@
                                       :state {:scene {:panels []
                                                       :terrains [(make-heightfield-terrain-record {:id "terrain-abc"})]}
                                               :hud {:panels []}}}))
-      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
+      (install-world-builtins! graph (make-world-manager {:id "test-world" :entry entry}))
       (local result (graph:load-by-key "activity-terrain-editor:test-world:sandbox:terrain-abc"))
       (assert result "heightfield terrain editor loader should create node")
       (assert (= result.key "activity-terrain-editor:test-world:sandbox:terrain-abc") "heightfield terrain editor key should match")
@@ -2304,7 +2309,7 @@
                                       :state {:scene {:panels []
                                                       :terrains [(make-heightfield-terrain-record {:id "terrain-abc"})]}
                                               :hud {:panels []}}}))
-      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
+      (install-world-builtins! graph (make-world-manager {:id "test-world" :entry entry}))
       (local result (graph:load-by-key "activity-terrain-tool:test-world:sandbox:terrain-abc:apply-perlin"))
       (assert result "terrain tool loader should create node")
       (assert (= result.key "activity-terrain-tool:test-world:sandbox:terrain-abc:apply-perlin") "terrain tool key should match")
@@ -2321,7 +2326,7 @@
                                                       :terrains []
                                                       :lights (make-light-state {:point [(make-light-record "point" {:id "point-1"})]})}
                                               :hud {:panels []}}}))
-      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
+      (install-world-builtins! graph (make-world-manager {:id "test-world" :entry entry}))
       (local lights-node (graph:load-by-key "activity-lights:test-world:sandbox"))
       (local type-node (graph:load-by-key "activity-light-type:test-world:sandbox:point"))
       (local light-node (graph:load-by-key "activity-light:test-world:sandbox:point:point-1"))

@@ -27,16 +27,17 @@
 
 (fn store-only-loader-case [deps runtime]
   (local Graph (require :graph/init))
-  (local GraphKeyLoaders (require :graph/key-loaders))
+  (local BuiltinGraphTestHelpers (require :tests/graph-builtin-extension-helpers))
   (local seeded (deps.seed-two-definitions-with-runs runtime))
   (local graph (Graph {:with-start false}))
-  (GraphKeyLoaders.register graph {:code-store runtime.code-store :workflow-store runtime.store})
+  (local builtins (BuiltinGraphTestHelpers.install-builtins! graph {:code-store runtime.code-store :workflow-store runtime.store}))
   (local map (deps.GraphMap.GraphMap {:graph graph :id "run-explorer-no-runner-map"}))
   (local explorer (map:load-by-key (.. "workflow-run-explorer:" seeded.selected.id)))
   (assert explorer "workflow-run-explorer key should load with workflow-store only")
   (assert (= (length (explorer:run-items)) 1) "store-only run explorer should list scoped runs")
   (assert (not (graph:has-key-loader-for-key (.. "workflow-run:" seeded.selected-run.id))) "store-only registration should not register workflow-run loader")
   (map:drop)
+  (builtins:drop)
   (graph:drop))
 
 (fn run-foreign []
