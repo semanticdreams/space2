@@ -14,6 +14,7 @@
 (local {: fallback-glyph} (require :text-utils))
 (local Geometry (require :text-input-geometry))
 (local MathUtils (require :math-utils))
+(local {: LayoutRoot} (require :layout))
 (local approx (. MathUtils :approx))
 (local temp-root "/tmp/space/tests/virtual-input-parity")
 
@@ -62,9 +63,29 @@
 (fn narrow-layout! [input columns lines]
   (input.layout:measurer)
   (set input.layout.size (glm.vec3 (+ (* 2 input.padding.x) (* columns input.column-width))
-                                    (+ (* 2 input.padding.y) (* lines input.line-height)) 0))
+                                     (+ (* 2 input.padding.y) (* lines input.line-height)) 0))
   (input.layout:layouter)
   input)
+
+(fn rooted-input [buffer columns lines]
+  (local root (LayoutRoot {:log-dirt? false}))
+  (local input ((VirtualInput {:buffer buffer :line-count lines :column-count columns}) (make-ctx)))
+  (input.layout:set-root root)
+  (narrow-layout! input columns lines)
+  {:root root :input input})
+
+(fn caret-local-x [input]
+  (- input.caret.layout.position.x input.layout.position.x))
+
+(fn caret-local-y [input]
+  (- input.caret.layout.position.y input.layout.position.y))
+
+(fn expected-caret-y [input visible-row]
+  (- input.layout.size.y input.padding.y (* visible-row input.line-height)))
+
+(fn assert-near [actual expected message]
+  (assert (approx actual expected)
+          (.. message "; expected=" (tostring expected) " actual=" (tostring actual))))
 
 (fn snapshot-text [buffer]
   (. (buffer:get-viewport {:line 0 :column 0 :lines 1 :columns 80}) :rows 1 :text))
@@ -388,6 +409,41 @@
   (assert (= input.caret.color eager.caret.color) "returning to normal should restore normal caret color")
   (eager:drop) (input:drop))
 
+(fn root-update-after-focus-lays-out-caret []
+  (local env (rooted-input (lazy-buffer "root-focus-caret" "alpha\nbeta" {:chunk-bytes 4}) 6 2))
+  (local input env.input)
+  (input:request-focus)
+  (env.root:update)
+  (assert input.caret.visible? "root update after focus should show VirtualInput caret")
+  (assert (> input.caret.layout.size.x 0) "root update after focus should give caret nonzero width")
+  (assert (> input.caret.layout.size.y 0) "root update after focus should give caret nonzero height")
+  (assert-near (caret-local-x input) input.padding.x "focused caret x should match column zero")
+  (assert-near (caret-local-y input) (expected-caret-y input 1) "focused caret y should match first row")
+  (input:drop))
+
+(fn root-update-after-insert-mode-lays-out-thin-caret []
+  (local env (rooted-input (lazy-buffer "root-mode-caret" "alpha\nbeta" {:chunk-bytes 4}) 6 2))
+  (local input env.input)
+  (input:request-focus)
+  (input.layout:layouter)
+  (local normal-width input.caret.layout.size.x)
+  (input:enter-insert-mode)
+  (env.root:update)
+  (assert (> normal-width input.caret-width) "normal caret should start as a block")
+  (assert-near input.caret.layout.size.x input.caret-width "root update after insert mode should apply thin caret width")
+  (input:drop))
+
+(fn root-update-after-cursor-move-lays-out-caret-position []
+  (local env (rooted-input (lazy-buffer "root-move-caret" "alpha\nbeta" {:chunk-bytes 4}) 6 2))
+  (local input env.input)
+  (input:request-focus)
+  (input.layout:layouter)
+  (assert (input:move-caret-to-line-column 1 2) "precondition: caret move should succeed")
+  (env.root:update)
+  (assert-near (caret-local-x input) (+ input.padding.x (* 2 input.column-width)) "root update after move should place caret at column two")
+  (assert-near (caret-local-y input) (expected-caret-y input 2) "root update after move should place caret on second row")
+  (input:drop))
+
 (fn file-backed-caret-visual-update-matches-eager-input []
   (local content "Wombat\nBee")
   (local buffer (lazy-buffer "caret-visual" content {:chunk-bytes 3}))
@@ -532,6 +588,9 @@
    {:name "VirtualInput variable-width caret x matches eager Input" :fn variable-width-caret-x-matches-eager-input}
    {:name "VirtualInput multiline caret y still matches eager Input" :fn multiline-caret-y-still-matches-eager-input}
    {:name "VirtualInput anchored row start-column is caret visible base" :fn anchored-row-start-column-is-caret-visible-base}
+   {:name "VirtualInput root update after focus lays out caret" :fn root-update-after-focus-lays-out-caret}
+   {:name "VirtualInput root update after insert mode lays out thin caret" :fn root-update-after-insert-mode-lays-out-thin-caret}
+   {:name "VirtualInput root update after cursor move lays out caret position" :fn root-update-after-cursor-move-lays-out-caret-position}
    {:name "VirtualInput file-backed caret visual update matches eager Input" :fn file-backed-caret-visual-update-matches-eager-input}
   {:name "VirtualInput direct normal edit keys do not edit" :fn direct-normal-edit-keys-do-not-edit}
   {:name "VirtualInput direct normal arrows do not move caret" :fn direct-normal-arrows-do-not-move-caret}
