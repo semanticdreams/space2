@@ -27,6 +27,14 @@
 (fn make-ext-node-b [key]
     (Graph.GraphNode {:key key :label "b"}))
 
+(fn graph-core-does-not-auto-create-built-in-start-node []
+    (local graph (Graph {}))
+    (assert (= (graph:lookup "start") nil)
+            "Graph core should not auto-create built-in start node")
+    (assert (= (graph:node-count) 0)
+            "Graph core should start empty before explicit node additions")
+    (graph:drop))
+
 (fn graph-core-adds-nodes-and-edges []
     (local graph (Graph {:with-start false}))
     (local a (Graph.GraphNode {:key "a"}))
@@ -328,6 +336,8 @@
     (graph-a:drop)
     (graph-b:drop))
 
+(table.insert tests {:name "graph-core-does-not-auto-create-built-in-start-node"
+                     :fn graph-core-does-not-auto-create-built-in-start-node})
 (table.insert tests {:name "Graph core adds nodes and edges" :fn graph-core-adds-nodes-and-edges})
 (table.insert tests {:name "Graph core replaces nodes and updates edges" :fn graph-core-replaces-node-and-updates-edges})
 (table.insert tests {:name "Graph core removes nodes and edges" :fn graph-core-removes-nodes-and-edges})

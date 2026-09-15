@@ -411,7 +411,7 @@
         (fn [_root]
             (local ctx (make-ctx))
             (local graph (Graph {}))
-            (local start graph.start)
+            (local start ((require :graph/nodes/start))) (graph:add-node start {:auto-focus? true})
             (local builder (start.view start))
             (local view (builder ctx))
             (view:refresh-items)
@@ -431,7 +431,7 @@
         (fn [_root]
             (local ctx (make-ctx))
             (local graph (Graph {}))
-            (local start graph.start)
+            (local start ((require :graph/nodes/start))) (graph:add-node start {:auto-focus? true})
             (local builder (start.view start))
             (local view (builder ctx))
             (view:refresh-items)
@@ -454,7 +454,7 @@
         (fn [_root]
             (local ctx (make-ctx))
             (local graph (Graph {}))
-            (local start graph.start)
+            (local start ((require :graph/nodes/start))) (graph:add-node start {:auto-focus? true})
             (local builder (start.view start))
             (local view (builder ctx))
             (view:refresh-items)
@@ -1045,7 +1045,7 @@
     (local original-quit app.engine.quit)
     (var quit-calls 0)
     (set app.engine.quit (fn [] (set quit-calls (+ quit-calls 1))))
-    (local quit-node (Graph.QuitNode {}))
+    (local quit-node ((require :graph/nodes/quit) {}))
     (local builder (quit-node.view quit-node))
     (local view (builder ctx))
     (view:perform-quit)
@@ -1149,10 +1149,10 @@
                                              :ctx ctx
                                              :enabled? true}))
             (local graph (Graph {}))
+            (local start ((require :graph/nodes/start))) (graph:add-node start {:position (glm.vec3 0 0 0)})
             (local view-controller (GraphView {:graph-map graph
-                                                :ctx ctx
-                                                :selector selector}))
-            (local start graph.start)
+                                                 :ctx ctx
+                                                 :selector selector}))
             (local point (. view-controller.points start))
             (assert point.on-double-click "GraphView should attach double click handler to node point")
             (point:on-double-click {})
@@ -2031,7 +2031,7 @@
                                                      (when (= (. self.children i) element)
                                                          (table.remove self.children i))))})
             (local graph (Graph {}))
-            (local node graph.start)
+            (local node ((require :graph/nodes/start))) (graph:add-node node {:position (glm.vec3 0 0 0)})
             (local views (GraphViewNodeViews {:ctx ctx
                                               :view-target target}))
             (views:open node)

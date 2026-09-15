@@ -422,7 +422,7 @@
             (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :selector selector}))
-            (local start (Graph.StartNode))
+            (local start ((require :graph/nodes/start)))
             (graph:add-node start {:position (glm.vec3 1 1 0)})
             (selector.box.changed:emit {:p1 {:x 0 :y 0}
                                         :p2 {:x 2 :y 2}})
@@ -445,7 +445,7 @@
             (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :selector selector}))
-            (local start (Graph.StartNode))
+            (local start ((require :graph/nodes/start)))
             (graph:add-node start {:position (glm.vec3 5 5 0)})
             (selector.box.changed:emit {:p1 {:x 0 :y 0}
                                         :p2 {:x 2 :y 2}})
