@@ -1,4 +1,5 @@
 (local fs (require :fs))
+(local BuiltinGraphTestHelpers (require :tests/graph-builtin-extension-helpers))
 
 (local tests [])
 
@@ -108,13 +109,37 @@
   (assert (= result nil) "load-by-key should return nil when loader returns nil")
   (graph:drop))
 
+(fn make-completed-future [value]
+  {:on-complete (fn [cb]
+                  (cb true value nil :test)
+                  value)
+   :cancel (fn [] nil)})
+
+(fn make-hackernews-client []
+  {:fetch-topstories (fn [] (make-completed-future []))
+   :fetch-newstories (fn [] (make-completed-future []))
+   :fetch-beststories (fn [] (make-completed-future []))
+   :fetch-item (fn [id]
+                 (make-completed-future {:id id
+                                         :by "dhouston"
+                                         :title "demo"}))
+   :fetch-user (fn [id]
+                 (make-completed-future {:id id
+                                         :created 0
+                                         :karma 0
+                                         :about ""}))})
+
+(fn assert-graph-node-has-preview [node context]
+  (assert node (.. "missing node for preview assertion: " context))
+  (assert node.preview (.. context " should expose preview"))
+  (assert (= (type node.preview) "function") (.. context " preview should be a function")))
+
 (fn world-backed-loaders-return-nil-for-missing-objects []
   (local Graph (require :graph/init))
-  (local GraphKeyLoaders (require :graph/key-loaders))
   (local graph (Graph {:with-start false}))
   (local world-manager {:get-world-entry (fn [_self _id] nil)
                         :list-tabs (fn [_self] [])})
-  (GraphKeyLoaders.register graph {:world-manager world-manager})
+  (local builtins (BuiltinGraphTestHelpers.install-builtins! graph {:world-manager world-manager}))
   (local keys ["world:missing"
                "activity-terrain:missing:sandbox:t1"
                "activity-terrain-editor:missing:sandbox:t1"
@@ -127,6 +152,7 @@
     (local (ok result) (pcall (fn [] (graph:create-node-by-key key))))
     (assert ok (.. "Missing world-backed key should not throw: " key))
     (assert (= result nil) (.. "Missing world-backed key should return nil: " key)))
+  (builtins:drop)
   (graph:drop))
 
 (fn multiple-loaders-match-by-scheme []
@@ -459,7 +485,7 @@
       (loaded-string-node:drop)
       (graph:drop))))
 
-(fn graph-key-loaders-registers-and-loads-nodes []
+(fn built-in-graph-extensions-register-and-load-nodes []
   (with-temp-dir
     (fn [dir]
       (local StringEntityStore (require :entities/string))
@@ -475,139 +501,114 @@
       (local kernels (Kernels.Kernels {:base-dir (fs.join-path dir "kernels")
                                        :defer-callbacks false}))
       (local llm-store (LlmStore.Store {:base-dir (fs.join-path dir "llm")}))
-      (local GraphKeyLoaders (require :graph/key-loaders))
       (local Graph (require :graph/init))
       (local graph (Graph {:with-start false :link-store link-store}))
 
-      (fn make-future [value]
-        {:on-complete (fn [cb]
-                        (cb true value nil :test)
-                        value)
-         :cancel (fn [] nil)})
-
-      (local hn-client
-        {:fetch-topstories (fn [] (make-future []))
-         :fetch-newstories (fn [] (make-future []))
-         :fetch-beststories (fn [] (make-future []))
-         :fetch-item (fn [id]
-                       (make-future {:id id
-                                     :by "dhouston"
-                                     :title "demo"}))
-         :fetch-user (fn [id]
-                       (make-future {:id id
-                                     :created 0
-                                     :karma 0
-                                     :about ""}))})
-
-      (GraphKeyLoaders.register graph {:string-store string-store
-                                       :list-store list-store
-                                       :link-store link-store
-                                       :notebook-store notebook-store
-                                       :kernels kernels
-                                       :llm-store llm-store
-                                       :hackernews-ensure-client (fn [] hn-client)})
-
-      (fn assert-has-preview [node context]
-        (assert node (.. "missing node for preview assertion: " context))
-        (assert node.preview (.. context " should expose preview"))
-        (assert (= (type node.preview) "function") (.. context " preview should be a function")))
+      (local builtins
+        (BuiltinGraphTestHelpers.install-builtins! graph {:string-store string-store
+                                                           :list-store list-store
+                                                           :link-store link-store
+                                                           :notebook-store notebook-store
+                                                           :kernels kernels
+                                                           :llm-store llm-store
+                                                           :hackernews-ensure-client make-hackernews-client}))
 
       (local string-list (graph:load-by-key "string-entity-list"))
       (assert string-list "should load string-entity-list")
       (assert (= string-list.key "string-entity-list") "string list key should match")
       (assert (= string-list.store string-store) "string list should use provided store")
-      (assert-has-preview string-list "string-entity-list")
+      (assert-graph-node-has-preview string-list "string-entity-list")
 
       (local notebook-record (notebook-store:create-notebook {:name "surgery prep"}))
       (local notebooks-node (graph:load-by-key "notebooks"))
       (assert notebooks-node "should load notebooks node")
       (assert (= notebooks-node.key "notebooks") "notebooks key should match")
       (assert (= notebooks-node.store notebook-store) "notebooks node should use provided store")
-      (assert-has-preview notebooks-node "notebooks")
+      (assert-graph-node-has-preview notebooks-node "notebooks")
 
       (local notebook-node (graph:load-by-key (.. "notebook:" notebook-record.id)))
       (assert notebook-node "should load notebook node")
       (assert (= notebook-node.key (.. "notebook:" notebook-record.id)) "notebook key should match")
       (assert (= notebook-node.notebook-id notebook-record.id) "notebook id should match")
-      (assert-has-preview notebook-node "notebook")
+      (assert-graph-node-has-preview notebook-node "notebook")
 
       (local kernels-node (graph:load-by-key "kernels"))
       (assert kernels-node "should load kernels node")
       (assert (= kernels-node.key "kernels") "kernels key should match")
-      (assert-has-preview kernels-node "kernels")
+      (assert-graph-node-has-preview kernels-node "kernels")
 
       (local created-kernel (kernels:create-kernel {:name "test-kernel"}))
       (local kernel-node (graph:load-by-key (.. "kernel:" (tostring created-kernel.id))))
       (assert kernel-node "should load kernel node")
       (assert (= kernel-node.key (.. "kernel:" (tostring created-kernel.id)))
               "kernel key should match")
-      (assert-has-preview kernel-node "kernel")
+      (assert-graph-node-has-preview kernel-node "kernel")
 
       (local node (graph:load-by-key "class:demo"))
       (assert node "should load class node")
       (assert (= node.key "class:demo") "class node key should match")
-      (assert-has-preview node "class")
+      (assert-graph-node-has-preview node "class")
 
       (local fs-node (graph:load-by-key "fs:/tmp"))
       (assert fs-node "should load fs node")
       (assert (= fs-node.key "fs:/tmp") "fs node key should match")
       (assert (= fs-node.path "/tmp") "fs node should use parsed path")
-      (assert-has-preview fs-node "fs")
+      (assert-graph-node-has-preview fs-node "fs")
 
       (local table-node (graph:load-by-key "table:_G"))
       (assert table-node "should load table:_G")
       (assert (= table-node.key "table:_G") "table node key should match")
       (assert (= table-node.table _G) "table node should resolve _G")
-      (assert-has-preview table-node "table")
+      (assert-graph-node-has-preview table-node "table")
 
       (local tool-node (graph:load-by-key "llm-tool:test-tool"))
       (assert tool-node "should load llm-tool node")
       (assert (= tool-node.key "llm-tool:test-tool") "llm-tool node key should match")
       (assert (= tool-node.name "test-tool") "llm-tool node should use parsed name")
-      (assert-has-preview tool-node "llm-tool")
+      (assert-graph-node-has-preview tool-node "llm-tool")
 
       (llm-store:create-conversation {:name "demo"} "c1")
       (local convo-node (graph:load-by-key "llm-conversation:c1"))
       (assert convo-node "should load llm conversation")
       (assert (= convo-node.key "llm-conversation:c1") "llm conversation key should match")
-      (assert-has-preview convo-node "llm-conversation")
+      (assert-graph-node-has-preview convo-node "llm-conversation")
 
       (llm-store:create-item {:type "message" :content "hi"} "m1")
       (local msg-node (graph:load-by-key "llm-message:m1"))
       (assert msg-node "should load llm message")
       (assert (= msg-node.key "llm-message:m1") "llm message key should match")
-      (assert-has-preview msg-node "llm-message")
+      (assert-graph-node-has-preview msg-node "llm-message")
 
       (local hn-root (graph:load-by-key "hackernews-root"))
       (assert hn-root "should load hackernews root node")
       (assert (= hn-root.key "hackernews-root") "hackernews root key should match")
-      (assert-has-preview hn-root "hackernews-root")
+      (assert-graph-node-has-preview hn-root "hackernews-root")
 
       (local hn-list (graph:load-by-key "hackernews-story-list:topstories"))
       (assert hn-list "should load hackernews story list node")
       (assert (= hn-list.key "hackernews-story-list:topstories") "hackernews story list key should match")
-      (assert-has-preview hn-list "hackernews-story-list")
+      (assert-graph-node-has-preview hn-list "hackernews-story-list")
 
       (local hn-story (graph:load-by-key "hackernews-story:42"))
       (assert hn-story "should load hackernews story node")
       (assert (= hn-story.key "hackernews-story:42") "hackernews story key should match")
-      (assert-has-preview hn-story "hackernews-story")
+      (assert-graph-node-has-preview hn-story "hackernews-story")
 
       (local hn-user (graph:load-by-key "hackernews-user:jl"))
       (assert hn-user "should load hackernews user node")
       (assert (= hn-user.key "hackernews-user:jl") "hackernews user key should match")
-      (assert-has-preview hn-user "hackernews-user")
+      (assert-graph-node-has-preview hn-user "hackernews-user")
 
+      (builtins:drop)
       (graph:drop)
       (kernels:drop))))
 
 (fn fs-loader-returns-nil-for-missing-path []
   (with-temp-dir
     (fn [dir]
-      (local GraphKeyLoaders (require :graph/key-loaders))
       (local Graph (require :graph/init))
       (local graph (Graph {:with-start false}))
-      (GraphKeyLoaders.register graph {})
+      (local builtins (BuiltinGraphTestHelpers.install-builtins! graph {}))
       (local existing-key (.. "fs:" dir))
       (local existing-node (graph:load-by-key existing-key))
       (assert existing-node "fs loader should resolve an existing path")
@@ -615,6 +616,7 @@
       (local missing-node (graph:create-node-by-key missing-key))
       (assert (= missing-node nil)
               "fs loader should return nil for a missing path")
+      (builtins:drop)
       (graph:drop))))
 
 (fn hackernews-ensure-client-propagates-to-child-nodes []
@@ -648,9 +650,8 @@
 
 (fn activity-hierarchy-loaders-resolve-existing-session []
   (local Graph (require :graph/init))
-  (local GraphKeyLoaders (require :graph/key-loaders))
   (local graph (Graph {:with-start false}))
-  (GraphKeyLoaders.register graph {:world-manager (make-activity-world-manager) :asset-path-resolver (fn [_name] nil)})
+  (local builtins (BuiltinGraphTestHelpers.install-builtins! graph {:world-manager (make-activity-world-manager) :asset-path-resolver (fn [_name] nil)}))
   (each [_ key (ipairs ["world-activities:test-world" "world-activity:test-world:sandbox" "activity-surfaces:test-world:sandbox" "activity-scene:test-world:sandbox" "activity-scene-panels:test-world:sandbox" "activity-terrains:test-world:sandbox" "activity-skybox:test-world:sandbox" "activity-background:test-world:sandbox" "activity-lights:test-world:sandbox" "activity-scene-panel:test-world:sandbox:1" "activity-terrain:test-world:sandbox:terrain-a" "activity-terrain-editor:test-world:sandbox:terrain-a" "activity-terrain-tool:test-world:sandbox:terrain-a:apply-perlin" "activity-light-type:test-world:sandbox:point" "activity-light:test-world:sandbox:point:point-1"])]
     (local node (graph:load-by-key key))
     (assert node (.. "loader should resolve " key))
@@ -659,14 +660,14 @@
   (assert (= (graph:load-by-key "activity-canvas:test-world:sandbox") nil) "activity-canvas loader should return nil when session has no canvas")
   (each [_ key (ipairs ["scene-panels:test-world" "terrains:test-world" "skybox:test-world" "background:test-world" "lights:test-world"])]
     (assert (= (graph:load-by-key key) nil) (.. "legacy scene category loader should be absent: " key)))
+  (builtins:drop)
   (graph:drop))
 
 (fn legacy-scene-detail-loaders-are-absent-after-map-key-migration []
   "Legacy persisted detail keys migrate in GraphMapManager; loaders should not keep aliases."
   (local Graph (require :graph/init))
-  (local GraphKeyLoaders (require :graph/key-loaders))
   (local graph (Graph {:with-start false}))
-  (GraphKeyLoaders.register graph {:world-manager (make-activity-world-manager) :asset-path-resolver (fn [_name] nil)})
+  (local builtins (BuiltinGraphTestHelpers.install-builtins! graph {:world-manager (make-activity-world-manager) :asset-path-resolver (fn [_name] nil)}))
   (each [_ key (ipairs ["scene-panel:test-world:1"
                         "terrain:test-world:terrain-a"
                         "terrain-editor:test-world:terrain-a"
@@ -675,6 +676,7 @@
                         "light:test-world:point:point-1"])]
     (assert (= (graph:load-by-key key) nil)
             (.. "legacy scene detail loader should be absent: " key)))
+  (builtins:drop)
   (graph:drop))
 
 (table.insert tests {:name "graph has register-key-loader"
@@ -749,8 +751,8 @@
                      :fn link-entity-integration-readds-edge-after-node-removal})
 (table.insert tests {:name "list entity node loads items via load-by-key"
                      :fn list-entity-node-loads-items-via-load-by-key})
-(table.insert tests {:name "graph key loaders registers and loads nodes"
-                      :fn graph-key-loaders-registers-and-loads-nodes})
+(table.insert tests {:name "built-in graph extensions register and load nodes"
+                       :fn built-in-graph-extensions-register-and-load-nodes})
 (table.insert tests {:name "fs loader returns nil for missing path"
                      :fn fs-loader-returns-nil-for-missing-path})
 (table.insert tests {:name "hackernews ensure-client propagates to child nodes"

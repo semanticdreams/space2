@@ -4,6 +4,7 @@
 (local Templates (require :workflows/templates))
 (local WorkflowEvents (require :llm/agent/workflow-events))
 (local AgentSessionGraphNode (require :graph/nodes/agent-session))
+(local BuiltinGraphTestHelpers (require :tests/graph-builtin-extension-helpers))
 
 (local _main (require :main))
 
@@ -52,22 +53,23 @@
   (local {:WorkflowStore WorkflowStore} (require :workflows/store))
   (local CodeEntityStore (require :entities/code))
   (local Graph (require :graph/init))
-  (local GraphKeyLoaders (require :graph/key-loaders))
   (local workflow-store (WorkflowStore {:base-dir (fs.join-path dir "workflow")}))
   (local code-store (CodeEntityStore.CodeEntityStore {:base-dir (fs.join-path dir "code")}))
   (local runner (make-runner workflow-store))
   (local graph (Graph {:with-start false}))
-  (GraphKeyLoaders.register graph {:code-store code-store
-                                   :workflow-store workflow-store
-                                   :workflow-runner runner})
+  (local builtins (BuiltinGraphTestHelpers.install-builtins! graph {:code-store code-store
+                                                                    :workflow-store workflow-store
+                                                                    :workflow-runner runner}))
   {:store workflow-store
    :code-store code-store
    :runner runner
-   :graph graph})
+   :graph graph
+   :builtins builtins})
 
 (fn with-runtime-dir [f dir]
   (local runtime (make-runtime dir))
   (local (ok result) (pcall f runtime))
+  (runtime.builtins:drop)
   (runtime.graph:drop)
   (if ok result (error result)))
 
@@ -1001,11 +1003,11 @@
 (fn start-definition-node-requires-graph-dependencies-before-persisting-case [runtime]
   (local definition (seed-definition-for-authoring runtime)) (local map (GraphMap.GraphMap {:graph runtime.graph :id "start-preflight-map"})) (local node (map:load-by-key (.. "workflow-definition:" definition.id))) (assert-start-preflight-fails-without-persisting runtime node nil "requires a graph map") (assert-start-preflight-fails-without-persisting runtime node {:add-edge (fn [])} "requires a graph map") (assert-start-preflight-fails-without-persisting runtime node {:load-by-key (fn [])} "requires a graph map") (map:drop))
 
-(fn start-definition-node-requires-workflow-run-loader-before-persisting-case [runtime] (local Graph (require :graph/init)) (local DefinitionNode (require :graph/nodes/workflow-definition))
-  (local graph (Graph {:with-start false})) (DefinitionNode.register-loader graph {:store runtime.store :runner runtime.runner :code-store runtime.code-store})
+(fn start-definition-node-requires-workflow-run-loader-before-persisting-case [runtime] (local Graph (require :graph/init))
+  (local graph (Graph {:with-start false})) (local builtins (BuiltinGraphTestHelpers.install-builtins! graph {:workflow-store runtime.store :workflow-runner runtime.runner :code-store runtime.code-store :only-schemes [:workflow-definition]}))
   (local definition (seed-definition-for-authoring runtime)) (local map (GraphMap.GraphMap {:graph graph :id "start-missing-run-loader-map"})) (local node (map:load-by-key (.. "workflow-definition:" definition.id)))
   (local before-started (length runtime.runner.started)) (local before-runs (length (runtime.store:list-runs {:definition-id definition.id}))) (local (ok err) (pcall node.start-workflow-from-graph node {:prompt "go"} {}))
-  (assert (not ok) "Start should fail loudly without a workflow-run key loader") (assert (string.find (tostring err) "requires graph loader for workflow-run" 1 true) "Start missing loader failure should explain the workflow-run loader requirement") (assert (= (length runtime.runner.started) before-started) "Start without workflow-run loader should not call the runner") (assert (= (length (runtime.store:list-runs {:definition-id definition.id})) before-runs) "Start without workflow-run loader should not persist a workflow run") (map:drop) (graph:drop))
+  (assert (not ok) "Start should fail loudly without a workflow-run key loader") (assert (string.find (tostring err) "requires graph loader for workflow-run" 1 true) "Start missing loader failure should explain the workflow-run loader requirement") (assert (= (length runtime.runner.started) before-started) "Start without workflow-run loader should not call the runner") (assert (= (length (runtime.store:list-runs {:definition-id definition.id})) before-runs) "Start without workflow-run loader should not persist a workflow run") (map:drop) (builtins:drop) (graph:drop))
 
 (fn start-context-captures-graph-map-and-selected-node-keys-case [runtime]
   (local definition (seed-definition-for-authoring runtime)) (local map (GraphMap.GraphMap {:graph runtime.graph :id "context-map"})) (local node (map:load-by-key (.. "workflow-definition:" definition.id))) (map:load-by-key (.. "workflow-step:" definition.id ":step-a"))
@@ -1025,7 +1027,6 @@
   (local {:WorkflowRunner WorkflowRunner} (require :workflows/runner))
   (local CodeEntityStore (require :entities/code))
   (local Graph (require :graph/init))
-  (local GraphKeyLoaders (require :graph/key-loaders))
   (local previous-code-store (and app app.code-store))
   (local workflow-store (WorkflowStore {:base-dir (fs.join-path dir "workflow-shared-code")}))
   (local code-store (CodeEntityStore.CodeEntityStore {:base-dir (fs.join-path dir "code-shared")}))
@@ -1033,7 +1034,9 @@
   (local executor (WorkflowCodeExecutor {:code-store app.code-store :app app}))
   (local runner (WorkflowRunner {:store workflow-store :executor executor :app app}))
   (local graph (Graph {:with-start false}))
-  (GraphKeyLoaders.register graph {:workflow-store workflow-store :workflow-runner runner})
+  (local builtins (BuiltinGraphTestHelpers.install-builtins! graph {:code-store code-store
+                                                                    :workflow-store workflow-store
+                                                                    :workflow-runner runner}))
   (local code (code-store:create-entity {:id "step-code" :name "Step" :source (workflow-step-source 1)}))
   (local definition (workflow-store:create-definition {:id "wf-shared-code"
                                                        :name "Shared code"
@@ -1050,6 +1053,7 @@
   (runner:tick-run second-run.id {})
   (assert (= (. (workflow-store:get-run second-run.id) :output :step :value) 2)
           "workflow execution should observe graph-authored code edits after executor cached the entity")
+  (builtins:drop)
   (graph:drop)
   (set app.code-store previous-code-store))
 

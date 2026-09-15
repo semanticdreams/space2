@@ -1,7 +1,7 @@
 (local glm (require :glm))
 (local Graph (require :graph/init))
 (local GraphMap (require :graph/map))
-(local GraphKeyLoaders (require :graph/key-loaders))
+(local BuiltinGraphTestHelpers (require :tests/graph-builtin-extension-helpers))
 (local GraphView (require :graph/view))
 (local BuildContext (require :build-context))
 (local ObjectSelector (require :object-selector))
@@ -411,7 +411,7 @@
         (fn [_root]
             (local ctx (make-ctx))
             (local graph (Graph {}))
-            (local start graph.start)
+            (local start ((require :graph/nodes/start))) (graph:add-node start {:auto-focus? true})
             (local builder (start.view start))
             (local view (builder ctx))
             (view:refresh-items)
@@ -431,7 +431,7 @@
         (fn [_root]
             (local ctx (make-ctx))
             (local graph (Graph {}))
-            (local start graph.start)
+            (local start ((require :graph/nodes/start))) (graph:add-node start {:auto-focus? true})
             (local builder (start.view start))
             (local view (builder ctx))
             (view:refresh-items)
@@ -454,7 +454,7 @@
         (fn [_root]
             (local ctx (make-ctx))
             (local graph (Graph {}))
-            (local start graph.start)
+            (local start ((require :graph/nodes/start))) (graph:add-node start {:auto-focus? true})
             (local builder (start.view start))
             (local view (builder ctx))
             (view:refresh-items)
@@ -580,7 +580,7 @@
                     (local fnl-file (fs.join-path root "main.fnl"))
                     (fs.write-file fnl-file "(local x 1)\n")
                     (local graph (Graph {:with-start false}))
-                    (GraphKeyLoaders.register graph {})
+                    (local builtins (BuiltinGraphTestHelpers.install-builtins! graph {}))
                     (local graph-map (GraphMap.GraphMap {:graph graph :id "code-actions"}))
                     (local dir-key (.. "fs:" (fs.absolute root)))
                     (local dir-node (graph-map:load-by-key dir-key))
@@ -607,6 +607,7 @@
                     (assert (graph-map:lookup module-key)
                             "Open as Fennel Module should add fnl-module node to GraphMap")
                     (graph-map:drop)
+                    (builtins:drop)
                     (graph:drop))))))
 
 (fn fnl-module-node-view-adds-required-module-node []
@@ -1045,7 +1046,7 @@
     (local original-quit app.engine.quit)
     (var quit-calls 0)
     (set app.engine.quit (fn [] (set quit-calls (+ quit-calls 1))))
-    (local quit-node (Graph.QuitNode {}))
+    (local quit-node ((require :graph/nodes/quit) {}))
     (local builder (quit-node.view quit-node))
     (local view (builder ctx))
     (view:perform-quit)
@@ -1149,10 +1150,10 @@
                                              :ctx ctx
                                              :enabled? true}))
             (local graph (Graph {}))
+            (local start ((require :graph/nodes/start))) (graph:add-node start {:position (glm.vec3 0 0 0)})
             (local view-controller (GraphView {:graph-map graph
-                                                :ctx ctx
-                                                :selector selector}))
-            (local start graph.start)
+                                                 :ctx ctx
+                                                 :selector selector}))
             (local point (. view-controller.points start))
             (assert point.on-double-click "GraphView should attach double click handler to node point")
             (point:on-double-click {})
@@ -2031,7 +2032,7 @@
                                                      (when (= (. self.children i) element)
                                                          (table.remove self.children i))))})
             (local graph (Graph {}))
-            (local node graph.start)
+            (local node ((require :graph/nodes/start))) (graph:add-node node {:position (glm.vec3 0 0 0)})
             (local views (GraphViewNodeViews {:ctx ctx
                                               :view-target target}))
             (views:open node)
@@ -4443,9 +4444,9 @@
 
 (fn fs-node-uppercase-module-interactions-restore-through-key-loaders []
   (with-fs-interaction-test-dir
-    (fn [root]
+      (fn [root]
       (local source-graph (Graph {:with-start false}))
-      (GraphKeyLoaders.register source-graph {})
+      (local source-builtins (BuiltinGraphTestHelpers.install-builtins! source-graph {}))
       (local file-cases
         [{:name "MAIN.FNL"
           :label "Open as Fennel Module"
@@ -4468,7 +4469,7 @@
                 (.. file-case.name " should add module node before persistence")))
       (local state (source-graph:capture-state))
       (local restored-graph (Graph {:with-start false}))
-      (GraphKeyLoaders.register restored-graph {})
+      (local restored-builtins (BuiltinGraphTestHelpers.install-builtins! restored-graph {}))
       (restored-graph:restore-state state)
       (each [_ file-case (ipairs file-cases)]
         (local module-key (.. file-case.prefix (fs.absolute (fs.join-path root file-case.name))))
@@ -4476,7 +4477,9 @@
                 (.. file-case.name " module key should restore through key loader")))
       (assert (= (restored-graph:edge-count) 2)
               "Restored uppercase module graph should preserve edges")
+      (restored-builtins:drop)
       (restored-graph:drop)
+      (source-builtins:drop)
       (source-graph:drop))))
 
 (fn fs-node-relative-directory-open-entry-preserves-relative-child-key []

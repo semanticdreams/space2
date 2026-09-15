@@ -76,6 +76,37 @@ loudly if a visible node for the refreshed scheme cannot be rebuilt; hot reload
 rolls the unit back and refreshes again so the runtime returns to the previous
 working adapter version.
 
+## Built-in graph extensions
+
+Built-in graph node families and user/runtime graph extensions use the same app
+registry. At startup, `main.fnl` creates `app.graph-extension-registry`, then
+`graph/extensions/builtins/init.fnl` registers family-scoped built-in descriptors
+for entities, workflows, filesystem, LLM, Hacker News, kernels, and worlds. The
+registry installs those descriptors into every live HomeWorld graph runtime and
+into future runtimes before graph-map topology is hydrated, so built-in schemes
+such as `start`, `fs`, `string-entity`, `world`, `llm-conversation`, and workflow
+schemes arrive through the same descriptor path as reloadable user extensions.
+
+Built-in descriptor modules are adapter/installers, not domain stores. Each
+family receives the owning stores or systems it needs from app/runtime context and
+adapts those records into graph node adapters. Entity descriptors adapt entity
+stores, workflow descriptors adapt workflow stores, world descriptors adapt
+`world-manager`/`WorldData`, and so on. Graph core remains the key-loader and
+topology primitive layer; it does not take ownership of the domain data behind
+those keys.
+
+`graph:register-key-loader` is low-level installer code only. Descriptor
+`install-loaders` functions may call it and return the owner-safe handles that the
+registry tracks. App initialization, HomeWorld setup, tests, and user modules
+should not call individual built-in node `register-loader` helpers as setup APIs;
+they should register descriptors through `app.graph-extension-registry` (or a
+test-local `GraphExtensionRegistry`) and let the registry install runtime handles.
+
+The old `graph/key-loaders.fnl` centralized built-in registrar no longer exists
+and is not a supported import path. Do not add forwarding shims or fallback
+registrars for it; the graph extension registry is the only node-type
+installation mechanism for both built-ins and user/runtime extensions.
+
 ## Topology and ownership invariants
 
 Graph topology remains key-only. A graph extension owns the domain data behind its

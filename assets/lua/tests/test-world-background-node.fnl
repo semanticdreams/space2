@@ -1,7 +1,7 @@
 (local fs (require :fs))
 (local Signal (require :signal))
 (local Graph (require :graph/init))
-(local GraphKeyLoaders (require :graph/key-loaders))
+(local BuiltinGraphTestHelpers (require :tests/graph-builtin-extension-helpers))
 (local ValidationUtils (require :graph/validation-utils))
 (local LightSystemModule (require :light-system))
 (local SkyboxState (require :skybox-state))
@@ -188,15 +188,16 @@
   (assert (= node.label "background") "BackgroundNode label should be 'background'")
   (node:drop))
 
-(fn graph-key-loaders-load-background-node []
+(fn built-in-graph-extensions-load-background-node []
   (with-temp-dir
     (fn [_dir]
       (local graph (Graph {:with-start false}))
-      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world"})})
+      (local builtins (BuiltinGraphTestHelpers.install-builtins! graph {:world-manager (make-world-manager {:id "test-world"})}))
       (local result (graph:load-by-key "activity-background:test-world:sandbox"))
       (assert result "background loader should create node")
       (assert (= result.key "activity-background:test-world:sandbox") "background key should match")
       (result:drop)
+      (builtins:drop)
       (graph:drop))))
 
 (fn background-node-isolates-activity-state []
@@ -259,8 +260,8 @@
                      :fn background-node-module-exports})
 (table.insert tests {:name "background node has correct key"
                      :fn background-node-has-correct-key})
-(table.insert tests {:name "graph key loaders load background node"
-                      :fn graph-key-loaders-load-background-node})
+(table.insert tests {:name "built-in graph extensions load background node"
+                       :fn built-in-graph-extensions-load-background-node})
 (table.insert tests {:name "background node isolates activity state"
                      :fn background-node-isolates-activity-state})
 (table.insert tests {:name "background node view builds"

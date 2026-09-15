@@ -148,16 +148,17 @@
 
 (fn fs-file-viewer-key-loader-loads-existing-file []
   (local Graph (require :graph/init))
-  (local GraphKeyLoaders (require :graph/key-loaders))
+  (local BuiltinGraphTestHelpers (require :tests/graph-builtin-extension-helpers))
   (local (dir file) (create-sample-file))
   (local key (.. "fs-file-viewer:" file))
   (local graph (Graph {:with-start false}))
-  (GraphKeyLoaders.register graph {})
+  (local builtins (BuiltinGraphTestHelpers.install-builtins! graph {}))
   (local node (graph:load-by-key key))
   (assert node "fs-file-viewer loader should create a node for an existing file")
   (assert (= node.key key) "loaded viewer key should match")
   (assert (= node.path file) "loaded viewer path should match absolute path")
   (node:drop)
+  (builtins:drop)
   (graph:drop)
   (fs.remove-all dir))
 
