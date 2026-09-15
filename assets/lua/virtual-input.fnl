@@ -40,8 +40,8 @@
     (when (and row-widget row-widget.layout)
       (row-widget.layout:mark-layout-dirty))))
 (fn mark-caret-dirty [input]
-  (when (and input.caret input.caret.layout)
-    (input.caret.layout:mark-layout-dirty)))
+  (when input.layout
+    (input.layout:mark-layout-dirty)))
 (fn mark-viewport-dirty [input]
   (mark-row-layouts-dirty input)
   (mark-caret-dirty input))
