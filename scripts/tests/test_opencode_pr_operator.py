@@ -93,6 +93,18 @@ def test_create_current_uses_validated_current_branch_without_cli_branch_argumen
             (
                 "gh",
                 "pr",
+                "view",
+                "feature/opencode-capabilities",
+                "--json",
+                "state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url",
+            ): command_result(
+                ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS],
+                returncode=1,
+                stderr="no pull requests found",
+            ),
+            (
+                "gh",
+                "pr",
                 "create",
                 "--base",
                 "main",
@@ -109,6 +121,154 @@ def test_create_current_uses_validated_current_branch_without_cli_branch_argumen
     assert result["status"] == "pass"
     assert runner.calls == [
         ["git", "branch", "--show-current"],
+        [
+            "gh",
+            "pr",
+            "view",
+            "feature/opencode-capabilities",
+            "--json",
+            "state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url",
+        ],
+        ["gh", "pr", "create", "--base", "main", "--head", "feature/opencode-capabilities", "--fill"],
+    ]
+
+
+def test_create_current_returns_existing_pr_without_creating(monkeypatch, trusted_repo: Path) -> None:
+    pr = {"url": "https://github.com/semanticdreams/space2/pull/123", "state": "OPEN"}
+    runner = GhRunner(
+        {
+            ("git", "branch", "--show-current"): "feature/opencode-capabilities\n",
+            (
+                "gh",
+                "pr",
+                "view",
+                "feature/opencode-capabilities",
+                "--json",
+                "state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url",
+            ): json.dumps(pr),
+        }
+    )
+    monkeypatch.setattr(pr_operator, "run_command", runner)
+
+    result = pr_operator.create_current_pr(trusted_repo)
+
+    assert result["status"] == "pass"
+    assert result["evidence"]["url"] == pr["url"]
+    assert result["evidence"]["pr"] == pr
+    assert runner.calls == [
+        ["git", "branch", "--show-current"],
+        ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS],
+    ]
+
+
+def test_create_current_creates_when_view_reports_no_existing_pr(monkeypatch, trusted_repo: Path) -> None:
+    calls: list[tuple[list[str], bool]] = []
+
+    def fake_run(args, cwd: Path, check: bool = True):
+        del cwd
+        args = list(args)
+        calls.append((args, check))
+        if args == ["git", "branch", "--show-current"]:
+            return command_result(args, "feature/opencode-capabilities\n")
+        if args == ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS]:
+            return command_result(args, returncode=1, stderr="no pull requests found for branch feature/opencode-capabilities")
+        if args == ["gh", "pr", "create", "--base", "main", "--head", "feature/opencode-capabilities", "--fill"]:
+            return command_result(args, "https://github.com/semanticdreams/space2/pull/124\n")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(pr_operator, "run_command", fake_run)
+
+    result = pr_operator.create_current_pr(trusted_repo)
+
+    assert result["status"] == "pass"
+    assert result["evidence"]["url"] == "https://github.com/semanticdreams/space2/pull/124"
+    assert calls == [
+        (["git", "branch", "--show-current"], True),
+        (["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS], False),
+        (["gh", "pr", "create", "--base", "main", "--head", "feature/opencode-capabilities", "--fill"], False),
+    ]
+
+
+def test_create_current_unsafe_view_failure_preserves_command_details_and_does_not_create(monkeypatch, trusted_repo: Path) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(args, cwd: Path, check: bool = True):
+        del cwd, check
+        args = list(args)
+        calls.append(args)
+        if args == ["git", "branch", "--show-current"]:
+            return command_result(args, "feature/opencode-capabilities\n")
+        if args == ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS]:
+            return command_result(args, returncode=2, stderr="HTTP 401: credential expired\nauth detail from gh")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(pr_operator, "run_command", fake_run)
+
+    result = pr_operator.create_current_pr(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert result["evidence"]["returncode"] == 2
+    assert result["evidence"]["stderr"] == "HTTP 401: credential expired\nauth detail from gh"
+    assert result["evidence"]["args"] == ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS]
+    assert calls == [
+        ["git", "branch", "--show-current"],
+        ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS],
+    ]
+
+
+def test_create_current_generic_not_found_view_failure_does_not_create(monkeypatch, trusted_repo: Path) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(args, cwd: Path, check: bool = True):
+        del cwd, check
+        args = list(args)
+        calls.append(args)
+        if args == ["git", "branch", "--show-current"]:
+            return command_result(args, "feature/opencode-capabilities\n")
+        if args == ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS]:
+            return command_result(args, returncode=1, stderr="HTTP 404: Not Found")
+        raise AssertionError(f"unexpected create attempt: {args}")
+
+    monkeypatch.setattr(pr_operator, "run_command", fake_run)
+
+    result = pr_operator.create_current_pr(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert result["evidence"]["returncode"] == 1
+    assert result["evidence"]["stderr"] == "HTTP 404: Not Found"
+    assert result["evidence"]["args"] == ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS]
+    assert calls == [
+        ["git", "branch", "--show-current"],
+        ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS],
+    ]
+
+
+def test_create_current_create_failure_preserves_command_details(monkeypatch, trusted_repo: Path) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(args, cwd: Path, check: bool = True):
+        del cwd, check
+        args = list(args)
+        calls.append(args)
+        if args == ["git", "branch", "--show-current"]:
+            return command_result(args, "feature/opencode-capabilities\n")
+        if args == ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS]:
+            return command_result(args, returncode=1, stderr="no pull requests found")
+        if args == ["gh", "pr", "create", "--base", "main", "--head", "feature/opencode-capabilities", "--fill"]:
+            return command_result(args, returncode=1, stderr="GraphQL: Validation failed")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(pr_operator, "run_command", fake_run)
+
+    result = pr_operator.create_current_pr(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert result["evidence"]["returncode"] == 1
+    assert result["evidence"]["stderr"] == "GraphQL: Validation failed"
+    assert result["evidence"]["args"] == ["gh", "pr", "create", "--base", "main", "--head", "feature/opencode-capabilities", "--fill"]
+    assert calls == [
+        ["git", "branch", "--show-current"],
+        ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS],
         ["gh", "pr", "create", "--base", "main", "--head", "feature/opencode-capabilities", "--fill"],
     ]
 

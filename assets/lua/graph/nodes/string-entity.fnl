@@ -18,6 +18,43 @@
         (Utils.truncate-with-ellipsis first-line 50))
       (or (and entity entity.id) "string entity")))
 
+(local LinkEntityStore (require :entities/link))
+(local GraphMapContext (require :graph/map-context))
+
+(fn require-graph-map [node]
+  (local graph-map node.graph)
+  (assert graph-map "StringEntityNode.create-child requires mounted GraphMap")
+  (GraphMapContext.assert-graph-map graph-map "StringEntityNode.create-child"))
+
+(fn resolve-link-store [graph-map]
+  (local store
+    (if (and graph-map graph-map.graph graph-map.graph.link-store)
+        graph-map.graph.link-store
+        (and graph-map graph-map.link-store)
+        graph-map.link-store
+        (LinkEntityStore.get-default)))
+  (assert store "StringEntityNode.create-child requires link store"))
+
+(fn require-created-entity [entity context]
+  (assert entity (.. context " failed to create entity"))
+  (assert entity.id (.. context " created entity is missing id"))
+  entity)
+
+(fn rollback-created-child [string-store link-store child link]
+  (when (and link link.id)
+    (link-store:delete-entity link.id))
+  (when (and child child.id)
+    (string-store:delete-entity child.id)))
+
+(fn load-created-child [graph-map string-store link-store child link child-key]
+  (local (load-ok child-node) (pcall graph-map.load-by-key graph-map child-key))
+  (when (or (not load-ok) (not child-node))
+    (rollback-created-child string-store link-store child link)
+    (if load-ok
+        (error (.. "StringEntityNode.create-child failed to load child key into GraphMap: " child-key))
+        (error child-node)))
+  child-node)
+
 (fn StringEntityNode [opts]
   (local options (or opts {}))
   (local entity-id (assert options.entity-id "StringEntityNode requires entity-id"))
@@ -63,11 +100,33 @@
        (fn [self]
          (self.store:delete-entity self.entity-id)))
 
+  (set node.create-child
+       (fn [self]
+         (local graph-map (require-graph-map self))
+         (local child (require-created-entity
+                        (self.store:create-entity {})
+                        "StringEntityNode.create-child string store"))
+         (local child-key (.. KEY_PREFIX (tostring child.id)))
+         (local link-store (resolve-link-store graph-map))
+         (local link (require-created-entity
+                       (link-store:create-entity {:source-key self.key
+                                                  :target-key child-key})
+                       "StringEntityNode.create-child link store"))
+         (local child-node (load-created-child graph-map self.store link-store child link child-key))
+         {:child child
+          :child-key child-key
+          :child-node child-node
+          :link link}))
+
   (set node.actions
-       [{:name "Delete Entity"
+       [{:name "Create child"
+         :icon "subdirectory_arrow_right"
+         :fn (fn [_button _event]
+               (node:create-child))}
+        {:name "Delete Entity"
          :icon "delete"
          :fn (fn [_button _event]
-                 (node:delete-entity))}])
+               (node:delete-entity))}])
 
   (var deleted-handler nil)
   (var updated-handler nil)

@@ -27,6 +27,7 @@ Implemented:
 - Graph map sidebar is installed as the graph mode left dock and exposes map list, switching, new/rename/delete actions, active stats, and selected count.
 - Graph node panel persistence includes `graph-map-id`; restore only applies to the active map and hydration prunes stale panel records.
 - The root `Add to Map` action opens a dialog that loads an entered graph key into the active map and preserves target-owned close lifecycle handling.
+- String entity nodes expose a `Create child` action that creates a child string entity, creates a link entity from parent key to child key, and loads the child key into the containing `GraphMap`.
 - Fast tests cover the main GraphMap, manager, sidebar, GraphView persistence/panel, and menu action behavior.
 
 Remaining:
@@ -210,6 +211,8 @@ Do not persist:
 - Edges that can be recomputed deterministically from shared backing stores.
 
 When both endpoints of a link entity are present in a graph map, the map may create a derived edge record for display. Derived edge records should be distinguishable from explicit map edges so capture skips them.
+
+String entity `Create child` relies on link-entity derived-edge recomputation. The created link entity owns the parent-child relationship, and the visible edge remains omitted from `GraphMap:capture-state`.
 
 Workflow display edges follow the same visibility rule: workflow definitions, runs, run steps, and events are loaded only by explicit workflow controls, and workflow-derived display edges are not the canonical workflow topology. The workflow store owns definition edges, run records, run-step records, and event records.
 
@@ -437,6 +440,8 @@ Do not silently delete backing objects when removing from a map.
 
 `Add Start` is map membership recovery, not automatic start-node re-seeding. It uses the registry-installed `start` key loader through the active `GraphMap` and does not delete or mutate backing domain objects.
 
+String entity `Create child` is a node-specific domain action. It mutates `StringEntityStore` and `LinkEntityStore`, then materializes the new child node in the containing `GraphMap`; it does not add an explicit map edge.
+
 ## Migration Phases
 
 ### Phase 1: Introduce Single Graph Map
@@ -506,6 +511,7 @@ Fast Fennel tests cover:
 - GraphView persistence uses map-specific metadata paths.
 - Panel persistence includes and respects `graph-map-id`.
 - Graph sidebar switches maps without leaving stale clickables/focus/movables.
+- String entity `Create child` creates store-owned child/link entities, materializes the child in the containing graph map, and leaves the derived link edge out of captured topology.
 
 Standard verification command:
 
