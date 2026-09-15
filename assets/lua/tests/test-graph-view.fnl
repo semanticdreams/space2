@@ -90,9 +90,9 @@
                                :move_item 4242
                                :select 4242
                                :arrow_drop_down 4242
-                               :open_in_full 4242
-                               :open_in_new 4242
-                               :close_fullscreen 4242
+                                :open_in_full 4242
+                                :open_in_new 4242 :content_copy 4242
+                                :close_fullscreen 4242
                                :more_vert 4242
                                :terminal 4242
                               :settings 4242
@@ -1845,11 +1845,11 @@
                         (menu-button:on-click {})
                         (assert menu-opened? "Header menu button should open a menu")
                         (assert menu-actions "Header menu should include actions")
-                        (assert (= (length menu-actions) 4)
-                                "Header menu should include Open, Collapse, cube, and Remove from Map")
-                        (assert (= (. menu-actions 1 :name) "Open"))
-                        (assert (= (. menu-actions 2 :name) "Collapse"))
-                        (assert (= (. menu-actions 4 :name) "Remove from Map"))
+                        (assert (= (length menu-actions) 6) "Header menu should include Open, Copy key, Collapse, cube, Remove from Map, and separator")
+                        (assert (= (. menu-actions 1 :name) "Open")) (assert (= (. menu-actions 2 :name) "Copy key"))
+                        (assert (= (. menu-actions 3 :name) "Collapse")) (assert (= (. menu-actions 4 :name) "cube"))
+                        (assert (= (. menu-actions 5 :name) "Remove from Map"))
+                        (assert (= (. menu-actions 6 :type) :separator) "Header menu should keep a separator even without node-specific actions")
                         ;; Test collapse button
                         (local collapse-button (. card.header-bar.children 3 :element))
                         (collapse-button:on-click {})
@@ -1863,7 +1863,7 @@
                         (local menu-button-2 (. (. view.points node :header-bar :children 5) :element))
                         (menu-button-2:on-click {})
                         (assert menu-actions "Re-expanded header menu should include actions")
-                        ((. menu-actions 4 :fn) nil {})
+                        ((. menu-actions 5 :fn) nil {})
                         (assert (not (map:lookup "header-button-test"))
                                 "Remove from Map should remove the node from the map"))))
             (set app.menu-manager original-menu-manager)
@@ -1920,16 +1920,17 @@
             (local map (GraphMap.GraphMap {:graph graph :id "test-menu"}))
             (var opened nil)
             (var custom-invoked 0)
-            (var cube-invoked 0)
+            (var cube-invoked 0) (var copied nil) (local gl (require :gl))
             (local original-menu-manager app.menu-manager)
-            (local original-scene app.scene)
+            (local original-scene app.scene) (local original-clipboard-set gl.clipboard-set)
             (set app.menu-manager {:open (fn [_self opts]
-                                           (set opened opts))})
+                                            (set opened opts))})
             (set app.scene {:add-graph-node-cube (fn [_self opts]
-                                                   (set cube-invoked (+ cube-invoked 1))
-                                                   (assert (and opts opts.node
-                                                                (= opts.node.key "menu-node"))
-                                                           "Cube action should forward the selected graph node"))})
+                                                    (set cube-invoked (+ cube-invoked 1))
+                                                    (assert (and opts opts.node
+                                                                 (= opts.node.key "menu-node"))
+                                                            "Cube action should forward the selected graph node"))})
+            (set gl.clipboard-set (fn [value] (set copied value)))
             (local node (Graph.GraphNode {:key "menu-node"
                                           :actions [{:name "Custom Action"
                                                      :icon "build"
@@ -1942,19 +1943,18 @@
             (assert point.on-right-click "GraphView should attach right click handler to node point")
             (point:on-right-click {:point (glm.vec3 3 4 0)})
             (assert opened "Right click should open a menu")
-            (assert (= (length opened.actions) 5)
-                    "Node menu should include Open, Expand, cube, custom actions, and Remove from Map")
-            (assert (= (. opened.actions 1 :name) "Open"))
-            (assert (= (. opened.actions 2 :name) "Expand"))
-            (assert (= (. opened.actions 3 :name) "cube"))
-            (assert (= (. opened.actions 4 :name) "Custom Action"))
-            (assert (= (. opened.actions 5 :name) "Remove from Map"))
-            ((. opened.actions 3 :fn) nil {})
+            (assert (= (length opened.actions) 7) "Node menu should include Open, Copy key, Expand, cube, Remove from Map, separator, and custom actions")
+            (assert (= (. opened.actions 1 :name) "Open")) (assert (= (. opened.actions 2 :name) "Copy key"))
+            (assert (= (. opened.actions 3 :name) "Expand")) (assert (= (. opened.actions 4 :name) "cube"))
+            (assert (= (. opened.actions 5 :name) "Remove from Map")) (assert (= (. opened.actions 6 :type) :separator) "Node menu should separate graph actions from node-specific actions")
+            (assert (= (. opened.actions 7 :name) "Custom Action")) ((. opened.actions 2 :fn) nil {})
+            (assert (= copied "menu-node") "Copy key action should copy the selected graph node key")
+            ((. opened.actions 4 :fn) nil {})
             (assert (= cube-invoked 1)
                     "Cube action should create one scene graph-node cube")
-            ((. opened.actions 4 :fn) nil {})
+            ((. opened.actions 7 :fn) nil {})
             (assert (= custom-invoked 1)
-                    "Custom node action should be callable from the context menu")
+                    "Custom node action should be callable from the context menu after separator")
             ((. opened.actions 5 :fn) nil {})
             (assert (not (map:lookup "menu-node"))
                     "Remove from Map action should remove the node from the map")
@@ -1962,7 +1962,7 @@
             (map:drop)
             (graph:drop)
             (set app.menu-manager original-menu-manager)
-            (set app.scene original-scene))))
+            (set app.scene original-scene) (set gl.clipboard-set original-clipboard-set))))
 
 (fn graph-point-right-click-uses-menu-manager-created-later []
     (with-temp-data-dir

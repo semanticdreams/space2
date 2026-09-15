@@ -181,36 +181,42 @@
                    ((. node :actions) node)
                    (and node node.actions)))
         (table.insert actions
-                      {:name "Open"
-                       :icon "open_in_new"
-                       :fn (fn [_button event]
-                               (when focus-manager
-                                   (focus-manager:arm-auto-focus {:event event}))
-                               (local (ok err) (pcall (fn [] (views:open node))))
-                               (when focus-manager
-                                   (focus-manager:clear-auto-focus))
-                               (when (not ok)
-                                   (error err)))})
+                       {:name "Open"
+                        :icon "open_in_new"
+                         :fn (fn [_button event]
+                                (when focus-manager
+                                    (focus-manager:arm-auto-focus {:event event}))
+                                (local (ok err) (pcall (fn [] (views:open node))))
+                                (when focus-manager
+                                    (focus-manager:clear-auto-focus))
+                                (when (not ok)
+                                    (error err)))})
         (table.insert actions
-                      {:name (if (. expanded-nodes node) "Collapse" "Expand")
-                       :icon (if (. expanded-nodes node) "close_fullscreen" "open_in_full")
-                       :fn (fn [_button _event]
-                               (toggle-node-presentation node))})
+                       {:name "Copy key"
+                        :icon "content_copy"
+                        :fn (fn [_button _event]
+                               (local runtime-gl (require :gl)) (runtime-gl.clipboard-set (tostring node.key)))})
         (table.insert actions
-                      {:name "cube"
-                       :fn (fn [_button _event]
-                               (local scene app.scene)
-                               (when (and scene scene.add-graph-node-cube)
-                                   (scene:add-graph-node-cube {:node node})))})
+                       {:name (if (. expanded-nodes node) "Collapse" "Expand")
+                        :icon (if (. expanded-nodes node) "close_fullscreen" "open_in_full")
+                         :fn (fn [_button _event]
+                                (toggle-node-presentation node))})
+        (table.insert actions
+                       {:name "cube"
+                         :fn (fn [_button _event]
+                                (local scene app.scene)
+                                (when (and scene scene.add-graph-node-cube)
+                                    (scene:add-graph-node-cube {:node node})))})
+        (table.insert actions
+                       {:name "Remove from Map"
+                        :icon "close"
+                        :fn (fn [_button _event]
+                                (when (and graph-map graph-map.remove-nodes)
+                                    (graph-map:remove-nodes [node])))})
+        (table.insert actions {:type :separator})
         (each [_ action (ipairs (or configured-actions []))]
             (when (and action action.name action.fn)
                 (table.insert actions action)))
-        (table.insert actions
-                      {:name "Remove from Map"
-                       :icon "close"
-                       :fn (fn [_button _event]
-                               (when (and graph-map graph-map.remove-nodes)
-                                   (graph-map:remove-nodes [node])))})
         actions)
 
     (fn resolve-menu-position [event]
