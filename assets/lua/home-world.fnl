@@ -8,7 +8,7 @@
 (local Scene (require :scene))
 (local {: FirstPersonControls} (require :first-person-controls))
 (local Graph (require :graph/init))
-(local GraphKeyLoaders (require :graph/key-loaders))
+
 (local GraphMap (require :graph/map))
 (local GraphMapManager (require :graph/map-manager))
 (local DrawingDocument (require :drawing/document))
@@ -997,14 +997,14 @@
             "HomeWorld requires :home-world-canvas-runtime to return a table")
     module)
 
-  (fn register-runtime-graph-loaders [graph world]
-    (GraphKeyLoaders.register graph
-                              {:world-manager (assert world.graph-world-manager
-                                                      (.. "HomeWorld " world.id " requires :graph-world-manager"))
-                                :asset-path-resolver (assert world.asset-path-resolver
-                                                            (.. "HomeWorld " world.id " requires :asset-path-resolver"))
-                                 :code-store app.code-store :workflow-store app.workflow-store
-                                 :workflow-runner app.workflow-runner}))
+
+
+
+
+
+
+
+
 
   (fn drop-runtime-resources! [runtime]
     (when runtime
@@ -1087,7 +1087,7 @@
     (local canvas-state (or (and world.state world.state.canvas) {}))
     (local activity-state (or (and world.state world.state.activity) {}))
     (local graph (Graph {:with-start false :entity-events? false}))
-    (register-runtime-graph-loaders graph world)
+
     (local restore-runtime {:graph graph})
     (var restore-runtime-installed? false)
     (when app.graph-extension-registry

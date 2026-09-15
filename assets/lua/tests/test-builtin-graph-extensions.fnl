@@ -1,5 +1,12 @@
 (local tests [])
 
+(local Main (require :main))
+(local fs (require :fs))
+(local Graph (require :graph/init))
+(local GraphExtensionRegistry (require :graph/extension-registry))
+(local Signal (require :signal))
+(local tempfile (require :tempfile))
+
 (local expected-schemes
   ["activity-background" "activity-canvas" "activity-hud" "activity-lights"
    "activity-light" "activity-light-type" "activity-scene" "activity-scene-panel"
@@ -119,6 +126,67 @@
   (assert (string.find (tostring err) "builtin-graph-workflows requires :workflow-store" 1 true)
           (.. "missing workflow-store error should be explicit, got: " (tostring err))))
 
+(fn create-test-built-in-options [base-dir]
+  (assert base-dir "test built-in options require base-dir")
+  (local StringEntityStore (require :entities/string))
+  (local CodeEntityStore (require :entities/code))
+  (local ListEntityStore (require :entities/list))
+  (local LinkEntityStore (require :entities/link))
+  (local IdentityStore (require :entities/identity))
+  (local NotebookStore (require :notebooks/store))
+  (local LlmStore (require :llm/conversations/store))
+  (local WorkflowStore (require :workflows/store))
+  {:string-store (StringEntityStore.StringEntityStore {:base-dir base-dir})
+   :code-store (CodeEntityStore.CodeEntityStore {:base-dir base-dir})
+   :list-store (ListEntityStore.ListEntityStore {:base-dir base-dir})
+   :link-store (LinkEntityStore.LinkEntityStore {:base-dir base-dir})
+   :identity-store (IdentityStore.IdentityStore {:base-dir base-dir})
+   :notebook-store (NotebookStore.NotebookStore {:base-dir base-dir})
+   :llm-store (LlmStore.Store {:base-dir base-dir})
+   :workflow-store (WorkflowStore.get-default {:base-dir base-dir})
+   :kernels {:kernels-changed (Signal)
+             :instances-changed (Signal)
+             :list-kernels (fn [_self] [])
+             :list-instances (fn [_self _opts] [])
+             :kernel-label (fn [_self kernel] (if kernel.name kernel.name kernel.id))
+             :get-kernel (fn [_self _id] nil)
+             :get-instance (fn [_self _id] nil)}
+   :world-manager {:changed (Signal)
+                   :list-tabs (fn [_self]
+                                [{:id "world-a" :name "home" :active? true}])}
+   :asset-path-resolver (fn [path] path)})
+
+(fn assert-loads [graph key]
+  (assert (graph:load-by-key key)
+          (.. "expected built-in registry loader to load " key)))
+
+(fn built-in-registration-through-registry-loads-representative-families []
+  (assert (= (type Main.ensure-built-in-graph-extensions!) "function")
+          "Main should expose ensure-built-in-graph-extensions!")
+  (local saved-registry app.graph-extension-registry)
+  (local saved-handles app.builtin-graph-extension-handles)
+  (local temp-dir (tempfile.TemporaryDirectory {:prefix "builtin-graph-registry-"}))
+  (local registry (GraphExtensionRegistry.GraphExtensionRegistry {:app app}))
+  (local graph (Graph {:with-start false :entity-events? false}))
+  (local runtime {:graph graph})
+  (set app.graph-extension-registry registry)
+  (set app.builtin-graph-extension-handles nil)
+  (local options (create-test-built-in-options temp-dir.path))
+  (Main.ensure-built-in-graph-extensions! options)
+  (registry:install-runtime runtime)
+  (assert-loads graph "start")
+  (assert-loads graph "string-entity-list")
+  (assert-loads graph (.. "fs:" temp-dir.path))
+  (assert-loads graph "llm")
+  (assert-loads graph "kernels")
+  (assert-loads graph "worlds")
+  (registry:uninstall-runtime runtime)
+  (graph:drop)
+  (temp-dir:drop)
+  (set app.graph-extension-registry saved-registry)
+  (set app.builtin-graph-extension-handles saved-handles)
+  true)
+
 (table.insert tests {:name "built-in descriptors have required shape"
                      :fn builtin-descriptors-have-required-shape})
 (table.insert tests {:name "built-in descriptors expose exact scheme coverage"
@@ -128,7 +196,9 @@
 (table.insert tests {:name "workflow descriptor registers runner schemes when runner present"
                      :fn workflow-descriptor-registers-runner-schemes-when-runner-present})
 (table.insert tests {:name "workflow descriptor requires workflow-store explicitly"
-                     :fn workflow-descriptor-requires-workflow-store-explicitly})
+                      :fn workflow-descriptor-requires-workflow-store-explicitly})
+(table.insert tests {:name "built-in-registration-through-registry-loads-representative-families"
+                     :fn built-in-registration-through-registry-loads-representative-families})
 
 (local main
   (fn []
