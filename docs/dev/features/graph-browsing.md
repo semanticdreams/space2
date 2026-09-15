@@ -7,7 +7,7 @@ tags:
   - graph
   - ui
 created: 2026-07-14
-updated: 2026-07-14
+updated: 2026-09-15
 ---
 
 # Graph browsing & editing
@@ -27,6 +27,7 @@ Currently objects exist and are visible in the graph, but navigating between the
 - Make node property inspection fast with inline editing
 - Support drag-to-link between objects exposed in the graph
 - Keep interaction model consistent with rest of space UI
+- Order graph node context menus with graph-view actions first, including `Copy key`, then a first-class separator, then adapter-provided `node.actions`; graph-map actions such as open, expand/collapse, cube presentation, and removal stay owned by `GraphView`.
 
 ## Tasks
 

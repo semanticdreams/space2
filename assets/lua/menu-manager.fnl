@@ -4,17 +4,28 @@
 
 (local SDLK_ESCAPE 27)
 
+(fn value-or [value fallback]
+  (if (= value nil) fallback value))
+
+(fn action-name [action]
+  (if action.name action.name action.text))
+
+(fn screen-coordinate [screen axis]
+  (if (and screen (. screen axis)) (. screen axis) 0))
+
+(fn event-button [event]
+  (if (and event event.button) event.button 3))
+
 (fn MenuManager [opts]
-  (local options (or opts {}))
-  (local clickables (or options.clickables app.clickables))
-  (local hud (or options.hud app.hud))
-  (local static-root-actions (or options.root-actions nil))
+  (local options (value-or opts {}))
+  (local clickables (value-or options.clickables app.clickables))
+  (local hud (value-or options.hud app.hud))
+  (local static-root-actions options.root-actions)
   (local root-actions-provider
-    (or options.root-actions-provider
+    (if options.root-actions-provider
+        options.root-actions-provider
         (fn [_event]
-          (if static-root-actions
-              static-root-actions
-              (RootContextMenuActions.actions-for-event _event)))))
+          (if static-root-actions static-root-actions (RootContextMenuActions.actions-for-event _event)))))
 
   (assert clickables "MenuManager requires clickables")
   (assert hud "MenuManager requires hud")
@@ -29,12 +40,13 @@
     (not (= active-menu nil)))
 
   (fn screen-pos->hud [screen]
-    (local x (or (and screen screen.x) 0))
-    (local y (or (and screen screen.y) 0))
+    (local x (screen-coordinate screen :x))
+    (local y (screen-coordinate screen :y))
     (local ray (and hud hud.screen-pos-ray (hud:screen-pos-ray {:x x :y y})))
     (if (and ray ray.origin ray.direction)
-        (let [dz (or ray.direction.z 0)
-              t (if (not (= dz 0)) (/ (- 0 ray.origin.z) dz) 0)]
+        (do
+          (local dz (value-or ray.direction.z 0))
+          (local t (if (not (= dz 0)) (/ (- 0 ray.origin.z) dz) 0))
           (+ ray.origin (* ray.direction t)))
         (glm.vec3 x y 0)))
 
@@ -46,25 +58,27 @@
       ))
 
   (fn wrap-actions [actions]
-    (icollect [_ action (ipairs (or actions []))]
-      {:name (or action.name action.text)
-       :text action.text
-       :icon action.icon
-       :variant action.variant
-       :padding action.padding
-       :on-click (fn [button event]
-                   (when action.fn
-                     (action.fn button event))
-                   (when action.handler
-                     (action.handler button event))
-                   (when action.on-click
-                     (action.on-click button event))
-                   (close))}))
+    (icollect [_ action (ipairs (value-or actions []))]
+      (if (= action.type :separator)
+          {:type :separator}
+          {:name (action-name action)
+           :text action.text
+           :icon action.icon
+           :variant action.variant
+           :padding action.padding
+           :on-click (fn [button event]
+                       (when action.fn
+                         (action.fn button event))
+                       (when action.handler
+                         (action.handler button event))
+                       (when action.on-click
+                         (action.on-click button event))
+                       (close))})))
 
   (fn open [self opts]
-    (local open-opts (or opts {}))
+    (local open-opts (value-or opts {}))
     (local actions (wrap-actions open-opts.actions))
-    (local position (or open-opts.position (glm.vec3 0 0 0)))
+    (local position (value-or open-opts.position (glm.vec3 0 0 0)))
     (close)
     (when (and hud hud.add-overlay-child)
       (local builder (Menu {:actions actions}))
@@ -77,7 +91,7 @@
     (local position (screen-pos->hud screen))
     (open nil {:actions (root-actions-provider event)
                :position position
-               :ignore-button (or (and event event.button) 3)}))
+               :ignore-button (event-button event)}))
 
   (fn on-left-click-void [_event]
     (when active-menu
