@@ -8,14 +8,38 @@ storage details stay behind that port.
 
 ## Compatibility oracle
 
-Existing `Input` widget and `InputModel behavior` are the compatibility oracle
-for shared commands. They are older, more proven, and covered by accepted tests.
-When `Input` and `VirtualInput` disagree on behavior that both support, assume
-`VirtualInput` is the part to fix unless a file-scale difference is explicitly
-documented in the spec or developer docs.
+Existing `Input` widget and `InputModel` behavior are the compatibility oracle
+for shared commands, interaction lifecycle, and caret behavior. They are older,
+more proven, and covered by accepted tests. When `Input` and `VirtualInput`
+disagree on behavior that both support, assume `VirtualInput` or a shared policy
+is the part to fix unless a file-scale difference is explicitly documented in the
+spec or developer docs.
 
 `VirtualInput` is newer and less proven. It must match shared `Input` semantics
-without adopting eager `InputModel` storage or whole-buffer assumptions.
+without adopting eager `InputModel` storage, whole-buffer assumptions, or
+whole-file materialization for huge-file behavior.
+
+See [Text Input Policies](text-input-policies.md) for the focus, caret, direct
+key, geometry, and lazy-storage boundaries shared by this engine.
+
+## Shared input policies
+
+The command engine is one part of the shared text input architecture. Storage-
+neutral interaction rules live in small policy modules extracted from eager
+`Input` behavior:
+
+- `text-input-focus-policy.fnl` handles focus request, focus/blur, active input
+  connection, text-state entry, disconnect normalization, and focus visuals.
+- `text-input-caret-policy.fnl` handles focus-gated visibility, normal/insert
+  color, mode width, line/column metrics, and caret height.
+- `text-input-key-policy.fnl` handles only direct shortcuts that are valid
+  outside normal commands, such as save, copy, and page scrolling.
+- `text-input-geometry.fnl` handles storage-neutral pointer, row, column, and
+  row-y/screen-point geometry.
+
+Normal-mode text editing remains owned by `text-normal-commands.fnl` and routed
+through `text-editing-port.fnl`; insert-mode edits route through `InsertState`
+and the active input methods.
 
 ## Text-editing port
 

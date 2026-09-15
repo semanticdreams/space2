@@ -7,21 +7,12 @@
 (local BoundsUtils (require :bounds-utils))
 (local gl (require :gl))
 (local Modifiers (require :input-modifiers))
-(local InputState (require :input-state-router))
-(local {: fallback-glyph : line-height} (require :text-utils))
+(local FocusPolicy (require :text-input-focus-policy))
+(local CaretPolicy (require :text-input-caret-policy))
+(local KeyPolicy (require :text-input-key-policy))
+(local Geometry (require :text-input-geometry))
 (local {: resolve-input-colors : resolve-padding} (require :widget-theme-utils))
 
-(local KEY_BACKSPACE 8)
-(local KEY_DELETE 127)
-(local KEY_RETURN 13)
-(local KEY_LEFT 1073741904)
-(local KEY_RIGHT 1073741903)
-(local KEY_DOWN 1073741905)
-(local KEY_UP 1073741906)
-(local KEY_HOME 1073741898)
-(local KEY_END 1073741901)
-(local KEY_PAGEUP 1073741899)
-(local KEY_PAGEDOWN 1073741902)
 (var virtual-input-clip-region-seq 0)
 (fn next-virtual-input-clip-region-id []
   (set virtual-input-clip-region-seq (+ virtual-input-clip-region-seq 1))
@@ -43,15 +34,6 @@
   (if (= offset nil)
       (or row.end-byte row.line-end-byte row.start-byte 0)
       (+ (or row.start-byte 0) offset)))
-(fn column-for-x [input row local-x]
-  (assert input "column-for-x requires input")
-  (local raw-column (if (> input.column-width 0)
-                      (math.floor (/ (math.max 0 local-x) input.column-width))
-                      0))
-  (math.max 0 (math.min raw-column (length (or row.codepoints [])))))
-(fn row-visible-column-count [input row]
-  (assert row "row-visible-column-count requires row")
-  (math.min input.visible-column-count (length (or row.codepoints []))))
 (fn mark-row-layouts-dirty [input]
   (each [_ row-widget (ipairs input.rows)]
     (when (and row-widget row-widget.layout)
@@ -779,61 +761,28 @@
           (self:insert-text payload.text))
         true)
       false))
+(fn update-caret-visual [self opts]
+  (CaretPolicy.apply-caret-visual self opts))
 
-(fn move-direct-horizontal-key [self bounded-delta fallback-delta shift?]
-  (local opts {:extend-selection? shift? :allow-line-cross? true :allow-after-line-end? true})
-  (if (and self.bounded-logical-navigation?
-           self.buffer.adjacent-codepoint-from-anchor
-           self.move-caret-horizontal-bounded)
-      (self:move-caret-horizontal-bounded bounded-delta opts)
-      (self:move-caret fallback-delta opts)))
-
+(fn update-focus-visual [self opts]
+  (local mark-layout-dirty? (resolve-mark-flag opts :mark-layout-dirty? true))
+  (when self.background
+    (set self.background.color (if self.focused? self.colors.focused-background self.colors.background))
+    (when (and mark-layout-dirty? self.background.layout)
+      (self.background.layout:mark-layout-dirty)))
+  (update-caret-visual self {:mark-layout-dirty? mark-layout-dirty?}))
 (fn on-key-down [self payload]
-  (if (not (and payload payload.key))
-      false
-      (do
-        (local key payload.key)
-        (local ctrl? (Modifiers.ctrl-held? payload.mod))
-        (local shift? (Modifiers.shift-held? payload.mod))
-        (if (and ctrl? (= key (string.byte "s")))
-            (do (self:save) true)
-            (and ctrl? (= key (string.byte "S")))
-            (do (self:save) true)
-            (and ctrl? (= key (string.byte "c")))
-            (if (self:copy-selection) true false)
-            (and ctrl? (= key (string.byte "C")))
-            (if (self:copy-selection) true false)
-            (= key KEY_LEFT)
-            (move-direct-horizontal-key self -1 :left shift?)
-            (= key KEY_RIGHT)
-            (move-direct-horizontal-key self 1 :right shift?)
-            (= key KEY_UP)
-            (self:move-caret :up {:extend-selection? shift?})
-            (= key KEY_DOWN)
-            (self:move-caret :down {:extend-selection? shift?})
-            (= key KEY_HOME)
-            (self:move-caret :home {:extend-selection? shift?})
-            (= key KEY_END)
-            (self:move-caret :end {:extend-selection? shift?})
-            (= key KEY_PAGEUP)
-            (self:scroll-lines (- self.visible-line-count) {:extend-selection? shift?})
-            (= key KEY_PAGEDOWN)
-            (self:scroll-lines self.visible-line-count {:extend-selection? shift?})
-            (= key KEY_BACKSPACE)
-            (self:delete-before-cursor)
-            (= key KEY_DELETE)
-            (self:delete-at-cursor)
-            (= key KEY_RETURN)
-            (self:insert-text "\n")
-            false))))
+  (KeyPolicy.handle-direct-key self payload))
 
 (fn enter-insert-mode [self]
   (set self.mode :insert)
+  (update-caret-visual self)
   (mark-caret-dirty self)
   true)
 
 (fn enter-normal-mode [self]
   (set self.mode :normal)
+  (update-caret-visual self)
   (mark-caret-dirty self)
   true)
 
@@ -842,25 +791,24 @@
       (self.on-submit self payload)
       false))
 
-(fn local-point-from-event [self event]
-  (if (and event event.local-point)
-      event.local-point
-      (if (and event event.point self.layout)
-          (- event.point self.layout.position)
-          (glm.vec3 0 0 0))))
-
 (fn on-click [self event]
   (self:request-focus)
-  (local point (local-point-from-event self event))
+  (local explicit-position? (and event event.row-index event.column))
+  (local point (if explicit-position?
+                 nil
+                 (Geometry.local-point-from-event self event)))
   (local row-index (if (and event event.row-index)
-                     event.row-index
-                     (+ 1 (math.floor (/ (math.max 0 (- point.y self.padding.y)) self.line-height)))))
+                       event.row-index
+                       (Geometry.row-index-for-point self point)))
   (local viewport (ensure-viewport self))
   (local row (. viewport.rows row-index))
   (when row
+    (local row-codepoints (assert row.codepoints "VirtualInput click requires row codepoints"))
     (local column (if (and event event.column)
                     event.column
-                    (column-for-x self row (- point.x self.padding.x))))
+                    (Geometry.column-for-x self.column-width
+                                           (- point.x self.padding.x)
+                                           (length row-codepoints))))
     (apply-caret-byte self (byte-for-column row column) (and event (Modifiers.shift-held? event.mod))))
   true)
 
@@ -938,30 +886,49 @@
   (set child.layout.depth-offset-index depth)
   (set child.layout.clip-region clip)
   (child.layout:layouter))
-
-(fn caret-position [input position rotation line column]
-  (local visible-row (+ (- line input.scroll-line) 1))
+(fn row-y-offset [input size visible-row]
+  (Geometry.row-y-offset size input.padding input.line-height visible-row))
+(fn caret-row-style [input row]
+  (assert input "VirtualInput caret row style requires input")
+  (assert row "VirtualInput caret row style requires row")
+  (local row-widget (. input.rows (+ (- row.line input.scroll-line) 1)))
+  (assert (and row-widget row-widget.style) "VirtualInput caret width requires row text style"))
+(fn caret-row-codepoint [input row column]
+  (assert input "VirtualInput caret codepoint requires input")
+  (assert row "VirtualInput caret codepoint requires row")
+  (local codepoints (assert row.codepoints "VirtualInput caret width requires row codepoints"))
+  (. codepoints (+ (- column input.scroll-column) 1)))
+(fn caret-width-for-mode [input row column]
+  (local style (caret-row-style input row))
+  (when (and (not (= input.mode :insert)) (not style.font))
+    (error "VirtualInput caret width requires row text font"))
+  (CaretPolicy.mode-caret-width style
+                                (caret-row-codepoint input row column)
+                                input.caret-width
+                                input.mode))
+(fn caret-position [input position rotation size line column]
   (+ position
-     (rotation:rotate (glm.vec3 (+ input.padding.x (* (- column input.scroll-column) input.column-width))
-                                 (+ input.padding.y (* (- visible-row 1) input.line-height))
-                                 0))))
-
+     (rotation:rotate
+       (glm.vec3 (+ input.padding.x (* (- column input.scroll-column) input.column-width))
+                 (Geometry.row-y-offset size input.padding input.line-height (+ (- line input.scroll-line) 1))
+                 0))))
 (fn show-caret [input position rotation size depth clip line column]
-  (set input.caret.visible? true)
-  (layout-child input.caret
-                (caret-position input position rotation line column)
-                rotation
-                (glm.vec3 input.caret-width input.line-height size.z)
-                depth
-                clip))
-
+  (local (_caret-line _caret-column row) (caret-line-column input))
+  (assert row "VirtualInput show-caret requires visible caret row")
+  (update-caret-visual input {:mark-layout-dirty? false})
+  (if input.focused?
+      (do
+        (layout-child input.caret (caret-position input position rotation size line column) rotation (glm.vec3 (caret-width-for-mode input row column) (CaretPolicy.caret-height input.line-height (- size.y (* 2 input.padding.y))) size.z) depth clip))
+      (do
+        (set input.caret.visible? false)
+        (layout-child input.caret position rotation (glm.vec3 0 0 size.z) depth clip))))
 (fn hide-caret [input position rotation size depth clip]
   (set input.caret.visible? false)
   (layout-child input.caret position rotation (glm.vec3 0 0 size.z) depth clip))
-
 (fn layout-caret [input position rotation size depth clip]
   (local (line column row) (caret-line-column input))
-  (if (and row
+  (if (and input.focused?
+           row
            (>= column input.scroll-column)
            (<= column (+ input.scroll-column input.visible-column-count)))
       (show-caret input position rotation size depth clip line column)
@@ -979,8 +946,8 @@
   (layout-child input.background position rotation size (+ depth 1) clip)
   (each [i row-widget (ipairs input.rows)]
     (local row-pos (+ position (rotation:rotate (glm.vec3 input.padding.x
-                                                          (+ input.padding.y (* (- i 1) input.line-height))
-                                                          0))))
+                                                          (row-y-offset input size i)
+                                                           0))))
     (layout-child row-widget row-pos rotation (glm.vec3 (- size.x (* 2 input.padding.x)) input.line-height size.z) (+ depth 3) clip))
   (layout-caret input position rotation size (+ depth 2) clip))
 
@@ -994,19 +961,13 @@
   (self.layout:intersect ray))
 
 (fn request-focus [self]
-  (when self.focus-node
-    (self.focus-node:request-focus))
-  (when (and InputState (not self.connected?))
-    (InputState.connect-input self)
-    (InputState.set-state :text))
-  true)
+  (FocusPolicy.request-focus self))
 
 (fn on-state-connected [self _event]
   (set self.connected? true))
 
 (fn on-state-disconnected [self _event]
-  (set self.connected? false)
-  (self:enter-normal-mode))
+  (FocusPolicy.handle-state-disconnected self))
 
 (fn initialize-cached-state! [input]
   (local (_line _column known?) (refresh-logical-caret-state input))
@@ -1015,66 +976,20 @@
     (keep-column-visible input input.cursor-column)
     (store-scroll-anchor-from-cursor! input)))
 
-(fn handle-focus [input]
-  (input:request-focus))
-
-(fn handle-blur [input]
-  (when input.connected?
-    (InputState.disconnect-input input)))
-
-(fn focus-event-current? [input event]
-  (= (and event event.current) input.focus-node))
-
-(fn focus-event-previous? [input event]
-  (= (and event event.previous) input.focus-node))
-
-(fn make-focus-listener [input]
-  (fn [event]
-    (when (focus-event-current? input event)
-      (handle-focus input))))
-
-(fn make-blur-listener [input]
-  (fn [event]
-    (when (focus-event-previous? input event)
-      (handle-blur input))))
-
 (fn drop [self]
   (assert (not self.__dropped) "VirtualInput dropped twice")
   (set self.__dropped true)
+  (FocusPolicy.handle-drop self)
+  (FocusPolicy.disconnect-focus-listeners self)
   (self.clickables:unregister self)
+  (when self.focus-node
+    (self.focus-node:drop)
+    (set self.focus-node nil))
   (each [_ row-widget (ipairs self.rows)]
     (row-widget:drop))
   (self.background:drop)
   (self.caret:drop)
-  (when self.focus-node
-    (self.focus-node:drop)
-    (set self.focus-node nil))
-  (when (and self.connected? InputState)
-    (InputState.disconnect-input self))
-  (when self.__focus-listener
-    (local manager self.focus-manager)
-    (when (and manager manager.focus-focus)
-      (manager.focus-focus.disconnect self.__focus-listener true))
-    (set self.__focus-listener nil))
-  (when self.__blur-listener
-    (local manager self.focus-manager)
-    (when (and manager manager.focus-blur)
-      (manager.focus-blur.disconnect self.__blur-listener true))
-    (set self.__blur-listener nil))
   (self.layout:drop))
-
-(fn resolve-line-height* [text-style]
-  (local value (line-height text-style))
-  (if (and value (> value 0)) value 1.6))
-
-(fn resolve-column-width* [text-style caret-width]
-  (local font (and text-style text-style.font))
-  (if font
-      (do
-        (local glyph (fallback-glyph font 32))
-        (local advance (* glyph.advance text-style.scale))
-        (if (and advance (> advance 0)) advance caret-width))
-      caret-width))
 
 (fn VirtualInput [opts]
   (local options (or opts {}))
@@ -1103,9 +1018,10 @@
     (for [_ 1 line-count]
       (table.insert row-widgets ((Text {:codepoints [] :style text-style}) ctx)))
     (local background ((Rectangle {:color colors.background}) ctx))
-    (local caret ((Rectangle {:color colors.caret-insert}) ctx))
-    (local computed-line-height (resolve-line-height* text-style))
-    (local computed-column-width (resolve-column-width* text-style caret-width))
+    (local caret ((Rectangle {:color colors.caret-normal}) ctx))
+    (caret:set-visible false {:mark-layout-dirty? false})
+    (local computed-line-height (CaretPolicy.resolve-line-height text-style 1.6))
+    (local computed-column-width (CaretPolicy.resolve-column-width text-style caret-width))
     (local child-layouts [background.layout caret.layout])
     (each [_ row-widget (ipairs row-widgets)]
       (table.insert child-layouts row-widget.layout))
@@ -1125,7 +1041,8 @@
         :pointer-target pointer-target
         :focus-node focus-node
         :focus-manager focus-manager
-        :connected? false
+         :connected? false
+         :focused? false
         :line-count line-count
         :column-count column-count
         :configured-line-count line-count
@@ -1135,9 +1052,10 @@
         :local-clip-region nil
         :local-clip-region-id (next-virtual-input-clip-region-id)
         :padding padding
-       :line-height computed-line-height
-       :column-width computed-column-width
-       :caret-width caret-width
+        :line-height computed-line-height
+        :column-width computed-column-width
+        :caret-width caret-width
+        :colors colors
        :scroll-line (math.max 0 (or buffer.scroll-line 0))
         :scroll-column 0
         :viewport nil
@@ -1177,20 +1095,18 @@
        :submit submit
        :on-text-input on-text-input
        :on-key-down on-key-down
-       :on-click on-click
-       :request-focus request-focus
-       :on-state-connected on-state-connected
+        :on-click on-click
+        :request-focus request-focus
+        :update-focus-visual update-focus-visual
+        :update-caret-visual update-caret-visual
+        :on-state-connected on-state-connected
        :on-state-disconnected on-state-disconnected
        :intersect intersect-virtual-input
        :drop drop})
     (set layout.virtual-input input)
     (when (and focus-node focus-context layout)
       (focus-context:attach-bounds focus-node {:layout layout}))
-    (when focus-manager
-      (set input.__focus-listener
-           (focus-manager.focus-focus.connect (make-focus-listener input)))
-      (set input.__blur-listener
-           (focus-manager.focus-blur.connect (make-blur-listener input))))
+    (FocusPolicy.connect-focus-listeners input)
     (clickables:register input)
     (initialize-cached-state! input)
     (input:refresh-viewport {:mark-layout-dirty? false})
