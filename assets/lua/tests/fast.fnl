@@ -119,6 +119,7 @@
     :tests.test-sql-builder
     :tests.test-string-utils
     :tests.test-string-entities
+    :tests.test-string-entity-create-child
     :tests.test-code-entities
     :tests.test-identity-entities
     :tests.test-link-entities
