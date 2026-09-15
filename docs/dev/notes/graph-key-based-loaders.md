@@ -85,13 +85,24 @@ Same pattern for:
 - `list-entity.fnl` → `"list-entity:" .. entity-id`
 - `link-entity.fnl` → `"link-entity:" .. entity-id`
 
-### Step 2: Add Key Loader Registry to Graph
+### Step 2: Key Loader Registry in Graph Core
 
 **`assets/lua/graph/core.fnl`**:
+
+Graph core owns the per-runtime key-loader registry. Descriptor installers call
+`graph:register-key-loader` with descriptor ownership metadata, and the graph
+returns an owner-safe registration handle. The registry stores a registration
+record rather than a bare loader function so uninstall/rollback can prove that a
+descriptor is unregistering only its own loader.
 
 ```fennel
 ;; After existing declarations in create-graph
 (local key-loaders {})
+(var key-loader-registration-seq 0)
+
+(fn next-registration-id []
+  (set key-loader-registration-seq (+ key-loader-registration-seq 1))
+  key-loader-registration-seq)
 
 (fn key-scheme [key]
   (when (and key (= (type key) "string"))
@@ -100,14 +111,42 @@ Same pattern for:
         (string.sub key 1 (- start 1))
         key)))
 
-(fn register-key-loader [_self scheme loader-fn]
+(fn register-key-loader [graph scheme loader-fn opts]
   (assert scheme "register-key-loader requires a scheme")
   (assert (not (string.find scheme ":" 1 true))
           "register-key-loader scheme must not include ':'")
   (assert loader-fn "register-key-loader requires a loader function")
   (assert (not (. key-loaders scheme))
           (.. "register-key-loader duplicate scheme: " scheme))
-  (set (. key-loaders scheme) loader-fn))
+  (local options (or opts {}))
+  (local registration {:scheme scheme
+                       :loader-fn loader-fn
+                       :owner-id options.owner-id
+                       :extension-id options.extension-id
+                       :registration-id (next-registration-id)
+                       :active? true})
+  (local handle {:scheme scheme
+                 :owner-id registration.owner-id
+                 :extension-id registration.extension-id
+                 :registration-id registration.registration-id
+                 :active? true
+                 :unregister (fn [handle-self]
+                               (graph:unregister-key-loader handle-self))})
+  (set registration.handle handle)
+  (set (. key-loaders scheme) registration)
+  handle)
+
+(fn unregister-key-loader [_self handle]
+  (local registration (. key-loaders handle.scheme))
+  (when (and registration
+             (or (not (= registration.registration-id handle.registration-id))
+                 (not (= registration.handle handle))))
+    (error (.. "key loader for scheme " handle.scheme " belongs to another registration")))
+  (when registration
+    (set registration.active? false)
+    (set handle.active? false)
+    (set (. key-loaders handle.scheme) nil))
+  true)
 
 (fn load-by-key [_self key]
   (when (not key)
@@ -119,10 +158,10 @@ Same pattern for:
     (lua "return existing"))
   ;; Find loader and create node
   (local scheme (key-scheme key))
-  (local loader (. key-loaders scheme))
-  (when (not loader)
+  (local registration (. key-loaders scheme))
+  (when (not registration)
     (lua "return nil"))
-  (local node (loader key))
+  (local node (registration.loader-fn key))
   (when node
     (assert (. node :key) "load-by-key loader must return node with key")
     (assert (= (. node :key) key)
@@ -133,6 +172,7 @@ Same pattern for:
 
 ;; Add to self table
 (set self.register-key-loader register-key-loader)
+(set self.unregister-key-loader unregister-key-loader)
 (set self.load-by-key load-by-key)
 ```
 
@@ -158,7 +198,9 @@ direct unit tests of the helper only. They are not an app/runtime/test setup API
       (local entity-id (extract-entity-id key))
       (local entity (store:get-entity entity-id))
       (when entity
-        (StringEntityNode {:entity-id entity-id :store store})))))
+        (StringEntityNode {:entity-id entity-id :store store})))
+    {:owner-id options.owner-id
+     :extension-id options.extension-id}))
 
 {:StringEntityNode StringEntityNode
  :register-loader register-loader}
@@ -206,7 +248,7 @@ In `add-item-nodes`, change from lookup to load-by-key:
 
 ## API Reference
 
-### graph:register-key-loader(scheme, loader-fn)
+### graph:register-key-loader(scheme, loader-fn, opts)
 
 Low-level descriptor installer primitive that registers a loader function for
 keys matching the given scheme in one graph runtime.
@@ -214,6 +256,15 @@ keys matching the given scheme in one graph runtime.
 **Parameters:**
 - `scheme` (string): The key scheme to match (e.g., `"string-entity"`)
 - `loader-fn` (function): A function that takes a key and returns a node (or nil)
+- `opts` (table, optional): descriptor ownership metadata, normally
+  `{:owner-id ctx.owner-id :extension-id ctx.extension-id}` from a registry
+  descriptor installer
+
+**Returns:** an owner-safe registration handle with `:scheme`, `:owner-id`,
+`:extension-id`, `:registration-id`, `:active?`, and `:unregister`. Descriptor
+installers must return these handles to `GraphExtensionRegistry` so failed
+installs, unit reloads, and runtime teardown can unregister exactly the loaders
+owned by that descriptor.
 
 **Loader function signature:**
 ```fennel
@@ -226,10 +277,11 @@ The loader should:
 3. Check if the underlying data exists (e.g., entity in store)
 4. Return a new node instance, or nil if the key is unsupported or data doesn't exist
 
-Call this from `GraphExtensionRegistry` descriptor `install-loaders` functions and
-return the resulting owner-safe handles to the registry. Do not use it as an app
-setup or test setup API for built-ins; install built-ins and user/runtime node
-types by registering descriptors through the graph extension registry.
+Call this from `GraphExtensionRegistry` descriptor `install-loaders` functions,
+pass the descriptor context ownership metadata in `opts`, and return the
+resulting handles to the registry. Do not use it as an app setup or test setup
+API for built-ins; install built-ins and user/runtime node types by registering
+descriptors through the graph extension registry.
 
 ### graph:load-by-key(key)
 
