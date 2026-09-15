@@ -42,9 +42,27 @@ The payload portion may contain additional `:` characters; only the first colon 
 
 Loading is explicit via `graph:load-by-key(key)`. The existing `graph:lookup(key)` is unchanged and only returns existing nodes. This keeps the system predictable - nodes are only created when explicitly requested.
 
-### Node-Owned Registration
+### Descriptor-Owned Installation
 
-Node modules can register their own low-level loaders, but app/runtime setup installs built-in node types as graph extension descriptors through `graph/extensions/builtins` and `app.graph-extension-registry`. There is no centralized built-in key-loader registrar or fallback module.
+`graph:register-key-loader` is the low-level primitive that descriptor installer
+code uses to attach a scheme loader to one graph runtime. App setup, HomeWorld
+runtime setup, tests, and reloadable user modules should not call individual
+built-in node `register-loader` helpers as setup APIs. They register graph
+extension descriptors with `app.graph-extension-registry` (or a test-local
+`GraphExtensionRegistry`) and let the registry install loaders and morphs into
+live and future runtimes.
+
+Built-in node types follow the same mechanism as user/runtime extensions:
+`main.fnl` registers the family-scoped descriptors from
+`graph/extensions/builtins`, and the registry installs them into each HomeWorld
+runtime before persisted graph-map topology is hydrated. Those descriptors adapt
+owning stores and systems into graph node adapters; the graph still persists only
+topology keys and edge keys, while entity, workflow, LLM, kernel, filesystem, and
+world systems own their domain data.
+
+There is no centralized built-in key-loader registrar, compatibility wrapper, or
+fallback setup path. The historical `graph/key-loaders.fnl` module has been
+removed and is not a supported import path.
 
 In practice, schemes should be treated as stable identifiers. This repo uses schemes that match the node type/module name (e.g. `hackernews-story`, `llm-message`, `string-entity`) so it’s easy to find the implementation and avoid drift.
 
@@ -118,9 +136,11 @@ Same pattern for:
 (set self.load-by-key load-by-key)
 ```
 
-### Step 3: Add Loader Registration to Node Modules
+### Step 3: Add Loader Installer Helpers to Node Modules
 
-Each node type that supports key-based loading exports a `register-loader` function.
+Node modules may expose focused `register-loader` helper functions as low-level
+installer utilities, but those helpers are for descriptor implementations and
+direct unit tests of the helper only. They are not an app/runtime/test setup API.
 
 **`assets/lua/graph/nodes/string-entity.fnl`**:
 ```fennel
@@ -159,6 +179,11 @@ During app initialization, register built-in graph extension descriptors and ins
 (BuiltInGraphExtensions.register! app.graph-extension-registry opts)
 ```
 
+This registry call is the runtime installation path. Descriptor `install-loaders`
+functions may call `graph:register-key-loader` internally, but app/runtime/test
+setup should not bypass the registry by invoking those low-level installers
+directly.
+
 ### Step 5: Update ListEntityNode to Use load-by-key
 
 **`assets/lua/graph/nodes/list-entity.fnl`**:
@@ -183,7 +208,8 @@ In `add-item-nodes`, change from lookup to load-by-key:
 
 ### graph:register-key-loader(scheme, loader-fn)
 
-Register a loader function for keys matching the given scheme.
+Low-level descriptor installer primitive that registers a loader function for
+keys matching the given scheme in one graph runtime.
 
 **Parameters:**
 - `scheme` (string): The key scheme to match (e.g., `"string-entity"`)
@@ -199,6 +225,11 @@ The loader should:
 2. For payload keys, extract and validate the payload string
 3. Check if the underlying data exists (e.g., entity in store)
 4. Return a new node instance, or nil if the key is unsupported or data doesn't exist
+
+Call this from `GraphExtensionRegistry` descriptor `install-loaders` functions and
+return the resulting owner-safe handles to the registry. Do not use it as an app
+setup or test setup API for built-ins; install built-ins and user/runtime node
+types by registering descriptors through the graph extension registry.
 
 ### graph:load-by-key(key)
 
@@ -217,8 +248,8 @@ Load or lookup a node by its key.
 Any node type can add key-based loading by:
 
 1. Using a `"<scheme>:<payload>"` key format (or a bare key for singleton nodes)
-2. Exporting a `register-loader` function
-3. Registering the loader after graph creation
+2. Providing loader installer code inside a graph extension descriptor
+3. Registering the descriptor through `GraphExtensionRegistry`
 
 Example for a hypothetical `BookmarkNode`:
 
@@ -233,17 +264,25 @@ Example for a hypothetical `BookmarkNode`:
               :view BookmarkNodeView
               ...}))
 
-(fn register-loader [graph opts]
-  (local bookmarks-db (or opts.db (get-default-db)))
-  (graph:register-key-loader SCHEME
-    (fn [key]
-      (local url (string.sub key (+ 1 (string.len KEY_PREFIX))))
-      (local bookmark (bookmarks-db:get url))
-      (when bookmark
-        (BookmarkNode {:url url :title bookmark.title})))))
+(fn bookmark-descriptor [db]
+  {:id "bookmark-extension"
+   :unit-id "bookmark-unit"
+   :schemes [SCHEME]
+   :install-loaders
+   (fn [graph ctx]
+     (local bookmarks-db (or db (get-default-db)))
+     [(graph:register-key-loader
+        SCHEME
+        (fn [key]
+          (local url (string.sub key (+ 1 (string.len KEY_PREFIX))))
+          (local bookmark (bookmarks-db:get url))
+          (when bookmark
+            (BookmarkNode {:url url :title bookmark.title})))
+        {:owner-id ctx.owner-id
+         :extension-id ctx.extension-id})])})
 
 {:BookmarkNode BookmarkNode
- :register-loader register-loader}
+ :descriptor bookmark-descriptor}
 ```
 
 ## Files Changed
