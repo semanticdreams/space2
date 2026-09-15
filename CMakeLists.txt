@@ -750,7 +750,7 @@ set_tests_properties(${PROJECT_NAME}_constraints PROPERTIES
 )
 
 add_test(NAME ${PROJECT_NAME}_runtime_fennel_paths
-    COMMAND space -m tests.test-runtime-fennel-path:main
+    COMMAND ${CMAKE_COMMAND} -E env --unset=FENNEL_PATH --unset=FENNEL_MACRO_PATH $<TARGET_FILE:space> -m tests.test-runtime-fennel-path:main
 )
 set_tests_properties(${PROJECT_NAME}_runtime_fennel_paths PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
