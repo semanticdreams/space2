@@ -18,6 +18,13 @@
             id
             nil))))
 
+(fn key-scheme [key]
+  (when (and key (= (type key) "string"))
+    (local (start _end) (string.find key ":" 1 true))
+    (if start
+        (string.sub key 1 (- start 1))
+        key)))
+
 (fn make-register-loader [scheme get-default-store make-node]
   (assert scheme "make-register-loader requires scheme")
   (assert (= (type scheme) "string") "make-register-loader requires string scheme")
@@ -38,5 +45,6 @@
             (make-node entity-id store)))))))
 
 {:key-prefix key-prefix
+ :key-scheme key-scheme
  :extract-id extract-id
  :make-register-loader make-register-loader}

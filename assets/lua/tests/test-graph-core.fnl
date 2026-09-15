@@ -21,6 +21,12 @@
         result
         (error result)))
 
+(fn make-ext-node-a [key]
+    (Graph.GraphNode {:key key :label "a"}))
+
+(fn make-ext-node-b [key]
+    (Graph.GraphNode {:key key :label "b"}))
+
 (fn graph-core-adds-nodes-and-edges []
     (local graph (Graph {:with-start false}))
     (local a (Graph.GraphNode {:key "a"}))
@@ -261,6 +267,67 @@
     (assert (= (and (. state.edges 1) (. (. state.edges 1) :target)) "test:missing"))
     (graph:drop))
 
+(fn graph-core-key-loader-handle-unregisters-owner-loader []
+    (local graph (Graph {:with-start false}))
+    (local handle
+        (graph:register-key-loader "ext" make-ext-node-a {:owner-id "unit-a"}))
+    (assert handle "register-key-loader should return a handle")
+    (assert (= handle.scheme "ext") "Handle should include scheme")
+    (assert (= handle.owner-id "unit-a") "Handle should include owner-id")
+    (assert (= (graph:key-loader-owner "ext") "unit-a")
+            "Graph should report key-loader owner")
+    (assert (graph:has-key-loader-for-key "ext:item")
+            "Registered loader should resolve matching keys")
+    (assert (graph:unregister-key-loader handle)
+            "Unregistering active handle should succeed")
+    (assert (= (graph:key-loader-owner "ext") nil)
+            "Unregistering handle should remove owner")
+    (assert (not (graph:has-key-loader-for-key "ext:item"))
+            "Unregistering handle should remove loader")
+    (assert (graph:unregister-key-loader handle)
+            "Unregistering the same inactive handle should be idempotent")
+    (graph:drop))
+
+(fn graph-core-key-loader-duplicate-active-loader-fails []
+    (local graph (Graph {:with-start false}))
+    (graph:register-key-loader "ext" make-ext-node-a {:owner-id "unit-a"})
+    (local (ok err)
+        (pcall #(graph:register-key-loader "ext" make-ext-node-b {:owner-id "unit-b"})))
+    (assert (not ok) "Duplicate active loader registration should fail")
+    (assert (string.find (tostring err) "duplicate scheme: ext" 1 true)
+            "Duplicate active loader error should name the scheme")
+    (graph:drop))
+
+(fn graph-core-key-loader-stale-handle-cannot-remove-new-owner []
+    (local graph (Graph {:with-start false}))
+    (local handle-a
+        (graph:register-key-loader "ext" make-ext-node-a {:owner-id "unit-a"}))
+    (graph:unregister-key-loader handle-a)
+    (graph:register-key-loader "ext" make-ext-node-b {:owner-id "unit-b"})
+    (local (ok err) (pcall #(graph:unregister-key-loader handle-a)))
+    (assert (not ok) "stale handle should not remove another owner registration")
+    (assert (string.find (tostring err) "belongs to another registration" 1 true))
+    (assert (= (graph:key-loader-owner "ext") "unit-b")
+            "Stale unregister must not remove the newer owner")
+    (graph:drop))
+
+(fn graph-core-key-loader-foreign-handle-cannot-remove-registration []
+    (local graph-a (Graph {:with-start false}))
+    (local graph-b (Graph {:with-start false}))
+    (local handle-a
+        (graph-a:register-key-loader "ext" make-ext-node-a {:owner-id "unit-a"}))
+    (graph-b:register-key-loader "ext" make-ext-node-b {:owner-id "unit-b"})
+    (local (ok err) (pcall #(graph-b:unregister-key-loader handle-a)))
+    (assert (not ok) "foreign handle should not remove another graph registration")
+    (assert (string.find (tostring err) "belongs to another registration" 1 true)
+            "Foreign handle error should use stale-registration diagnostic")
+    (assert (= (graph-b:key-loader-owner "ext") "unit-b")
+            "Foreign unregister must not remove graph-b owner")
+    (assert (graph-b:has-key-loader-for-key "ext:item")
+            "Foreign unregister must leave graph-b loader active")
+    (graph-a:drop)
+    (graph-b:drop))
+
 (table.insert tests {:name "Graph core adds nodes and edges" :fn graph-core-adds-nodes-and-edges})
 (table.insert tests {:name "Graph core replaces nodes and updates edges" :fn graph-core-replaces-node-and-updates-edges})
 (table.insert tests {:name "Graph core removes nodes and edges" :fn graph-core-removes-nodes-and-edges})
@@ -276,7 +343,15 @@
 (table.insert tests {:name "Graph core restore skips edges with unresolved endpoints"
                      :fn graph-core-restore-skips-edges-with-unresolved-endpoints})
 (table.insert tests {:name "Graph core capture preserves unresolved restored state"
-                     :fn graph-core-capture-preserves-unresolved-restored-state})
+                      :fn graph-core-capture-preserves-unresolved-restored-state})
+(table.insert tests {:name "Graph core key-loader handle unregisters owner loader"
+                     :fn graph-core-key-loader-handle-unregisters-owner-loader})
+(table.insert tests {:name "Graph core key-loader duplicate active loader fails"
+                     :fn graph-core-key-loader-duplicate-active-loader-fails})
+(table.insert tests {:name "Graph core key-loader stale handle cannot remove new owner"
+                     :fn graph-core-key-loader-stale-handle-cannot-remove-new-owner})
+(table.insert tests {:name "Graph core key-loader foreign handle cannot remove registration"
+                     :fn graph-core-key-loader-foreign-handle-cannot-remove-registration})
 
 (local main
   (fn []

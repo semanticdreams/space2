@@ -367,19 +367,22 @@
             (set last-matched-event-count (+ last-matched-event-count 1))))))
     pending-events)
 
-  (fn rollback! [target-unit module-names backup snapshot]
+  (fn rollback! [target-unit module-names backup snapshot failed-target-loaded?]
+    (when failed-target-loaded?
+      (target-unit:unload {:reload-phase "rollback-unload-failed"}))
     (clear-loaded-modules! module-names)
     (restore-loaded-modules! backup)
     (target-unit:load {:reload-phase "rollback"})
     (target-unit:restore snapshot {:reload-phase "rollback"})
+    (Units.refresh-graph-extensions-for-unit! target-unit.id)
     true)
 
-  (fn handle-reload-failure [target-unit module-names backup snapshot err]
+  (fn handle-reload-failure [target-unit module-names backup snapshot err failed-target-loaded?]
     (logging.error (string.format "[hot-reload] reload failed for %s: %s"
                                   target-unit.id
                                   err))
     (local (rollback-ok rollback-err)
-      (pcall rollback! target-unit module-names backup snapshot))
+      (pcall rollback! target-unit module-names backup snapshot failed-target-loaded?))
     (if rollback-ok
         (do
           (logging.warn (string.format
@@ -417,6 +420,7 @@
     (local previous-reload-ctx (and app app.__hot-reload-ctx))
     (when app
       (set app.__hot-reload-ctx reload-ctx))
+    (var target-loaded-after-unload? false)
     (local (ok err)
       (pcall
         (fn []
@@ -437,13 +441,15 @@
            (logging.info (string.format
                           "[hot-reload] load target=%s"
                           target-unit.id))
-          (when (= target-unit.id "app-root")
-            (set _G.__space_debug_log_session_started true))
+           (when (= target-unit.id "app-root")
+             (set _G.__space_debug_log_session_started true))
            (target-unit:load reload-ctx)
+           (set target-loaded-after-unload? true)
            (logging.info (string.format
-                           "[hot-reload] restore target=%s"
-                           target-unit.id))
-          (target-unit:restore snapshot reload-ctx))))
+                          "[hot-reload] restore target=%s"
+                          target-unit.id))
+           (target-unit:restore snapshot reload-ctx)
+           (Units.refresh-graph-extensions-for-unit! target-unit.id))))
     (when app
       (set app.__hot-reload-ctx previous-reload-ctx))
     (if ok
@@ -458,7 +464,7 @@
                           (length changes)
                           reload-count))
           true)
-        (handle-reload-failure target-unit module-names backup snapshot err)))
+        (handle-reload-failure target-unit module-names backup snapshot err target-loaded-after-unload?)))
 
   (fn reload-now! [_self opts]
     (assert (not dropped?) "HotReloadController.reload-now! called after drop")

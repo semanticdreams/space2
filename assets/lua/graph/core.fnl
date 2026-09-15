@@ -12,10 +12,91 @@
 (local IdentityStore (require :entities/identity))
 (local StringEntityStore (require :entities/string))
 (local Morphs (require :morphs/init))
+(local KeyLoaderUtils (require :graph/key-loader-utils))
 
 (local GraphNode NodeBase.GraphNode)
 (local GraphEdge Edge.GraphEdge)
 (local node-id NodeBase.node-id)
+
+(fn validate-key-loader-scheme [context scheme]
+    (assert scheme (.. context " requires a scheme"))
+    (assert (= (type scheme) "string") (.. context " requires string scheme"))
+    (assert (> (string.len scheme) 0) (.. context " requires non-empty scheme")))
+
+(fn make-key-loader-handle [graph registration]
+    {:scheme registration.scheme
+     :owner-id registration.owner-id
+     :extension-id registration.extension-id
+     :registration-id registration.registration-id
+     :active? true
+     :unregister (fn [handle-self]
+                   (graph:unregister-key-loader handle-self))})
+
+(fn register-key-loader [graph key-loaders allocate-registration-id scheme loader-fn opts]
+    (validate-key-loader-scheme "register-key-loader" scheme)
+    (assert (not (string.find scheme ":" 1 true))
+            "register-key-loader scheme must not include ':'")
+    (assert loader-fn "register-key-loader requires a loader function")
+    (assert (= (type loader-fn) "function") "register-key-loader requires function loader")
+    (assert (not (. key-loaders scheme))
+            (.. "register-key-loader duplicate scheme: " scheme))
+    (local options (or opts {}))
+    (local registration {:scheme scheme
+                         :loader-fn loader-fn
+                         :owner-id options.owner-id
+                         :extension-id options.extension-id
+                         :registration-id (allocate-registration-id)
+                         :active? true})
+    (local handle (make-key-loader-handle graph registration))
+    (set registration.handle handle)
+    (set (. key-loaders scheme) registration)
+    handle)
+
+(fn unregister-key-loader-handle [key-loaders handle]
+    (validate-key-loader-scheme "unregister-key-loader" handle.scheme)
+    (local registration (. key-loaders handle.scheme))
+    (if registration
+        (do
+            (when (or (not (= registration.registration-id handle.registration-id))
+                      (not (= registration.handle handle)))
+                (error (.. "key loader for scheme " handle.scheme " belongs to another registration")))
+            (set registration.active? false)
+            (set (. key-loaders handle.scheme) nil)
+            (set handle.active? false)
+            true)
+        (if (not handle.active?)
+            true
+            (do
+                (set handle.active? false)
+                true))))
+
+(fn unregister-key-loader-scheme [key-loaders scheme opts]
+    (validate-key-loader-scheme "unregister-key-loader" scheme)
+    (local options (or opts {}))
+    (local registration (. key-loaders scheme))
+    (if registration
+        (do
+            (when (and registration.owner-id
+                       (not (= options.owner-id registration.owner-id)))
+                (error (.. "key loader for scheme " scheme " belongs to owner " registration.owner-id)))
+            (when (and options.registration-id
+                       (not (= options.registration-id registration.registration-id)))
+                (error (.. "key loader for scheme " scheme " belongs to another registration")))
+            (set registration.active? false)
+            (when registration.handle
+                (set registration.handle.active? false))
+            (set (. key-loaders scheme) nil)
+            true)
+        true))
+
+(fn unregister-key-loader [key-loaders handle-or-scheme opts]
+    (assert handle-or-scheme "unregister-key-loader requires a handle or scheme")
+    (local kind (type handle-or-scheme))
+    (assert (or (= kind "table") (= kind "string"))
+            "unregister-key-loader requires table handle or string scheme")
+    (if (= kind "table")
+        (unregister-key-loader-handle key-loaders handle-or-scheme)
+        (unregister-key-loader-scheme key-loaders handle-or-scheme opts)))
 
 (fn create-graph [opts]
     (local options (or opts {}))
@@ -24,6 +105,7 @@
     (local edge-map {})
     (local key-loaders {})
     (var node-seq 0)
+    (var key-loader-registration-seq 0)
     (local node-added (Signal))
     (local node-removed (Signal))
     (local node-replaced (Signal))
@@ -213,11 +295,7 @@
                     (self:load-by-key resolved-key)))))
 
     (fn key-scheme [key]
-        (when (and key (= (type key) "string"))
-            (local (start _end) (string.find key ":" 1 true))
-            (if start
-                (string.sub key 1 (- start 1))
-                key)))
+        (KeyLoaderUtils.key-scheme key))
 
     (fn record-unresolved-restored-node [key]
         (when (and key (= (type key) :string))
@@ -241,17 +319,22 @@
                                                              :target target-key}))))
 
     (set self.register-key-loader
-        (fn [_self scheme loader-fn]
-            (assert scheme "register-key-loader requires a scheme")
-            (assert (= (type scheme) "string") "register-key-loader requires string scheme")
-            (assert (> (string.len scheme) 0) "register-key-loader requires non-empty scheme")
-            (assert (not (string.find scheme ":" 1 true))
-                    "register-key-loader scheme must not include ':'")
-            (assert loader-fn "register-key-loader requires a loader function")
-            (assert (= (type loader-fn) "function") "register-key-loader requires function loader")
-            (assert (not (. key-loaders scheme))
-                    (.. "register-key-loader duplicate scheme: " scheme))
-            (set (. key-loaders scheme) loader-fn)))
+        (fn [_self scheme loader-fn opts]
+            (register-key-loader self key-loaders
+                                 (fn []
+                                     (set key-loader-registration-seq (+ key-loader-registration-seq 1))
+                                     key-loader-registration-seq)
+                                 scheme loader-fn opts)))
+
+    (set self.unregister-key-loader
+        (fn [_self handle-or-scheme opts]
+            (unregister-key-loader key-loaders handle-or-scheme opts)))
+
+    (set self.key-loader-owner
+        (fn [_self scheme]
+            (assert (= (type scheme) "string") "key-loader-owner requires string scheme")
+            (local registration (. key-loaders scheme))
+            (and registration registration.owner-id)))
 
     (set self.load-by-key
         (fn [_self key]
@@ -260,9 +343,9 @@
             (local existing (. nodes key))
             (when existing (lua "return existing"))
             (local scheme (key-scheme key))
-            (local loader (. key-loaders scheme))
-            (when (not loader) (lua "return nil"))
-            (local node (loader key))
+            (local registration (. key-loaders scheme))
+            (when (not registration) (lua "return nil"))
+            (local node (registration.loader-fn key))
             (when node
                 (assert (. node :key) "load-by-key loader must return node with key")
                 (assert (= (. node :key) key)
@@ -276,9 +359,9 @@
             (when (not key) (lua "return nil"))
             (assert (= (type key) "string") "create-node-by-key requires string key")
             (local scheme (key-scheme key))
-            (local loader (. key-loaders scheme))
-            (when (not loader) (lua "return nil"))
-            (local node (loader key))
+            (local registration (. key-loaders scheme))
+            (when (not registration) (lua "return nil"))
+            (local node (registration.loader-fn key))
             (when node
                 (assert (. node :key) "create-node-by-key loader must return node with key")
                 (assert (= (. node :key) key)

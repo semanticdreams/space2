@@ -1668,7 +1668,7 @@
   (ensure-canvas-unit)
   (local hud-unit (ensure-hud-unit))
   (hud-unit:load)
-  (load-built-in-activity-units!)
+  (load-built-in-activity-units!) (app.ensure-graph-extension-registry!)
   (ensure-user-code-units!)
   (init-world-manager)
   (when app.world-manager
@@ -2100,7 +2100,7 @@
     (set app.world-manager nil))
   (Activities.clear-activity-runtime-hooks!)
   (when app.unit-manager
-    (app.unit-manager:clear))
+    (app.unit-manager:clear) (set app.graph-extension-registry nil))
   (set app.canvas-unit nil)
   (set app.active-world-entry nil)
   (set app.active-world-runtime nil)
@@ -2216,6 +2216,12 @@
   (sync-physics-paused-state)
   )
 
+(fn app.ensure-graph-extension-registry! []
+  (when (not app.graph-extension-registry)
+    (local Registry (require :graph/extension-registry))
+    (set app.graph-extension-registry (Registry.GraphExtensionRegistry {:app app})))
+  app.graph-extension-registry)
+
 (when (and app.engine AppConfig.run-main (not app.__suppress-main-run?))
   (when app.engine-autocreated
     (set app.engine (EngineModule.Engine (load-window-startup-options)))
@@ -2231,10 +2237,11 @@
   (app.engine:shutdown))
 
 {:init app.init
- :build-hud-world-tabs-widget build-hud-world-tabs-widget
- :install-app-shell! install-app-shell!
- :bind-active-world-runtime installable-bind-active-world-runtime
- :ensure-user-code-units! ensure-user-code-units!
+  :build-hud-world-tabs-widget build-hud-world-tabs-widget
+  :install-app-shell! install-app-shell!
+  :bind-active-world-runtime installable-bind-active-world-runtime
+  :ensure-graph-extension-registry! app.ensure-graph-extension-registry!
+  :ensure-user-code-units! ensure-user-code-units!
  :clear-fennel-module-cache! clear-fennel-module-cache!
  :drop app.drop
  :snapshot app.snapshot-app-state

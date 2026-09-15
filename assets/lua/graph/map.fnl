@@ -3,10 +3,41 @@
 (local NodeBase (require :graph/node-base))
 (local LinkEntityStore (require :entities/link))
 (local IdentityStore (require :entities/identity))
+(local KeyLoaderUtils (require :graph/key-loader-utils))
 (local glm (require :glm))
 
 (local GraphEdge Edge.GraphEdge)
 (local node-id NodeBase.node-id)
+
+(fn refresh-adapters-by-scheme [graph-map shared-graph nodes lookup replace-node scheme]
+    (assert scheme "GraphMap.refresh-adapters-by-scheme requires scheme")
+    (assert (= (type scheme) "string")
+            "GraphMap.refresh-adapters-by-scheme requires string scheme")
+    (assert (> (string.len scheme) 0)
+            "GraphMap.refresh-adapters-by-scheme requires non-empty scheme")
+    (local keys
+        (icollect [key _node (pairs nodes)]
+            (if (= (KeyLoaderUtils.key-scheme key) scheme)
+                key)))
+    (table.sort keys)
+    (local replacements [])
+    (local failed [])
+    (each [_ key (ipairs keys)]
+        (local replacement (shared-graph:create-node-by-key key))
+        (if replacement
+            (table.insert replacements {:key key :node replacement})
+            (table.insert failed key)))
+    (when (> (length failed) 0)
+        (error (.. "failed to refresh graph nodes for scheme " scheme)))
+    (local refreshed [])
+    (each [_ item (ipairs replacements)]
+        (local existing (lookup graph-map item.key))
+        (when existing
+            (replace-node graph-map existing item.node)
+            (table.insert refreshed item.key)))
+    {:scheme scheme
+     :refreshed refreshed
+     :failed failed})
 
 (fn create-graph-map [opts]
     (local options (or opts {}))
@@ -308,6 +339,10 @@
             (when node
                 (add-node self node))
             node))
+
+    (set self.refresh-adapters-by-scheme
+        (fn [_self scheme]
+            (refresh-adapters-by-scheme self shared-graph nodes lookup replace-node scheme)))
 
     (fn record-unresolved-restored-node [key]
         (when (and key (= (type key) :string))

@@ -372,6 +372,68 @@
     (map:drop)
     (graph:drop))
 
+(fn graph-map-refresh-adapters-by-scheme-rebuilds-visible-nodes []
+    (local graph (Graph {:with-start false}))
+    (var label-version "v1")
+    (graph:register-key-loader "ext"
+        (fn [key]
+            (Graph.GraphNode {:key key :label label-version})))
+    (local map (GraphMap.GraphMap {:graph graph :id "test-refresh-ext"}))
+    (local node-a (map:load-by-key "ext:a"))
+    (local node-b (map:load-by-key "ext:b"))
+    (map:add-edge (Graph.GraphEdge {:source node-a :target node-b}))
+    (set map.selected_node_keys ["ext:a"])
+    (set map.focused_node_key "ext:b")
+    (var replaced-count 0)
+    (local replaced-keys [])
+    (local handler (map.node-replaced:connect
+                       (fn [payload]
+                           (set replaced-count (+ replaced-count 1))
+                           (table.insert replaced-keys (and payload payload.new payload.new.key)))))
+    (set label-version "v2")
+    (local result (map:refresh-adapters-by-scheme "ext"))
+    (local refreshed-a (map:lookup "ext:a"))
+    (local refreshed-b (map:lookup "ext:b"))
+    (assert (= result.scheme "ext") "Refresh result should include scheme")
+    (assert (= (length result.refreshed) 2) "Refresh result should include refreshed keys")
+    (assert (= (length result.failed) 0) "Refresh result should include no failures")
+    (assert (= refreshed-a.label "v2") "Refreshed node A should use updated adapter")
+    (assert (= refreshed-b.label "v2") "Refreshed node B should use updated adapter")
+    (local edge (. map.edges 1))
+    (assert (= edge.source refreshed-a) "Explicit edge source should point at replacement adapter")
+    (assert (= edge.target refreshed-b) "Explicit edge target should point at replacement adapter")
+    (assert (= (length map.selected_node_keys) 1) "Refresh should preserve selected key count")
+    (assert (= (. map.selected_node_keys 1) "ext:a") "Refresh should preserve selected keys")
+    (assert (= map.focused_node_key "ext:b") "Refresh should preserve focused key")
+    (assert (= replaced-count 2) "Refresh should emit node-replaced for each refreshed node")
+    (assert (= (. replaced-keys 1) "ext:a") "First replacement should be ext:a")
+    (assert (= (. replaced-keys 2) "ext:b") "Second replacement should be ext:b")
+    (map.node-replaced:disconnect handler true)
+    (map:drop)
+    (graph:drop))
+
+(fn graph-map-refresh-adapters-by-scheme-fails-before-mutation []
+    (local graph (Graph {:with-start false}))
+    (var loadable? true)
+    (graph:register-key-loader "ext"
+        (fn [key]
+            (if loadable?
+                (Graph.GraphNode {:key key :label "v1"})
+                nil)))
+    (local map (GraphMap.GraphMap {:graph graph :id "test-refresh-fail"}))
+    (local original (map:load-by-key "ext:a"))
+    (set loadable? false)
+    (local (ok err) (pcall #(map:refresh-adapters-by-scheme "ext")))
+    (assert (not ok) "Refresh should fail when a visible node cannot be rebuilt")
+    (assert (string.find (tostring err) "failed to refresh graph nodes for scheme ext" 1 true)
+            "Refresh failure should name the failing scheme")
+    (assert (= (map:lookup "ext:a") original)
+            "Refresh failure should leave previous adapter visible")
+    (assert (= original.label "v1")
+            "Refresh failure should not mutate existing adapter")
+    (map:drop)
+    (graph:drop))
+
 (fn graph-map-capture-preserves-unresolved-restored-state []
     (local graph (Graph {:with-start false}))
     (graph:register-key-loader "test"
@@ -985,6 +1047,10 @@
 (table.insert tests {:name "Morph only affects maps containing the source key" :fn morph-only-affects-maps-containing-source})
 (table.insert tests {:name "Morph loads target when source is in map" :fn morph-loads-target-when-source-is-in-map})
 (table.insert tests {:name "Shared node-added does not auto-sync into map" :fn shared-node-added-does-not-auto-sync-into-map})
+(table.insert tests {:name "GraphMap refresh-adapters-by-scheme rebuilds visible nodes"
+                     :fn graph-map-refresh-adapters-by-scheme-rebuilds-visible-nodes})
+(table.insert tests {:name "GraphMap refresh-adapters-by-scheme fails before mutation"
+                     :fn graph-map-refresh-adapters-by-scheme-fails-before-mutation})
 (table.insert tests {:name "GraphMap capture preserves unresolved restored state" :fn graph-map-capture-preserves-unresolved-restored-state})
 (table.insert tests {:name "Shared edge-added forwards edge metadata" :fn shared-edge-added-forwards-metadata})
 (table.insert tests {:name "GraphMap capture skips derived link-entity edges" :fn graph-map-capture-skips-derived-link-edges})

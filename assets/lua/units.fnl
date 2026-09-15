@@ -14,6 +14,11 @@
   (icollect [_ item (ipairs (or items []))]
     item))
 
+(fn refresh-graph-extensions-for-unit! [unit-id]
+  (when (and app app.graph-extension-registry app.graph-extension-registry.refresh-unit)
+    (app.graph-extension-registry:refresh-unit unit-id))
+  true)
+
 (fn Unit [opts]
   (local spec (or opts {}))
   (local id (assert spec.id "Unit requires :id"))
@@ -36,10 +41,10 @@
    :source (or spec.source :user)
    :owned-paths (clone-list spec.owned-paths)
    :has-snapshot? has-snapshot?
-   :loaded? (fn [_self] loaded?)
-   :load (fn [self ctx]
-           (load-fn ctx)
-           (set loaded? true))
+    :loaded? (fn [_self] loaded?)
+    :load (fn [self ctx]
+            (local (ok result) (pcall load-fn ctx)) (when (not ok) (disconnect-all-signals) (local (cleanup-ok cleanup-err) (pcall unload-fn ctx)) (set loaded? false) (when (not cleanup-ok) (error (.. (tostring result) " (cleanup after failed load also failed: " (tostring cleanup-err) ")"))) (error result))
+            (set loaded? true))
    :unload (fn [self ctx]
              (disconnect-all-signals)
              (local (ok err) (pcall unload-fn ctx))
@@ -51,11 +56,13 @@
                (snapshot-fn ctx))
    :restore (fn [_self state ctx]
               (restore-fn state ctx))
-   :reload (fn [self ctx]
-             (local state (self:snapshot ctx))
-             (self:unload ctx)
-             (self:load ctx)
-             (self:restore state ctx))
+    :reload (fn [self ctx]
+              (local state (self:snapshot ctx))
+              (self:unload ctx)
+              (self:load ctx)
+              (local restored (self:restore state ctx))
+              (refresh-graph-extensions-for-unit! id)
+              restored)
    :connect-signal (fn [self name signal handler]
                      (when (. connected-signals name)
                        (error (.. "Signal " name " already connected on unit " id)))
@@ -323,5 +330,6 @@
   self)
 
 {:Unit Unit
- :ModuleUnit ModuleUnit
- :SourceUnit SourceUnit}
+  :ModuleUnit ModuleUnit
+  :SourceUnit SourceUnit
+  :refresh-graph-extensions-for-unit! refresh-graph-extensions-for-unit!}

@@ -1003,8 +1003,81 @@
                                                       (.. "HomeWorld " world.id " requires :graph-world-manager"))
                                 :asset-path-resolver (assert world.asset-path-resolver
                                                             (.. "HomeWorld " world.id " requires :asset-path-resolver"))
-                                :code-store app.code-store :workflow-store app.workflow-store
-                                :workflow-runner app.workflow-runner}))
+                                 :code-store app.code-store :workflow-store app.workflow-store
+                                 :workflow-runner app.workflow-runner}))
+
+  (fn drop-runtime-resources! [runtime]
+    (when runtime
+      (when (and runtime.graph-extension-registry-installed?
+                 app.graph-extension-registry)
+        (app.graph-extension-registry:uninstall-runtime runtime)
+        (set runtime.graph-extension-registry-installed? false))
+      (when runtime.scene
+        (runtime.scene:drop)
+        (set runtime.scene nil))
+      (when runtime.graph-map-manager
+        (when runtime.graph-map-sync-handler
+          (runtime.graph-map-manager.maps-changed:disconnect runtime.graph-map-sync-handler true)
+          (set runtime.graph-map-sync-handler nil))
+        (runtime.graph-map-manager:drop)
+        (set runtime.graph-map-manager nil))
+      (when runtime.graph
+        (runtime.graph:drop)
+        (set runtime.graph nil))
+      (set runtime.scene-scope nil))
+    true)
+
+  (fn setup-created-runtime! [world runtime graph-map-manager]
+    (when (and app.graph-extension-registry
+               (not runtime.graph-extension-registry-installed?))
+      (app.graph-extension-registry:install-runtime runtime)
+      (set runtime.graph-extension-registry-installed? true))
+    ;; Install presentation provider on the runtime so renderers and input
+    ;; helpers can query activity-owned cameras and render targets.
+    (set runtime.presentation (Presentation.for-runtime runtime))
+    (local sync-active-graph-map!
+      (fn []
+        (local active-graph-map (graph-map-manager:get-active-map))
+        (set runtime.graph-map active-graph-map)
+        (when (and runtime.scene runtime.scene.set-graph-map)
+          (runtime.scene:set-graph-map active-graph-map))
+        (when (= app.active-world-runtime runtime)
+          (set app.graph-map active-graph-map)
+          (set app.graph-map-manager graph-map-manager))
+        active-graph-map))
+    (set runtime.graph-map-sync-handler
+         (graph-map-manager.maps-changed:connect (fn [_payload]
+                                                   (sync-active-graph-map!))))
+    (set runtime.load-canvas-runtime
+         (fn [rt]
+           (assert (= rt runtime) "HomeWorld.load-canvas-runtime called with wrong runtime")
+           ((. (current-canvas-runtime-module) :load-runtime-canvas-surface!) world runtime)))
+    (set runtime.unload-canvas-runtime
+         (fn [rt]
+           (assert (= rt runtime) "HomeWorld.unload-canvas-runtime called with wrong runtime")
+           ((. (current-canvas-runtime-module) :drop-runtime-canvas-surface!) runtime)))
+    (set runtime.capture-canvas-unit-state
+         (fn [rt]
+           (assert (= rt runtime) "HomeWorld.capture-canvas-unit-state called with wrong runtime")
+           ((. (current-canvas-runtime-module) :capture-runtime-canvas-unit-state) world runtime)))
+    (set runtime.restore-canvas-unit-state
+         (fn [rt state]
+           (assert (= rt runtime) "HomeWorld.restore-canvas-unit-state called with wrong runtime")
+           ((. (current-canvas-runtime-module) :restore-runtime-canvas-unit-state!) runtime state)))
+    (set runtime.restore-workspace-shell-state
+         (fn [rt canvas-target]
+             (when (and canvas-target rt.pending-canvas-state)
+               (canvas-target:restore-shell-state rt.pending-canvas-state))))
+    (set runtime.restore-surface-state
+         (fn [rt canvas-target hud]
+           (when (and canvas-target canvas-target.restore-state rt.pending-canvas-state)
+             (canvas-target:restore-state rt.pending-canvas-state)
+             (set rt.pending-canvas-state nil))
+           (when (and hud hud.restore-state rt.pending-hud-state)
+             (hud:restore-state rt.pending-hud-state)
+             (set rt.pending-hud-state nil))))
+    (runtime:load-canvas-runtime)
+    runtime)
 
   (fn create-runtime [world ctx]
     ;; Create a default scene surface camera.  Activity slots (e.g. sandbox)
@@ -1015,12 +1088,24 @@
     (local activity-state (or (and world.state world.state.activity) {}))
     (local graph (Graph {:with-start false :entity-events? false}))
     (register-runtime-graph-loaders graph world)
-    (local graph-map-manager (GraphMapManager.GraphMapManager
-                               {:graph graph
-                                :state (or world.state.graph {})
-                                :data-dir world.dir}))
+    (local restore-runtime {:graph graph})
+    (var restore-runtime-installed? false)
+    (when app.graph-extension-registry
+      (local (install-ok install-result) (pcall #(app.graph-extension-registry:install-runtime restore-runtime)))
+      (if install-ok
+          (set restore-runtime-installed? true)
+          (do (graph:drop) (error install-result))))
+    (local (map-manager-ok graph-map-manager)
+      (pcall #(GraphMapManager.GraphMapManager
+                {:graph graph
+                 :state (or world.state.graph {})
+                 :data-dir world.dir})))
+    (when restore-runtime-installed?
+      (app.graph-extension-registry:uninstall-runtime restore-runtime))
+    (when (not map-manager-ok)
+      (graph:drop)
+      (error graph-map-manager))
     (local graph-map (graph-map-manager:get-active-map))
-    (var graph-map-sync-handler nil)
     (local scene-scope
       (do
         (local scope
@@ -1100,53 +1185,13 @@
                    :start-scheduled? false
                    :scene-panels (clone-table (and sandbox-scene-state sandbox-scene-state.panels []))
         :scene-panel-index 1}})
-    ;; Install presentation provider on the runtime so renderers and input
-    ;; helpers can query activity-owned cameras and render targets.
-    (set runtime.presentation (Presentation.for-runtime runtime))
-    (local sync-active-graph-map!
-      (fn []
-        (local active-graph-map (graph-map-manager:get-active-map))
-        (set runtime.graph-map active-graph-map)
-        (when (and runtime.scene runtime.scene.set-graph-map)
-          (runtime.scene:set-graph-map active-graph-map))
-        (when (= app.active-world-runtime runtime)
-          (set app.graph-map active-graph-map)
-          (set app.graph-map-manager graph-map-manager))
-        active-graph-map))
-    (set graph-map-sync-handler
-         (graph-map-manager.maps-changed:connect (fn [_payload]
-                                                   (sync-active-graph-map!))))
-    (set runtime.graph-map-sync-handler graph-map-sync-handler)
-    (set runtime.load-canvas-runtime
-         (fn [rt]
-           (assert (= rt runtime) "HomeWorld.load-canvas-runtime called with wrong runtime")
-           ((. (current-canvas-runtime-module) :load-runtime-canvas-surface!) world runtime)))
-    (set runtime.unload-canvas-runtime
-         (fn [rt]
-           (assert (= rt runtime) "HomeWorld.unload-canvas-runtime called with wrong runtime")
-           ((. (current-canvas-runtime-module) :drop-runtime-canvas-surface!) runtime)))
-    (set runtime.capture-canvas-unit-state
-         (fn [rt]
-           (assert (= rt runtime) "HomeWorld.capture-canvas-unit-state called with wrong runtime")
-           ((. (current-canvas-runtime-module) :capture-runtime-canvas-unit-state) world runtime)))
-    (set runtime.restore-canvas-unit-state
-         (fn [rt state]
-           (assert (= rt runtime) "HomeWorld.restore-canvas-unit-state called with wrong runtime")
-           ((. (current-canvas-runtime-module) :restore-runtime-canvas-unit-state!) runtime state)))
-    (set runtime.restore-workspace-shell-state
-         (fn [rt canvas-target]
-            (when (and canvas-target rt.pending-canvas-state)
-              (canvas-target:restore-shell-state rt.pending-canvas-state))))
-    (set runtime.restore-surface-state
-         (fn [rt canvas-target hud]
-           (when (and canvas-target canvas-target.restore-state rt.pending-canvas-state)
-             (canvas-target:restore-state rt.pending-canvas-state)
-             (set rt.pending-canvas-state nil))
-           (when (and hud hud.restore-state rt.pending-hud-state)
-             (hud:restore-state rt.pending-hud-state)
-             (set rt.pending-hud-state nil))))
-    (runtime:load-canvas-runtime)
-    runtime)
+    (local (setup-ok setup-result)
+      (pcall setup-created-runtime! world runtime graph-map-manager))
+    (if setup-ok
+        setup-result
+        (do
+          (drop-runtime-resources! runtime)
+          (error setup-result))))
 
   (fn clear-runtime [world ctx reason]
     (local runtime world.runtime)
@@ -1157,19 +1202,7 @@
       (clear-active-runtime-containment! world)
       (runtime:unload-canvas-runtime)
       (set runtime.drawing-controller nil)
-      (when runtime.scene
-        (runtime.scene:drop)
-        (set runtime.scene nil))
-      (when runtime.graph-map-manager
-        (when runtime.graph-map-sync-handler
-          (runtime.graph-map-manager.maps-changed:disconnect runtime.graph-map-sync-handler true)
-          (set runtime.graph-map-sync-handler nil))
-        (runtime.graph-map-manager:drop)
-        (set runtime.graph-map-manager nil))
-      (when runtime.graph
-        (runtime.graph:drop)
-        (set runtime.graph nil))
-      (set runtime.scene-scope nil)
+      (drop-runtime-resources! runtime)
       (set world.runtime nil)
       (when reason
         (logging.info (string.format "[world] %s runtime cleared (%s)" world.id reason)))))

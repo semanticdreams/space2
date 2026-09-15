@@ -126,6 +126,10 @@
     :tests.test-notebooks
     :tests.test-link-entity-crash
     :tests.test-morphs
+    :tests.test-graph-extension-morphs
+    :tests.test-graph-extension-registry
+    :tests.test-graph-extension-units
+    :tests.test-graph-extension-runtime-plumbing
     :tests.test-world-nodes
     :tests.test-world-skybox-node
     :tests.test-world-background-node
