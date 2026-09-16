@@ -313,6 +313,17 @@ set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "Disable spdlog examples" FORCE)
 set(SPDLOG_INSTALL OFF CACHE BOOL "Disable spdlog install" FORCE)
 add_subdirectory(external/spdlog)
 
+set(SENTRY_BUILD_TESTS OFF CACHE BOOL "Disable sentry-native tests" FORCE)
+set(SENTRY_BUILD_EXAMPLES OFF CACHE BOOL "Disable sentry-native examples" FORCE)
+set(SENTRY_BUILD_BENCHMARKS OFF CACHE BOOL "Disable sentry-native benchmarks" FORCE)
+set(SENTRY_BUILD_SHARED_LIBS OFF CACHE BOOL "Build sentry-native statically" FORCE)
+if(UNIX AND NOT APPLE)
+    set(SENTRY_BACKEND crashpad CACHE STRING "Use crashpad backend for sentry-native" FORCE)
+    set(SENTRY_TRANSPORT curl CACHE STRING "Use curl transport for sentry-native" FORCE)
+endif()
+add_subdirectory(external/sentry-native)
+space_suppress_target_warnings(sentry)
+
 option(SPACE_REQUIRE_NATIVE_LINUX_INPUT
     "Require native Linux desktop input backends (Wayland + XInput2) for SDL builds"
     ON)
@@ -517,6 +528,14 @@ target_link_libraries(${PROJECT_NAME}_lib
     Boost::headers
     space_yojimbo
 )
+if(TARGET sentry::sentry)
+    target_link_libraries(${PROJECT_NAME}_lib sentry::sentry)
+elseif(TARGET sentry)
+    # sentry::sentry is the expected upstream alias for sentry-native 0.16.6.
+    target_link_libraries(${PROJECT_NAME}_lib sentry)
+else()
+    message(FATAL_ERROR "Required sentry-native target not found")
+endif()
 if(TARGET BulletInverseDynamics)
     target_link_libraries(${PROJECT_NAME}_lib BulletInverseDynamics)
 endif()
@@ -672,6 +691,13 @@ target_link_libraries(${PROJECT_NAME} ${PROJECT_NAME}_lib)
 set_target_properties(${PROJECT_NAME} PROPERTIES
     INSTALL_RPATH "\$ORIGIN/../lib"
 )
+if(TARGET crashpad_handler)
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:crashpad_handler>
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>/crashpad_handler
+        VERBATIM)
+endif()
 target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE ${CMAKE_CURRENT_LIST_DIR}/external/CLI11/include)
 if(WIN32)
     set(SPACE_WINDOWS_ICON_PNG "${CMAKE_CURRENT_SOURCE_DIR}/assets/pics/space.png")
@@ -765,6 +791,11 @@ add_test(NAME test_vector_buffer COMMAND test_vector_buffer)
 set_tests_properties(test_vector_buffer PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
+
+add_executable(test_error_reporting tests/test_error_reporting.cpp)
+target_link_libraries(test_error_reporting ${PROJECT_NAME}_lib)
+target_include_directories(test_error_reporting PRIVATE external/cpp-httplib)
+add_test(NAME test_error_reporting COMMAND test_error_reporting)
 
 add_executable(test_input_dial_type
     tests/test_input_dial_type.cpp
