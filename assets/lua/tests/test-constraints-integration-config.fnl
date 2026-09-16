@@ -102,9 +102,13 @@
     (lua "return true"))
   (local cmake (read-repo-file "CMakeLists.txt"))
   (assert-contains cmake "add_test(NAME ${PROJECT_NAME}_constraints"
-                   "CMake should declare the constraints test")
-  (assert-contains cmake "COMMAND space -m constraints.runner:main -- --output summary --target repo"
-                   "constraints CTest should run the repo constraints command in concise summary mode")
+                    "CMake should declare the constraints test")
+  (assert-contains cmake "set(SPACE_TEST_COMMAND_TARGET ${PROJECT_NAME})"
+                    "CMake should default Fennel CTest commands to the main executable target")
+  (assert-contains cmake "set(SPACE_TEST_COMMAND_TARGET space-cli)"
+                    "CMake should route Windows Fennel CTest commands through the console executable target")
+  (assert-contains cmake "COMMAND $<TARGET_FILE:${SPACE_TEST_COMMAND_TARGET}> -m constraints.runner:main -- --output summary --target repo"
+                    "constraints CTest should run the repo constraints command in concise summary mode through the selected executable target")
   (assert-contains cmake "FIXTURES_SETUP space_constraints"
                    "constraints CTest should set up its fixture")
   (assert (ctest-block-has-fixture? cmake "${PROJECT_NAME}_fnl_tests")

@@ -246,6 +246,13 @@ Windows release builds currently publish:
 - `space-windows-x86_64-setup.exe`
 - `space-windows-x86_64.zip`
 
+Both Windows release packages include two executables:
+
+- `space.exe` is the desktop GUI launcher. Explorer, Start Menu entries, desktop shortcuts, and installer launch actions use this executable so normal launches do not open a terminal window. Alternate GUI shortcuts can still pass a module entry, such as `space.exe -m some.gui.entry:main`, without opening a terminal.
+- `space-cli.exe` is the console launcher for PowerShell/cmd, scripts, CI, tests, and captured terminal output. Use it for command-line workflows such as `space-cli.exe --help`, `space-cli.exe -m tests.fast:main`, file execution, stdin, or `space-cli.exe -c "(print :ok)"`.
+
+Linux and macOS release packages remain single-executable platforms.
+
 The Matrix FFI library (`ffi/matrix`) is built by default and requires `cargo`. To skip it, configure
 with `-DSPACE_BUILD_MATRIX=OFF` (e.g. `make cmake` then `cmake -DSPACE_BUILD_MATRIX=OFF ..`).
 Matrix Rust artifacts are written to a shared Cargo target directory under the user cache by default
