@@ -133,6 +133,55 @@ def test_git_integrator_allows_exact_guarded_git_wrapper_commands():
     }
 
 
+def test_merged_old_pr_followup_recovery_is_documented_in_workflow_files():
+    required_terms = [
+        "pr_head",
+        "current_head",
+        "MERGED",
+        "create-followup-branch",
+        "follow-up branch",
+    ]
+    documented_paths = [
+        REPO_ROOT / ".opencode" / "skills" / "finishing-a-development-branch" / "SKILL.md",
+        REPO_ROOT / ".opencode" / "agents" / "supervisor.md",
+        REPO_ROOT / "docs" / "dev" / "features" / "opencode-agent-workflow.md",
+    ]
+
+    for path in documented_paths:
+        text = path.read_text(encoding="utf-8")
+        missing_terms = [term for term in required_terms if term not in text]
+        assert missing_terms == [], f"{path.relative_to(REPO_ROOT)} missing {missing_terms}"
+
+
+def test_workflow_docs_do_not_recommend_raw_github_polling_commands():
+    forbidden_commands = [
+        "gh pr view",
+        "gh run list",
+        "gh run watch",
+    ]
+    documented_paths = [
+        REPO_ROOT / ".opencode" / "skills" / "finishing-a-development-branch" / "SKILL.md",
+        REPO_ROOT / ".opencode" / "agents" / "supervisor.md",
+        REPO_ROOT / "docs" / "dev" / "features" / "opencode-agent-workflow.md",
+    ]
+
+    for path in documented_paths:
+        text = path.read_text(encoding="utf-8")
+        if text.startswith("---\n"):
+            text = text.split("---\n", 2)[2]
+        present_commands = [command for command in forbidden_commands if command in text]
+        assert present_commands == [], f"{path.relative_to(REPO_ROOT)} recommends {present_commands}"
+
+
+def test_finishing_skill_does_not_recommend_branch_deletion():
+    path = REPO_ROOT / ".opencode" / "skills" / "finishing-a-development-branch" / "SKILL.md"
+    text = path.read_text(encoding="utf-8")
+
+    assert "git branch -d" not in text
+    assert "Cleanup Branch" not in text
+    assert "| 1. Merge locally | yes | — | — | yes |" not in text
+
+
 def test_git_integrator_rejects_extra_bash_allow(tmp_path: Path):
     repo = make_repo(tmp_path)
     agent_path = repo / ".opencode" / "agents" / "git-integrator.md"

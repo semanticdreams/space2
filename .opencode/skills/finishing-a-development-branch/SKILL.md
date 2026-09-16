@@ -161,10 +161,24 @@ when permitted, and restart from Step 0.
   3. If both checks pass: execute the default action automatically:
       - Push the current branch through `git-integrator`.
       - Create a pull request targeting the base branch through `github-operator`.
+        - If `github-operator create-current` returns
+          `human_decision_required` with evidence that an existing PR is
+          `MERGED` and `pr_head != current_head`, do not request broad `gh`
+          permission or any raw `gh --head` workaround. Treat it as the
+          merged-old-PR follow-up branch recovery path: confirm clean tree,
+          named non-`main` branch, and current `origin/main` base state through
+          `git-integrator`; dispatch `git-integrator create-followup-branch`;
+          dispatch `git-integrator push-current`; dispatch
+          `github-operator create-current`; then continue auto-merge and
+          merge-queue polling as usual. Preserve the wrapper evidence fields
+          (`branch`, `current_head`, `pr_head`, `pr_state`, `pr_url`) in the
+          handoff. Any refusal from the guarded wrapper remains
+          `HUMAN_DECISION_REQUIRED` with the wrapper evidence.
        - Enable auto-merge (or queue the PR) when branch protection allows it.
-       - Poll with `gh pr view <pr-or-branch> --json state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url` until `mergedAt` is present (PR merged).\
-          Use `github-operator` wrapper evidence for merge-queue polling; do not
-          run direct broad `gh run list` or `gh run watch` commands.
+       - Dispatch `github-operator view-current` and
+         `github-operator poll-merge-queue-current` wrapper actions until the
+         wrapper evidence reports `mergedAt` is present (PR merged). Do not run
+         direct GitHub CLI polling commands from the supervisor.
 
       Do not update the PR branch
       solely because origin/main advanced after PR creation. Merge queue
@@ -239,11 +253,9 @@ git merge <feature-branch>
 
 If tests fail on the merged result: follow the Step 1 validation-failure loop — invoke `systematic-debugging`, route any fix through `implementer` → `reviewer` → pass, do not push/PR/merge/clean up while red, and rerun from Step 0 after reviewed fixes. Nothing has been pushed, so the merge is local and recoverable.
 
-Once green: clean up the worktree (Step 7), then delete the branch:
-
-```bash
-git branch -d <feature-branch>
-```
+Once green: clean up the worktree (Step 7), then report the preserved branch
+name and leave branch lifecycle decisions to the human or a future guarded
+workflow. Do not request branch-deletion permission.
 
 ### Option 2: Push and Create PR
 
@@ -287,11 +299,11 @@ git worktree prune
 
 ## Quick Reference
 
-| Option | Merge | Push | Keep Worktree | Cleanup Branch |
-|--------|-------|------|---------------|----------------|
-| 1. Merge locally | yes | — | — | yes |
-| 2. Create PR | — | yes | yes | — |
-| 3. Keep as-is | — | — | yes | — |
+| Option | Merge | Push | Keep Worktree | Branch Lifecycle |
+|--------|-------|------|---------------|------------------|
+| 1. Merge locally | yes | — | — | preserved/manual |
+| 2. Create PR | — | yes | yes | preserved/manual |
+| 3. Keep as-is | — | — | yes | preserved/manual |
 
 ## Common Rationalizations
 

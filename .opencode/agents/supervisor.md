@@ -247,8 +247,10 @@ choice.
 After a PR is open and auto-merge is enabled or the PR enters GitHub merge
 queue, do not safe-merge origin/main solely because
 origin/main advanced. Merge queue handles post-PR freshness. The supervisor
-polls with `gh pr view <pr-or-branch> --json state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url` until `mergedAt` is present (PR merged)
-and resumes only for actionable blockers: merge queue
+dispatches `github-operator view-current` and
+`github-operator poll-merge-queue-current` wrapper actions until wrapper
+evidence reports `mergedAt` is present (PR merged), and resumes only for
+actionable blockers: merge queue
 conflicts, required-check failures (including merge-group `test` failures),
 missing merge queue protection, permission failures, closed-unmerged PRs,
 and queue timeouts.
@@ -272,7 +274,7 @@ blocking check, and available evidence.
 | **implementer** | Task implementation, TDD, fix rounds | deepseek |
 | **reviewer** | Spec compliance + code quality review, re-review | gpt-5.5 (high) |
 | **adjudicator** | Breaker cap: accept/park/escalate findings | gpt-5.5 (high) |
-| **git-integrator** | Guarded current-branch Git status, fetch, safe merge from origin/main, and push wrappers | gpt-5.5 |
+| **git-integrator** | Guarded current-branch Git status, fetch, safe merge from origin/main, follow-up branch creation, and push wrappers | gpt-5.5 |
 | **github-operator** | Guarded GitHub auth/protection checks, PR creation, auto-merge, and merge-queue polling wrappers | gpt-5.5 |
 | **config-auditor** | Guarded OpenCode home config verification for project-supplied non-secret support links | gpt-5.5 |
 
@@ -299,13 +301,26 @@ boundaries. Dispatch the dedicated capability subagent instead of requesting
 direct broad permission:
 
 - Dispatch `git-integrator` for current-branch integration status,
-  `origin/main` fetch, safe merge from `origin/main`, and pushing the current
-  branch through `scripts/opencode_git_integrate.py`.
+  `origin/main` fetch, safe merge from `origin/main`, guarded follow-up branch
+  creation, and pushing the current branch through
+  `scripts/opencode_git_integrate.py`.
 - Dispatch `github-operator` for GitHub authentication checks, target-branch
   protection checks, PR creation, auto-merge enablement, PR state reads, and
   merge-queue polling through `scripts/opencode_pr_operator.py`.
 - Dispatch `config-auditor` for OpenCode home config verification through
   `scripts/verify_opencode_home_config.py`.
+
+When `github-operator create-current` reports `human_decision_required` because
+an existing PR for the current branch is `MERGED` and the evidence shows
+`pr_head != current_head`, route the merged-old-PR recovery through the guarded
+capabilities instead of asking for broad Git/GitHub access: preserve the
+evidence fields (`branch`, `current_head`, `pr_head`, `pr_state`, `pr_url`),
+dispatch `git-integrator` to confirm clean/current-base status, dispatch
+`git-integrator create-followup-branch` to create the deterministic follow-up
+branch, dispatch `git-integrator push-current`, then dispatch `github-operator
+create-current` and resume normal PR/merge-queue handling. Do not request raw
+`gh --head`, broad `gh`, rebase, reset, force-push, direct main push, or branch
+deletion permission for this path.
 
 If a capability wrapper returns `human_decision_required`, report
 `HUMAN_DECISION_REQUIRED` with the wrapper evidence. Do not ask for one-off broad

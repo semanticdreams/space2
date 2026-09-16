@@ -216,6 +216,29 @@ Space uses guarded capabilities to reduce routine OpenCode permission friction w
 - **Wrapper JSON evidence is the reviewable handoff.** Capability wrappers emit structured JSON with `status`, `action`, `message`, and `evidence` so supervisors, reviewers, and weekly automation can inspect what happened without granting a broad shell or GitHub capability.
 - **OpenCode must be restarted after `.opencode/**` changes.** Agent definitions, skill instructions, and permission rules are startup-loaded, so restart OpenCode before relying on changed capability agents or policy rules.
 
+### Merged old PR follow-up branch recovery
+
+If `github-operator create-current` reports `human_decision_required` because
+the current branch already has an existing PR whose `pr_state` is `MERGED` and
+whose `pr_head` differs from `current_head`, the supervisor uses the guarded
+follow-up branch recovery path instead of broad GitHub or raw `gh --head`
+permission.
+
+The recovery branch name is deterministic:
+`<current-branch>-followup-<short-head-sha>`. The `git-integrator
+create-followup-branch` wrapper refuses unless the worktree is clean, the source
+branch is named and not `main`, `HEAD` already contains current `origin/main`,
+the source and follow-up branch names satisfy the safe branch policy, and the
+target follow-up branch is absent both locally and on `origin`.
+
+The normal sequence is: create the follow-up branch through `git-integrator
+create-followup-branch`, push the current branch through `git-integrator
+push-current`, then create the current PR through `github-operator
+create-current`. Preserve wrapper evidence such as `branch`, `current_head`,
+`pr_head`, `pr_state`, and `pr_url` in handoffs. OpenCode must be restarted
+after `.opencode/**` changes before relying on updated routing or capability
+instructions.
+
 ### Capability preflight
 
 Privileged Git, GitHub, and OpenCode configuration operations route through
@@ -279,13 +302,9 @@ After the PR is open and queued, agents keep running and poll until the PR is
 actually merged. Queue handoff alone is not success; success means the PR is
 merged (`mergedAt` present or equivalent merged state).
 
-Agents poll with:
-
-```bash
-gh pr view <pr-or-branch> --json state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url
-gh run list --workflow test.yml --event merge_group --limit 20 --json databaseId,headBranch,headSha,status,conclusion,event,url,displayTitle,createdAt
-gh run watch <run-id> --exit-status --interval 100
-```
+Agents poll through `github-operator` wrapper actions such as `view-current`
+and `poll-merge-queue-current`. The supervisor treats the wrapper JSON evidence
+as the source of truth and does not run raw GitHub CLI polling commands.
 
 The following states are non-terminal: `queued`, `waiting`, `pending`,
 `in-progress`, `expected`, or `null`/missing conclusion on merge-group runs.
