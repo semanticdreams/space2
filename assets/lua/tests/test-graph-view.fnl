@@ -4303,6 +4303,18 @@
   (icollect [_ item (ipairs items)]
     (. item 2)))
 
+(fn finish-relative-fixture! [graph cleanup-fn ok err]
+  (var final-err (if ok nil err))
+  (when graph
+    (local (drop-ok drop-err) (pcall (fn [] (graph:drop))))
+    (when (and (not drop-ok) (not final-err))
+      (set final-err drop-err)))
+  (local (cleanup-ok cleanup-err) (pcall cleanup-fn))
+  (when (and (not cleanup-ok) (not final-err))
+    (set final-err cleanup-err))
+  (when final-err
+    (error final-err)))
+
 (fn with-fs-interaction-test-dir [f]
   (with-temp-data-dir
     (fn [_root]
@@ -4388,28 +4400,22 @@
       (graph:drop))))
 
 (fn fs-node-relative-text-viewer-uses-absolute-key []
-  (local cwd (fs.cwd))
-  (local relative-path "assets/lua/tests/data/fs-node-relative-viewer.md")
+  (set temp-counter (+ temp-counter 1))
+  (local relative-parent (fs.join-path ".tmp" "space-tests"))
+  (local relative-path (fs.join-path relative-parent (.. "fs-node-relative-viewer-" (os.time) "-" temp-counter ".md")))
   (local absolute-path (fs.absolute relative-path))
-  (fs.write-file absolute-path "# relative viewer\n")
-  (local graph (Graph {:with-start false}))
-  (local node (FsNode {:path relative-path}))
-  (graph:add-node node {:position (glm.vec3 0 0 0)})
-  (local interaction (find-search-row (node:emit-items) "View text"))
-  (assert interaction "Relative text file should expose View text interaction")
-  (assert (= interaction.path absolute-path)
-          "File interaction path should be absolute")
-  (assert (= interaction.target-key (.. "fs-file-viewer:" absolute-path))
-          "File viewer target key should use absolute path")
-  (local result (node:open-entry interaction))
-  (local viewer-key (.. "fs-file-viewer:" absolute-path))
-  (assert (= result (graph:lookup viewer-key))
-          "Relative View text interaction should return absolute-key viewer node")
-  (assert (= result.key viewer-key))
-  (assert (= (graph:edge-count) 1))
-  (graph:drop)
-  (fs.remove absolute-path)
-  cwd)
+  (var graph nil)
+  (local (ok err) (pcall (fn []
+    (fs.create-dirs relative-parent) (fs.write-file absolute-path "# relative viewer\n")
+    (set graph (Graph {:with-start false})) (local node (FsNode {:path relative-path})) (graph:add-node node {:position (glm.vec3 0 0 0)})
+    (local interaction (find-search-row (node:emit-items) "View text"))
+    (assert interaction "Relative text file should expose View text interaction")
+    (assert (= interaction.path absolute-path) "File interaction path should be absolute")
+    (assert (= interaction.target-key (.. "fs-file-viewer:" absolute-path)) "File viewer target key should use absolute path")
+    (local result (node:open-entry interaction)) (local viewer-key (.. "fs-file-viewer:" absolute-path))
+    (assert (= result (graph:lookup viewer-key)) "Relative View text interaction should return absolute-key viewer node")
+    (assert (= result.key viewer-key)) (assert (= (graph:edge-count) 1)))))
+  (finish-relative-fixture! graph (fn [] (when (fs.exists absolute-path) (fs.remove absolute-path))) ok err))
 
 (fn fs-node-module-interactions-preserve-key-formats []
   (with-fs-interaction-test-dir
@@ -4483,30 +4489,24 @@
       (source-graph:drop))))
 
 (fn fs-node-relative-directory-open-entry-preserves-relative-child-key []
-  (local relative-root "assets/lua/tests/data/fs-node-relative-dir")
+  (set temp-counter (+ temp-counter 1))
+  (local relative-root (fs.join-path ".tmp" "space-tests" (.. "fs-node-relative-dir-" (os.time) "-" temp-counter)))
   (local absolute-root (fs.absolute relative-root))
-  (when (fs.exists absolute-root)
-    (fs.remove-all absolute-root))
-  (fs.create-dirs absolute-root)
-  (fs.write-file (fs.join-path absolute-root "child.txt") "hello")
-  (local graph (Graph {:with-start false}))
-  (local node (FsNode {:path relative-root}))
-  (graph:add-node node {:position (glm.vec3 0 0 0)})
+  (local expected-child-path (fs.join-path relative-root "child.txt"))
+  (var graph nil)
   (local (ok err)
     (pcall
       (fn []
+        (when (fs.exists absolute-root) (fs.remove-all absolute-root)) (fs.create-dirs absolute-root) (fs.write-file (fs.join-path absolute-root "child.txt") "hello")
+        (set graph (Graph {:with-start false})) (local node (FsNode {:path relative-root})) (graph:add-node node {:position (glm.vec3 0 0 0)})
         (local entry (find-search-row (node:emit-items) "child.txt"))
         (assert entry "Relative directory should list child file")
-        (assert (= entry.path (fs.join-path relative-root "child.txt"))
-                "Directory entry path should preserve relative parent style")
+        (assert (not (= entry.path (fs.absolute expected-child-path))) "Directory entry path should remain relative by raw comparison") (assert (paths-eq entry.path expected-child-path) "Directory entry path should match expected relative child path") (assert (= entry.path expected-child-path) "Directory entry path should preserve relative parent style")
         (node:open-entry entry)
-        (local expected-key (.. "fs:" (fs.join-path relative-root "child.txt")))
+        (local expected-key (.. "fs:" expected-child-path))
         (assert (graph:lookup expected-key)
                 (.. "Opening relative child should add " expected-key)))))
-  (graph:drop)
-  (fs.remove-all absolute-root)
-  (when (not ok)
-    (error err)))
+  (finish-relative-fixture! graph (fn [] (when (fs.exists absolute-root) (fs.remove-all absolute-root))) ok err))
 
 (fn fs-node-view-requires-explicit-build-context []
   (with-fs-interaction-test-dir
