@@ -21,7 +21,7 @@
 #include "util/win/registration_protocol_win_structs.h"
 
 #include <stddef.h>
-#include <Windows.h>
+#include <windows.h>
 #include <werapi.h>
 
 namespace crashpad::wer {
