@@ -12,6 +12,7 @@
 
 #include "asset_manager.h"
 #include "dotenv.h"
+#include "error_reporting.h"
 #include "executable_path.h"
 #include "lua_callbacks.h"
 #include "lua_jobs.h"
@@ -96,6 +97,16 @@ std::string read_stdin()
         input.push_back('\n');
     }
     return input;
+}
+
+void capture_lua_error(const std::string& entry_mode, const std::string& target, const sol::error& error)
+{
+    error_reporting::capture_exception(
+        "LuaError",
+        error.what(),
+        error.what(),
+        {{"entry_mode", entry_mode}, {"entry_target", target}});
+    error_reporting::flush(2000);
 }
 
 int main(int argc, char *argv[])
@@ -297,6 +308,20 @@ int main(int argc, char *argv[])
         }
     }
 
+    auto entry_mode_name = [&]() -> std::string {
+        switch (entry_mode) {
+        case EntryMode::Module:
+            return "module";
+        case EntryMode::File:
+            return "file";
+        case EntryMode::Command:
+            return "command";
+        case EntryMode::Stdin:
+            return "stdin";
+        }
+        return "unknown";
+    };
+
     std::string audio_tag;
     if (entry_mode == EntryMode::Module) {
         audio_tag = module_name_target;
@@ -315,6 +340,8 @@ int main(int argc, char *argv[])
         cef_runtime::configure_browser_process(cef_config);
     }
 #endif
+
+    error_reporting::install_terminate_handler();
 
     LuaRuntime runtime;
     runtime.init();
@@ -343,10 +370,12 @@ int main(int argc, char *argv[])
         )");
         }
         catch (const sol::error &e) {
+            capture_lua_error("repl", entry_target, e);
             log_write_file_only("lua", Error, std::string("REPL startup error: ") + e.what());
             std::cerr << "REPL startup error: " << e.what() << "\n";
             return 1;
         }
+        error_reporting::shutdown();
         return 0;
     }
 
@@ -356,6 +385,7 @@ int main(int argc, char *argv[])
             runtime.execute_fennel(source);
         }
         catch (const sol::error &e) {
+            capture_lua_error(entry_mode_name(), entry_target, e);
             log_write_file_only("lua", Error, std::string("Lua error: ") + e.what());
             std::cerr << "Lua error: " << e.what() << "\n";
             return 1;
@@ -369,6 +399,7 @@ int main(int argc, char *argv[])
             }
         }
         catch (const sol::error &e) {
+            capture_lua_error(entry_mode_name(), entry_target, e);
             log_write_file_only("lua", Error, std::string("Lua error: ") + e.what());
             std::cerr << "Lua error: " << e.what() << "\n";
             return 1;
@@ -382,6 +413,7 @@ int main(int argc, char *argv[])
             }
         }
         catch (const sol::error &e) {
+            capture_lua_error(entry_mode_name(), entry_target, e);
             log_write_file_only("lua", Error, std::string("Lua error: ") + e.what());
             std::cerr << "Lua error: " << e.what() << "\n";
             return 1;
@@ -400,5 +432,7 @@ int main(int argc, char *argv[])
 #if defined(SPACE_ENABLE_CEF)
     cef_runtime::shutdown();
 #endif
+
+    error_reporting::shutdown();
 	return 0;
 }

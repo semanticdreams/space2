@@ -899,6 +899,7 @@ set_tests_properties(test_lua_gccjit_binding PROPERTIES
 add_executable(test_lua_module_error_integration
     tests/test_lua_module_error_integration.cpp
 )
+target_include_directories(test_lua_module_error_integration PRIVATE external/cpp-httplib)
 add_test(NAME test_lua_module_error_integration COMMAND test_lua_module_error_integration)
 set_tests_properties(test_lua_module_error_integration PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}

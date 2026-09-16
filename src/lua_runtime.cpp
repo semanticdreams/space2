@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "asset_manager.h"
+#include "error_reporting.h"
 #include "http_client.h"
 #include "lua_callbacks.h"
 #include "lua_engine.h"
@@ -203,6 +204,9 @@ void LuaRuntime::install_fatal_traceback()
 
             log_write_file_only("lua", Error, traced);
             std::cerr << traced << "\n";
+
+            error_reporting::capture_exception("LuaFatalTraceback", traced, traced, {{"entry_mode", "fatal_traceback"}});
+            error_reporting::flush(2000);
 
             std::abort();
 
