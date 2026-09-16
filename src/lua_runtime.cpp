@@ -24,6 +24,14 @@
 
 extern "C" int luaopen_lsqlite3(lua_State* L);
 
+namespace
+{
+std::string make_fennel_asset_search_path(const std::string& lua_path)
+{
+    return lua_path + "/?.fnl;" + lua_path + "/?/init.fnl";
+}
+}
+
 void lua_bind_opengl(sol::state&);
 void lua_bind_image_io(sol::state&);
 void lua_bind_json(sol::state&);
@@ -96,6 +104,7 @@ void LuaRuntime::install_fennel(bool correlate)
         "app = app or {}\n"
         "local fennel = require(\"fennel\")\n"
         "fennel.path = __SPACE_FENNEL_PATH .. \";\" .. fennel.path\n"
+        "fennel[\"macro-path\"] = __SPACE_FENNEL_PATH .. \";\" .. fennel[\"macro-path\"]\n"
         "fennel.install({ correlate = __SPACE_FENNEL_CORRELATE })\n"
         "__SPACE_FENNEL_PATH = nil\n"
         "__SPACE_FENNEL_CORRELATE = nil\n");
@@ -285,7 +294,7 @@ void LuaRuntime::configure_package_paths()
     assets_path_value = AssetManager::getAssetPath("");
     std::string lua_path = AssetManager::getAssetPath("lua");
     std::string package_path = lua_path + "/?.lua";
-    fennel_path_value = lua_path + "/?.fnl";
+    fennel_path_value = make_fennel_asset_search_path(lua_path);
     lua["package"]["path"] = lua["package"]["path"].get<std::string>() + ";" + package_path;
 }
 

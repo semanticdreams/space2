@@ -42,6 +42,10 @@ def _current_branch(repo: Path) -> str:
     return run_command(["git", "branch", "--show-current"], repo).stdout.strip()
 
 
+def _current_head(repo: Path) -> str:
+    return run_command(["git", "rev-parse", "HEAD"], repo).stdout.strip()
+
+
 def _safe_current_branch(action: str, repo: Path) -> tuple[str | None, dict[str, object] | None]:
     return _safe_branch(action, _current_branch(repo))
 
@@ -65,6 +69,17 @@ def _is_no_pr_view_result(result: Any) -> bool:
         "could not find any pull request",
     )
     return any(marker in output for marker in no_pr_markers)
+
+
+def _existing_pr_reuse_evidence(data: dict[str, Any], branch: str, current_head: str, args: list[str]) -> dict[str, object]:
+    return {
+        "branch": branch,
+        "current_head": current_head,
+        "pr_head": data.get("headRefOid"),
+        "pr_state": data.get("state"),
+        "pr_url": data.get("url"),
+        "args": args,
+    }
 
 
 def _required_checks_include_test(required_checks: Any) -> bool:
@@ -279,6 +294,12 @@ def create_current_pr(repo_root: Path) -> dict[str, object]:
             data = _json_loads(view_result.stdout)
             if not isinstance(data, dict):
                 return human_decision(action, "GitHub PR view response was ambiguous", _command_result_evidence(view_result, branch))
+            current_head = _current_head(repo)
+            reuse_evidence = _existing_pr_reuse_evidence(data, branch, current_head, view_result.args)
+            if data.get("headRefOid") != current_head:
+                return human_decision(action, "Existing pull request does not match current branch HEAD", reuse_evidence)
+            if data.get("state") != "OPEN":
+                return human_decision(action, "Existing pull request is not open for the current branch HEAD", reuse_evidence)
             return success(
                 action,
                 "Pull request already exists targeting main",

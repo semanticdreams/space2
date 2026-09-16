@@ -771,6 +771,14 @@ set_tests_properties(${PROJECT_NAME}_constraints PROPERTIES
     ENVIRONMENT "SKIP_KEYRING_TESTS=1;XDG_DATA_HOME=/tmp/space/tests/xdg-data;SPACE_DISABLE_AUDIO=1;SPACE_LOG_DIR=/tmp/space/tests/log;SPACE_ASSETS_PATH=${CMAKE_SOURCE_DIR}/assets;FENNEL_PATH=${CMAKE_SOURCE_DIR}/assets/lua/?.fnl\;${CMAKE_SOURCE_DIR}/assets/lua/?/init.fnl;FENNEL_MACRO_PATH=${CMAKE_SOURCE_DIR}/assets/lua/?.fnl\;${CMAKE_SOURCE_DIR}/assets/lua/?/init.fnl"
 )
 
+add_test(NAME ${PROJECT_NAME}_runtime_fennel_paths
+    COMMAND ${CMAKE_COMMAND} -E env --unset=FENNEL_PATH --unset=FENNEL_MACRO_PATH $<TARGET_FILE:space> -m tests.test-runtime-fennel-path:main
+)
+set_tests_properties(${PROJECT_NAME}_runtime_fennel_paths PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    ENVIRONMENT "SKIP_KEYRING_TESTS=1;XDG_DATA_HOME=/tmp/space/tests/xdg-data;SPACE_DISABLE_AUDIO=1;SPACE_LOG_DIR=/tmp/space/tests/log;SPACE_ASSETS_PATH=${CMAKE_SOURCE_DIR}/assets"
+)
+
 add_executable(test_vector_buffer
     tests/test_vector_buffer.cpp
 )
