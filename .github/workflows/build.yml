@@ -80,7 +80,7 @@ jobs:
           mkdir -p /tmp/space-tarball-smoke
           tar -xzf "${tarball}" -C /tmp/space-tarball-smoke
           test -x /tmp/space-tarball-smoke/space
-          scripts/verify-linux-package-layout.sh --root /tmp/space-tarball-smoke --profile "${{ matrix.profile }}"
+          scripts/verify-linux-package-layout.sh --root /tmp/space-tarball-smoke --layout tarball --profile "${{ matrix.profile }}"
           timeout 30s env SPACE_DISABLE_AUDIO=1 SPACE_SKIP_CEF=1 \
             /tmp/space-tarball-smoke/space -m "${SPACE_RELEASE_HEADLESS_SMOKE_MODULE}"
           if [[ "${{ matrix.profile }}" == "full" ]]; then
@@ -108,7 +108,7 @@ jobs:
               mkdir -p /tmp/space-smoke
               tar -xzf "/work/${TARBALL}" -C /tmp/space-smoke
               test -x /tmp/space-smoke/space
-              /scripts/verify-linux-package-layout.sh --root /tmp/space-smoke --profile "${PROFILE}"
+              /scripts/verify-linux-package-layout.sh --root /tmp/space-smoke --layout tarball --profile "${PROFILE}"
             '
           done
 
@@ -126,7 +126,7 @@ jobs:
             set -euo pipefail
             apt-get update -qq
             apt-get install -y -qq "/build/${DEB_NAME}"
-            /scripts/verify-linux-package-layout.sh --root /usr --profile "${PROFILE}"
+            /scripts/verify-linux-package-layout.sh --root /usr --layout package --profile "${PROFILE}"
             timeout 30s env SPACE_DISABLE_AUDIO=1 SPACE_SKIP_CEF=1 \
               /usr/bin/space -m tests.test-headless-engine-run:main
             '
@@ -144,7 +144,7 @@ jobs:
             fedora:43 bash -lc '
             set -euo pipefail
             rpm -i "/build/${RPM_NAME}"
-            /scripts/verify-linux-package-layout.sh --root /usr --profile "${PROFILE}"
+            /scripts/verify-linux-package-layout.sh --root /usr --layout package --profile "${PROFILE}"
             '
 
       - name: ccache stats

@@ -21,7 +21,8 @@ sudo apt-get install -y \
     nasm \
     curl \
     python3 \
-    python3-pil
+    python3-pil \
+    ripgrep
 
 sudo apt-get install -y sccache || true
 
@@ -32,6 +33,11 @@ fi
 
 if ! command -v ccache >/dev/null 2>&1; then
     echo "Missing ccache after setup." >&2
+    exit 1
+fi
+
+if ! command -v rg >/dev/null 2>&1; then
+    echo "Missing ripgrep after setup." >&2
     exit 1
 fi
 
