@@ -41,6 +41,9 @@
 /third_party/linux/clang
 /third_party/linux/sysroot
 /third_party/lss/lss
+!/third_party/lss/lss/
+!/third_party/lss/lss/**
+/third_party/lss/lss/.git
 /third_party/mini_chromium/mini_chromium
 !/third_party/mini_chromium/mini_chromium/
 !/third_party/mini_chromium/mini_chromium/**
@@ -50,5 +53,8 @@
 /third_party/ninja/ninja.exe
 /third_party/windows/clang/win-amd64
 /third_party/zlib/zlib
+!/third_party/zlib/zlib/
+!/third_party/zlib/zlib/**
+/third_party/zlib/zlib/.git
 /xcodebuild
 tags
