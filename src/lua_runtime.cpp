@@ -62,6 +62,7 @@ void lua_bind_zmq(sol::state&);
 void lua_bind_matrix(sol::state&);
 void lua_bind_realtime(sol::state&);
 void lua_bind_logging(sol::state&);
+void lua_bind_error_reporting(sol::state&);
 void lua_bind_uuid(sol::state&);
 void lua_bind_shell(sol::state&);
 void lua_bind_process(sol::state&);
@@ -245,6 +246,7 @@ void LuaRuntime::install_base_bindings()
     lua_bind_matrix(lua);
     lua_bind_realtime(lua);
     lua_bind_logging(lua);
+    lua_bind_error_reporting(lua);
     lua_bind_uuid(lua);
     lua_bind_shell(lua);
     lua_bind_process(lua);
