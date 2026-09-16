@@ -26,6 +26,8 @@ __pycache__/
 
 # Builds
 build/
+!external/sentry-native/external/crashpad/third_party/mini_chromium/build/
+!external/sentry-native/external/crashpad/third_party/mini_chromium/build/chromeos_buildflags.h
 release/
 .sccache/
 .sccache-windows/
