@@ -128,7 +128,7 @@ int main()
     const fs::path fennel_file_error = assets_dir / "lua" / "tests" / "file-error.fnl";
     const fs::path lua_file_error = assets_dir / "lua" / "tests" / "lua-file-error.lua";
 #if defined(_WIN32)
-    const fs::path executable = fs::current_path() / "space.exe";
+    const fs::path executable = fs::current_path() / "space-cli.exe";
 #else
     const fs::path executable = fs::current_path() / "space";
 #endif

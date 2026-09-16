@@ -102,7 +102,7 @@ bool check(bool condition, const std::string& message)
 int main()
 {
 #if defined(_WIN32)
-    const fs::path executable = fs::current_path() / "space.exe";
+    const fs::path executable = fs::current_path() / "space-cli.exe";
 #else
     const fs::path executable = fs::current_path() / "space";
 #endif
