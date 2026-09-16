@@ -1339,17 +1339,17 @@
   (assert (= config.mcp.space.type "remote") "config should create remote MCP server")
   (assert (= config.mcp.space.url status.url) "config URL should match bridge URL") (assert (= config.mcp.space.enabled true) "config should enable MCP server")
   (each [_ name (ipairs ["invalid" "write" "edit" "bash" "task" "todowrite" "webfetch" "websearch" "lsp" "skill" "question"])] (assert (= (. config.permission name) "deny") (.. "config should deny native OpenCode tool: " name)))
-  (local allowed-patterns [(.. space-data-dir "/agent-sessions/**") (.. space-data-dir "/agent-opencode/**") (.. space-data-dir "/agent-approvals/**") (.. space-data-dir "/agent-artifacts/**") (.. space-data-dir "/code/**") (.. space-cache-dir "/log/**")])
-  (local nested-secret-deny-patterns [(.. space-data-dir "/agent-sessions/**/*token*") (.. space-data-dir "/agent-artifacts/**/*credential*") (.. space-cache-dir "/log/**/*keyring*")]) (fn assert-bounded-tool [tool-name]
-    (local permissions (. config.permission tool-name)) (assert (= (type permissions) "table") (.. tool-name " should use bounded permission patterns")) (assert (= (. permissions "*") "deny") (.. tool-name " should deny broad access"))
-    (each [_ pattern (ipairs allowed-patterns)] (assert (= (. permissions pattern) "allow") (.. tool-name " should allow bounded root: " pattern))
-      (each [_ marker (ipairs ["auth" "token" "secret" "credential" "keyring"])]
-        (local deny-pattern (string.gsub pattern "%*%*$" (.. "*" marker "*"))) (assert (= (. permissions deny-pattern) "deny") (.. tool-name " should deny secret-looking path: " deny-pattern)))) (each [_ nested-pattern (ipairs nested-secret-deny-patterns)] (assert (= (. permissions nested-pattern) "deny") (.. tool-name " should deny nested secret-looking path: " nested-pattern))))
+  (fn slash-path [path] (string.gsub path "\\" "/")) (fn permission-value [permissions expected-pattern] (var found nil) (each [pattern value (pairs permissions)] (when (= (slash-path pattern) (slash-path expected-pattern)) (set found value))) found)
+  (fn assert-pattern-permission [permissions expected-pattern expected-value message] (assert (= (permission-value permissions expected-pattern) expected-value) message)) (local allowed-patterns [(.. space-data-dir "/agent-sessions/**") (.. space-data-dir "/agent-opencode/**") (.. space-data-dir "/agent-approvals/**") (.. space-data-dir "/agent-artifacts/**") (.. space-data-dir "/code/**") (.. space-cache-dir "/log/**")])
+  ;; Nested secret deny patterns are derived per allowed root and marker below.
+  (fn assert-bounded-tool [tool-name]
+    (local permissions (. config.permission tool-name)) (assert (= (type permissions) "table") (.. tool-name " should use bounded permission patterns")) (assert-pattern-permission permissions "*" "deny" (.. tool-name " should deny broad access"))
+    (each [_ pattern (ipairs allowed-patterns)] (assert-pattern-permission permissions pattern "allow" (.. tool-name " should allow bounded root: " pattern))
+      (each [_ marker (ipairs ["auth" "token" "secret" "credential" "keyring"])] (local deny-pattern (string.gsub pattern "%*%*$" (.. "*" marker "*"))) (local nested-deny-pattern (string.gsub pattern "/%*%*$" (.. "/**/*" marker "*"))) (assert-pattern-permission permissions deny-pattern "deny" (.. tool-name " should deny secret-looking path: " deny-pattern)) (assert-pattern-permission permissions nested-deny-pattern "deny" (.. tool-name " should deny nested secret-looking path: " nested-deny-pattern)))))
   (each [_ name (ipairs ["read" "list" "glob" "grep" "external_directory"])] (assert-bounded-tool name))
   (assert (= (length status.allowed-roots) (length allowed-patterns)) "bridge status should report allowed roots")
   (each [i pattern (ipairs allowed-patterns)] (assert (= (. status.allowed-roots i) pattern) (.. "bridge status allowed root should match: " pattern)))
-  (bridge:refresh-config!) (local refreshed (json.loads (fs.read-file status.config-path))) (assert (= refreshed.mcp.space.url status.url) "refresh-config should preserve current MCP URL")
-  (bridge:stop) (clean-dir dir))
+  (bridge:refresh-config!) (local refreshed (json.loads (fs.read-file status.config-path))) (assert (= refreshed.mcp.space.url status.url) "refresh-config should preserve current MCP URL") (bridge:stop) (clean-dir dir))
 
 (fn test-opencode-mcp-bridge-refreshes-provider-table []
   (local BridgeMod (require :llm/agent/opencode-mcp-bridge))
@@ -1763,27 +1763,27 @@
   {:artifacts captured-artifacts :session-id session.id})
 
 (fn test-runner-default-artifacts-nested-under-non-session-data-dir []
-  (local dir (temp-dir))
+  (local dir (temp-dir)) (local PathUtils (require :tests.path-utils))
   (local result (capture-runner-artifacts dir))
   (local expected-root (fs.join-path dir "agent-artifacts"))
   (local expected-session-dir (fs.join-path expected-root result.session-id))
-  (assert (= result.artifacts.root expected-root)
+  (assert (PathUtils.paths-eq result.artifacts.root expected-root)
           "non-agent-sessions data-dir should use nested artifact root")
-  (assert (= result.artifacts.session-dir expected-session-dir)
+  (assert (PathUtils.paths-eq result.artifacts.session-dir expected-session-dir)
           "non-agent-sessions data-dir should create nested session artifact dir")
   (assert (fs.exists expected-session-dir)
           "nested default session artifact directory should exist")
   (clean-dir dir))
 
 (fn test-runner-default-artifacts-sibling-for-agent-sessions-data-dir []
-  (local root (temp-dir))
+  (local root (temp-dir)) (local PathUtils (require :tests.path-utils))
   (local data-dir (fs.join-path root "agent-sessions"))
   (local result (capture-runner-artifacts data-dir))
   (local expected-root (fs.join-path root "agent-artifacts"))
   (local expected-session-dir (fs.join-path expected-root result.session-id))
-  (assert (= result.artifacts.root expected-root)
+  (assert (PathUtils.paths-eq result.artifacts.root expected-root)
           "agent-sessions data-dir should use sibling artifact root")
-  (assert (= result.artifacts.session-dir expected-session-dir)
+  (assert (PathUtils.paths-eq result.artifacts.session-dir expected-session-dir)
           "agent-sessions data-dir should create sibling session artifact dir")
   (assert (fs.exists expected-session-dir)
           "sibling default session artifact directory should exist")
