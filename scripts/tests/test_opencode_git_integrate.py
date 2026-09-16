@@ -288,6 +288,52 @@ def test_create_followup_branch_refuses_when_origin_main_not_in_head(monkeypatch
     assert runner.checks[runner.calls.index(["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"])] is False
 
 
+def test_create_followup_branch_refuses_unsafe_current_branch_name(monkeypatch, trusted_repo: Path) -> None:
+    runner = GitRunner(
+        {
+            ("git", "status", "--porcelain"): "",
+            ("git", "branch", "--show-current"): "unsafe/branch\n",
+            ("git", "rev-parse", "--short=7", "HEAD"): "caad43f\n",
+            ("git", "merge-base", "--is-ancestor", "origin/main", "HEAD"): command_result(
+                ["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"],
+                returncode=0,
+            ),
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    result = git_integrate.create_followup_branch(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert result["evidence"]["code"] == "invalid_branch"
+    assert result["evidence"]["branch"] == "unsafe/branch"
+    assert [call for call in runner.calls if call[:3] == ["git", "switch", "-c"]] == []
+
+
+def test_create_followup_branch_refuses_unsafe_derived_target_branch_name(monkeypatch, trusted_repo: Path) -> None:
+    target = "feature/opencode-capabilities followup caad43f"
+    runner = GitRunner(
+        {
+            ("git", "status", "--porcelain"): "",
+            ("git", "branch", "--show-current"): "feature/opencode-capabilities\n",
+            ("git", "rev-parse", "--short=7", "HEAD"): "caad43f\n",
+            ("git", "merge-base", "--is-ancestor", "origin/main", "HEAD"): command_result(
+                ["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"],
+                returncode=0,
+            ),
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+    monkeypatch.setattr(git_integrate, "_derive_followup_branch_name", lambda _branch, _sha: target)
+
+    result = git_integrate.create_followup_branch(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert result["evidence"]["code"] == "invalid_branch"
+    assert result["evidence"]["followup_branch"] == target
+    assert [call for call in runner.calls if call[:3] == ["git", "switch", "-c"]] == []
+
+
 def test_create_followup_branch_refuses_when_local_target_exists(monkeypatch, trusted_repo: Path) -> None:
     target = "feature/opencode-capabilities-followup-caad43f"
     runner = GitRunner(
