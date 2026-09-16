@@ -18,7 +18,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--iss-path", default=None)
     parser.add_argument("--app-exe-name", default="space.exe")
-    parser.add_argument("--output-basename", default="space-windows-setup")
+    parser.add_argument("--output-basename", default="space-windows-x86_64-setup")
     parser.add_argument("--iscc-path", default=None)
     return parser.parse_args()
 
