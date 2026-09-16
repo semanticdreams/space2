@@ -164,7 +164,7 @@ jobs:
           import zipfile
 
           root = pathlib.Path("build/dist/windows")
-          with zipfile.ZipFile("build/dist/space-windows.zip", "w", zipfile.ZIP_DEFLATED) as archive:
+          with zipfile.ZipFile("build/dist/space-windows-x86_64.zip", "w", zipfile.ZIP_DEFLATED) as archive:
               for path in root.rglob("*"):
                   archive.write(path, path.relative_to(root))
           PY
@@ -174,7 +174,7 @@ jobs:
           python3 - <<'PY'
           import zipfile
 
-          with zipfile.ZipFile("build/dist/space-windows.zip") as archive:
+          with zipfile.ZipFile("build/dist/space-windows-x86_64.zip") as archive:
               names = set(archive.namelist())
           missing = {"space.exe", "space-cli.exe"} - names
           if missing:
@@ -203,7 +203,7 @@ jobs:
         with:
           name: windows-packaging-inputs
           path: |
-            build/dist/space-windows.zip
+            build/dist/space-windows-x86_64.zip
             build/dist/windows
             build/windows/CPackConfig.cmake
             build/windows/space.ico
@@ -266,7 +266,7 @@ jobs:
           $logPath = Join-Path $env:RUNNER_TEMP "space-installer.log"
           Remove-Item -Recurse -Force $installDir -ErrorAction SilentlyContinue
           Remove-Item $logPath -ErrorAction SilentlyContinue
-          $installer = (Resolve-Path "build/dist/space-windows-setup.exe").Path
+          $installer = (Resolve-Path "build/dist/space-windows-x86_64-setup.exe").Path
           Start-Process -FilePath $installer -ArgumentList @("/SP-","/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CURRENTUSER","/TASKS=desktopicon",("/DIR=" + $installDir),("/LOG=" + $logPath)) -Wait -NoNewWindow
           foreach ($exeName in @("space.exe", "space-cli.exe")) {
             if (-not (Test-Path (Join-Path $installDir $exeName))) {

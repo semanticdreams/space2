@@ -35,8 +35,9 @@ def test_linux_packaging_names_follow_stable_hierarchy() -> None:
     assert_absent(script, "space-minimal-linux", "scripts/build-linux.sh")
 
 
-def test_workflow_uses_new_release_artifact_names() -> None:
-    workflow = read_repo_text(".github/workflows/build.yml")
+def test_workflows_use_new_release_artifact_names() -> None:
+    build_workflow = read_repo_text(".github/workflows/build.yml")
+    test_workflow = read_repo_text(".github/workflows/test.yml")
 
     expected_names = [
         "space-linux-x86_64.tar.gz",
@@ -49,16 +50,30 @@ def test_workflow_uses_new_release_artifact_names() -> None:
         "space-windows-x86_64-setup.exe",
     ]
 
-    for expected_name in expected_names:
-        assert expected_name in workflow
-
-    for obsolete_name in [
+    obsolete_names = [
         "space-linux-x86_64-bin.tar.gz",
         "space-minimal-linux",
         "space-windows.zip",
         "space-windows-setup.exe",
+    ]
+
+    for expected_name in expected_names:
+        assert expected_name in build_workflow
+
+    for obsolete_name in obsolete_names:
+        assert_absent(build_workflow, obsolete_name, ".github/workflows/build.yml")
+
+    for expected_name in [
+        "space-windows-x86_64.zip",
+        "space-windows-x86_64-setup.exe",
     ]:
-        assert_absent(workflow, obsolete_name, ".github/workflows/build.yml")
+        assert expected_name in test_workflow, f"{expected_name!r} missing from .github/workflows/test.yml"
+
+    for obsolete_name in [
+        "space-windows.zip",
+        "space-windows-setup.exe",
+    ]:
+        assert_absent(test_workflow, obsolete_name, ".github/workflows/test.yml")
 
 
 def test_linux_package_layout_verifier_workflow_callers_choose_layout_mode() -> None:
