@@ -21,10 +21,39 @@ typedef HANDLE HREPORT;
 #define WER_MAX_PREFERRED_MODULES_BUFFER 256
 #endif
 
+// Ubuntu 22.04/Jammy's MinGW-w64 8.0.0 werapi.h declares
+// WER_SUBMIT_RESULT but omits the PWER_SUBMIT_RESULT pointer typedef while
+// still using PWER_SUBMIT_RESULT in WerReportSubmit(). Define the missing name
+// before include_next so that the old header can parse its own prototype. Newer
+// MinGW headers include *PWER_SUBMIT_RESULT in the enum typedef, so limit this
+// workaround to detected old MinGW versions; predefining it for fixed headers
+// would corrupt that typedef.
+#if defined(__MINGW64_VERSION_MAJOR) && __MINGW64_VERSION_MAJOR <= 8
+#ifndef PWER_SUBMIT_RESULT
+#define PWER_SUBMIT_RESULT WER_SUBMIT_RESULT*
+#endif
+#endif
+
 #include_next <werapi.h>
 
 #ifndef PWER_SUBMIT_RESULT
 #define PWER_SUBMIT_RESULT WER_SUBMIT_RESULT*
+#endif
+
+// MinGW's WER_RUNTIME_EXCEPTION_INFORMATION declaration is gated on
+// _WIN32_WINNT >= 0x0601. Crashpad uses the pointer type even when the build's
+// target version is lower, so provide the same base fields from MinGW's Win7+
+// declaration when the system header intentionally omitted it. Crashpad carries
+// its own Windows 10 19041 extension for bIsFatal.
+#if !defined(_WIN32_WINNT) || _WIN32_WINNT < 0x0601
+typedef struct _WER_RUNTIME_EXCEPTION_INFORMATION {
+  DWORD dwSize;
+  HANDLE hProcess;
+  HANDLE hThread;
+  EXCEPTION_RECORD exceptionRecord;
+  CONTEXT context;
+  PCWSTR pwszReportId;
+} WER_RUNTIME_EXCEPTION_INFORMATION, *PWER_RUNTIME_EXCEPTION_INFORMATION;
 #endif
 
 #endif  // CRASHPAD_COMPAT_MINGW_WERAPI_H_
