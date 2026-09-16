@@ -104,35 +104,26 @@ touch "${PACKAGE_MARKER}"
 mkdir -p "${BUILD_DIR}/dist"
 TARBALL_ROOT="${BUILD_DIR}/dist/tar-root"
 
+VARIANT_SUFFIX=""
+APPIMAGE_BASE="space"
 if [[ "${PROFILE}" == "minimal" ]]; then
-    BIN_TAR_NAME="space-minimal-linux-x86_64-bin.tar.gz"
+    VARIANT_SUFFIX="-minimal"
     APPIMAGE_BASE="space-minimal"
-    STABLE_APPIMAGE_NAME="space-minimal-linux-x86_64.AppImage"
-    if [[ -n "${DEB_FLAVOR}" ]]; then
-        STABLE_DEB_NAME="space-minimal-linux-${DEB_FLAVOR}-amd64.deb"
-    else
-        STABLE_DEB_NAME="space-minimal-linux-amd64.deb"
-    fi
-    if [[ -n "${RPM_FLAVOR}" ]]; then
-        STABLE_RPM_NAME="space-minimal-linux-${RPM_FLAVOR}-x86_64.rpm"
-    else
-        STABLE_RPM_NAME="space-minimal-linux-x86_64.rpm"
-    fi
-else
-    BIN_TAR_NAME="space-linux-x86_64-bin.tar.gz"
-    APPIMAGE_BASE="space"
-    STABLE_APPIMAGE_NAME="space-linux-x86_64.AppImage"
-    if [[ -n "${DEB_FLAVOR}" ]]; then
-        STABLE_DEB_NAME="space-linux-${DEB_FLAVOR}-amd64.deb"
-    else
-        STABLE_DEB_NAME="space-linux-amd64.deb"
-    fi
-    if [[ -n "${RPM_FLAVOR}" ]]; then
-        STABLE_RPM_NAME="space-linux-${RPM_FLAVOR}-x86_64.rpm"
-    else
-        STABLE_RPM_NAME="space-linux-x86_64.rpm"
-    fi
 fi
+
+DEB_FLAVOR_SUFFIX=""
+RPM_FLAVOR_SUFFIX=""
+if [[ -n "${DEB_FLAVOR}" ]]; then
+    DEB_FLAVOR_SUFFIX="-${DEB_FLAVOR}"
+fi
+if [[ -n "${RPM_FLAVOR}" ]]; then
+    RPM_FLAVOR_SUFFIX="-${RPM_FLAVOR}"
+fi
+
+BIN_TAR_NAME="space-linux-x86_64${VARIANT_SUFFIX}.tar.gz"
+STABLE_APPIMAGE_NAME="space-linux-x86_64${VARIANT_SUFFIX}.AppImage"
+STABLE_DEB_NAME="space-linux-amd64${DEB_FLAVOR_SUFFIX}${VARIANT_SUFFIX}.deb"
+STABLE_RPM_NAME="space-linux-x86_64${RPM_FLAVOR_SUFFIX}${VARIANT_SUFFIX}.rpm"
 
 RELEASE_MANIFEST="${BUILD_DIR}/release-artifacts-${PROFILE}.txt"
 RELEASE_DEB_PATH="${BUILD_DIR}/${STABLE_DEB_NAME}"
