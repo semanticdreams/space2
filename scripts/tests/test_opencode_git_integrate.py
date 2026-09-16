@@ -215,6 +215,208 @@ def test_push_current_refuses_main_invalid_branch_and_pushes_only_head_to_curren
     ]
 
 
+def test_derive_followup_branch_name_appends_followup_suffix() -> None:
+    assert (
+        git_integrate._derive_followup_branch_name("juicyrebel/test-workflow-artifact-names", "caad43f")
+        == "juicyrebel/test-workflow-artifact-names-followup-caad43f"
+    )
+
+
+def test_create_followup_branch_refuses_dirty_worktree(monkeypatch, trusted_repo: Path) -> None:
+    runner = GitRunner(
+        {
+            ("git", "status", "--porcelain"): " M task.py\n",
+            ("git", "branch", "--show-current"): "feature/opencode-capabilities\n",
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    result = git_integrate.create_followup_branch(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert [call for call in runner.calls if call[:3] == ["git", "switch", "-c"]] == []
+
+
+def test_create_followup_branch_refuses_main_branch(monkeypatch, trusted_repo: Path) -> None:
+    runner = GitRunner(
+        {
+            ("git", "status", "--porcelain"): "",
+            ("git", "branch", "--show-current"): "main\n",
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    result = git_integrate.create_followup_branch(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert [call for call in runner.calls if call[:3] == ["git", "switch", "-c"]] == []
+
+
+def test_create_followup_branch_refuses_detached_head(monkeypatch, trusted_repo: Path) -> None:
+    runner = GitRunner(
+        {
+            ("git", "status", "--porcelain"): "",
+            ("git", "branch", "--show-current"): "\n",
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    result = git_integrate.create_followup_branch(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert [call for call in runner.calls if call[:3] == ["git", "switch", "-c"]] == []
+
+
+def test_create_followup_branch_refuses_when_origin_main_not_in_head(monkeypatch, trusted_repo: Path) -> None:
+    runner = GitRunner(
+        {
+            ("git", "status", "--porcelain"): "",
+            ("git", "branch", "--show-current"): "feature/opencode-capabilities\n",
+            ("git", "rev-parse", "--short=7", "HEAD"): "caad43f\n",
+            ("git", "merge-base", "--is-ancestor", "origin/main", "HEAD"): command_result(
+                ["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"],
+                returncode=1,
+            ),
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    result = git_integrate.create_followup_branch(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert [call for call in runner.calls if call[:3] == ["git", "switch", "-c"]] == []
+    assert runner.checks[runner.calls.index(["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"])] is False
+
+
+def test_create_followup_branch_refuses_when_local_target_exists(monkeypatch, trusted_repo: Path) -> None:
+    target = "feature/opencode-capabilities-followup-caad43f"
+    runner = GitRunner(
+        {
+            ("git", "status", "--porcelain"): "",
+            ("git", "branch", "--show-current"): "feature/opencode-capabilities\n",
+            ("git", "rev-parse", "--short=7", "HEAD"): "caad43f\n",
+            ("git", "merge-base", "--is-ancestor", "origin/main", "HEAD"): command_result(
+                ["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"],
+                returncode=0,
+            ),
+            ("git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"): command_result(
+                ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"],
+                returncode=0,
+            ),
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    result = git_integrate.create_followup_branch(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert [call for call in runner.calls if call[:3] == ["git", "switch", "-c"]] == []
+    assert runner.checks[runner.calls.index(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"])] is False
+
+
+def test_create_followup_branch_refuses_when_remote_target_exists(monkeypatch, trusted_repo: Path) -> None:
+    target = "feature/opencode-capabilities-followup-caad43f"
+    runner = GitRunner(
+        {
+            ("git", "status", "--porcelain"): "",
+            ("git", "branch", "--show-current"): "feature/opencode-capabilities\n",
+            ("git", "rev-parse", "--short=7", "HEAD"): "caad43f\n",
+            ("git", "merge-base", "--is-ancestor", "origin/main", "HEAD"): command_result(
+                ["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"],
+                returncode=0,
+            ),
+            ("git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"): command_result(
+                ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"],
+                returncode=1,
+            ),
+            ("git", "ls-remote", "--exit-code", "--heads", "origin", target): command_result(
+                ["git", "ls-remote", "--exit-code", "--heads", "origin", target],
+                returncode=0,
+            ),
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    result = git_integrate.create_followup_branch(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert [call for call in runner.calls if call[:3] == ["git", "switch", "-c"]] == []
+    assert runner.checks[runner.calls.index(["git", "ls-remote", "--exit-code", "--heads", "origin", target])] is False
+
+
+def test_create_followup_branch_switches_to_deterministic_absent_target(monkeypatch, trusted_repo: Path) -> None:
+    target = "feature/opencode-capabilities-followup-caad43f"
+    runner = GitRunner(
+        {
+            ("git", "status", "--porcelain"): "",
+            ("git", "branch", "--show-current"): "feature/opencode-capabilities\n",
+            ("git", "rev-parse", "--short=7", "HEAD"): "caad43f\n",
+            ("git", "merge-base", "--is-ancestor", "origin/main", "HEAD"): command_result(
+                ["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"],
+                returncode=0,
+            ),
+            ("git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"): command_result(
+                ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"],
+                returncode=1,
+            ),
+            ("git", "ls-remote", "--exit-code", "--heads", "origin", target): command_result(
+                ["git", "ls-remote", "--exit-code", "--heads", "origin", target],
+                returncode=2,
+            ),
+            ("git", "switch", "-c", target): "",
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    result = git_integrate.create_followup_branch(trusted_repo)
+
+    assert result["status"] == "pass"
+    assert result["evidence"]["source_branch"] == "feature/opencode-capabilities"
+    assert result["evidence"]["followup_branch"] == target
+    assert runner.calls == [
+        ["git", "status", "--porcelain"],
+        ["git", "branch", "--show-current"],
+        ["git", "rev-parse", "--short=7", "HEAD"],
+        ["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"],
+        ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"],
+        ["git", "ls-remote", "--exit-code", "--heads", "origin", target],
+        ["git", "switch", "-c", target],
+    ]
+
+
+def test_cli_create_followup_branch_emits_json_and_returns_success(monkeypatch, trusted_repo: Path, capsys) -> None:
+    target = "feature/opencode-capabilities-followup-caad43f"
+    runner = GitRunner(
+        {
+            ("git", "status", "--porcelain"): "",
+            ("git", "branch", "--show-current"): "feature/opencode-capabilities\n",
+            ("git", "rev-parse", "--short=7", "HEAD"): "caad43f\n",
+            ("git", "merge-base", "--is-ancestor", "origin/main", "HEAD"): command_result(
+                ["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"],
+                returncode=0,
+            ),
+            ("git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"): command_result(
+                ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"],
+                returncode=1,
+            ),
+            ("git", "ls-remote", "--exit-code", "--heads", "origin", target): command_result(
+                ["git", "ls-remote", "--exit-code", "--heads", "origin", target],
+                returncode=2,
+            ),
+            ("git", "switch", "-c", target): "",
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    exit_code = git_integrate.main(["create-followup-branch", "--repo-root", str(trusted_repo)])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["status"] == "pass"
+    assert payload["action"] == "create_followup_branch"
+    assert payload["evidence"]["followup_branch"] == target
+
+
 def test_cli_emits_json_and_returns_nonzero_on_unsafe_state(monkeypatch, trusted_repo: Path, capsys) -> None:
     runner = GitRunner(
         {
