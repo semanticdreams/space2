@@ -313,6 +313,17 @@ set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "Disable spdlog examples" FORCE)
 set(SPDLOG_INSTALL OFF CACHE BOOL "Disable spdlog install" FORCE)
 add_subdirectory(external/spdlog)
 
+set(SENTRY_BUILD_TESTS OFF CACHE BOOL "Disable sentry-native tests" FORCE)
+set(SENTRY_BUILD_EXAMPLES OFF CACHE BOOL "Disable sentry-native examples" FORCE)
+set(SENTRY_BUILD_BENCHMARKS OFF CACHE BOOL "Disable sentry-native benchmarks" FORCE)
+set(SENTRY_BUILD_SHARED_LIBS OFF CACHE BOOL "Build sentry-native statically" FORCE)
+if(UNIX AND NOT APPLE)
+    set(SENTRY_BACKEND crashpad CACHE STRING "Use crashpad backend for sentry-native" FORCE)
+    set(SENTRY_TRANSPORT curl CACHE STRING "Use curl transport for sentry-native" FORCE)
+endif()
+add_subdirectory(external/sentry-native)
+space_suppress_target_warnings(sentry)
+
 option(SPACE_REQUIRE_NATIVE_LINUX_INPUT
     "Require native Linux desktop input backends (Wayland + XInput2) for SDL builds"
     ON)
@@ -517,6 +528,14 @@ target_link_libraries(${PROJECT_NAME}_lib
     Boost::headers
     space_yojimbo
 )
+if(TARGET sentry::sentry)
+    target_link_libraries(${PROJECT_NAME}_lib sentry::sentry)
+elseif(TARGET sentry)
+    # sentry::sentry is the expected upstream alias for sentry-native 0.16.6.
+    target_link_libraries(${PROJECT_NAME}_lib sentry)
+else()
+    message(FATAL_ERROR "Required sentry-native target not found")
+endif()
 if(TARGET BulletInverseDynamics)
     target_link_libraries(${PROJECT_NAME}_lib BulletInverseDynamics)
 endif()
@@ -677,6 +696,13 @@ function(space_configure_app_target target_name)
         target_compile_definitions(${target_name} PUBLIC SPACE_ENABLE_CEF=1)
         space_setup_cef_for_target(${target_name})
     endif()
+    if(TARGET crashpad_handler)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:crashpad_handler>
+                $<TARGET_FILE_DIR:${target_name}>/crashpad_handler
+            VERBATIM)
+    endif()
     target_compile_options(${target_name} PRIVATE -O2 -g)
     target_link_options(${target_name} PRIVATE -O2 -g)
     set_target_properties(${target_name} PROPERTIES CXX_VISIBILITY_PRESET hidden)
@@ -693,7 +719,6 @@ else()
     add_executable(${PROJECT_NAME} apps/space/main.cpp)
     space_configure_app_target(${PROJECT_NAME})
 endif()
-
 if(WIN32)
     set(SPACE_WINDOWS_ICON_PNG "${CMAKE_CURRENT_SOURCE_DIR}/assets/pics/space.png")
     set(SPACE_WINDOWS_ICON_FILE "${CMAKE_CURRENT_BINARY_DIR}/space.ico")
@@ -787,6 +812,11 @@ add_test(NAME test_vector_buffer COMMAND test_vector_buffer)
 set_tests_properties(test_vector_buffer PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
+
+add_executable(test_error_reporting tests/test_error_reporting.cpp)
+target_link_libraries(test_error_reporting ${PROJECT_NAME}_lib)
+target_include_directories(test_error_reporting PRIVATE external/cpp-httplib)
+add_test(NAME test_error_reporting COMMAND test_error_reporting)
 
 add_executable(test_input_dial_type
     tests/test_input_dial_type.cpp
@@ -890,6 +920,7 @@ set_tests_properties(test_lua_gccjit_binding PROPERTIES
 add_executable(test_lua_module_error_integration
     tests/test_lua_module_error_integration.cpp
 )
+target_include_directories(test_lua_module_error_integration PRIVATE external/cpp-httplib)
 add_test(NAME test_lua_module_error_integration COMMAND test_lua_module_error_integration)
 set_tests_properties(test_lua_module_error_integration PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
