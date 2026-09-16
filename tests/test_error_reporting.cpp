@@ -53,9 +53,11 @@ int main()
     httplib::Server server;
     std::mutex mutex;
     std::vector<std::string> bodies;
+    bool forbidden_host_seen = false;
     server.Post(R"(.*)", [&](const httplib::Request& req, httplib::Response& res) {
         std::lock_guard<std::mutex> lock(mutex);
         if (req.body.find("bugsink.narlun.com") != std::string::npos) {
+            forbidden_host_seen = true;
             res.status = 500;
             return;
         }
@@ -82,7 +84,13 @@ int main()
     error_reporting::shutdown();
     server.stop();
     thread.join();
+    bool local_only_delivery = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        local_only_delivery = !forbidden_host_seen;
+    }
     return check(ok, error_message)
+            && check(local_only_delivery, "no request body referenced bugsink.narlun.com")
             && check(wait_for_body_containing(bodies, mutex, "space local test exception"), "local event received")
         ? 0
         : 1;
