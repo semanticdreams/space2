@@ -194,5 +194,21 @@ int main()
         }
     }
 
+    std::string output;
+    int exit_code = 0;
+    if (!check(run_command_capture(build_command(executable, {"--bad-option"}), output, exit_code),
+               "run invalid global option command")) {
+        return 1;
+    }
+    if (!check(exit_code == 109, "invalid global option should preserve CLI11 exit code")) {
+        std::cerr << output << "\n";
+        return 1;
+    }
+    if (!check(output.find("--bad-option") != std::string::npos,
+               "invalid global option should report the rejected option")) {
+        std::cerr << output << "\n";
+        return 1;
+    }
+
     return 0;
 }

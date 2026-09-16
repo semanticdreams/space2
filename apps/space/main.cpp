@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -286,7 +287,14 @@ int main(int argc, char *argv[])
         app.parse(std::move(cli_args));
     }
     catch (const CLI::ParseError &e) {
-        return app.exit(e);
+        if (e.get_exit_code() == 0) {
+            return app.exit(e);
+        }
+
+        std::ostringstream error_output;
+        int exit_code = app.exit(e, std::cout, error_output);
+        report_top_level_error(error_output.str());
+        return exit_code;
     }
 
     if (!dotenv_already_loaded) {

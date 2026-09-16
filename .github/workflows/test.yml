@@ -106,7 +106,6 @@ jobs:
         run: make test-e2e
 
   build-windows:
-    if: github.event_name == 'push'
     runs-on: ubuntu-22.04
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache-windows
@@ -149,6 +148,39 @@ jobs:
       - name: Prepare runtime bundle
         run: scripts/package-windows-runtime.sh
 
+      - name: Smoke test Windows package
+        run: |
+          scripts/prepare-windows-wine-runtime.sh build/windows/space-cli.exe
+          test -f build/dist/windows/space.exe
+          test -f build/dist/windows/space-cli.exe
+          x86_64-w64-mingw32-objdump -p build/windows/space.exe | rg "Subsystem.*Windows GUI"
+          x86_64-w64-mingw32-objdump -p build/windows/space-cli.exe | rg "Subsystem.*Windows CUI"
+          timeout 60s wine64 build/windows/space-cli.exe --help >/dev/null
+
+      - name: Create Windows ZIP
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import zipfile
+
+          root = pathlib.Path("build/dist/windows")
+          with zipfile.ZipFile("build/dist/space-windows.zip", "w", zipfile.ZIP_DEFLATED) as archive:
+              for path in root.rglob("*"):
+                  archive.write(path, path.relative_to(root))
+          PY
+
+      - name: Verify Windows ZIP contents
+        run: |
+          python3 - <<'PY'
+          import zipfile
+
+          with zipfile.ZipFile("build/dist/space-windows.zip") as archive:
+              names = set(archive.namelist())
+          missing = {"space.exe", "space-cli.exe"} - names
+          if missing:
+              raise SystemExit(f"missing from Windows ZIP: {sorted(missing)}")
+          PY
+
       - name: ccache stats
         run: ccache -s
 
@@ -166,8 +198,19 @@ jobs:
           path: build/dist/windows
           if-no-files-found: error
 
+      - name: Upload Windows packaging inputs
+        uses: actions/upload-artifact@v5
+        with:
+          name: windows-packaging-inputs
+          path: |
+            build/dist/space-windows.zip
+            build/dist/windows
+            build/windows/CPackConfig.cmake
+            build/windows/space.ico
+            scripts/windows-installer.iss
+          if-no-files-found: error
+
   test-windows:
-    if: github.event_name == 'push'
     needs: build-windows
     runs-on: windows-latest
     env:
@@ -194,3 +237,43 @@ jobs:
           FENNEL_MACRO_PATH: ${{ github.workspace }}\\build\\dist\\windows\\assets\\lua\\?.fnl;${{ github.workspace }}\\build\\dist\\windows\\assets\\lua\\?\\init.fnl
           XDG_DATA_HOME: ${{ github.workspace }}\\.tmp\\xdg-data
         run: .\build\dist\windows\space-cli.exe -m tests.fast:main
+
+  build-windows-installer:
+    needs: build-windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Download Windows packaging inputs
+        uses: actions/download-artifact@v5
+        with:
+          name: windows-packaging-inputs
+          path: .
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: python scripts/build-windows-installer.py
+
+      - name: Smoke test Windows installer
+        shell: pwsh
+        run: |
+          $installDir = Join-Path $env:RUNNER_TEMP "space-install"
+          $logPath = Join-Path $env:RUNNER_TEMP "space-installer.log"
+          Remove-Item -Recurse -Force $installDir -ErrorAction SilentlyContinue
+          Remove-Item $logPath -ErrorAction SilentlyContinue
+          $installer = (Resolve-Path "build/dist/space-windows-setup.exe").Path
+          Start-Process -FilePath $installer -ArgumentList @("/SP-","/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CURRENTUSER","/TASKS=desktopicon",("/DIR=" + $installDir),("/LOG=" + $logPath)) -Wait -NoNewWindow
+          foreach ($exeName in @("space.exe", "space-cli.exe")) {
+            if (-not (Test-Path (Join-Path $installDir $exeName))) {
+              if (Test-Path $logPath) {
+                Get-Content $logPath
+              }
+              throw "Installed executable not found: ${exeName}"
+            }
+          }
+          & (Join-Path $installDir "space-cli.exe") --help *> $null
