@@ -2,13 +2,13 @@
 
 Space's embedded runtime owns the default Fennel asset search path. Normal app launch must not rely on shell wrappers setting `FENNEL_PATH` or `FENNEL_MACRO_PATH` for modules under `assets/lua`.
 
-The canonical runtime path order is:
+The canonical runtime path pattern for each asset root is:
 
 ```text
-assets/lua/?.fnl;assets/lua/?/init.fnl
+<asset-root>/lua/?.fnl;<asset-root>/lua/?/init.fnl
 ```
 
-Flat files intentionally take precedence over directory `init.fnl` modules.
+Asset roots are ordered by the runtime asset overlay search order. Flat files intentionally take precedence over directory `init.fnl` modules within each root, and earlier roots shadow later roots. See [Runtime Asset Overlays](./runtime-asset-overlays) for the full root order.
 
 `LuaRuntime` applies this path to both `fennel.path` and `fennel["macro-path"]` before loading app modules. The runtime also exposes the same value as `runtime.fennel-path` for child processes and user-code tooling that need to extend the project path.
 
