@@ -15,7 +15,7 @@
 #ifndef CRASHPAD_HANDLER_WIN_WER_CRASHPAD_WER_H_
 #define CRASHPAD_HANDLER_WIN_WER_CRASHPAD_WER_H_
 
-#include <Windows.h>
+#include <windows.h>
 #include <werapi.h>
 
 namespace crashpad::wer {

@@ -17,7 +17,7 @@
 
 #include "handler/win/wer/crashpad_wer.h"
 
-#include <Windows.h>
+#include <windows.h>
 #include <werapi.h>
 
 // Functions that will be exported from the DLL.
