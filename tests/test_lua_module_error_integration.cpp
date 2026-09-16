@@ -1,9 +1,15 @@
+#include "httplib.h"
+
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #if !defined(_WIN32)
@@ -120,6 +126,65 @@ bool check(bool condition, const std::string& message)
     return true;
 }
 
+struct LocalEnvelopeServer {
+    httplib::Server server;
+    std::thread thread;
+    std::mutex mutex;
+    std::vector<std::string> bodies;
+    std::chrono::milliseconds response_delay { 0 };
+    int port { 0 };
+
+    bool start()
+    {
+        server.Post(R"(.*)", [&](const httplib::Request& req, httplib::Response& res) {
+            if (response_delay.count() > 0) {
+                std::this_thread::sleep_for(response_delay);
+            }
+            std::lock_guard<std::mutex> lock(mutex);
+            bodies.push_back(req.body);
+            res.status = 200;
+            res.set_content("{}", "application/json");
+        });
+
+        port = server.bind_to_any_port("127.0.0.1");
+        if (port <= 0) {
+            return false;
+        }
+        thread = std::thread([this]() { server.listen_after_bind(); });
+        return true;
+    }
+
+    void stop()
+    {
+        server.stop();
+        if (thread.joinable()) {
+            thread.join();
+        }
+    }
+
+    bool contains(const std::string& needle)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (std::chrono::steady_clock::now() < deadline) {
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                for (const std::string& body : bodies) {
+                    if (body.find(needle) != std::string::npos) {
+                        return true;
+                    }
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        return false;
+    }
+
+    std::string dsn() const
+    {
+        return "http://public@127.0.0.1:" + std::to_string(port) + "/1";
+    }
+};
+
 } // namespace
 
 int main()
@@ -192,6 +257,119 @@ int main()
             std::cerr << output << "\n";
             return 1;
         }
+    }
+
+    LocalEnvelopeServer server;
+    if (!check(server.start(), "start local error reporting server")) {
+        return 1;
+    }
+
+    const fs::path reporting_db = fs::temp_directory_path() / "space-error-reporting-test-db";
+    if (!check(set_env_var("SPACE_TEST_ERROR_REPORTING_DSN", server.dsn()),
+               "set SPACE_TEST_ERROR_REPORTING_DSN")) {
+        server.stop();
+        return 1;
+    }
+    if (!check(set_env_var("SPACE_TEST_ERROR_REPORTING_DB", reporting_db.string()),
+               "set SPACE_TEST_ERROR_REPORTING_DB")) {
+        server.stop();
+        return 1;
+    }
+
+    std::string startup_output;
+    int startup_exit_code = 0;
+    if (!check(run_command_capture(build_command(executable, {"-m", "tests.error-reporting-startup-error:main"}),
+                                   startup_output,
+                                   startup_exit_code),
+               "run error reporting startup fixture")) {
+        server.stop();
+        return 1;
+    }
+    if (!check(startup_exit_code != 0, "error reporting startup fixture should fail")) {
+        std::cerr << startup_output << "\n";
+        server.stop();
+        return 1;
+    }
+    if (!check(startup_output.find("tests.error-reporting startup failure") != std::string::npos,
+               "startup fixture preserves reported error output")) {
+        std::cerr << startup_output << "\n";
+        server.stop();
+        return 1;
+    }
+
+    std::string callback_output;
+    int callback_exit_code = 0;
+    if (!check(run_command_capture(build_command(executable, {"-m", "tests.error-reporting-callback-error:main"}),
+                                   callback_output,
+                                   callback_exit_code),
+               "run error reporting callback fixture")) {
+        server.stop();
+        return 1;
+    }
+    if (!check(callback_exit_code == 0, "error reporting callback fixture should succeed")) {
+        std::cerr << callback_output << "\n";
+        server.stop();
+        return 1;
+    }
+    if (!check(callback_output.find("[callbacks] invocation failed") != std::string::npos,
+               "callback fixture preserves callback failure output")) {
+        std::cerr << callback_output << "\n";
+        server.stop();
+        return 1;
+    }
+    if (!check(server.contains("tests.error-reporting callback failure"),
+               "callback fixture delivered local error report")) {
+        server.stop();
+        return 1;
+    }
+
+    server.stop();
+
+    LocalEnvelopeServer slow_server;
+    slow_server.response_delay = std::chrono::milliseconds(3000);
+    if (!check(slow_server.start(), "start slow local error reporting server")) {
+        return 1;
+    }
+
+    const fs::path slow_reporting_db = fs::temp_directory_path() / "space-error-reporting-slow-test-db";
+    if (!check(set_env_var("SPACE_TEST_ERROR_REPORTING_DSN", slow_server.dsn()),
+               "set slow SPACE_TEST_ERROR_REPORTING_DSN")) {
+        slow_server.stop();
+        return 1;
+    }
+    if (!check(set_env_var("SPACE_TEST_ERROR_REPORTING_DB", slow_reporting_db.string()),
+               "set slow SPACE_TEST_ERROR_REPORTING_DB")) {
+        slow_server.stop();
+        return 1;
+    }
+
+    std::string slow_startup_output;
+    int slow_startup_exit_code = 0;
+    const auto slow_startup_start = std::chrono::steady_clock::now();
+    bool slow_startup_ran = run_command_capture(
+        build_command(executable, {"-m", "tests.error-reporting-startup-error:main"}),
+        slow_startup_output,
+        slow_startup_exit_code);
+    const auto slow_startup_elapsed = std::chrono::steady_clock::now() - slow_startup_start;
+    slow_server.stop();
+    if (!check(slow_startup_ran, "run slow error reporting startup fixture")) {
+        return 1;
+    }
+    if (!check(slow_startup_exit_code != 0, "slow error reporting startup fixture should fail")) {
+        std::cerr << slow_startup_output << "\n";
+        return 1;
+    }
+    if (!check(slow_startup_output.find("tests.error-reporting startup failure") != std::string::npos,
+               "slow startup fixture preserves reported error output")) {
+        std::cerr << slow_startup_output << "\n";
+        return 1;
+    }
+    if (!check(slow_startup_elapsed < std::chrono::milliseconds(1500),
+               "slow server must not block top-level Lua error return")) {
+        std::cerr << "elapsed_ms="
+                  << std::chrono::duration_cast<std::chrono::milliseconds>(slow_startup_elapsed).count()
+                  << "\n";
+        return 1;
     }
 
     std::string output;

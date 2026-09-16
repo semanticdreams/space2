@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "asset_manager.h"
+#include "error_reporting.h"
 #include "http_client.h"
 #include "lua_callbacks.h"
 #include "lua_engine.h"
@@ -91,6 +92,7 @@ void lua_bind_zmq(sol::state&);
 void lua_bind_matrix(sol::state&);
 void lua_bind_realtime(sol::state&);
 void lua_bind_logging(sol::state&);
+void lua_bind_error_reporting(sol::state&);
 void lua_bind_uuid(sol::state&);
 void lua_bind_shell(sol::state&);
 void lua_bind_process(sol::state&);
@@ -232,6 +234,9 @@ void LuaRuntime::install_fatal_traceback()
             log_write_file_only("lua", Error, traced);
             std::cerr << traced << "\n";
 
+            error_reporting::capture_exception("LuaFatalTraceback", traced, traced, {{"entry_mode", "fatal_traceback"}});
+            error_reporting::flush(2000);
+
             std::abort();
 
             return sol::make_object(lua, traced);
@@ -274,6 +279,7 @@ void LuaRuntime::install_base_bindings()
     lua_bind_matrix(lua);
     lua_bind_realtime(lua);
     lua_bind_logging(lua);
+    lua_bind_error_reporting(lua);
     lua_bind_uuid(lua);
     lua_bind_shell(lua);
     lua_bind_process(lua);

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "lua_callbacks.h"
+#include "error_reporting.h"
 #include "lua_http.h"
 #include "lua_http_server.h"
 #include "lua_jobs.h"
@@ -101,6 +102,15 @@ bool call_until(const sol::function& fn)
         return value.as<bool>();
     }
     return value.valid() && value != sol::lua_nil;
+}
+
+void capture_callback_error(uint64_t id, const sol::error& error)
+{
+    error_reporting::capture_exception(
+        "LuaCallbackError",
+        error.what(),
+        error.what(),
+        {{"callback_id", std::to_string(id)}});
 }
 
 void flush_deferred_unregistrations()
@@ -309,6 +319,7 @@ void lua_callbacks_dispatch(sol::state_view lua, std::size_t max_results)
         sol::protected_function_result result = callback(payload);
         if (!result.valid()) {
             sol::error err = result;
+            capture_callback_error(item.id, err);
             std::cerr << "[callbacks] invocation failed for id " << item.id << ": " << err.what() << "\n";
         }
     }
@@ -346,6 +357,7 @@ std::size_t lua_callbacks_dispatch_ids(sol::state_view lua, const std::vector<ui
         sol::protected_function_result result = callback(payload);
         if (!result.valid()) {
             sol::error err = result;
+            capture_callback_error(item.id, err);
             std::cerr << "[callbacks] invocation failed for id " << item.id << ": " << err.what() << "\n";
         }
     }

@@ -110,6 +110,7 @@
     :tests.test-selection
     :tests.test-callbacks
     :tests.test-logging
+    :tests.test-error-reporting
     :tests.test-http
     :tests.test-settings
     :tests.test-runtime-performance
