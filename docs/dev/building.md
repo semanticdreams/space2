@@ -6,20 +6,20 @@ Use prebuilt packages from the latest release:
 [Latest release page](https://github.com/semanticdreams/space2/releases/latest)
 
 Direct downloads:
-- Windows installer (.exe): [space-windows-setup.exe](https://github.com/semanticdreams/space2/releases/latest/download/space-windows-setup.exe)
-- Windows (.zip): [space-windows.zip](https://github.com/semanticdreams/space2/releases/latest/download/space-windows.zip)
+- Windows installer (.exe): [space-windows-x86_64-setup.exe](https://github.com/semanticdreams/space2/releases/latest/download/space-windows-x86_64-setup.exe)
+- Windows (.zip): [space-windows-x86_64.zip](https://github.com/semanticdreams/space2/releases/latest/download/space-windows-x86_64.zip)
 - AppImage: [space-linux-x86_64.AppImage](https://github.com/semanticdreams/space2/releases/latest/download/space-linux-x86_64.AppImage)
 - Debian/Ubuntu (.deb): [space-linux-amd64.deb](https://github.com/semanticdreams/space2/releases/latest/download/space-linux-amd64.deb)
 - Fedora/openSUSE Tumbleweed (.rpm): [space-linux-x86_64.rpm](https://github.com/semanticdreams/space2/releases/latest/download/space-linux-x86_64.rpm)
-- Tarball (.tar.gz): [space-linux-x86_64-bin.tar.gz](https://github.com/semanticdreams/space2/releases/latest/download/space-linux-x86_64-bin.tar.gz)
-- Minimal AppImage: [space-minimal-linux-x86_64.AppImage](https://github.com/semanticdreams/space2/releases/latest/download/space-minimal-linux-x86_64.AppImage)
-- Minimal Debian/Ubuntu (.deb): [space-minimal-linux-amd64.deb](https://github.com/semanticdreams/space2/releases/latest/download/space-minimal-linux-amd64.deb)
-- Minimal Fedora/openSUSE Tumbleweed (.rpm): [space-minimal-linux-x86_64.rpm](https://github.com/semanticdreams/space2/releases/latest/download/space-minimal-linux-x86_64.rpm)
-- Minimal Tarball (.tar.gz): [space-minimal-linux-x86_64-bin.tar.gz](https://github.com/semanticdreams/space2/releases/latest/download/space-minimal-linux-x86_64-bin.tar.gz)
+- Tarball (.tar.gz): [space-linux-x86_64.tar.gz](https://github.com/semanticdreams/space2/releases/latest/download/space-linux-x86_64.tar.gz)
+- Minimal AppImage: [space-linux-x86_64-minimal.AppImage](https://github.com/semanticdreams/space2/releases/latest/download/space-linux-x86_64-minimal.AppImage)
+- Minimal Debian/Ubuntu (.deb): [space-linux-amd64-minimal.deb](https://github.com/semanticdreams/space2/releases/latest/download/space-linux-amd64-minimal.deb)
+- Minimal Fedora/openSUSE Tumbleweed (.rpm): [space-linux-x86_64-minimal.rpm](https://github.com/semanticdreams/space2/releases/latest/download/space-linux-x86_64-minimal.rpm)
+- Minimal Tarball (.tar.gz): [space-linux-x86_64-minimal.tar.gz](https://github.com/semanticdreams/space2/releases/latest/download/space-linux-x86_64-minimal.tar.gz)
 
 Install guidance:
-- Windows installer: run `space-windows-setup.exe` and follow the installer.
-- Windows: extract `space-windows.zip` and run `space.exe`.
+- Windows installer: run `space-windows-x86_64-setup.exe` and follow the installer.
+- Windows: extract `space-windows-x86_64.zip` and run `space.exe`.
 - AppImage: mark executable and run it (`chmod +x <file>.AppImage`, then `./<file>.AppImage`).
 - Tarball: extract and run `./space`.
 - Debian/Ubuntu: install the downloaded `.deb` with `sudo apt install ./space-*.deb` (or `sudo dpkg -i`).
@@ -238,13 +238,20 @@ scripts/build-linux.sh --profile full --package-mode rpm --rpm-flavor fedora
 ```
 
 Stable outputs are written as:
-- Full default names: `build/space-linux-x86_64.AppImage`, `build/space-linux-amd64.deb`, `build/space-linux-x86_64.rpm`, `build/dist/space-linux-x86_64-bin.tar.gz`
-- Minimal default names: `build/space-minimal-linux-x86_64.AppImage`, `build/space-minimal-linux-amd64.deb`, `build/space-minimal-linux-x86_64.rpm`, `build/dist/space-minimal-linux-x86_64-bin.tar.gz`
-- Distro-flavored outputs use the selected flavor, such as `build/space-linux-ubuntu-24.04-amd64.deb` or `build/space-linux-fedora-x86_64.rpm`
+- Full default names: `build/space-linux-x86_64.AppImage`, `build/space-linux-amd64.deb`, `build/space-linux-x86_64.rpm`, `build/dist/space-linux-x86_64.tar.gz`
+- Minimal default names: `build/space-linux-x86_64-minimal.AppImage`, `build/space-linux-amd64-minimal.deb`, `build/space-linux-x86_64-minimal.rpm`, `build/dist/space-linux-x86_64-minimal.tar.gz`
+- Distro-flavored outputs use the selected flavor after the architecture and before the optional variant, such as `build/space-linux-amd64-ubuntu-24.04.deb`, `build/space-linux-x86_64-fedora.rpm`, or `build/space-linux-amd64-ubuntu-24.04-minimal.deb`.
 
 Windows release builds currently publish:
-- `space-windows-setup.exe`
-- `space-windows.zip`
+- `space-windows-x86_64-setup.exe`
+- `space-windows-x86_64.zip`
+
+Both Windows release packages include two executables:
+
+- `space.exe` is the desktop GUI launcher. Explorer, Start Menu entries, desktop shortcuts, and installer launch actions use this executable so normal launches do not open a terminal window. Alternate GUI shortcuts can still pass a module entry, such as `space.exe -m some.gui.entry:main`, without opening a terminal.
+- `space-cli.exe` is the console launcher for PowerShell/cmd, scripts, CI, tests, and captured terminal output. Use it for command-line workflows such as `space-cli.exe --help`, `space-cli.exe -m tests.fast:main`, file execution, stdin, or `space-cli.exe -c "(print :ok)"`.
+
+Linux and macOS release packages remain single-executable platforms.
 
 The Matrix FFI library (`ffi/matrix`) is built by default and requires `cargo`. To skip it, configure
 with `-DSPACE_BUILD_MATRIX=OFF` (e.g. `make cmake` then `cmake -DSPACE_BUILD_MATRIX=OFF ..`).

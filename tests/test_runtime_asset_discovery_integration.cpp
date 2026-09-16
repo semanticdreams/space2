@@ -199,7 +199,7 @@ bool test_project_cwd_main_overlays_executable_assets(const fs::path& executable
 int main()
 {
 #if defined(_WIN32)
-    const fs::path executable = fs::current_path() / "space.exe";
+    const fs::path executable = fs::current_path() / "space-cli.exe";
 #else
     const fs::path executable = fs::current_path() / "space";
 #endif

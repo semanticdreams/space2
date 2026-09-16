@@ -71,9 +71,9 @@ jobs:
       - name: Smoke test Linux bundles (host)
         run: |
           if [[ "${{ matrix.profile }}" == "full" ]]; then
-            tarball="$(realpath "build/dist/space-linux-x86_64-bin.tar.gz")"
+            tarball="$(realpath "build/dist/space-linux-x86_64.tar.gz")"
           else
-            tarball="$(realpath "build/dist/space-minimal-linux-x86_64-bin.tar.gz")"
+            tarball="$(realpath "build/dist/space-linux-x86_64-minimal.tar.gz")"
           fi
           test -f "${tarball}"
           rm -rf /tmp/space-tarball-smoke
@@ -92,9 +92,9 @@ jobs:
       - name: Smoke test Linux bundles (Linux distros)
         run: |
           if [[ "${{ matrix.profile }}" == "full" ]]; then
-            tarball="space-linux-x86_64-bin.tar.gz"
+            tarball="space-linux-x86_64.tar.gz"
           else
-            tarball="space-minimal-linux-x86_64-bin.tar.gz"
+            tarball="space-linux-x86_64-minimal.tar.gz"
           fi
           for image in ubuntu:22.04 ubuntu:24.04 debian:12 debian:13 fedora:43 fedora:44 opensuse/tumbleweed; do
             docker run --rm \
@@ -114,7 +114,7 @@ jobs:
 
       - name: Smoke test DEB package (Ubuntu)
         env:
-          DEB_NAME: ${{ matrix.profile == 'full' && 'space-linux-amd64.deb' || 'space-minimal-linux-amd64.deb' }}
+          DEB_NAME: ${{ matrix.profile == 'full' && 'space-linux-amd64.deb' || 'space-linux-amd64-minimal.deb' }}
         run: |
           test -f "build/${DEB_NAME}"
           docker run --rm \
@@ -133,7 +133,7 @@ jobs:
 
       - name: Verify RPM package layout (Fedora)
         env:
-          RPM_NAME: ${{ matrix.profile == 'full' && 'space-linux-x86_64.rpm' || 'space-minimal-linux-x86_64.rpm' }}
+          RPM_NAME: ${{ matrix.profile == 'full' && 'space-linux-x86_64.rpm' || 'space-linux-x86_64-minimal.rpm' }}
         run: |
           test -f "build/${RPM_NAME}"
           docker run --rm \
@@ -229,9 +229,12 @@ jobs:
 
       - name: Smoke test Windows binary
         run: |
-          scripts/prepare-windows-wine-runtime.sh build/windows/space.exe
+          scripts/prepare-windows-wine-runtime.sh build/windows/space-cli.exe
           test -f build/dist/windows/space.exe
-          timeout 60s wine64 build/windows/space.exe --help >/dev/null
+          test -f build/dist/windows/space-cli.exe
+          x86_64-w64-mingw32-objdump -p build/windows/space.exe | rg "Subsystem.*Windows GUI"
+          x86_64-w64-mingw32-objdump -p build/windows/space-cli.exe | rg "Subsystem.*Windows CUI"
+          timeout 60s wine64 build/windows/space-cli.exe --help >/dev/null
 
       - name: Create ZIP
         run: |
@@ -240,7 +243,7 @@ jobs:
           import zipfile
 
           root = pathlib.Path("build/dist/windows")
-          with zipfile.ZipFile("build/dist/space-windows.zip", "w", zipfile.ZIP_DEFLATED) as archive:
+          with zipfile.ZipFile("build/dist/space-windows-x86_64.zip", "w", zipfile.ZIP_DEFLATED) as archive:
               for path in root.rglob("*"):
                   archive.write(path, path.relative_to(root))
           PY
@@ -260,7 +263,7 @@ jobs:
         with:
           name: windows-packaging-inputs
           path: |
-            build/dist/space-windows.zip
+            build/dist/space-windows-x86_64.zip
             build/dist/windows
             build/windows/CPackConfig.cmake
             build/windows/space.ico
@@ -293,22 +296,24 @@ jobs:
           $logPath = Join-Path $env:RUNNER_TEMP "space-installer.log"
           Remove-Item -Recurse -Force $installDir -ErrorAction SilentlyContinue
           Remove-Item $logPath -ErrorAction SilentlyContinue
-          $installer = (Resolve-Path "build/dist/space-windows-setup.exe").Path
+          $installer = (Resolve-Path "build/dist/space-windows-x86_64-setup.exe").Path
           Start-Process -FilePath $installer -ArgumentList @("/SP-","/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CURRENTUSER","/TASKS=desktopicon",("/DIR=" + $installDir),("/LOG=" + $logPath)) -Wait -NoNewWindow
-          if (-not (Test-Path (Join-Path $installDir "space.exe"))) {
-            if (Test-Path $logPath) {
-              Get-Content $logPath
+          foreach ($exeName in @("space.exe", "space-cli.exe")) {
+            if (-not (Test-Path (Join-Path $installDir $exeName))) {
+              if (Test-Path $logPath) {
+                Get-Content $logPath
+              }
+              throw "Installed executable not found: ${exeName}"
             }
-            throw "Installed executable not found."
           }
-          & (Join-Path $installDir "space.exe") --help *> $null
+          & (Join-Path $installDir "space-cli.exe") --help *> $null
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         if: github.ref_type == 'tag'
         with:
           files: |
-            build/dist/space-windows.zip
-            build/dist/space-windows-setup.exe
+            build/dist/space-windows-x86_64.zip
+            build/dist/space-windows-x86_64-setup.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
