@@ -39,6 +39,7 @@
 (local callbacks (require :callbacks))
 (local runtime (require :runtime))
 (local logging (require :logging))
+(local error-reporting (require :error-reporting))
 (local Units (require :units))
 (local UnitManager (require :unit-manager))
 
@@ -69,6 +70,23 @@
 (local appdirs (require :appdirs))
 (local log-path (logging.get-output-path))
 (logging.init {:path log-path})
+
+(fn init-error-reporting []
+  (local dsn "https://1f1673528e9b4e8cae1d0a722e435170@bugsink.narlun.com/1")
+  (local environment (os.getenv :SPACE_ERROR_REPORTING_ENVIRONMENT))
+  (local release (os.getenv :SPACE_ERROR_REPORTING_RELEASE))
+  (local has-environment (and environment (not= environment "")))
+  (local has-release (and release (not= release "")))
+  (local opts
+    (if (and has-environment has-release) {:dsn dsn :environment environment :release release}
+        has-environment {:dsn dsn :environment environment}
+        has-release {:dsn dsn :release release}
+        {:dsn dsn}))
+  (error-reporting.init opts))
+
+(when (and app.engine AppConfig.run-main (not app.__suppress-main-run?))
+  (init-error-reporting))
+
 (logging.set-level "shader" "warn")
 (logging.set-level "window" "warn")
 (local audio (require :audio))
