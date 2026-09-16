@@ -66,3 +66,37 @@ def test_windows_installer_default_basename_includes_architecture() -> None:
 
     assert 'default="space-windows-x86_64-setup"' in helper
     assert_absent(helper, 'default="space-windows-setup"', "scripts/build-windows-installer.py")
+
+
+def test_release_docs_use_new_public_download_names() -> None:
+    doc_files = [
+        "docs/dev/building.md",
+        "docs/user/quick-start.md",
+    ]
+    expected_public_names = [
+        "space-linux-x86_64.tar.gz",
+        "space-linux-x86_64-minimal.tar.gz",
+        "space-linux-x86_64.AppImage",
+        "space-linux-x86_64-minimal.AppImage",
+        "space-linux-amd64.deb",
+        "space-linux-amd64-minimal.deb",
+        "space-linux-x86_64.rpm",
+        "space-linux-x86_64-minimal.rpm",
+        "space-windows-x86_64.zip",
+        "space-windows-x86_64-setup.exe",
+    ]
+    obsolete_public_names = [
+        "space-linux-x86_64-bin.tar.gz",
+        "space-minimal-linux",
+        "space-windows.zip",
+        "space-windows-setup.exe",
+    ]
+
+    for doc_file in doc_files:
+        text = read_repo_text(doc_file)
+
+        for expected_name in expected_public_names:
+            assert expected_name in text, f"{expected_name!r} missing from {doc_file}"
+
+        for obsolete_name in obsolete_public_names:
+            assert_absent(text, obsolete_name, doc_file)
