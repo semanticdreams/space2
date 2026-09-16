@@ -306,4 +306,4 @@ if [ -f "${cache_file}" ]; then
 fi
 
 cmake "${cmake_args[@]}"
-cmake --build "${BUILD_DIR}" --config Release --target space
+cmake --build "${BUILD_DIR}" --config Release --target space space-cli
