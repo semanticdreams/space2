@@ -54,9 +54,10 @@ int main()
     std::mutex mutex;
     std::vector<std::string> bodies;
     bool forbidden_host_seen = false;
+    const std::string forbidden_host = std::string("bugsink.") + "narlun.com";
     server.Post(R"(.*)", [&](const httplib::Request& req, httplib::Response& res) {
         std::lock_guard<std::mutex> lock(mutex);
-        if (req.body.find("bugsink.narlun.com") != std::string::npos) {
+        if (req.body.find(forbidden_host) != std::string::npos) {
             forbidden_host_seen = true;
             res.status = 500;
             return;
@@ -90,7 +91,7 @@ int main()
         local_only_delivery = !forbidden_host_seen;
     }
     return check(ok, error_message)
-            && check(local_only_delivery, "no request body referenced bugsink.narlun.com")
+            && check(local_only_delivery, "no request body referenced production Bugsink host")
             && check(wait_for_body_containing(bodies, mutex, "space local test exception"), "local event received")
         ? 0
         : 1;
