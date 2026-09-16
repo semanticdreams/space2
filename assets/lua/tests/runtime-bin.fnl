@@ -23,6 +23,13 @@
     (set path (fs.join-path path (. parts index))))
   path)
 
+(fn executable-safe-path [path]
+  (if (and path
+           (= nil (string.find path "/" 1 true))
+           (= nil (string.find path "\\" 1 true)))
+      (.. "./" path)
+      path))
+
 (fn resolve [opts]
   (local fs (dependency opts :fs default-fs))
   (local getenv (dependency opts :getenv os.getenv))
@@ -36,7 +43,7 @@
         (each [_ parts (ipairs candidates)]
           (local candidate (candidate-path fs parts))
           (when (and (not resolved) (path-exists? fs candidate))
-            (set resolved candidate)))
+            (set resolved (executable-safe-path candidate))))
         (if resolved
             resolved
             (error (.. "could not locate space binary from " (fs.cwd)))))))

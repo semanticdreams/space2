@@ -50,8 +50,14 @@
 (fn packaged-windows-candidate-resolves []
   (local resolved
     (RuntimeBin.resolve {:fs (fake-fs ["build/dist/windows/space-cli.exe"])
-                         :getenv (fake-getenv {})}))
+                          :getenv (fake-getenv {})}))
   (assert (= resolved "build/dist/windows/space-cli.exe") "packaged Windows CLI candidate should resolve"))
+
+(fn cwd-candidate-resolves-to-executable-safe-path []
+  (local resolved
+    (RuntimeBin.resolve {:fs (fake-fs ["space"])
+                         :getenv (fake-getenv {})}))
+  (assert (= resolved "./space") "current-directory candidate should be executable-safe"))
 
 (fn no-candidates-errors []
   (assert-error-contains
@@ -64,6 +70,7 @@
 (table.insert tests {:name "explicit missing SPACE_BIN errors" :fn explicit-missing-space-bin-errors})
 (table.insert tests {:name "explicit empty SPACE_BIN errors" :fn explicit-empty-space-bin-errors})
 (table.insert tests {:name "packaged Windows candidate resolves" :fn packaged-windows-candidate-resolves})
+(table.insert tests {:name "cwd candidate resolves to executable-safe path" :fn cwd-candidate-resolves-to-executable-safe-path})
 (table.insert tests {:name "no candidates errors" :fn no-candidates-errors})
 
 (local main
