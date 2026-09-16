@@ -1,8 +1,11 @@
 #include "lua_runtime.h"
 
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <memory>
+#include <sstream>
+#include <vector>
 
 #include "asset_manager.h"
 #include "http_client.h"
@@ -26,9 +29,35 @@ extern "C" int luaopen_lsqlite3(lua_State* L);
 
 namespace
 {
-std::string make_fennel_asset_search_path(const std::string& lua_path)
+std::string join_semicolon_paths(const std::vector<std::string>& paths)
 {
-    return lua_path + "/?.fnl;" + lua_path + "/?/init.fnl";
+    std::ostringstream out;
+    for (size_t i = 0; i < paths.size(); i++) {
+        if (i > 0) {
+            out << ";";
+        }
+        out << paths[i];
+    }
+    return out.str();
+}
+
+std::string make_lua_asset_search_path(const std::vector<std::filesystem::path>& asset_roots)
+{
+    std::vector<std::string> paths;
+    for (const std::filesystem::path& root : asset_roots) {
+        paths.push_back((root / "lua" / "?.lua").string());
+    }
+    return join_semicolon_paths(paths);
+}
+
+std::string make_fennel_asset_search_path(const std::vector<std::filesystem::path>& asset_roots)
+{
+    std::vector<std::string> paths;
+    for (const std::filesystem::path& root : asset_roots) {
+        paths.push_back((root / "lua" / "?.fnl").string());
+        paths.push_back((root / "lua" / "?" / "init.fnl").string());
+    }
+    return join_semicolon_paths(paths);
 }
 }
 
@@ -292,9 +321,9 @@ void LuaRuntime::install_base_bindings()
 void LuaRuntime::configure_package_paths()
 {
     assets_path_value = AssetManager::getAssetPath("");
-    std::string lua_path = AssetManager::getAssetPath("lua");
-    std::string package_path = lua_path + "/?.lua";
-    fennel_path_value = make_fennel_asset_search_path(lua_path);
+    std::vector<std::filesystem::path> asset_roots = AssetManager::getAssetRoots();
+    std::string package_path = make_lua_asset_search_path(asset_roots);
+    fennel_path_value = make_fennel_asset_search_path(asset_roots);
     lua["package"]["path"] = lua["package"]["path"].get<std::string>() + ";" + package_path;
 }
 

@@ -13,11 +13,15 @@
 
 namespace fs = std::filesystem;
 
-// Initialize static variables
-std::string AssetManager::systemAssetsRoot = "/usr/share/space/assets";
-std::optional<fs::path> AssetManager::executablePath;
-
 namespace {
+
+const std::string systemAssetsRoot = "/usr/share/space/assets";
+std::optional<fs::path> executablePath;
+
+struct Candidate {
+    fs::path root;
+    std::string label;
+};
 
 fs::path normalized(const fs::path& path)
 {
@@ -54,6 +58,74 @@ bool is_contained_under(const fs::path& full, const fs::path& root)
     return m2 == canonRoot.end();
 }
 
+char path_list_separator()
+{
+#if defined(_WIN32)
+    return ';';
+#else
+    return ':';
+#endif
+}
+
+std::vector<fs::path> split_asset_path_list(const char* value)
+{
+    std::vector<fs::path> roots;
+    if (value == nullptr || value[0] == '\0') {
+        return roots;
+    }
+
+    std::string list(value);
+    size_t start = 0;
+    while (start <= list.size()) {
+        size_t end = list.find(path_list_separator(), start);
+        std::string segment = list.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        if (!segment.empty()) {
+            roots.emplace_back(segment);
+        }
+        if (end == std::string::npos) {
+            break;
+        }
+        start = end + 1;
+    }
+
+    return roots;
+}
+
+std::vector<Candidate> build_asset_candidates()
+{
+    std::vector<Candidate> candidates;
+    std::vector<std::string> dedupKeys;
+
+    auto addCandidate = [&](const fs::path& root, const std::string& label) {
+        std::string key = dedup_key(root);
+        for (const std::string& existing : dedupKeys) {
+            if (existing == key) {
+                return;
+            }
+        }
+        dedupKeys.push_back(key);
+        candidates.push_back({root, label});
+    };
+
+    for (const fs::path& root : split_asset_path_list(std::getenv("SPACE_ASSETS_PATH"))) {
+        addCandidate(root, "SPACE_ASSETS_PATH");
+    }
+
+    addCandidate(fs::current_path() / "assets", "cwd");
+    addCandidate(fs::path(get_user_data_dir("space")) / "assets", "user-data");
+
+    if (executablePath.has_value()) {
+        fs::path exeDir = executablePath->parent_path();
+        addCandidate(exeDir / "assets", "executable-sibling");
+        addCandidate(exeDir / ".." / "share" / "space" / "assets", "executable-share");
+        addCandidate(exeDir / ".." / "Resources" / "assets", "executable-resources");
+    }
+
+    addCandidate(fs::path(systemAssetsRoot), "system");
+
+    return candidates;
+}
+
 } // namespace
 
 void AssetManager::setExecutablePath(const fs::path& path)
@@ -70,6 +142,15 @@ void AssetManager::clearExecutablePathForTests()
     executablePath = std::nullopt;
 }
 
+std::vector<fs::path> AssetManager::getAssetRoots()
+{
+    std::vector<fs::path> roots;
+    for (const Candidate& candidate : build_asset_candidates()) {
+        roots.push_back(candidate.root);
+    }
+    return roots;
+}
+
 std::string AssetManager::getAssetPath(const std::string& relativePath)
 {
     // Reject absolute paths — asset discovery only works with relative paths
@@ -79,87 +160,18 @@ std::string AssetManager::getAssetPath(const std::string& relativePath)
                                  " (absolute paths are not supported)");
     }
 
-    struct Candidate {
-        fs::path root;
-        std::string label;
-    };
-
-    std::vector<Candidate> candidates;
-    std::vector<std::string> dedupKeys;
+    std::vector<Candidate> candidates = build_asset_candidates();
     std::vector<std::string> searched;
-
-    auto addCandidate = [&](const fs::path& root, const std::string& label) {
-        std::string key = dedup_key(root);
-        for (const std::string& existing : dedupKeys) {
-            if (existing == key) {
-                searched.push_back(label + ": " + (root / relativePath).string() + " (deduplicated)");
-                return;
-            }
-        }
-        dedupKeys.push_back(key);
-        candidates.push_back({root, label});
-    };
-
-    // 1. SPACE_ASSETS_PATH (highest priority override)
-    const char* envAssetsPath = std::getenv("SPACE_ASSETS_PATH");
-    if (envAssetsPath && envAssetsPath[0] != '\0') {
-        fs::path envRoot(envAssetsPath);
-        addCandidate(envRoot, "SPACE_ASSETS_PATH");
-    }
-
-    // 2. User data assets
-    {
-        fs::path userDataRoot = fs::path(get_user_data_dir("space")) / "assets";
-        addCandidate(userDataRoot, "user-data");
-    }
-
-    // 3. Executable sibling assets
-    // 4. Executable-relative ../share/space/assets
-    // 5. Executable-relative ../Resources/assets
-    if (executablePath.has_value()) {
-        fs::path exeDir = executablePath->parent_path();
-
-        // 3. <executable-dir>/assets
-        {
-            fs::path siblingRoot = exeDir / "assets";
-            if (!siblingRoot.empty()) {
-                addCandidate(siblingRoot, "executable-sibling");
-            }
-        }
-
-        // 4. <executable-dir>/../share/space/assets
-        {
-            fs::path shareRoot = exeDir / ".." / "share" / "space" / "assets";
-            addCandidate(shareRoot, "executable-share");
-        }
-
-        // 5. <executable-dir>/../Resources/assets
-        {
-            fs::path resRoot = exeDir / ".." / "Resources" / "assets";
-            addCandidate(resRoot, "executable-resources");
-        }
-    }
-
-    // 6. CWD/assets fallback
-    {
-        fs::path cwdRoot = fs::current_path() / "assets";
-        addCandidate(cwdRoot, "cwd");
-    }
-
-    // 7. System assets root
-    {
-        addCandidate(fs::path(systemAssetsRoot), "system");
-    }
 
     // Probe candidates in order
     for (const auto& candidate : candidates) {
         fs::path fullPath = (candidate.root / relativePath).lexically_normal();
+        if (!is_contained_under(fullPath, candidate.root)) {
+            searched.push_back(candidate.label + ": " + fullPath.string() + " (outside root)");
+            continue;
+        }
         std::error_code ec;
         if (fs::exists(fullPath, ec)) {
-            if (!is_contained_under(fullPath, candidate.root)) {
-                searched.push_back(candidate.label + ": " + fullPath.string() + " (outside root)");
-                continue;
-            }
             return fs::absolute(fullPath).string();
         }
         searched.push_back(candidate.label + ": " + fullPath.string());
