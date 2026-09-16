@@ -143,6 +143,7 @@
     :tests.test-text-editing-port
     :tests.test-text-normal-commands
     :tests.test-lazy-text-buffer
+    :tests.test-runtime-bin
     :tests.test-virtual-input
     :tests.test-dial-type
     :tests.test-input-dial-type

@@ -1,6 +1,7 @@
 (local tests [])
 (local fs (require :fs))
 (local process (require :process))
+(local RuntimeBin (require :tests.runtime-bin))
 (local LazyTextSource (require :lazy-text-source))
 (local LazyTextBuffer (require :lazy-text-buffer))
 
@@ -96,9 +97,14 @@
   (buffer:insert-text (string.char 255)))
 
 (fn space-bin []
-  (if (fs.exists "./build/space")
-      "./build/space"
-      "./space"))
+  (RuntimeBin.resolve))
+
+(fn child-env []
+  {:SPACE_DISABLE_AUDIO "1"
+   :SPACE_ASSETS_PATH (os.getenv "SPACE_ASSETS_PATH")
+   :FENNEL_PATH (os.getenv "FENNEL_PATH")
+   :FENNEL_MACRO_PATH (os.getenv "FENNEL_MACRO_PATH")
+   :SPACE_BIN (space-bin)})
 
 (fn lazy-text-source-reads-bounded-byte-ranges []
   (local root (make-clean-temp-dir))
@@ -618,10 +624,7 @@
 
 (fn lazy-text-buffer-save-reports-external-modification-conflict []
   (local result (process.run {:args [(space-bin) "-m" "tests.test-lazy-text-buffer:conflict-main"]
-                              :env {:SPACE_DISABLE_AUDIO "1"
-                                    :SPACE_ASSETS_PATH (os.getenv "SPACE_ASSETS_PATH")
-                                    :FENNEL_PATH (os.getenv "FENNEL_PATH")
-                                    :FENNEL_MACRO_PATH (os.getenv "FENNEL_MACRO_PATH")}
+                              :env (child-env)
                               :timeout 30}))
   (assert (= result.exit-code 0)
           (.. "conflict child should pass; stdout=" (or result.stdout "")
@@ -642,10 +645,7 @@
 
 (fn lazy-text-buffer-save-detects-same-size-external-modification []
   (local result (process.run {:args [(space-bin) "-m" "tests.test-lazy-text-buffer:same-size-conflict-main"]
-                              :env {:SPACE_DISABLE_AUDIO "1"
-                                    :SPACE_ASSETS_PATH (os.getenv "SPACE_ASSETS_PATH")
-                                    :FENNEL_PATH (os.getenv "FENNEL_PATH")
-                                    :FENNEL_MACRO_PATH (os.getenv "FENNEL_MACRO_PATH")}
+                              :env (child-env)
                               :timeout 30}))
   (assert (= result.exit-code 0)
           (.. "same-size conflict child should pass; stdout=" (or result.stdout "")

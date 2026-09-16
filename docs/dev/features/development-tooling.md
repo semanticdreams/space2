@@ -28,6 +28,7 @@ A 3D spatial computing platform with C++ and Fennel components needs specialized
 - **Frame profiler** (`frame-profiler.fnl`): Per-frame timing breakdown.
 - **Runtime performance** (`runtime-performance.fnl`): Runtime metrics collection.
 - **Test harness** (`tests/runner.fnl`): Module-based test discovery, timeout management, assertions, and reporting. 170+ unit tests in `tests/fast.fnl`, 3 slow tests, 55 E2E snapshot tests with golden PNG comparison. See [Test Harness Cleanup](/dev/notes/test-harness-cleanup).
+- **Packaged child-process test runtime** (`tests/runtime-bin.fnl`): Fast-suite tests that spawn child Space processes resolve the runtime through `SPACE_BIN` first. Windows CI sets `SPACE_BIN` to `build/dist/windows/space-cli.exe` so packaged tests run child modules through the CLI executable shipped in the runtime bundle.
 - **HTTP client testing** (`dev-notes/testing-http-clients`): Infrastructure for testing HTTP-dependent code paths.
 - **Render capture** (`render-capture.fnl`): `glReadPixels` + PNG output for frame-level debugging. Separate from the E2E snapshot system. See [Render Capture](/dev/notes/render-capture).
 - **Remote control** (`remote-control.fnl`): ZeroMQ-based live Fennel evaluation for debugging running apps.
