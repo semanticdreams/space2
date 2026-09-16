@@ -3,10 +3,18 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <vector>
 #include <SDL3/SDL_main.h>
+
+#if defined(_WIN32) && defined(SPACE_WINDOWS_GUI_SUBSYSTEM)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 #include <CLI/CLI.hpp>
 
@@ -106,7 +114,18 @@ void capture_lua_error(const std::string& entry_mode, const std::string& target,
         error.what(),
         error.what(),
         {{"entry_mode", entry_mode}, {"entry_target", target}});
-    error_reporting::flush(2000);
+}
+
+void report_top_level_error(const std::string& message)
+{
+    std::cerr << message;
+    if (message.empty() || message.back() != '\n') {
+        std::cerr << "\n";
+    }
+
+#if defined(_WIN32) && defined(SPACE_WINDOWS_GUI_SUBSYSTEM)
+    MessageBoxA(nullptr, message.c_str(), "Space", MB_OK | MB_ICONERROR | MB_TASKMODAL);
+#endif
 }
 
 int main(int argc, char *argv[])
@@ -159,7 +178,7 @@ int main(int argc, char *argv[])
         log_init(LOG_CONFIG);
     }
     catch (const std::exception& e) {
-        std::cerr << "error: failed to initialize logging: " << e.what() << "\n";
+        report_top_level_error(std::string("error: failed to initialize logging: ") + e.what());
         return 1;
     }
 
@@ -219,8 +238,7 @@ int main(int argc, char *argv[])
         }
         if (arg == "--dotenv") {
             if (i + 1 >= argc) {
-                std::cerr << "error: --dotenv requires a path\n";
-                std::cerr << app.help() << "\n";
+                report_top_level_error(std::string("error: --dotenv requires a path\n") + app.help() + "\n");
                 return 2;
             }
             cli_args.push_back(arg);
@@ -234,8 +252,7 @@ int main(int argc, char *argv[])
         }
         if (arg == "-c") {
             if (i + 1 >= argc) {
-                std::cerr << "error: -c requires an argument\n";
-                std::cerr << app.help() << "\n";
+                report_top_level_error(std::string("error: -c requires an argument\n") + app.help() + "\n");
                 return 2;
             }
             entry_mode = EntryMode::Command;
@@ -247,8 +264,7 @@ int main(int argc, char *argv[])
         }
         if (arg == "-m") {
             if (i + 1 >= argc) {
-                std::cerr << "error: -m requires an argument\n";
-                std::cerr << app.help() << "\n";
+                report_top_level_error(std::string("error: -m requires an argument\n") + app.help() + "\n");
                 return 2;
             }
             entry_mode = EntryMode::Module;
@@ -281,7 +297,14 @@ int main(int argc, char *argv[])
         app.parse(std::move(cli_args));
     }
     catch (const CLI::ParseError &e) {
-        return app.exit(e);
+        if (e.get_exit_code() == 0) {
+            return app.exit(e);
+        }
+
+        std::ostringstream error_output;
+        int exit_code = app.exit(e, std::cout, error_output);
+        report_top_level_error(error_output.str());
+        return exit_code;
     }
 
     if (!dotenv_already_loaded) {
@@ -300,7 +323,7 @@ int main(int argc, char *argv[])
         size_t colon = entry_target.rfind(':');
         if (colon != std::string::npos) {
             if (colon == 0 || colon + 1 >= entry_target.size()) {
-                std::cerr << "error: -m expects mod or mod:fn\n";
+                report_top_level_error("error: -m expects mod or mod:fn");
                 return 2;
             }
             module_name_target = entry_target.substr(0, colon);
@@ -372,7 +395,7 @@ int main(int argc, char *argv[])
         catch (const sol::error &e) {
             capture_lua_error("repl", entry_target, e);
             log_write_file_only("lua", Error, std::string("REPL startup error: ") + e.what());
-            std::cerr << "REPL startup error: " << e.what() << "\n";
+            report_top_level_error(std::string("REPL startup error: ") + e.what());
             return 1;
         }
         error_reporting::shutdown();
@@ -387,7 +410,7 @@ int main(int argc, char *argv[])
         catch (const sol::error &e) {
             capture_lua_error(entry_mode_name(), entry_target, e);
             log_write_file_only("lua", Error, std::string("Lua error: ") + e.what());
-            std::cerr << "Lua error: " << e.what() << "\n";
+            report_top_level_error(std::string("Lua error: ") + e.what());
             return 1;
         }
     } else if (entry_mode == EntryMode::File) {
@@ -401,7 +424,7 @@ int main(int argc, char *argv[])
         catch (const sol::error &e) {
             capture_lua_error(entry_mode_name(), entry_target, e);
             log_write_file_only("lua", Error, std::string("Lua error: ") + e.what());
-            std::cerr << "Lua error: " << e.what() << "\n";
+            report_top_level_error(std::string("Lua error: ") + e.what());
             return 1;
         }
     } else {
@@ -415,7 +438,7 @@ int main(int argc, char *argv[])
         catch (const sol::error &e) {
             capture_lua_error(entry_mode_name(), entry_target, e);
             log_write_file_only("lua", Error, std::string("Lua error: ") + e.what());
-            std::cerr << "Lua error: " << e.what() << "\n";
+            report_top_level_error(std::string("Lua error: ") + e.what());
             return 1;
         }
     }

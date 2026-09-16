@@ -131,11 +131,15 @@ struct LocalEnvelopeServer {
     std::thread thread;
     std::mutex mutex;
     std::vector<std::string> bodies;
+    std::chrono::milliseconds response_delay { 0 };
     int port { 0 };
 
     bool start()
     {
         server.Post(R"(.*)", [&](const httplib::Request& req, httplib::Response& res) {
+            if (response_delay.count() > 0) {
+                std::this_thread::sleep_for(response_delay);
+            }
             std::lock_guard<std::mutex> lock(mutex);
             bodies.push_back(req.body);
             res.status = 200;
@@ -189,7 +193,7 @@ int main()
     const fs::path fennel_file_error = assets_dir / "lua" / "tests" / "file-error.fnl";
     const fs::path lua_file_error = assets_dir / "lua" / "tests" / "lua-file-error.lua";
 #if defined(_WIN32)
-    const fs::path executable = fs::current_path() / "space.exe";
+    const fs::path executable = fs::current_path() / "space-cli.exe";
 #else
     const fs::path executable = fs::current_path() / "space";
 #endif
@@ -292,11 +296,6 @@ int main()
         server.stop();
         return 1;
     }
-    if (!check(server.contains("tests.error-reporting startup failure"),
-               "startup fixture delivered local error report")) {
-        server.stop();
-        return 1;
-    }
 
     std::string callback_output;
     int callback_exit_code = 0;
@@ -325,6 +324,69 @@ int main()
     }
 
     server.stop();
+
+    LocalEnvelopeServer slow_server;
+    slow_server.response_delay = std::chrono::milliseconds(3000);
+    if (!check(slow_server.start(), "start slow local error reporting server")) {
+        return 1;
+    }
+
+    const fs::path slow_reporting_db = fs::temp_directory_path() / "space-error-reporting-slow-test-db";
+    if (!check(set_env_var("SPACE_TEST_ERROR_REPORTING_DSN", slow_server.dsn()),
+               "set slow SPACE_TEST_ERROR_REPORTING_DSN")) {
+        slow_server.stop();
+        return 1;
+    }
+    if (!check(set_env_var("SPACE_TEST_ERROR_REPORTING_DB", slow_reporting_db.string()),
+               "set slow SPACE_TEST_ERROR_REPORTING_DB")) {
+        slow_server.stop();
+        return 1;
+    }
+
+    std::string slow_startup_output;
+    int slow_startup_exit_code = 0;
+    const auto slow_startup_start = std::chrono::steady_clock::now();
+    bool slow_startup_ran = run_command_capture(
+        build_command(executable, {"-m", "tests.error-reporting-startup-error:main"}),
+        slow_startup_output,
+        slow_startup_exit_code);
+    const auto slow_startup_elapsed = std::chrono::steady_clock::now() - slow_startup_start;
+    slow_server.stop();
+    if (!check(slow_startup_ran, "run slow error reporting startup fixture")) {
+        return 1;
+    }
+    if (!check(slow_startup_exit_code != 0, "slow error reporting startup fixture should fail")) {
+        std::cerr << slow_startup_output << "\n";
+        return 1;
+    }
+    if (!check(slow_startup_output.find("tests.error-reporting startup failure") != std::string::npos,
+               "slow startup fixture preserves reported error output")) {
+        std::cerr << slow_startup_output << "\n";
+        return 1;
+    }
+    if (!check(slow_startup_elapsed < std::chrono::milliseconds(1500),
+               "slow server must not block top-level Lua error return")) {
+        std::cerr << "elapsed_ms="
+                  << std::chrono::duration_cast<std::chrono::milliseconds>(slow_startup_elapsed).count()
+                  << "\n";
+        return 1;
+    }
+
+    std::string output;
+    int exit_code = 0;
+    if (!check(run_command_capture(build_command(executable, {"--bad-option"}), output, exit_code),
+               "run invalid global option command")) {
+        return 1;
+    }
+    if (!check(exit_code == 109, "invalid global option should preserve CLI11 exit code")) {
+        std::cerr << output << "\n";
+        return 1;
+    }
+    if (!check(output.find("--bad-option") != std::string::npos,
+               "invalid global option should report the rejected option")) {
+        std::cerr << output << "\n";
+        return 1;
+    }
 
     return 0;
 }

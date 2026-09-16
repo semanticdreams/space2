@@ -95,7 +95,8 @@ std::string current_exception_message()
 void terminate_handler()
 {
     error_reporting::capture_exception("NativeTerminate", current_exception_message(), "std::terminate");
-    error_reporting::flush(2000);
+    // Keep terminate best-effort: blocking here can make a failing process appear
+    // hung when Bugsink or the network is slow/unavailable.
     if (g_previous_terminate) {
         g_previous_terminate();
     }
@@ -134,6 +135,10 @@ bool init(const InitOptions& options, std::string* error_message)
 
     sentry_options_set_dsn(sentry_options, options.dsn.c_str());
     sentry_options_set_debug(sentry_options, options.debug ? 1 : 0);
+    sentry_options_set_shutdown_timeout(sentry_options, 0);
+    sentry_options_set_transfer_timeout(sentry_options, 1000);
+    sentry_options_set_crashpad_wait_for_upload(sentry_options, 0);
+    sentry_options_set_crash_upload_mode(sentry_options, SENTRY_CRASH_UPLOAD_MODE_ASYNC);
     if (!options.release.empty()) {
         sentry_options_set_release(sentry_options, options.release.c_str());
     }
@@ -142,6 +147,9 @@ bool init(const InitOptions& options, std::string* error_message)
     }
     if (!options.database_path.empty()) {
         sentry_options_set_database_path(sentry_options, options.database_path.c_str());
+        if (std::filesystem::exists(options.database_path)) {
+            sentry_options_set_cache_keep(sentry_options, SENTRY_CACHE_KEEP_OFFLINE);
+        }
     }
     const std::string handler_path = executable_directory_crashpad_handler();
     sentry_options_set_handler_path(sentry_options, handler_path.c_str());

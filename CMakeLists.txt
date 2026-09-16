@@ -686,19 +686,39 @@ else()
     target_compile_definitions(${PROJECT_NAME}_lib PUBLIC "NOTIFY_BACKEND_REASON=\"notification backend unavailable on this platform.\"")
 endif()
 
-add_executable(${PROJECT_NAME} apps/space/main.cpp)
-target_link_libraries(${PROJECT_NAME} ${PROJECT_NAME}_lib)
-set_target_properties(${PROJECT_NAME} PROPERTIES
-    INSTALL_RPATH "\$ORIGIN/../lib"
-)
-if(TARGET crashpad_handler)
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:crashpad_handler>
-            $<TARGET_FILE_DIR:${PROJECT_NAME}>/crashpad_handler
-        VERBATIM)
+function(space_configure_app_target target_name)
+    target_link_libraries(${target_name} ${PROJECT_NAME}_lib)
+    set_target_properties(${target_name} PROPERTIES
+        INSTALL_RPATH "\$ORIGIN/../lib"
+    )
+    target_include_directories(${target_name} SYSTEM PRIVATE ${CMAKE_CURRENT_LIST_DIR}/external/CLI11/include)
+    if(SPACE_ENABLE_CEF)
+        target_compile_definitions(${target_name} PUBLIC SPACE_ENABLE_CEF=1)
+        space_setup_cef_for_target(${target_name})
+    endif()
+    if(TARGET crashpad_handler)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:crashpad_handler>
+                $<TARGET_FILE_DIR:${target_name}>/crashpad_handler
+            VERBATIM)
+    endif()
+    target_compile_options(${target_name} PRIVATE -O2 -g)
+    target_link_options(${target_name} PRIVATE -O2 -g)
+    set_target_properties(${target_name} PROPERTIES CXX_VISIBILITY_PRESET hidden)
+endfunction()
+
+if(WIN32)
+    add_executable(${PROJECT_NAME} WIN32 apps/space/main.cpp)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE SPACE_WINDOWS_GUI_SUBSYSTEM=1)
+    space_configure_app_target(${PROJECT_NAME})
+
+    add_executable(space-cli apps/space/main.cpp)
+    space_configure_app_target(space-cli)
+else()
+    add_executable(${PROJECT_NAME} apps/space/main.cpp)
+    space_configure_app_target(${PROJECT_NAME})
 endif()
-target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE ${CMAKE_CURRENT_LIST_DIR}/external/CLI11/include)
 if(WIN32)
     set(SPACE_WINDOWS_ICON_PNG "${CMAKE_CURRENT_SOURCE_DIR}/assets/pics/space.png")
     set(SPACE_WINDOWS_ICON_FILE "${CMAKE_CURRENT_BINARY_DIR}/space.ico")
@@ -732,10 +752,6 @@ if(WIN32)
     set_source_files_properties("${SPACE_WINDOWS_RC_FILE}" PROPERTIES OBJECT_DEPENDS "${SPACE_WINDOWS_ICON_FILE}")
     target_sources(${PROJECT_NAME} PRIVATE "${SPACE_WINDOWS_ICON_FILE}" "${SPACE_WINDOWS_RC_FILE}")
 endif()
-if(SPACE_ENABLE_CEF)
-    target_compile_definitions(${PROJECT_NAME} PUBLIC SPACE_ENABLE_CEF=1)
-    space_setup_cef_for_target(${PROJECT_NAME})
-endif()
 
 if(SPACE_ENABLE_CEF)
     add_executable(space_cef_helper
@@ -748,8 +764,13 @@ if(SPACE_ENABLE_CEF)
     space_setup_cef_for_target(space_cef_helper)
 endif()
 
+set(SPACE_TEST_COMMAND_TARGET ${PROJECT_NAME})
+if(WIN32)
+    set(SPACE_TEST_COMMAND_TARGET space-cli)
+endif()
+
 add_test(NAME ${PROJECT_NAME}_fnl_tests
-    COMMAND space -m tests.fast:main
+    COMMAND $<TARGET_FILE:${SPACE_TEST_COMMAND_TARGET}> -m tests.fast:main
 )
 set_tests_properties(${PROJECT_NAME}_fnl_tests PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
@@ -758,7 +779,7 @@ set_tests_properties(${PROJECT_NAME}_fnl_tests PROPERTIES
 )
 
 add_test(NAME ${PROJECT_NAME}_fnl_tests_integration
-    COMMAND space -m tests.integration:main
+    COMMAND $<TARGET_FILE:${SPACE_TEST_COMMAND_TARGET}> -m tests.integration:main
 )
 set_tests_properties(${PROJECT_NAME}_fnl_tests_integration PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
@@ -767,7 +788,7 @@ set_tests_properties(${PROJECT_NAME}_fnl_tests_integration PROPERTIES
 )
 
 add_test(NAME ${PROJECT_NAME}_constraints
-    COMMAND space -m constraints.runner:main -- --output summary --target repo
+    COMMAND $<TARGET_FILE:${SPACE_TEST_COMMAND_TARGET}> -m constraints.runner:main -- --output summary --target repo
 )
 set_tests_properties(${PROJECT_NAME}_constraints PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
@@ -975,11 +996,6 @@ set_tests_properties(test_native_logging_integration PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
-target_compile_options(${PROJECT_NAME} PRIVATE -O2 -g)
-target_link_options(${PROJECT_NAME} PRIVATE -O2 -g)
-
-set_target_properties(${PROJECT_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
-
 # Optional Rust Matrix bridge build.
 if(SPACE_BUILD_MATRIX)
     find_program(CARGO_EXECUTABLE cargo)
@@ -1143,8 +1159,13 @@ set(CPACK_PROJECT_VERSION ${SPACE_PACKAGE_VERSION})
 set(CPACK_PACKAGE_VERSION ${SPACE_PACKAGE_VERSION})
 set(CPACK_PACKAGE_VENDOR ${SPACE_PACKAGE_VENDOR})
 
+set(SPACE_INSTALL_TARGETS ${PROJECT_NAME})
+if(WIN32)
+    list(APPEND SPACE_INSTALL_TARGETS space-cli)
+endif()
+
 # Install the executable to /usr/bin
-install(TARGETS ${PROJECT_NAME}
+install(TARGETS ${SPACE_INSTALL_TARGETS}
     RUNTIME DESTINATION bin
 )
 

@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${BUILD_DIR:-${ROOT_DIR}/build/windows}"
 DIST_DIR="${1:-${ROOT_DIR}/build/dist/windows}"
 TARGET_EXE="${BUILD_DIR}/space.exe"
+CLI_EXE="${BUILD_DIR}/space-cli.exe"
 
 if [ ! -d "${BUILD_DIR}" ]; then
     echo "Missing build directory: ${BUILD_DIR}" >&2
@@ -14,12 +15,18 @@ if [ ! -f "${TARGET_EXE}" ]; then
     echo "Missing target executable: ${TARGET_EXE}" >&2
     exit 1
 fi
+if [ ! -f "${CLI_EXE}" ]; then
+    echo "Missing CLI executable: ${CLI_EXE}" >&2
+    exit 1
+fi
 
 "${ROOT_DIR}/scripts/prepare-windows-runtime.sh" "${TARGET_EXE}"
+"${ROOT_DIR}/scripts/prepare-windows-runtime.sh" "${CLI_EXE}"
 
 rm -rf "${DIST_DIR}"
 mkdir -p "${DIST_DIR}"
 cp "${TARGET_EXE}" "${DIST_DIR}/"
+cp "${CLI_EXE}" "${DIST_DIR}/"
 cp -r "${ROOT_DIR}/assets" "${DIST_DIR}/assets"
 find "${BUILD_DIR}" -maxdepth 1 -type f -name '*.dll' -exec cp {} "${DIST_DIR}/" \;
 
