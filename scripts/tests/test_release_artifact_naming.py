@@ -33,3 +33,36 @@ def test_linux_packaging_names_follow_stable_hierarchy() -> None:
 
     assert_absent(script, "space-linux-x86_64-bin.tar.gz", "scripts/build-linux.sh")
     assert_absent(script, "space-minimal-linux", "scripts/build-linux.sh")
+
+
+def test_workflow_uses_new_release_artifact_names() -> None:
+    workflow = read_repo_text(".github/workflows/build.yml")
+
+    expected_names = [
+        "space-linux-x86_64.tar.gz",
+        "space-linux-x86_64-minimal.tar.gz",
+        "space-linux-amd64.deb",
+        "space-linux-amd64-minimal.deb",
+        "space-linux-x86_64.rpm",
+        "space-linux-x86_64-minimal.rpm",
+        "space-windows-x86_64.zip",
+        "space-windows-x86_64-setup.exe",
+    ]
+
+    for expected_name in expected_names:
+        assert expected_name in workflow
+
+    for obsolete_name in [
+        "space-linux-x86_64-bin.tar.gz",
+        "space-minimal-linux",
+        "space-windows.zip",
+        "space-windows-setup.exe",
+    ]:
+        assert_absent(workflow, obsolete_name, ".github/workflows/build.yml")
+
+
+def test_windows_installer_default_basename_includes_architecture() -> None:
+    helper = read_repo_text("scripts/build-windows-installer.py")
+
+    assert 'default="space-windows-x86_64-setup"' in helper
+    assert_absent(helper, 'default="space-windows-setup"', "scripts/build-windows-installer.py")
