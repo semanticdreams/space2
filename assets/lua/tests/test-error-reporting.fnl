@@ -10,6 +10,11 @@
     (error message))
   err)
 
+(fn assert-error-contains [f expected message]
+  (local err (assert-error f message))
+  (when (not (string.find (tostring err) expected 1 true))
+    (error (.. message " expected error containing=" expected " actual=" (tostring err)))))
+
 (fn main []
   (assert-eq (type reporting.init) :function "init export")
   (assert-eq (type reporting.enabled?) :function "enabled? export")
@@ -22,6 +27,9 @@
   (assert-eq (reporting.capture-error {:type :Disabled :message "disabled"}) false "error capture disabled before init")
   (assert-error #(reporting.init {}) "empty init options must fail")
   (assert-error #(reporting.init {:dsn 42}) "numeric dsn must fail")
+  (assert-error-contains #(reporting.init {:dsn "not-a-dsn" :database_path "/tmp/sentry"})
+                         "unknown init option: database_path"
+                         "non-canonical init option key must fail")
   (assert-error #(reporting.capture-message :verbose :test "bad level") "invalid level must fail")
   true)
 

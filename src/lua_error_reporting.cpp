@@ -73,6 +73,27 @@ bool optional_bool(sol::table table, const std::string& key)
     return value.as<bool>();
 }
 
+bool is_allowed_init_option(const std::string& key)
+{
+    return key == "dsn" || key == "environment" || key == "release" || key == "database-path"
+        || key == "debug";
+}
+
+void validate_init_option_keys(sol::table table)
+{
+    for (const auto& item : table) {
+        sol::object key_obj = item.first;
+        if (!key_obj.is<std::string>()) {
+            throw sol::error("error-reporting init option keys must be strings");
+        }
+
+        const std::string key = key_obj.as<std::string>();
+        if (!is_allowed_init_option(key)) {
+            throw sol::error("error-reporting unknown init option: " + key);
+        }
+    }
+}
+
 error_reporting::Level parse_level(const std::string& level)
 {
     if (level == "fatal") {
@@ -100,6 +121,8 @@ error_reporting::InitOptions parse_init_options(sol::object options_obj)
     }
 
     sol::table options_table = options_obj.as<sol::table>();
+    validate_init_option_keys(options_table);
+
     error_reporting::InitOptions options;
     options.dsn = require_non_empty_string(options_table, "dsn");
     options.environment = optional_string(options_table, "environment");
