@@ -27,6 +27,8 @@ Install guidance:
 - Fedora/openSUSE Tumbleweed: install the downloaded `.rpm` with `sudo dnf install ./space-*.rpm` (or `sudo rpm -i`). The RPM does not declare automatic dependencies; install the runtime libraries below first.
 - RHEL/Rocky/openSUSE Leap: use the AppImage for now; full-feature RPMs need runtime libraries that are not available from their default repositories.
 
+Windows users should normally run `space.exe` from the installer, Start Menu, desktop shortcut, Explorer, or the extracted ZIP. Terminal and script users should use `space-cli.exe` for console behavior. GUI shortcuts can still launch alternate entries with `space.exe -m some.gui.entry:main` without opening a terminal window.
+
 RPM runtime dependencies (install before running the RPM):
 
 Fedora:
