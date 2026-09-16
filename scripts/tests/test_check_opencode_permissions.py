@@ -52,12 +52,23 @@ description: Use when testing {name}
 
 
 def write_capability_files(root: Path) -> None:
+    git_integrator_permissions = (
+        '  edit: deny\n'
+        '  task: deny\n'
+        '  external_directory: deny\n'
+        '  webfetch: deny\n'
+        '  websearch: deny\n'
+        '  question: deny\n'
+        '  bash:\n'
+        '    "python3 scripts/opencode_git_integrate.py status --repo-root .": allow\n'
+        '    "python3 scripts/opencode_git_integrate.py fetch-origin --repo-root .": allow\n'
+        '    "python3 scripts/opencode_git_integrate.py merge-origin-main --repo-root .": allow\n'
+        '    "python3 scripts/opencode_git_integrate.py push-current --repo-root .": allow\n'
+        '    "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .": allow\n'
+    )
     write_file(
         root / ".opencode" / "agents" / "git-integrator.md",
-        agent(
-            "git-integrator",
-            '  edit: deny\n  task: deny\n  external_directory: deny\n  webfetch: deny\n  websearch: deny\n  question: deny\n  bash:\n    "python3 scripts/opencode_git_integrate.py status --repo-root .": allow\n',
-        ),
+        agent("git-integrator", git_integrator_permissions),
     )
     write_file(
         root / ".opencode" / "agents" / "github-operator.md",
@@ -107,6 +118,107 @@ def permission_entries(repo: Path, agent_name: str, parent: str) -> dict[str, st
 def test_current_repo_policy_passes_after_task_3_changes():
     checker = load_checker()
     assert checker.check_repo(REPO_ROOT) == []
+
+
+def test_git_integrator_allows_exact_guarded_git_wrapper_commands():
+    bash_entries = permission_entries(REPO_ROOT, "git-integrator", "bash")
+
+    allowed_entries = {pattern for pattern, action in bash_entries.items() if action == "allow"}
+    assert allowed_entries == {
+        "python3 scripts/opencode_git_integrate.py status --repo-root .",
+        "python3 scripts/opencode_git_integrate.py fetch-origin --repo-root .",
+        "python3 scripts/opencode_git_integrate.py merge-origin-main --repo-root .",
+        "python3 scripts/opencode_git_integrate.py push-current --repo-root .",
+        "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .",
+    }
+
+
+def test_merged_old_pr_followup_recovery_is_documented_in_workflow_files():
+    required_terms = [
+        "pr_head",
+        "current_head",
+        "MERGED",
+        "create-followup-branch",
+        "follow-up branch",
+    ]
+    documented_paths = [
+        REPO_ROOT / ".opencode" / "skills" / "finishing-a-development-branch" / "SKILL.md",
+        REPO_ROOT / ".opencode" / "agents" / "supervisor.md",
+        REPO_ROOT / "docs" / "dev" / "features" / "opencode-agent-workflow.md",
+    ]
+
+    for path in documented_paths:
+        text = path.read_text(encoding="utf-8")
+        missing_terms = [term for term in required_terms if term not in text]
+        assert missing_terms == [], f"{path.relative_to(REPO_ROOT)} missing {missing_terms}"
+
+
+def test_workflow_docs_do_not_recommend_raw_github_polling_commands():
+    forbidden_commands = [
+        "gh pr view",
+        "gh run list",
+        "gh run watch",
+    ]
+    documented_paths = [
+        REPO_ROOT / ".opencode" / "skills" / "finishing-a-development-branch" / "SKILL.md",
+        REPO_ROOT / ".opencode" / "agents" / "supervisor.md",
+        REPO_ROOT / "docs" / "dev" / "features" / "opencode-agent-workflow.md",
+    ]
+
+    for path in documented_paths:
+        text = path.read_text(encoding="utf-8")
+        if text.startswith("---\n"):
+            text = text.split("---\n", 2)[2]
+        present_commands = [command for command in forbidden_commands if command in text]
+        assert present_commands == [], f"{path.relative_to(REPO_ROOT)} recommends {present_commands}"
+
+
+def test_finishing_skill_does_not_recommend_branch_deletion():
+    path = REPO_ROOT / ".opencode" / "skills" / "finishing-a-development-branch" / "SKILL.md"
+    text = path.read_text(encoding="utf-8")
+
+    assert "git branch -d" not in text
+    assert "Cleanup Branch" not in text
+    assert "| 1. Merge locally | yes | — | — | yes |" not in text
+
+
+def test_git_integrator_rejects_extra_bash_allow(tmp_path: Path):
+    repo = make_repo(tmp_path)
+    agent_path = repo / ".opencode" / "agents" / "git-integrator.md"
+    agent_text = agent_path.read_text(encoding="utf-8")
+    agent_path.write_text(
+        agent_text.replace(
+            '    "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .": allow\n',
+            '    "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .": allow\n    "git switch -c *": allow\n',
+        ),
+        encoding="utf-8",
+    )
+
+    assert "capability-boundary" in violation_codes(repo)
+
+
+@pytest.mark.parametrize(
+    "extra_entry",
+    [
+        '    "git switch -c *": "allow"\n',
+        '    "git switch -c *": allow # broad raw git permission\n',
+        '    "git switch -c *": "allow" # broad raw git permission\n',
+        "    'git switch -c *': 'ask' # broad raw git permission\n",
+    ],
+)
+def test_git_integrator_rejects_extra_bash_allow_or_ask_with_quotes_or_comments(tmp_path: Path, extra_entry: str):
+    repo = make_repo(tmp_path)
+    agent_path = repo / ".opencode" / "agents" / "git-integrator.md"
+    agent_text = agent_path.read_text(encoding="utf-8")
+    agent_path.write_text(
+        agent_text.replace(
+            '    "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .": allow\n',
+            '    "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .": allow\n' + extra_entry,
+        ),
+        encoding="utf-8",
+    )
+
+    assert "capability-boundary" in violation_codes(repo)
 
 
 def test_check_repo_fails_when_permission_frontmatter_contains_ask(tmp_path: Path):

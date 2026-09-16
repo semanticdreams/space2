@@ -233,6 +233,7 @@ jobs:
       - name: Run Windows fast suite
         env:
           SPACE_ASSETS_PATH: ${{ github.workspace }}\\build\\dist\\windows\\assets
+          SPACE_BIN: ${{ github.workspace }}\\build\\dist\\windows\\space-cli.exe
           FENNEL_PATH: ${{ github.workspace }}\\build\\dist\\windows\\assets\\lua\\?.fnl;${{ github.workspace }}\\build\\dist\\windows\\assets\\lua\\?\\init.fnl
           FENNEL_MACRO_PATH: ${{ github.workspace }}\\build\\dist\\windows\\assets\\lua\\?.fnl;${{ github.workspace }}\\build\\dist\\windows\\assets\\lua\\?\\init.fnl
           XDG_DATA_HOME: ${{ github.workspace }}\\.tmp\\xdg-data

@@ -1,6 +1,7 @@
 (local tests [])
 (local fs (require :fs))
 (local process (require :process))
+(local RuntimeBin (require :tests.runtime-bin))
 
 (var temp-counter 0)
 (local fs-temp-root (fs.join-path "/tmp/space/tests" "fs-test-tmp"))
@@ -84,9 +85,14 @@
   (fs.atomic-replace-if-current file segments token))
 
 (fn space-bin []
-  (if (fs.exists "./build/space")
-      "./build/space"
-      "./space"))
+  (RuntimeBin.resolve))
+
+(fn child-env []
+  {:SPACE_DISABLE_AUDIO "1"
+   :SPACE_ASSETS_PATH (os.getenv "SPACE_ASSETS_PATH")
+   :FENNEL_PATH (os.getenv "FENNEL_PATH")
+   :FENNEL_MACRO_PATH (os.getenv "FENNEL_MACRO_PATH")
+   :SPACE_BIN (space-bin)})
 
 (fn fs-write-read-stat []
   (with-temp-dir (fn [root]
@@ -167,10 +173,7 @@
 
 (fn fs-read-text-window-rejects-invalid-arguments []
   (local result (process.run {:args [(space-bin) "-m" "tests.test-fs:invalid-argument-main"]
-                              :env {:SPACE_DISABLE_AUDIO "1"
-                                    :SPACE_ASSETS_PATH (os.getenv "SPACE_ASSETS_PATH")
-                                    :FENNEL_PATH (os.getenv "FENNEL_PATH")
-                                    :FENNEL_MACRO_PATH (os.getenv "FENNEL_MACRO_PATH")}
+                              :env (child-env)
                               :timeout 30}))
   (assert (= result.exit-code 0)
           (.. "invalid-argument child should pass; stdout=" (or result.stdout "")
@@ -242,10 +245,7 @@
 
 (fn fs-read-byte-range-rejects-invalid-arguments []
   (local result (process.run {:args [(space-bin) "-m" "tests.test-fs:read-byte-range-invalid-argument-main"]
-                              :env {:SPACE_DISABLE_AUDIO "1"
-                                    :SPACE_ASSETS_PATH (os.getenv "SPACE_ASSETS_PATH")
-                                    :FENNEL_PATH (os.getenv "FENNEL_PATH")
-                                    :FENNEL_MACRO_PATH (os.getenv "FENNEL_MACRO_PATH")}
+                              :env (child-env)
                               :timeout 30}))
   (assert (= result.exit-code 0)
           (.. "read-byte-range invalid-argument child should pass; stdout=" (or result.stdout "")
@@ -279,10 +279,7 @@
 
 (fn fs-atomic-replace-if-current-rejects-stale-token []
   (local result (process.run {:args [(space-bin) "-m" "tests.test-fs:atomic-replace-stale-token-main"]
-                              :env {:SPACE_DISABLE_AUDIO "1"
-                                    :SPACE_ASSETS_PATH (os.getenv "SPACE_ASSETS_PATH")
-                                    :FENNEL_PATH (os.getenv "FENNEL_PATH")
-                                    :FENNEL_MACRO_PATH (os.getenv "FENNEL_MACRO_PATH")}
+                              :env (child-env)
                               :timeout 30}))
   (assert (= result.exit-code 0)
           (.. "atomic-replace stale-token child should pass; stdout=" (or result.stdout "")
@@ -302,10 +299,7 @@
 
 (fn fs-atomic-replace-if-current-rejects-modification-before-final-replace []
   (local result (process.run {:args [(space-bin) "-m" "tests.test-fs:atomic-replace-raced-final-replace-main"]
-                              :env {:SPACE_DISABLE_AUDIO "1"
-                                    :SPACE_ASSETS_PATH (os.getenv "SPACE_ASSETS_PATH")
-                                    :FENNEL_PATH (os.getenv "FENNEL_PATH")
-                                    :FENNEL_MACRO_PATH (os.getenv "FENNEL_MACRO_PATH")}
+                              :env (child-env)
                               :timeout 30}))
   (assert (= result.exit-code 0)
           (.. "atomic-replace raced final replace child should pass; stdout=" (or result.stdout "")
@@ -330,10 +324,7 @@
 
 (fn fs-atomic-replace-if-current-rejects-malformed-segments []
   (local result (process.run {:args [(space-bin) "-m" "tests.test-fs:atomic-replace-invalid-segment-main"]
-                              :env {:SPACE_DISABLE_AUDIO "1"
-                                    :SPACE_ASSETS_PATH (os.getenv "SPACE_ASSETS_PATH")
-                                    :FENNEL_PATH (os.getenv "FENNEL_PATH")
-                                    :FENNEL_MACRO_PATH (os.getenv "FENNEL_MACRO_PATH")}
+                              :env (child-env)
                               :timeout 30}))
   (assert (= result.exit-code 0)
           (.. "atomic-replace invalid-segment child should pass; stdout=" (or result.stdout "")

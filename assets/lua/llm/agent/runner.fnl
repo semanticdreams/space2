@@ -12,8 +12,8 @@
   (os.time))
 
 (fn default-artifact-root [data-dir]
-  (local parent (and fs.parent (fs.parent data-dir)))
-  (local basename (string.match data-dir "[^/]+$"))
+  (local parent (and fs.parent (fs.parent data-dir))) (local normalized-data-dir (string.gsub data-dir "\\" "/"))
+  (local basename (string.match normalized-data-dir "[^/]+$"))
   (if (and (= basename "agent-sessions")
            parent
            (not (= parent ""))
