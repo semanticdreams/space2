@@ -42,6 +42,9 @@
 /third_party/linux/sysroot
 /third_party/lss/lss
 /third_party/mini_chromium/mini_chromium
+!/third_party/mini_chromium/mini_chromium/
+!/third_party/mini_chromium/mini_chromium/**
+/third_party/mini_chromium/mini_chromium/.git
 /third_party/ninja/linux
 /third_party/ninja/mac*
 /third_party/ninja/ninja.exe
