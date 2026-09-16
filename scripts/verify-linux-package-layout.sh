@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT=""
 PROFILE=""
+LAYOUT="package"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -12,6 +13,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --profile)
             PROFILE="${2:-}"
+            shift 2
+            ;;
+        --layout)
+            LAYOUT="${2:-}"
             shift 2
             ;;
         *)
@@ -27,6 +32,10 @@ if [[ -z "${ROOT}" ]]; then
 fi
 if [[ "${PROFILE}" != "full" && "${PROFILE}" != "minimal" ]]; then
     echo "error: --profile must be 'full' or 'minimal'" >&2
+    exit 1
+fi
+if [[ "${LAYOUT}" != "tarball" && "${LAYOUT}" != "package" ]]; then
+    echo "error: --layout must be 'tarball' or 'package'" >&2
     exit 1
 fi
 
@@ -96,12 +105,15 @@ require_matrix_runtime_if_needed() {
     fi
 }
 
-require_executable "${ROOT}/space" "top-level launcher"
 require_executable "${ROOT}/bin/space" "installed binary"
 require_file "${ROOT}/share/space/assets/lua/main.fnl" "main Fennel asset"
-require_directory "${ROOT}/lib" "bundled library directory"
-require_sdl3_runtime "${ROOT}"
-require_matrix_runtime_if_needed "${ROOT}"
+
+if [[ "${LAYOUT}" == "tarball" ]]; then
+    require_executable "${ROOT}/space" "top-level launcher"
+    require_directory "${ROOT}/lib" "bundled library directory"
+    require_sdl3_runtime "${ROOT}"
+    require_matrix_runtime_if_needed "${ROOT}"
+fi
 
 if [[ "${PROFILE}" == "full" ]]; then
     require_executable "${ROOT}/bin/space_cef_helper" "CEF helper"

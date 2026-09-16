@@ -61,6 +61,29 @@ def test_workflow_uses_new_release_artifact_names() -> None:
         assert_absent(workflow, obsolete_name, ".github/workflows/build.yml")
 
 
+def test_linux_package_layout_verifier_workflow_callers_choose_layout_mode() -> None:
+    workflow = read_repo_text(".github/workflows/build.yml")
+
+    assert (
+        'scripts/verify-linux-package-layout.sh --root /tmp/space-tarball-smoke --layout tarball --profile "${{ matrix.profile }}"'
+        in workflow
+    )
+    assert (
+        '/scripts/verify-linux-package-layout.sh --root /tmp/space-smoke --layout tarball --profile "${PROFILE}"'
+        in workflow
+    )
+    assert (
+        '/scripts/verify-linux-package-layout.sh --root /usr --layout package --profile "${PROFILE}"'
+        in workflow
+    )
+    assert (
+        workflow.count(
+            '/scripts/verify-linux-package-layout.sh --root /usr --layout package --profile "${PROFILE}"'
+        )
+        == 2
+    )
+
+
 def test_windows_installer_default_basename_includes_architecture() -> None:
     helper = read_repo_text("scripts/build-windows-installer.py")
 

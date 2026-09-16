@@ -25,13 +25,27 @@ def make_minimal_root(root: Path) -> None:
     (root / "lib" / "libSDL3.so.0").write_text("fake sdl\n", encoding="utf-8")
 
 
+def make_minimal_package_root(root: Path) -> None:
+    (root / "bin").mkdir(parents=True)
+    (root / "share" / "space" / "assets" / "lua").mkdir(parents=True)
+    make_executable(root / "bin" / "space")
+    (root / "share" / "space" / "assets" / "lua" / "main.fnl").write_text(
+        "(print :ok)\n", encoding="utf-8"
+    )
+
+
 def run_verify(
     root: Path,
     profile: str = "minimal",
+    layout: str | None = "tarball",
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    command = [str(VERIFY_SCRIPT), "--root", str(root), "--profile", profile]
+    if layout is not None:
+        command.extend(["--layout", layout])
+
     return subprocess.run(
-        [str(VERIFY_SCRIPT), "--root", str(root), "--profile", profile],
+        command,
         cwd=REPO_ROOT,
         env=env,
         text=True,
@@ -51,6 +65,28 @@ def test_valid_minimal_install_tree_with_launcher_and_sdl3_passes(tmp_path: Path
     make_minimal_root(root)
 
     result = run_verify(root)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_package_layout_allows_distro_root_without_launcher_or_bundled_sdl3(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "usr"
+    make_minimal_package_root(root)
+
+    package_result = run_verify(root, layout="package")
+    tarball_result = run_verify(root, layout="tarball")
+
+    assert package_result.returncode == 0, package_result.stderr
+    assert_failed_with(tarball_result, "missing executable top-level launcher")
+
+
+def test_default_layout_preserves_package_root_callers(tmp_path: Path) -> None:
+    root = tmp_path / "usr"
+    make_minimal_package_root(root)
+
+    result = run_verify(root, layout=None)
 
     assert result.returncode == 0, result.stderr
 
