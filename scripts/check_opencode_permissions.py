@@ -21,6 +21,13 @@ class PolicyViolation:
 REQUIRED_AGENT_KEYS = {"description", "mode", "model", "permission"}
 REQUIRED_SKILL_KEYS = {"name", "description"}
 CAPABILITY_AGENTS = {"git-integrator", "github-operator", "config-auditor"}
+GIT_INTEGRATOR_ALLOWED_WRAPPER_COMMANDS = {
+    "python3 scripts/opencode_git_integrate.py status --repo-root .",
+    "python3 scripts/opencode_git_integrate.py fetch-origin --repo-root .",
+    "python3 scripts/opencode_git_integrate.py merge-origin-main --repo-root .",
+    "python3 scripts/opencode_git_integrate.py push-current --repo-root .",
+    "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .",
+}
 REQUIRED_CAPABILITY_FILES = (
     ".opencode/agents/git-integrator.md",
     ".opencode/agents/github-operator.md",
@@ -79,9 +86,9 @@ def _mapping_entries(raw: str, parent: str) -> list[tuple[str, str]]:
         block_lines.append(line)
     entries: list[tuple[str, str]] = []
     for line in block_lines:
-        match = re.match(r"^\s{4}([\"']?)(.*?)\1:\s*(allow|ask|deny)\s*$", line)
+        match = re.match(r"^\s{4}([\"']?)(.*?)\1:\s*([\"']?)(allow|ask|deny)\3\s*(?:#.*)?$", line)
         if match:
-            entries.append((match.group(2), match.group(3)))
+            entries.append((match.group(2), match.group(4)))
     return entries
 
 
@@ -284,6 +291,15 @@ def _check_capability_boundary(path: Path, repo_root: Path, name: str, raw: str)
         for pattern, action in _mapping_entries(raw, "bash"):
             if action in BLOCKED_ACTIONS and _has_untrusted_suffix_wildcard(pattern):
                 violations.append(_violation(path, repo_root, "capability-boundary", f"github-operator wrapper permission must not end in an untrusted wildcard: {pattern}: {action}"))
+    if name == "git-integrator":
+        bash_entries = _mapping_entries(raw, "bash")
+        bash_actions = dict(bash_entries)
+        for command in sorted(GIT_INTEGRATOR_ALLOWED_WRAPPER_COMMANDS):
+            if bash_actions.get(command) != "allow":
+                violations.append(_violation(path, repo_root, "capability-boundary", f"git-integrator must allow guarded wrapper command exactly: {command}"))
+        for pattern, action in bash_entries:
+            if action in BLOCKED_ACTIONS and pattern not in GIT_INTEGRATOR_ALLOWED_WRAPPER_COMMANDS:
+                violations.append(_violation(path, repo_root, "capability-boundary", f"git-integrator bash permission must be limited to approved wrapper commands: {pattern}: {action}"))
     return violations
 
 
