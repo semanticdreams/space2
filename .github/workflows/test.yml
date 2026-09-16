@@ -185,7 +185,7 @@ jobs:
           path: build/dist/windows
 
       - name: Smoke test Windows binary
-        run: .\build\dist\windows\space.exe --help | Out-Null
+        run: .\build\dist\windows\space-cli.exe --help | Out-Null
 
       - name: Run Windows fast suite
         env:
@@ -193,4 +193,4 @@ jobs:
           FENNEL_PATH: ${{ github.workspace }}\\build\\dist\\windows\\assets\\lua\\?.fnl;${{ github.workspace }}\\build\\dist\\windows\\assets\\lua\\?\\init.fnl
           FENNEL_MACRO_PATH: ${{ github.workspace }}\\build\\dist\\windows\\assets\\lua\\?.fnl;${{ github.workspace }}\\build\\dist\\windows\\assets\\lua\\?\\init.fnl
           XDG_DATA_HOME: ${{ github.workspace }}\\.tmp\\xdg-data
-        run: .\build\dist\windows\space.exe -m tests.fast:main
+        run: .\build\dist\windows\space-cli.exe -m tests.fast:main
