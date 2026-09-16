@@ -134,10 +134,12 @@ def test_create_current_uses_validated_current_branch_without_cli_branch_argumen
 
 
 def test_create_current_returns_existing_pr_without_creating(monkeypatch, trusted_repo: Path) -> None:
-    pr = {"url": "https://github.com/semanticdreams/space2/pull/123", "state": "OPEN"}
+    head = "31c62bc214b483adc95cbe234ce826b085f66225"
+    pr = {"url": "https://github.com/semanticdreams/space2/pull/123", "state": "OPEN", "headRefOid": head}
     runner = GhRunner(
         {
             ("git", "branch", "--show-current"): "feature/opencode-capabilities\n",
+            ("git", "rev-parse", "HEAD"): f"{head}\n",
             (
                 "gh",
                 "pr",
@@ -158,7 +160,85 @@ def test_create_current_returns_existing_pr_without_creating(monkeypatch, truste
     assert runner.calls == [
         ["git", "branch", "--show-current"],
         ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS],
+        ["git", "rev-parse", "HEAD"],
     ]
+
+
+def test_create_current_rejects_stale_existing_pr_with_different_head(monkeypatch, trusted_repo: Path) -> None:
+    current_head = "31c62bc214b483adc95cbe234ce826b085f66225"
+    pr_head = "ef51e29ec41341b874e5528b5634a22497192100"
+    pr = {
+        "url": "https://github.com/semanticdreams/space2/pull/119",
+        "state": "MERGED",
+        "mergedAt": "2026-09-15T12:34:56Z",
+        "headRefOid": pr_head,
+    }
+    runner = GhRunner(
+        {
+            ("git", "branch", "--show-current"): "feature/opencode-capabilities\n",
+            ("git", "rev-parse", "HEAD"): f"{current_head}\n",
+            (
+                "gh",
+                "pr",
+                "view",
+                "feature/opencode-capabilities",
+                "--json",
+                "state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url",
+            ): json.dumps(pr),
+        }
+    )
+    monkeypatch.setattr(pr_operator, "run_command", runner)
+
+    result = pr_operator.create_current_pr(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert result["evidence"] == {
+        "branch": "feature/opencode-capabilities",
+        "current_head": current_head,
+        "pr_head": pr_head,
+        "pr_state": "MERGED",
+        "pr_url": "https://github.com/semanticdreams/space2/pull/119",
+        "args": ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS],
+    }
+    assert runner.calls == [
+        ["git", "branch", "--show-current"],
+        ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS],
+        ["git", "rev-parse", "HEAD"],
+    ]
+
+
+def test_create_current_rejects_matching_head_pr_that_is_not_open(monkeypatch, trusted_repo: Path) -> None:
+    head = "31c62bc214b483adc95cbe234ce826b085f66225"
+    pr = {
+        "url": "https://github.com/semanticdreams/space2/pull/119",
+        "state": "MERGED",
+        "mergedAt": "2026-09-15T12:34:56Z",
+        "headRefOid": head,
+    }
+    runner = GhRunner(
+        {
+            ("git", "branch", "--show-current"): "feature/opencode-capabilities\n",
+            ("git", "rev-parse", "HEAD"): f"{head}\n",
+            (
+                "gh",
+                "pr",
+                "view",
+                "feature/opencode-capabilities",
+                "--json",
+                pr_operator.PR_VIEW_FIELDS,
+            ): json.dumps(pr),
+        }
+    )
+    monkeypatch.setattr(pr_operator, "run_command", runner)
+
+    result = pr_operator.create_current_pr(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert result["evidence"]["branch"] == "feature/opencode-capabilities"
+    assert result["evidence"]["current_head"] == head
+    assert result["evidence"]["pr_head"] == head
+    assert result["evidence"]["pr_state"] == "MERGED"
+    assert result["evidence"]["pr_url"] == "https://github.com/semanticdreams/space2/pull/119"
 
 
 def test_create_current_creates_when_view_reports_no_existing_pr(monkeypatch, trusted_repo: Path) -> None:
