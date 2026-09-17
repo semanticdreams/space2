@@ -42,6 +42,19 @@
             (table.insert next-frontier (tostring other-key))))
     next-frontier)
 
+(fn has-non-island-pin-before-island? [pinned expanded-nodes pinned-before-expand node]
+    (if (not (. pinned node))
+        false
+        (. pinned.__island_pinned node)
+        false
+        (. expanded-nodes node)
+        (. pinned-before-expand node)
+        true))
+
+(fn clear-stale-before-island-pin-on-collapse! [pinned pinned-before-expand node]
+    (when (and pinned.__before_island (not (. pinned-before-expand node)))
+        (set (. pinned.__before_island node) nil)))
+
 (fn GraphView [opts]
     (local options (or opts {}))
     (local graph-map options.graph-map)
@@ -508,8 +521,8 @@
                                              (set pinned.__island_pinned {}))
                                          (when (not pinned.__before_island)
                                              (set pinned.__before_island {}))
-                                         (when (and (. pinned node) (not (. pinned.__island_pinned node)))
-                                             (set (. pinned.__before_island node) true))
+                                          (when (has-non-island-pin-before-island? pinned expanded-nodes pinned-before-expand node)
+                                              (set (. pinned.__before_island node) true))
                                          (set (. pinned.__island_pinned node) true)
                                          (set (. pinned node) true)
                                          (graph-layout:set-node-pinned node true))
@@ -931,6 +944,7 @@
               (local new-point (build-compact-presentation node pos))
               (detach-presentation node current-point)
               (install-presentation node current-point new-point)
+              (clear-stale-before-island-pin-on-collapse! pinned pinned-before-expand node)
               (set (. pinned node) (or (. pinned-before-expand node) false))
               (set (. pinned-before-expand node) nil)
               (set (. expanded-nodes node) nil)

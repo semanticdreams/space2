@@ -211,6 +211,29 @@
     (assert (not (. view.pinned node-a))
             "member should unpin after island removal and expanded-card collapse"))
 
+(fn check-clears-expanded-pin-reason-before-later-island-removal [fixture]
+    (local map fixture.map)
+    (local view fixture.view)
+    (local node-a (map:lookup "test:a"))
+    (local point-a (. view.points node-a))
+    (assert point-a "fixture should have first member point")
+    (point-a:on-double-click {})
+    (local card (. view.points node-a))
+    (assert card._card-size "member should expand into a card")
+    (map:create-island (island-record {:id "island-1" :members ["test:a"]}))
+    (map:remove-island "island-1")
+    (assert (. view.pinned node-a) "expanded member should remain pinned after first island removal")
+    (local collapse-button (. card.header-bar.children 4 :element))
+    (assert collapse-button "expanded card should expose collapse button")
+    (collapse-button:on-click {})
+    (assert (not (. view.pinned node-a))
+            "collapsed member should release the expanded-card pin")
+    (map:create-island (island-record {:id "island-2" :members ["test:a"]}))
+    (assert (. view.pinned node-a) "second island should pin member while present")
+    (map:remove-island "island-2")
+    (assert (not (. view.pinned node-a))
+            "second island removal should not restore stale expanded-card pin ownership"))
+
 (fn check-removes-island-member-node-without-pin-cleanup-error [fixture]
     (local map fixture.map)
     (local view fixture.view)
@@ -305,6 +328,10 @@
     (with-fixture {:island (island-record {})}
         check-unpins-expanded-member-after-island-removal-and-collapse))
 
+(fn graph-view-clears-expanded-pin-reason-before-later-island-removal []
+    (with-fixture {}
+        check-clears-expanded-pin-reason-before-later-island-removal))
+
 (fn graph-view-removes-island-member-node-without-pin-cleanup-error []
     (with-fixture {:island (island-record {})}
         check-removes-island-member-node-without-pin-cleanup-error))
@@ -328,6 +355,8 @@
                      :fn graph-view-preserves-expanded-member-pin-after-island-removal})
 (table.insert tests {:name "GraphView unpins expanded member after island removal and collapse"
                      :fn graph-view-unpins-expanded-member-after-island-removal-and-collapse})
+(table.insert tests {:name "GraphView clears expanded pin reason before later island removal"
+                     :fn graph-view-clears-expanded-pin-reason-before-later-island-removal})
 (table.insert tests {:name "GraphView removes island member node without pin cleanup error"
                      :fn graph-view-removes-island-member-node-without-pin-cleanup-error})
 (table.insert tests {:name "GraphView snaps island member back after drag end"

@@ -399,19 +399,20 @@ Global compatibility can keep `app.graph` and `app.graph-view` during the transi
 
 ## Graph View Changes
 
-`GraphView` should attach to a `GraphMap` instead of a shared `Graph`.
+`GraphView` attaches to a `GraphMap`, not a shared/raw `Graph`. The transitional
+constructor key `:graph` and raw-Graph compatibility path have been removed; all
+callers must pass a real `GraphMap` via `:graph-map`.
 
-Minimal migration:
+Required runtime contract:
 
-- Keep constructor key `:graph` temporarily, but pass the active graph map.
-- Internally treat the object as the graph-like interaction source.
+- Construct `GraphView` with `:graph-map` set to the active graph map.
+- Require the supplied graph map to expose GraphMap island APIs such as `list-islands`.
 - Store map id on the view.
 - Construct `GraphViewPersistence` with `:graph-map-id` or a per-map data directory.
 - `capture-state` should capture selected/focused keys and delegate panel state to the map-specific node-view manager.
 
 Later cleanup:
 
-- Rename constructor option to `:graph-map` when call sites are migrated.
 - Reduce reliance on globals such as `app.graph-view` in node views and tools.
 
 ## Sidebar UX
