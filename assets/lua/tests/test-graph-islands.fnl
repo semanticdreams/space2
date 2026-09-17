@@ -133,11 +133,29 @@
     (assert (= (length pruned) 0) "prune-islands-for-node-keys should report no changes when already valid")
     (cleanup fixture))
 
+(fn graph-map-restore-emits-removed-for-replaced-islands []
+    (local fixture (make-map "island-restore-removes"))
+    (local map fixture.map)
+    (map:create-island (island-record "island-old" ["test:a"]))
+    (var removed-count 0)
+    (var removed-id nil)
+    (map.island-removed:connect
+        (fn [payload]
+            (set removed-count (+ removed-count 1))
+            (set removed-id payload.island.id)))
+    (map:restore-state {:nodes [] :edges [] :islands []})
+    (assert (= removed-count 1) "restore-state should emit island-removed for cleared islands")
+    (assert (= removed-id "island-old") "island-removed should identify cleared island")
+    (assert (= (map:get-island "island-old") nil)
+            "restore-state should remove islands that are absent from restored state")
+    (cleanup fixture))
+
 (table.insert tests {:name "GraphMap upserts captures and restores islands" :fn graph-map-upserts-captures-and-restores-islands})
 (table.insert tests {:name "GraphMap rejects invalid island records" :fn graph-map-rejects-invalid-island-records})
 (table.insert tests {:name "GraphMap removes island without removing member nodes" :fn graph-map-removes-island-without-removing-member-nodes})
 (table.insert tests {:name "GraphMap removes origin node while island remains" :fn graph-map-removes-origin-node-while-island-remains})
 (table.insert tests {:name "GraphMap prunes removed member nodes from islands" :fn graph-map-prunes-removed-member-nodes-from-islands})
+(table.insert tests {:name "GraphMap restore emits removed for replaced islands" :fn graph-map-restore-emits-removed-for-replaced-islands})
 
 (local main
     (fn []

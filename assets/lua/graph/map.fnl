@@ -587,8 +587,10 @@
                 (set (. nodes k) nil))
             (each [k _ (pairs derived-edge-keys)]
                 (set (. derived-edge-keys k) nil))
-            (each [k _ (pairs islands)]
-                (set (. islands k) nil))
+            (local existing-island-ids (icollect [k _ (pairs islands)] k))
+            (table.sort existing-island-ids)
+            (each [_ island-id (ipairs existing-island-ids)]
+                (remove-island self island-id {:cause "restore-state"}))
             (set unresolved-restored-node-keys [])
             (set unresolved-restored-edge-list [])
             (set next-island-id 1)
