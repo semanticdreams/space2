@@ -4,6 +4,8 @@ import stat
 import tarfile
 from pathlib import Path
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGER = REPO_ROOT / "scripts" / "package-linux-app.py"
@@ -125,3 +127,28 @@ def test_manifest_lists_built_artifacts(tmp_path: Path) -> None:
     manifest = packager.write_manifest(output_dir, artifacts)
 
     assert manifest.read_text(encoding="utf-8") == "mygame-linux-amd64.deb\nmygame-linux-x86_64.tar.gz\n"
+
+
+def test_deb_build_forces_root_payload_ownership(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    packager = load_packager()
+    metadata = packager.load_metadata(make_metadata(tmp_path))
+    package_root = tmp_path / "pkgroot"
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    packager.stage_package_root(metadata, package_root)
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr(packager, "require_tool", lambda name: None)
+
+    def fake_run(command: list[str], check: bool) -> None:
+        commands.append(command)
+        Path(command[-1]).write_text("deb\n", encoding="utf-8")
+
+    monkeypatch.setattr(packager.subprocess, "run", fake_run)
+
+    output = packager.build_deb(metadata, package_root, output_dir)
+
+    assert output == output_dir / "mygame-linux-amd64.deb"
+    assert commands == [
+        ["dpkg-deb", "--root-owner-group", "--build", str(package_root), str(output)]
+    ]

@@ -132,6 +132,48 @@ def test_release_version_requires_explicit_value_or_ref_name(tmp_path: Path) -> 
 
 
 @pytest.mark.parametrize(
+    ("extra", "app_name"),
+    [
+        (("--app-id", "space"), "My Game!"),
+        ((), "Space"),
+    ],
+)
+def test_space_app_id_is_reserved_and_fails_before_packaging(
+    tmp_path: Path,
+    extra: tuple[str, ...],
+    app_name: str,
+) -> None:
+    repo = make_app_repo(tmp_path)
+    output = tmp_path / "metadata.json"
+    command = [
+        sys.executable,
+        str(CLI),
+        "--repo-root",
+        str(repo),
+        "--space-version",
+        "v9.8.7",
+        "--app-name",
+        app_name,
+        "--output",
+        str(output),
+        *extra,
+    ]
+
+    result = subprocess.run(
+        command,
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env={**os.environ, "GITHUB_REF_NAME": "v1.2.3"},
+        check=False,
+    )
+
+    assert_cli_failed_with(result, "reserved app-id")
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(
     ("extra", "expected"),
     [
         (("--assets-dir", ".."), "assets directory must be inside repo root"),

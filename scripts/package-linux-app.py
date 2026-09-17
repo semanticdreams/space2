@@ -157,7 +157,10 @@ def build_deb(metadata: AppMetadata, package_root: Path, output_dir: Path) -> Pa
     debian_dir.mkdir(parents=True, exist_ok=True)
     (debian_dir / "control").write_text(deb_control_text(metadata), encoding="utf-8")
     output = output_dir / artifact_name(metadata, "deb")
-    subprocess.run(["dpkg-deb", "--build", str(package_root), str(output)], check=True)
+    subprocess.run(
+        ["dpkg-deb", "--root-owner-group", "--build", str(package_root), str(output)],
+        check=True,
+    )
     return output
 
 

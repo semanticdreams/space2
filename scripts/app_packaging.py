@@ -10,6 +10,7 @@ from pathlib import Path
 
 
 APP_ID_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+RESERVED_APP_IDS = {"space"}
 ENTRYPOINT_PATTERN = re.compile(
     r"^[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*(?::[A-Za-z_][A-Za-z0-9_-]*)?$"
 )
@@ -48,6 +49,8 @@ def validate_app_id(app_id: str) -> None:
         raise MetadataError(
             "invalid app-id: use lowercase letters, digits, and single hyphen-separated words"
         )
+    if app_id in RESERVED_APP_IDS:
+        raise MetadataError(f"reserved app-id: {app_id}")
 
 
 def validate_entrypoint(entrypoint: str) -> None:
@@ -67,7 +70,9 @@ def normalize_package_version(release_version: str) -> str:
 
 def load_metadata_json(path: str | Path) -> AppMetadata:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    return AppMetadata(**data)
+    metadata = AppMetadata(**data)
+    validate_app_id(metadata.app_id)
+    return metadata
 
 
 def safe_copy_tree(source: str | Path, destination: str | Path) -> None:
