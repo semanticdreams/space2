@@ -20,7 +20,13 @@ def load_packager():
     return module
 
 
-def make_metadata(tmp_path: Path, *, linux_profile: str = "full", release_version: str = "v1.2.3") -> Path:
+def make_metadata(
+    tmp_path: Path,
+    *,
+    linux_profile: str = "full",
+    release_version: str = "v1.2.3",
+    space_version: str = "v9.8.7",
+) -> Path:
     assets = tmp_path / "app" / "assets"
     (assets / "lua").mkdir(parents=True)
     (assets / "lua" / "main.fnl").write_text("(fn main [] nil)\n", encoding="utf-8")
@@ -33,7 +39,7 @@ def make_metadata(tmp_path: Path, *, linux_profile: str = "full", release_versio
         "linux_profile": linux_profile,
         "release_version": release_version,
         "package_version": release_version.removeprefix("v"),
-        "space_version": "v9.8.7",
+        "space_version": space_version,
     }
     path = tmp_path / "metadata.json"
     path.write_text(json.dumps(metadata), encoding="utf-8")
@@ -75,16 +81,50 @@ def test_package_root_is_app_only_and_generates_space_dependency_metadata(tmp_pa
     assert not (root / "usr" / "share" / "space" / "assets").exists()
     launcher = (root / "usr" / "bin" / "mygame").read_text(encoding="utf-8")
     assert 'SPACE_ASSETS_PATH="/usr/share/mygame/assets${SPACE_ASSETS_PATH:+:$SPACE_ASSETS_PATH}" exec /usr/bin/space -m main "$@"' in launcher
-    assert "Depends: space (>= 1.2.3)" in control_text
-    assert "Requires: space >= 1.2.3" in spec_text
+    assert "Depends: space (>= 9.8.7)" in control_text
+    assert "Requires: space >= 9.8.7" in spec_text
+
+
+def test_package_version_uses_app_release_but_space_dependency_uses_pinned_space_version(tmp_path: Path) -> None:
+    packager = load_packager()
+    metadata = packager.load_metadata(
+        make_metadata(tmp_path, release_version="v4.5.6", space_version="v1.2.3")
+    )
+
+    control_text = packager.deb_control_text(metadata)
+    spec_text = packager.rpm_spec_text(metadata)
+
+    assert "Version: 4.5.6\n" in control_text
+    assert "Depends: space (>= 1.2.3)\n" in control_text
+    assert "Version: 4.5.6\n" in spec_text
+    assert "Requires: space >= 1.2.3\n" in spec_text
 
 
 def test_unsafe_dependency_version_falls_back_to_unversioned_space_dependency(tmp_path: Path) -> None:
     packager = load_packager()
-    metadata = packager.load_metadata(make_metadata(tmp_path, release_version="nightly-main"))
+    metadata = packager.load_metadata(make_metadata(tmp_path, space_version="nightly-main"))
 
     assert "Depends: space\n" in packager.deb_control_text(metadata)
     assert "Requires: space\n" in packager.rpm_spec_text(metadata)
+
+
+def test_tarball_extraction_does_not_require_python_311_filter_argument(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    packager = load_packager()
+    metadata = packager.load_metadata(make_metadata(tmp_path))
+    original_extractall = tarfile.TarFile.extractall
+
+    def python_310_extractall(self, path=".", members=None, *, numeric_owner=False):
+        return original_extractall(self, path=path, members=members, numeric_owner=numeric_owner)
+
+    monkeypatch.setattr(tarfile.TarFile, "extractall", python_310_extractall)
+
+    root = tmp_path / "tarroot"
+
+    packager.stage_tarball_root(metadata, make_space_tarball(tmp_path), root)
+
+    assert (root / "bin" / "space").is_file()
 
 
 def test_tarball_root_preserves_space_files_and_prepends_app_assets(tmp_path: Path) -> None:

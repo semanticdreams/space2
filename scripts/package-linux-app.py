@@ -20,6 +20,7 @@ from app_packaging import (  # noqa: E402
     desktop_escape,
     linux_artifact_name,
     load_metadata_json,
+    normalize_package_version,
     safe_copy_tree,
     safe_dependency_version,
     write_executable,
@@ -80,14 +81,57 @@ def stage_package_root(metadata: AppMetadata, root: str | Path) -> Path:
 
 def _safe_extract_tarball(tarball: Path, root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
+    resolved_root = root.resolve()
     with tarfile.open(tarball, "r:gz") as archive:
         for member in archive.getmembers():
-            destination = (root / member.name).resolve()
-            try:
-                destination.relative_to(root.resolve())
-            except ValueError as error:
-                raise MetadataError(f"unsafe path in Space tarball: {member.name}") from error
-        archive.extractall(root, filter="data")
+            _validate_tar_member(member, resolved_root)
+        for member in archive.getmembers():
+            _extract_tar_member(archive, member, root, resolved_root)
+
+
+def _validate_tar_member(member: tarfile.TarInfo, resolved_root: Path) -> None:
+    destination = (resolved_root / member.name).resolve()
+    try:
+        destination.relative_to(resolved_root)
+    except ValueError as error:
+        raise MetadataError(f"unsafe path in Space tarball: {member.name}") from error
+    if member.issym() or member.islnk():
+        link_base = destination.parent if member.issym() else resolved_root
+        link_target = (link_base / member.linkname).resolve()
+        try:
+            link_target.relative_to(resolved_root)
+        except ValueError as error:
+            raise MetadataError(f"unsafe link in Space tarball: {member.name}") from error
+    elif not (member.isdir() or member.isfile()):
+        raise MetadataError(f"unsupported entry in Space tarball: {member.name}")
+
+
+def _extract_tar_member(
+    archive: tarfile.TarFile, member: tarfile.TarInfo, root: Path, resolved_root: Path
+) -> None:
+    destination = (resolved_root / member.name).resolve()
+    if member.isdir():
+        destination.mkdir(parents=True, exist_ok=True)
+        destination.chmod(member.mode)
+    elif member.isfile():
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        source = archive.extractfile(member)
+        if source is None:
+            raise MetadataError(f"unable to read file from Space tarball: {member.name}")
+        with source, destination.open("wb") as output:
+            shutil.copyfileobj(source, output)
+        destination.chmod(member.mode)
+    elif member.issym():
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists() or destination.is_symlink():
+            destination.unlink()
+        os.symlink(member.linkname, destination)
+    elif member.islnk():
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        link_target = (resolved_root / member.linkname).resolve()
+        if destination.exists() or destination.is_symlink():
+            destination.unlink()
+        os.link(link_target, destination)
 
 
 def stage_tarball_root(metadata: AppMetadata, space_tarball: str | Path, root: str | Path) -> Path:
@@ -104,7 +148,7 @@ def stage_tarball_root(metadata: AppMetadata, space_tarball: str | Path, root: s
 
 
 def dependency_text(metadata: AppMetadata, debian: bool) -> str:
-    version = safe_dependency_version(metadata.package_version)
+    version = safe_dependency_version(normalize_package_version(metadata.space_version))
     if not version:
         return "space"
     if debian:

@@ -102,6 +102,7 @@ def test_app_mode_stages_app_assets_and_desktop_metadata(tmp_path: Path) -> None
     assert "Name=My Game\n" in desktop
     assert "Exec=mygame %U\n" in desktop
     assert "Icon=mygame\n" in desktop
+    assert (root / "usr" / "share" / "icons" / "hicolor" / "256x256" / "apps" / "mygame.png").read_bytes() == b"png"
 
 
 def test_app_mode_apprun_prepends_app_assets_before_bundled_space_assets(tmp_path: Path) -> None:
