@@ -480,6 +480,12 @@
                         (set (. island-label-nodes node) nil)))
                 (error result))))
 
+    (fn clear-island-only-saved-expand-pin! [node]
+        (when (and (. expanded-nodes node)
+                   (. pinned-before-expand node)
+                   (not (and pinned.__before_island (. pinned.__before_island node))))
+            (set (. pinned-before-expand node) nil)))
+
     (local island-host
         (IslandHost.GraphViewIslandHost
             {:presenters IslandPresenters
@@ -510,6 +516,7 @@
                                      (do
                                          (when pinned.__island_pinned
                                              (set (. pinned.__island_pinned node) nil))
+                                         (clear-island-only-saved-expand-pin! node)
                                          (set (. pinned node)
                                               (if (or (. expanded-nodes node)
                                                       (and pinned.__before_island (. pinned.__before_island node)))
