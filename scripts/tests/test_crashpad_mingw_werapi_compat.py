@@ -3,10 +3,15 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WERAPI_COMPAT = REPO_ROOT / "external/sentry-native/external/crashpad/compat/mingw/werapi.h"
+MINI_CHROMIUM_RAND_UTIL = REPO_ROOT / "external/sentry-native/external/crashpad/third_party/mini_chromium/mini_chromium/base/rand_util.cc"
 
 
 def read_werapi_compat() -> str:
     return WERAPI_COMPAT.read_text(encoding="utf-8")
+
+
+def read_mini_chromium_rand_util() -> str:
+    return MINI_CHROMIUM_RAND_UTIL.read_text(encoding="utf-8")
 
 
 def test_old_mingw_pwer_submit_result_workaround_precedes_system_header() -> None:
@@ -30,3 +35,10 @@ def test_runtime_exception_information_fallback_is_available_after_system_header
     assert "CONTEXT context;" in header
     assert "PCWSTR pwszReportId;" in header
     assert "PWER_RUNTIME_EXCEPTION_INFORMATION" in header
+
+
+def test_mini_chromium_windows_sdk_includes_use_mingw_case_sensitive_names() -> None:
+    source = read_mini_chromium_rand_util()
+
+    assert "#include <ntsecapi.h>" in source
+    assert "#include <NTSecAPI.h>" not in source
