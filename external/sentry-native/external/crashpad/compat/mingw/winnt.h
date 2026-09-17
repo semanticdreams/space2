@@ -18,6 +18,29 @@
 #include_next <winnt.h>
 #include <minwindef.h>
 
+#ifndef CONTEXT_XSTATE
+#if defined(_M_AMD64) || defined(__x86_64__)
+#define CONTEXT_XSTATE (CONTEXT_AMD64 | 0x40)
+#elif defined(_M_IX86) || defined(__i386__)
+#define CONTEXT_XSTATE (CONTEXT_i386 | 0x40)
+#endif
+#endif
+
+#ifndef XSTATE_CET_U
+#define XSTATE_CET_U 11
+#endif
+
+#ifndef XSTATE_MASK_CET_U
+#define XSTATE_MASK_CET_U (1ull << XSTATE_CET_U)
+#endif
+
+#if defined(__MINGW64_VERSION_MAJOR) && __MINGW64_VERSION_MAJOR <= 8
+typedef struct _XSAVE_CET_U_FORMAT {
+  ULONG64 Ia32CetUMsr;
+  ULONG64 Ia32Pl3SspMsr;
+} XSAVE_CET_U_FORMAT, *PXSAVE_CET_U_FORMAT;
+#endif
+
 // https://msdn.microsoft.com/library/aa373184.aspx: "Note that this structure
 // definition was accidentally omitted from WinNT.h."
 struct PROCESSOR_POWER_INFORMATION {

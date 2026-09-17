@@ -4,6 +4,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WERAPI_COMPAT = REPO_ROOT / "external/sentry-native/external/crashpad/compat/mingw/werapi.h"
 DBGHELP_COMPAT = REPO_ROOT / "external/sentry-native/external/crashpad/compat/mingw/dbghelp.h"
+WINNT_COMPAT = REPO_ROOT / "external/sentry-native/external/crashpad/compat/mingw/winnt.h"
 MINI_CHROMIUM_RAND_UTIL = REPO_ROOT / "external/sentry-native/external/crashpad/third_party/mini_chromium/mini_chromium/base/rand_util.cc"
 
 
@@ -13,6 +14,10 @@ def read_werapi_compat() -> str:
 
 def read_dbghelp_compat() -> str:
     return DBGHELP_COMPAT.read_text(encoding="utf-8")
+
+
+def read_winnt_compat() -> str:
+    return WINNT_COMPAT.read_text(encoding="utf-8")
 
 
 def read_mini_chromium_rand_util() -> str:
@@ -77,3 +82,24 @@ def test_old_mingw_dbghelp_thread_names_stream_fallback_precedes_thread_name_str
     assert "__MINGW64_VERSION_MAJOR <= 8" in header
     assert header.index(fallback) > include_next
     assert header.index(fallback) < thread_name_comment
+
+
+def test_old_mingw_winnt_cet_xstate_fallbacks_follow_system_header_before_sdk_fallbacks() -> None:
+    header = read_winnt_compat()
+    include_next = header.index("#include_next <winnt.h>")
+    sdk_fallbacks = header.index("// 10.0.10240.0 SDK")
+    context_xstate = header.index("#define CONTEXT_XSTATE")
+    xstate_cet_u = header.index("#define XSTATE_CET_U 11")
+    xstate_mask = header.index("#define XSTATE_MASK_CET_U (1ull << XSTATE_CET_U)")
+    cet_format = header.index("typedef struct _XSAVE_CET_U_FORMAT")
+
+    assert include_next < context_xstate < sdk_fallbacks
+    assert include_next < xstate_cet_u < sdk_fallbacks
+    assert include_next < xstate_mask < sdk_fallbacks
+    assert include_next < cet_format < sdk_fallbacks
+    assert "(CONTEXT_AMD64 | 0x40)" in header or "0x00100040" in header
+    assert "(CONTEXT_i386 | 0x40)" in header or "0x00010040" in header
+    assert "__MINGW64_VERSION_MAJOR <= 8" in header
+    assert "ULONG64 Ia32CetUMsr;" in header
+    assert "ULONG64 Ia32Pl3SspMsr;" in header
+    assert "} XSAVE_CET_U_FORMAT" in header
