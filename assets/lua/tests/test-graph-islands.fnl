@@ -1,5 +1,6 @@
 (local Graph (require :graph/init))
 (local GraphMap (require :graph/map))
+(local GraphMapManager (require :graph/map-manager))
 
 (local tests [])
 
@@ -18,6 +19,16 @@
 
 (fn cleanup [fixture]
     (fixture.map:drop)
+    (fixture.graph:drop))
+
+(fn make-manager [state]
+    (local graph (Graph {:with-start false}))
+    (register-test-loader graph)
+    (local manager (GraphMapManager.GraphMapManager {:graph graph :state state}))
+    {:graph graph :manager manager})
+
+(fn cleanup-manager [fixture]
+    (fixture.manager:drop)
     (fixture.graph:drop))
 
 (fn island-record [id members]
@@ -150,12 +161,97 @@
             "restore-state should remove islands that are absent from restored state")
     (cleanup fixture))
 
+(fn find-map-entry [state id]
+    (assert (= (type state.maps) :table) "find-map-entry requires state maps")
+    (var found nil)
+    (each [_ entry (ipairs state.maps)]
+        (when (= entry.id id)
+            (set found entry)))
+    found)
+
+(fn graph-map-manager-captures-and-restores-island-records []
+    (local fixture (make-manager nil))
+    (local manager fixture.manager)
+    (local map (manager:get-active-map))
+    (map:load-by-key "test:a")
+    (map:load-by-key "test:b")
+    (map:create-island (island-record "island-1" ["test:a" "test:b"]))
+    (local allocated (map:create-island {:kind "freeform" :members ["test:a"]}))
+    (assert (= allocated.id "island-2") "manager fixture should allocate second island id")
+    (manager:create-map! "side" "Side")
+    (manager:switch-map! "side")
+    (manager:switch-map! "main")
+    (local captured (manager:capture-state))
+    (local main-entry (find-map-entry captured "main"))
+    (assert main-entry "capture-state should include main map entry")
+    (assert (= (length (or main-entry.islands [])) 2)
+            "GraphMapManager should capture active map island records")
+    (assert (= main-entry.next_island_id 3)
+            "GraphMapManager should capture active map next island id")
+    (cleanup-manager fixture)
+    (local restored-fixture (make-manager captured))
+    (local restored-map (restored-fixture.manager:get-active-map))
+    (local restored-island (restored-map:get-island "island-1"))
+    (assert restored-island "GraphMapManager should restore island records into active map")
+    (assert (= (length restored-island.members) 2)
+            "GraphMapManager should restore island members")
+    (local next-island (restored-map:create-island {:kind "freeform" :members ["test:a"]}))
+    (assert (= next-island.id "island-3")
+            "GraphMapManager should restore next island id")
+    (cleanup-manager restored-fixture))
+
+(fn graph-map-manager-prunes-unresolved-island-members-during-hydration []
+    (local fixture
+        (make-manager {:active_map_id "main"
+                       :next_map_id 3
+                       :maps [{:id "main" :name "Main" :nodes [] :edges []}
+                              {:id "list" :name "List" :nodes ["test:a" "missing:item"] :edges []
+                               :islands [(island-record "island-1" ["test:a" "missing:item"])]
+                               :next_island_id 2}]}))
+    (local captured (fixture.manager:capture-state))
+    (local list-entry (find-map-entry captured "list"))
+    (assert list-entry "capture-state should include inactive hydrated map entry")
+    (assert (= (length list-entry.nodes) 1)
+            "GraphMapManager should prune unresolved inactive map nodes during hydration")
+    (assert (= (. list-entry.nodes 1) "test:a")
+            "GraphMapManager should retain resolved inactive map nodes")
+    (assert (= (length list-entry.islands) 1)
+            "GraphMapManager should keep island with resolved members")
+    (assert (= (length (. list-entry.islands 1 :members)) 1)
+            "GraphMapManager should prune unresolved island members during hydration")
+    (assert (= (. list-entry.islands 1 :members 1) "test:a")
+            "GraphMapManager should preserve remaining island member order")
+    (assert (= list-entry.next_island_id 2)
+            "GraphMapManager should preserve next island id after pruning")
+    (cleanup-manager fixture))
+
+(fn graph-map-manager-drops-empty-island-after-member-pruning []
+    (local fixture
+        (make-manager {:active_map_id "main"
+                       :maps [{:id "main" :name "Main" :nodes [] :edges []}
+                              {:id "list" :name "List" :nodes ["missing:item"] :edges []
+                               :islands [(island-record "island-1" ["missing:item"])]
+                               :next_island_id 2}]}))
+    (local captured (fixture.manager:capture-state))
+    (local list-entry (find-map-entry captured "list"))
+    (assert list-entry "capture-state should include inactive hydrated map entry")
+    (assert (= (length list-entry.nodes) 0)
+            "GraphMapManager should prune unresolved inactive map nodes")
+    (assert (= (length (or list-entry.islands [])) 0)
+            "GraphMapManager should drop islands that have no resolved members")
+    (assert (= list-entry.next_island_id 2)
+            "GraphMapManager should preserve next island id when dropping empty islands")
+    (cleanup-manager fixture))
+
 (table.insert tests {:name "GraphMap upserts captures and restores islands" :fn graph-map-upserts-captures-and-restores-islands})
 (table.insert tests {:name "GraphMap rejects invalid island records" :fn graph-map-rejects-invalid-island-records})
 (table.insert tests {:name "GraphMap removes island without removing member nodes" :fn graph-map-removes-island-without-removing-member-nodes})
 (table.insert tests {:name "GraphMap removes origin node while island remains" :fn graph-map-removes-origin-node-while-island-remains})
 (table.insert tests {:name "GraphMap prunes removed member nodes from islands" :fn graph-map-prunes-removed-member-nodes-from-islands})
 (table.insert tests {:name "GraphMap restore emits removed for replaced islands" :fn graph-map-restore-emits-removed-for-replaced-islands})
+(table.insert tests {:name "GraphMapManager captures and restores island records" :fn graph-map-manager-captures-and-restores-island-records})
+(table.insert tests {:name "GraphMapManager prunes unresolved island members during hydration" :fn graph-map-manager-prunes-unresolved-island-members-during-hydration})
+(table.insert tests {:name "GraphMapManager drops empty island after member pruning" :fn graph-map-manager-drops-empty-island-after-member-pruning})
 
 (local main
     (fn []
