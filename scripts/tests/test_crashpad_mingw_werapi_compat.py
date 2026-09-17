@@ -121,6 +121,21 @@ def test_old_mingw_winnt_cet_xstate_fallbacks_follow_system_header_before_sdk_fa
     assert "} XSAVE_CET_U_FORMAT" in header
 
 
+def test_old_mingw_winnt_xstate_compaction_fallbacks_follow_system_header_before_cet_fallbacks() -> None:
+    header = read_winnt_compat()
+    include_next = header.index("#include_next <winnt.h>")
+    xstate_cet_u = header.index("#define XSTATE_CET_U 11")
+    compaction_enable_guard = header.index("#ifndef XSTATE_COMPACTION_ENABLE")
+    compaction_enable = header.index("#define XSTATE_COMPACTION_ENABLE 63")
+    compaction_mask_guard = header.index("#ifndef XSTATE_COMPACTION_ENABLE_MASK")
+    compaction_mask = header.index(
+        "#define XSTATE_COMPACTION_ENABLE_MASK (1ull << XSTATE_COMPACTION_ENABLE)"
+    )
+
+    assert include_next < compaction_enable_guard < compaction_enable < xstate_cet_u
+    assert include_next < compaction_mask_guard < compaction_mask < xstate_cet_u
+
+
 def test_process_reader_initialize_context2_sdk_definitions_do_not_apply_to_mingw() -> None:
     cmake = read_snapshot_cmake()
     definitions = "WINVER=0x0A00 _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000006"
