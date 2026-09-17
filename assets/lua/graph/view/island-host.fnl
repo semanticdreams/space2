@@ -12,6 +12,7 @@
     (local set-node-position (assert-required-callback options :set-node-position))
     (local set-node-pinned (assert-required-callback options :set-node-pinned))
     (local pinned-by-island {})
+    (local member-pin-counts {})
 
     (fn presenter-for-kind [kind]
         (assert (= (type presenters.presenter-for-kind) :function)
@@ -22,15 +23,36 @@
         (assert (node-for-key options key)
                 (.. "GraphViewIslandHost missing node for island member: " (tostring key))))
 
-    (fn unpin-member [island-id key]
+    (fn member-pin-count [key]
+        (if (. member-pin-counts key) (. member-pin-counts key) 0))
+
+    (fn add-member-pin-owner [island-id key]
+        (local tracked (if (. pinned-by-island island-id) (. pinned-by-island island-id) {}))
+        (set (. pinned-by-island island-id) tracked)
+        (when (not (. tracked key))
+            (set (. tracked key) true)
+            (set (. member-pin-counts key) (+ (member-pin-count key) 1))))
+
+    (fn remove-member-pin-owner [island-id key]
         (resolve-node key)
-        (set-node-pinned options key false))
+        (local tracked (. pinned-by-island island-id))
+        (when (and tracked (. tracked key))
+            (set (. tracked key) nil)
+            (local next-count (- (member-pin-count key) 1))
+            (if (> next-count 0)
+                (set (. member-pin-counts key) next-count)
+                (do
+                    (set (. member-pin-counts key) nil)
+                    (set-node-pinned options key false)))))
 
     (fn unpin-island-members [island-id]
         (local tracked (. pinned-by-island island-id))
         (when tracked
+            (local member-keys [])
             (each [key _pinned? (pairs tracked)]
-                (unpin-member island-id key))
+                (table.insert member-keys key))
+            (each [_ key (ipairs member-keys)]
+                (remove-member-pin-owner island-id key))
             (set (. pinned-by-island island-id) nil)))
 
     (local self
@@ -46,15 +68,11 @@
                                (assert island-id "set-member-pinned requires island id")
                                (assert key "set-member-pinned requires member key")
                                (resolve-node key)
-                               (local tracked (or (. pinned-by-island island-id) {}))
-                               (set (. pinned-by-island island-id) tracked)
                                (if pinned?
                                    (do
-                                       (set (. tracked key) true)
+                                       (add-member-pin-owner island-id key)
                                        (set-node-pinned options key true))
-                                   (do
-                                       (set (. tracked key) nil)
-                                       (set-node-pinned options key false))))
+                                   (remove-member-pin-owner island-id key)))
          :reconcile-island (fn [self island]
                              (assert island "reconcile-island requires island")
                              (local presenter (presenter-for-kind island.kind))
@@ -66,8 +84,7 @@
                                  (set (. current key) true))
                              (each [key _pinned? (pairs previous)]
                                  (when (not (. current key))
-                                     (unpin-member island.id key)))
-                             (set (. pinned-by-island island.id) {})
+                                     (remove-member-pin-owner island.id key)))
                              (presenter.apply island self))
          :reconcile-all (fn [self islands]
                           (local seen {})

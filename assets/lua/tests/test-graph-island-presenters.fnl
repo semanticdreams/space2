@@ -16,6 +16,13 @@
     (assert-close actual.y expected.y (.. (or message "vec3") " y"))
     (assert-close actual.z expected.z (.. (or message "vec3") " z")))
 
+(fn count-pin-events [events key pinned?]
+    (var count 0)
+    (each [_ event (ipairs events)]
+        (when (and (= event.key key) (= event.pinned? pinned?))
+            (set count (+ count 1))))
+    count)
+
 (fn make-host [opts]
     (local options (if opts opts {}))
     (local positions (if options.positions options.positions {}))
@@ -105,6 +112,27 @@
     (assert (= (. backing-host.pinned 5 :key) "item:b") "drop-island should unpin tracked member")
     (assert (= (. backing-host.pinned 5 :pinned?) false) "drop-island should unpin with false"))
 
+(fn island-host-keeps-shared-members-pinned-until-last-island-drops []
+    (local backing-host (make-host {:positions {"shared" (glm.vec3 1 2 3)}}))
+    (local host (IslandHost.GraphViewIslandHost backing-host))
+    (host:reconcile-island {:id "island-1"
+                            :kind "ordered-list"
+                            :members ["shared" "only:a"]
+                            :state {:spacing 5}})
+    (host:reconcile-island {:id "island-2"
+                            :kind "ordered-list"
+                            :members ["shared" "only:b"]
+                            :state {:spacing 5}})
+    (host:reconcile-island {:id "island-1"
+                            :kind "ordered-list"
+                            :members ["only:a"]
+                            :state {:spacing 5}})
+    (assert (= (count-pin-events backing-host.pinned "shared" false) 0)
+            "removing a shared member from one island should not unpin while another island owns it")
+    (host:drop-island "island-2")
+    (assert (= (count-pin-events backing-host.pinned "shared" false) 1)
+            "dropping the last island owner should unpin the shared member"))
+
 (table.insert tests {:name "OrderedListPresenter computes deterministic vertical placements"
                      :fn ordered-list-presenter-computes-deterministic-vertical-placements})
 (table.insert tests {:name "OrderedListPresenter uses state position before member fallback"
@@ -113,6 +141,8 @@
                      :fn island-host-errors-on-missing-presenter-kind})
 (table.insert tests {:name "IslandHost pins and unpins island members through host callbacks"
                      :fn island-host-pins-and-unpins-island-members-through-host-callbacks})
+(table.insert tests {:name "IslandHost keeps shared members pinned until last island drops"
+                     :fn island-host-keeps-shared-members-pinned-until-last-island-drops})
 
 (local main
     (fn []
