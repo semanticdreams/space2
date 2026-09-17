@@ -179,6 +179,7 @@
     :tests.test-workflow-graph
     :tests.test-graph-map
     :tests.test-graph-islands
+    :tests.test-ordered-list-islands
     :tests.test-graph-island-presenters
     :tests.test-graph-view-islands
     :tests.test-graph-map-manager

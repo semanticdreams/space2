@@ -24,6 +24,9 @@
 (fn edge-key [source target]
   (.. (node-id source) "->" (node-id target)))
 
+(fn ordered-list-island-id [entity-id]
+  (.. "ordered-list:" (tostring entity-id)))
+
 (fn remove-edge-by-key [graph key]
   (when (and graph graph.edges graph.edge-map key)
     (local existing (. graph.edge-map key))
@@ -80,6 +83,37 @@
   (if (identity-key? key)
       (string.sub key (+ (string.len IDENTITY_KEY_PREFIX) 1))
       nil))
+
+(fn load-visible-node [graph key]
+  (if (not graph)
+      nil
+      (if graph.resolve-node
+          (graph:resolve-node key)
+          (if graph.load-by-key
+              (graph:load-by-key key)
+              nil))))
+
+(fn identity-target-key [identity-store item-key]
+  (local identity-id (identity-id-from-key item-key))
+  (if (and identity-id identity-store identity-store.get-entity)
+      (do
+        (local identity-entity (identity-store:get-entity identity-id))
+        (local target-key (and identity-entity identity-entity.target-key))
+        (if (and target-key (> (string.len (tostring target-key)) 0))
+            target-key
+            nil))
+      nil))
+
+(fn resolve-item-target [self item-key]
+  (local graph self.graph)
+  (local direct (load-visible-node graph item-key))
+  (if direct
+      direct
+      (do
+        (local target-key (identity-target-key self.identity-store item-key))
+        (if target-key
+            (load-visible-node graph target-key)
+            nil))))
 
 (fn ListEntityNode [opts]
   (local options (or opts {}))
@@ -143,37 +177,38 @@
        (fn [self]
          (local graph self.graph)
          (when (and graph graph.load-by-key graph.add-edge)
-           (local current (self:get-entity))
-           (local items (or (and current current.items) []))
-           (local desired {})
-           (fn resolve-item-target [item-key]
-             (local resolved
-               (if graph.resolve-node
-                   (graph:resolve-node item-key)
-                   (graph:load-by-key item-key)))
-             (if resolved
-                 resolved
-                 (do
-                   (local identity-id (identity-id-from-key item-key))
-                   (if (and identity-id self.identity-store self.identity-store.get-entity)
-                       (do
-                         (local identity-entity (self.identity-store:get-entity identity-id))
-                         (local target-key (and identity-entity identity-entity.target-key))
-                         (when (and target-key (> (string.len (tostring target-key)) 0))
-                           (if graph.resolve-node
-                               (graph:resolve-node target-key)
-                               (graph:load-by-key target-key))))
-                       nil))))
-           (each [_ item-key (ipairs items)]
-             (local target (resolve-item-target item-key))
-             (when target
-               (graph:add-edge (GraphEdge {:source self :target target})
-                               {:from-list-entity self.entity-id})
+            (local current (self:get-entity))
+            (local items (or (and current current.items) []))
+            (local desired {})
+            (each [_ item-key (ipairs items)]
+              (local target (resolve-item-target self item-key))
+              (when target
+                (graph:add-edge (GraphEdge {:source self :target target})
+                                {:from-list-entity self.entity-id})
                (set (. desired (edge-key self target)) true)))
            (each [k _ (pairs (or self.list-item-edge-keys {}))]
              (when (not (. desired k))
                (remove-edge-by-key graph k)))
-           (set self.list-item-edge-keys desired))))
+            (set self.list-item-edge-keys desired))))
+
+  (set node.expand-items-as-island
+       (fn [self _opts]
+         (local graph self.graph)
+         (assert (and graph graph.load-by-key graph.upsert-island)
+                 "ListEntityNode.expand-items-as-island requires mounted graph map with load-by-key and upsert-island")
+         (local current (self:get-entity))
+         (local items (or (and current current.items) []))
+         (local members [])
+         (each [_ item-key (ipairs items)]
+           (local target (resolve-item-target self item-key))
+           (when (and target target.key)
+             (table.insert members (tostring target.key))))
+         (graph:upsert-island {:id (ordered-list-island-id self.entity-id)
+                               :kind "ordered-list"
+                               :members members
+                               :state {:list-key self.key
+                                       :interaction-policy "snap-back"
+                                       :spacing 24}})))
 
   (set node.update-name
        (fn [self new-name]
@@ -201,13 +236,17 @@
          (self.store:delete-entity self.entity-id)))
 
   (set node.actions
-       [{:name "Refresh Items"
-         :icon "refresh"
-         :fn (fn [_button _event]
-                 (node:add-item-nodes))}
-        {:name "Delete Entity"
-         :icon "delete"
-         :fn (fn [_button _event]
+        [{:name "Refresh Items"
+          :icon "refresh"
+          :fn (fn [_button _event]
+                  (node:add-item-nodes))}
+         {:name "Expand items as island"
+          :icon "format_list_numbered"
+          :fn (fn [_button _event]
+                  (node:expand-items-as-island))}
+         {:name "Delete Entity"
+          :icon "delete"
+          :fn (fn [_button _event]
                  (node:delete-entity))}])
 
   (var deleted-handler nil)
@@ -234,7 +273,10 @@
     (local id (or (and payload payload.id) ""))
     (when (= (tostring id) (tostring entity-id))
       (node.items-changed:emit payload)
-      (node:add-item-nodes)))
+      (node:add-item-nodes)
+      (local graph node.graph)
+      (when (and graph graph.get-island (graph:get-island (ordered-list-island-id entity-id)))
+        (node:expand-items-as-island))))
 
   (set items-handler
        (store.list-entity-items-changed:connect handle-items-changed))
