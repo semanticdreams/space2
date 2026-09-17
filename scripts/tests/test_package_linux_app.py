@@ -1,0 +1,127 @@
+import importlib.util
+import json
+import stat
+import tarfile
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+PACKAGER = REPO_ROOT / "scripts" / "package-linux-app.py"
+
+
+def load_packager():
+    spec = importlib.util.spec_from_file_location("package_linux_app", PACKAGER)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def make_metadata(tmp_path: Path, *, linux_profile: str = "full", release_version: str = "v1.2.3") -> Path:
+    assets = tmp_path / "app" / "assets"
+    (assets / "lua").mkdir(parents=True)
+    (assets / "lua" / "main.fnl").write_text("(fn main [] nil)\n", encoding="utf-8")
+    metadata = {
+        "app_name": "My Game",
+        "app_id": "mygame",
+        "entrypoint": "main",
+        "assets_dir": str(assets),
+        "icon_path": None,
+        "linux_profile": linux_profile,
+        "release_version": release_version,
+        "package_version": release_version.removeprefix("v"),
+        "space_version": "v9.8.7",
+    }
+    path = tmp_path / "metadata.json"
+    path.write_text(json.dumps(metadata), encoding="utf-8")
+    return path
+
+
+def make_space_tarball(tmp_path: Path) -> Path:
+    root = tmp_path / "space-root"
+    (root / "bin").mkdir(parents=True)
+    (root / "share" / "space" / "assets" / "lua").mkdir(parents=True)
+    (root / "bin" / "space").write_text("space binary\n", encoding="utf-8")
+    (root / "share" / "space" / "assets" / "lua" / "main.fnl").write_text(
+        "(print :space)\n", encoding="utf-8"
+    )
+    tarball = tmp_path / "space-linux-x86_64.tar.gz"
+    with tarfile.open(tarball, "w:gz") as archive:
+        for path in root.rglob("*"):
+            archive.add(path, arcname=path.relative_to(root))
+    return tarball
+
+
+def assert_executable(path: Path) -> None:
+    assert path.is_file()
+    assert path.stat().st_mode & stat.S_IXUSR
+
+
+def test_package_root_is_app_only_and_generates_space_dependency_metadata(tmp_path: Path) -> None:
+    packager = load_packager()
+    metadata = packager.load_metadata(make_metadata(tmp_path))
+    root = tmp_path / "pkgroot"
+
+    packager.stage_package_root(metadata, root)
+    control_text = packager.deb_control_text(metadata)
+    spec_text = packager.rpm_spec_text(metadata)
+
+    assert_executable(root / "usr" / "bin" / "mygame")
+    assert (root / "usr" / "share" / "mygame" / "assets" / "lua" / "main.fnl").is_file()
+    assert (root / "usr" / "share" / "applications" / "mygame.desktop").is_file()
+    assert not (root / "usr" / "share" / "space" / "assets").exists()
+    launcher = (root / "usr" / "bin" / "mygame").read_text(encoding="utf-8")
+    assert 'SPACE_ASSETS_PATH="/usr/share/mygame/assets${SPACE_ASSETS_PATH:+:$SPACE_ASSETS_PATH}" exec /usr/bin/space -m main "$@"' in launcher
+    assert "Depends: space (>= 1.2.3)" in control_text
+    assert "Requires: space >= 1.2.3" in spec_text
+
+
+def test_unsafe_dependency_version_falls_back_to_unversioned_space_dependency(tmp_path: Path) -> None:
+    packager = load_packager()
+    metadata = packager.load_metadata(make_metadata(tmp_path, release_version="nightly-main"))
+
+    assert "Depends: space\n" in packager.deb_control_text(metadata)
+    assert "Requires: space\n" in packager.rpm_spec_text(metadata)
+
+
+def test_tarball_root_preserves_space_files_and_prepends_app_assets(tmp_path: Path) -> None:
+    packager = load_packager()
+    metadata = packager.load_metadata(make_metadata(tmp_path))
+    root = tmp_path / "tarroot"
+
+    packager.stage_tarball_root(metadata, make_space_tarball(tmp_path), root)
+
+    assert (root / "bin" / "space").read_text(encoding="utf-8") == "space binary\n"
+    assert (root / "share" / "space" / "assets" / "lua" / "main.fnl").is_file()
+    assert (root / "share" / "mygame" / "assets" / "lua" / "main.fnl").is_file()
+    assert_executable(root / "mygame")
+    launcher = (root / "mygame").read_text(encoding="utf-8")
+    assert 'SPACE_ASSETS_PATH="${APP_DIR}/share/mygame/assets:${APP_DIR}/share/space/assets${SPACE_ASSETS_PATH:+:$SPACE_ASSETS_PATH}"' in launcher
+    assert 'exec "${APP_DIR}/bin/space" -m main "$@"' in launcher
+
+
+def test_artifact_names_include_profile_only_for_self_contained_outputs(tmp_path: Path) -> None:
+    packager = load_packager()
+    full = packager.load_metadata(make_metadata(tmp_path / "full", linux_profile="full"))
+    minimal = packager.load_metadata(make_metadata(tmp_path / "minimal", linux_profile="minimal"))
+
+    assert packager.artifact_name(full, "deb") == "mygame-linux-amd64.deb"
+    assert packager.artifact_name(full, "rpm") == "mygame-linux-x86_64.rpm"
+    assert packager.artifact_name(full, "tarball") == "mygame-linux-x86_64.tar.gz"
+    assert packager.artifact_name(minimal, "deb") == "mygame-linux-amd64.deb"
+    assert packager.artifact_name(minimal, "rpm") == "mygame-linux-x86_64.rpm"
+    assert packager.artifact_name(minimal, "tarball") == "mygame-linux-x86_64-minimal.tar.gz"
+
+
+def test_manifest_lists_built_artifacts(tmp_path: Path) -> None:
+    packager = load_packager()
+    output_dir = tmp_path / "out"
+    artifacts = [output_dir / "mygame-linux-amd64.deb", output_dir / "mygame-linux-x86_64.tar.gz"]
+    output_dir.mkdir()
+    for artifact in artifacts:
+        artifact.write_text("artifact\n", encoding="utf-8")
+
+    manifest = packager.write_manifest(output_dir, artifacts)
+
+    assert manifest.read_text(encoding="utf-8") == "mygame-linux-amd64.deb\nmygame-linux-x86_64.tar.gz\n"

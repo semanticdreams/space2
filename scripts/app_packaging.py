@@ -4,6 +4,8 @@ import dataclasses
 import json
 import os
 import re
+import shutil
+import stat
 from pathlib import Path
 
 
@@ -61,6 +63,54 @@ def normalize_package_version(release_version: str) -> str:
     ):
         return release_version[1:]
     return release_version
+
+
+def load_metadata_json(path: str | Path) -> AppMetadata:
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    return AppMetadata(**data)
+
+
+def safe_copy_tree(source: str | Path, destination: str | Path) -> None:
+    src = Path(source)
+    dst = Path(destination)
+    if not src.is_dir():
+        raise MetadataError(f"source directory does not exist: {src}")
+    if dst.exists():
+        shutil.rmtree(dst)
+    shutil.copytree(src, dst, symlinks=True)
+
+
+def write_executable(path: str | Path, content: str) -> Path:
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(content, encoding="utf-8")
+    mode = output.stat().st_mode
+    output.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return output
+
+
+def desktop_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("\n", "\\n")
+
+
+SAFE_DEPENDENCY_VERSION_PATTERN = re.compile(r"^[0-9][A-Za-z0-9.+:~_-]*$")
+
+
+def safe_dependency_version(package_version: str) -> str | None:
+    if SAFE_DEPENDENCY_VERSION_PATTERN.fullmatch(package_version):
+        return package_version
+    return None
+
+
+def linux_artifact_name(app_id: str, target: str, linux_profile: str = "full") -> str:
+    if target == "deb":
+        return f"{app_id}-linux-amd64.deb"
+    if target == "rpm":
+        return f"{app_id}-linux-x86_64.rpm"
+    if target == "tarball":
+        profile_suffix = "-minimal" if linux_profile == "minimal" else ""
+        return f"{app_id}-linux-x86_64{profile_suffix}.tar.gz"
+    raise MetadataError(f"unsupported Linux package target: {target}")
 
 
 def ref_name_from_environment() -> str:
