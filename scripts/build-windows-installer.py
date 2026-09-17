@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
 import re
 import shutil
 import subprocess
 import sys
+import uuid
 
 
 def parse_args() -> argparse.Namespace:
@@ -17,6 +19,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dist-dir", default=None)
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--iss-path", default=None)
+    parser.add_argument("--metadata-json", default=None)
     parser.add_argument("--app-exe-name", default="space.exe")
     parser.add_argument("--output-basename", default="space-windows-x86_64-setup")
     parser.add_argument("--iscc-path", default=None)
@@ -63,6 +66,79 @@ def resolve_iscc_path(explicit_path: str | None) -> pathlib.Path:
     raise SystemExit("Unable to locate ISCC.exe. Install Inno Setup or pass --iscc-path.")
 
 
+def deterministic_app_id(app_id: str) -> str:
+    return "{{" + str(uuid.uuid5(uuid.NAMESPACE_URL, f"space-app:{app_id}")).upper() + "}}"
+
+
+def resolve_app_icon(icon_path: str | pathlib.Path, output_dir: str | pathlib.Path) -> pathlib.Path:
+    source = pathlib.Path(icon_path).resolve()
+    if not source.is_file():
+        raise SystemExit(f"Missing app icon: {source}")
+    if source.suffix.lower() == ".ico":
+        return source
+    if source.suffix.lower() != ".png":
+        raise SystemExit(f"Unsupported Windows app icon format: {source}")
+    output = pathlib.Path(output_dir).resolve() / "app.ico"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [
+            sys.executable,
+            str(pathlib.Path(__file__).resolve().parent / "generate_windows_icon.py"),
+            "--input",
+            str(source),
+            "--output",
+            str(output),
+        ],
+        check=True,
+    )
+    return output
+
+
+def app_metadata_command_defines(metadata_json: pathlib.Path, output_dir: pathlib.Path) -> dict[str, str]:
+    metadata = json.loads(metadata_json.read_text(encoding="utf-8"))
+    required = ["app_name", "app_id", "entrypoint", "package_version"]
+    missing = [key for key in required if not metadata.get(key)]
+    if missing:
+        raise SystemExit(f"Missing app metadata field(s): {', '.join(missing)}")
+    defines = {
+        "AppId": deterministic_app_id(str(metadata["app_id"])),
+        "AppName": str(metadata["app_name"]),
+        "AppVersion": str(metadata["package_version"]),
+        "AppPublisher": str(metadata["app_name"]),
+        "AppExeName": "space.exe",
+        "AppExeArgs": f'-m {metadata["entrypoint"]}',
+        "AppDirName": str(metadata["app_id"]),
+        "AppGroupName": str(metadata["app_name"]),
+        "OutputBaseFilename": f'{metadata["app_id"]}-windows-x86_64-setup',
+    }
+    icon_path = metadata.get("icon_path")
+    if icon_path:
+        defines["AppIconFile"] = str(resolve_app_icon(str(icon_path), output_dir))
+    return defines
+
+
+def space_command_defines(cpack_config: pathlib.Path, app_icon_path: pathlib.Path, app_exe_name: str, output_basename: str) -> dict[str, str]:
+    require_file(cpack_config, "CPack config")
+    require_file(app_icon_path, "generated Windows icon")
+    cpack_text = cpack_config.read_text(encoding="utf-8")
+    app_name = parse_cpack_var("CPACK_PACKAGE_NAME", cpack_text)
+    app_version = parse_cpack_var("CPACK_PACKAGE_VERSION", cpack_text)
+    app_publisher = parse_cpack_var("CPACK_DEBIAN_PACKAGE_MAINTAINER", cpack_text) or app_name
+    if not app_name or not app_version:
+        raise SystemExit(f"Failed to resolve package metadata from {cpack_config}")
+    return {
+        "AppName": app_name,
+        "AppVersion": app_version,
+        "AppPublisher": app_publisher,
+        "AppExeName": app_exe_name,
+        "AppExeArgs": "",
+        "AppDirName": app_name,
+        "AppGroupName": app_name,
+        "OutputBaseFilename": output_basename,
+        "AppIconFile": str(app_icon_path),
+    }
+
+
 def main() -> int:
     args = parse_args()
     root_dir = pathlib.Path(args.root_dir).resolve()
@@ -73,39 +149,28 @@ def main() -> int:
     cpack_config = build_dir / "CPackConfig.cmake"
     app_icon_path = build_dir / "space.ico"
 
-    require_dir(build_dir, "build directory")
     require_dir(dist_dir, "packaged runtime directory")
     require_file(dist_dir / args.app_exe_name, "packaged Windows executable")
     require_file(iss_path, "Inno Setup script")
-    require_file(cpack_config, "CPack config")
-    require_file(app_icon_path, "generated Windows icon")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    cpack_text = cpack_config.read_text(encoding="utf-8")
-    app_name = parse_cpack_var("CPACK_PACKAGE_NAME", cpack_text)
-    app_version = parse_cpack_var("CPACK_PACKAGE_VERSION", cpack_text)
-    app_publisher = parse_cpack_var("CPACK_DEBIAN_PACKAGE_MAINTAINER", cpack_text) or app_name
-    if not app_name or not app_version:
-        raise SystemExit(f"Failed to resolve package metadata from {cpack_config}")
+    if args.metadata_json:
+        defines = app_metadata_command_defines(pathlib.Path(args.metadata_json).resolve(), output_dir)
+    else:
+        require_dir(build_dir, "build directory")
+        defines = space_command_defines(cpack_config, app_icon_path, args.app_exe_name, args.output_basename)
 
     iscc_path = resolve_iscc_path(args.iscc_path)
     command = [
         str(iscc_path),
-        f"/DAppName={app_name}",
-        f"/DAppVersion={app_version}",
-        f"/DAppPublisher={app_publisher}",
-        f"/DAppExeName={args.app_exe_name}",
-        f"/DAppDirName={app_name}",
-        f"/DAppGroupName={app_name}",
+        *[f"/D{name}={value}" for name, value in defines.items()],
         f"/DSourceDir={dist_dir}",
         f"/DOutputDir={output_dir}",
-        f"/DOutputBaseFilename={args.output_basename}",
-        f"/DAppIconFile={app_icon_path}",
         str(iss_path),
     ]
     subprocess.run(command, check=True)
 
-    installer_path = output_dir / f"{args.output_basename}.exe"
+    installer_path = output_dir / f"{defines['OutputBaseFilename']}.exe"
     require_file(installer_path, "generated installer")
     print(installer_path)
     return 0
