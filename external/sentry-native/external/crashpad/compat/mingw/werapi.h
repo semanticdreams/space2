@@ -54,6 +54,21 @@ typedef struct _WER_RUNTIME_EXCEPTION_INFORMATION {
   CONTEXT context;
   PCWSTR pwszReportId;
 } WER_RUNTIME_EXCEPTION_INFORMATION, *PWER_RUNTIME_EXCEPTION_INFORMATION;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+HRESULT WINAPI WerRegisterRuntimeExceptionModule(
+    PCWSTR pwszOutOfProcessCallbackDll,
+    PVOID pContext);
+HRESULT WINAPI WerUnregisterRuntimeExceptionModule(
+    PCWSTR pwszOutOfProcessCallbackDll,
+    PVOID pContext);
+
+#ifdef __cplusplus
+}
+#endif
 #endif
 
 #endif  // CRASHPAD_COMPAT_MINGW_WERAPI_H_

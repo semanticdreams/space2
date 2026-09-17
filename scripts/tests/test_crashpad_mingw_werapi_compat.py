@@ -37,6 +37,24 @@ def test_runtime_exception_information_fallback_is_available_after_system_header
     assert "PWER_RUNTIME_EXCEPTION_INFORMATION" in header
 
 
+def test_runtime_exception_module_fallbacks_are_available_after_system_header_with_c_linkage() -> None:
+    header = read_werapi_compat()
+    include_next = header.index("#include_next <werapi.h>")
+    type_fallback = header.index("typedef struct _WER_RUNTIME_EXCEPTION_INFORMATION")
+    register_fallback = "HRESULT WINAPI WerRegisterRuntimeExceptionModule("
+    unregister_fallback = "HRESULT WINAPI WerUnregisterRuntimeExceptionModule("
+
+    assert header.index(register_fallback) > include_next
+    assert header.index(unregister_fallback) > include_next
+    assert header.index(register_fallback) > type_fallback
+    assert header.index(unregister_fallback) > type_fallback
+    assert "#ifdef __cplusplus\nextern \"C\" {\n#endif" in header
+    assert "#ifdef __cplusplus\n}\n#endif" in header
+    assert "PCWSTR pwszOutOfProcessCallbackDll" in header
+    assert "PVOID pContext" in header
+    assert "#ifndef WerRegisterRuntimeExceptionModule" not in header
+
+
 def test_mini_chromium_windows_sdk_includes_use_mingw_case_sensitive_names() -> None:
     source = read_mini_chromium_rand_util()
 
