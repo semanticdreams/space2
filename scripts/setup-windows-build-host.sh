@@ -19,6 +19,7 @@ sudo apt-get install -y \
     git \
     pkg-config \
     nasm \
+    llvm-14 \
     curl \
     python3 \
     python3-pil \
