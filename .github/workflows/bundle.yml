@@ -1,0 +1,282 @@
+name: Bundle Space App
+
+on:
+  workflow_call:
+    inputs:
+      space-version:
+        description: Pinned Space GitHub Release tag to bundle.
+        required: true
+        type: string
+      app-name:
+        description: Human-readable app name.
+        required: true
+        type: string
+      app-id:
+        description: Package-safe app id. Derived from app-name when empty.
+        required: false
+        type: string
+        default: ""
+      entrypoint:
+        description: Space module or module:function entrypoint.
+        required: false
+        type: string
+        default: main
+      assets-dir:
+        description: App assets directory relative to the caller repository.
+        required: false
+        type: string
+        default: assets
+      icon-path:
+        description: Optional app icon path relative to the caller repository.
+        required: false
+        type: string
+        default: ""
+      linux-profile:
+        description: Space Linux release profile to bundle, either full or minimal.
+        required: false
+        type: string
+        default: full
+      release-version:
+        description: App release version. Derived from the caller tag/ref when empty.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  bundle-linux:
+    name: Bundle Linux app artifacts
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout caller app
+        uses: actions/checkout@v5
+        with:
+          path: app
+
+      - name: Resolve Space workflow repository ref
+        id: space-workflow-ref
+        shell: bash
+        env:
+          GITHUB_WORKFLOW_REF_VALUE: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          workflow_ref="${GITHUB_WORKFLOW_REF_VALUE}"
+          if [[ "${workflow_ref}" != *@* || "${workflow_ref}" != */.github/workflows/* ]]; then
+            echo "Unable to parse github.workflow_ref: ${workflow_ref}" >&2
+            exit 1
+          fi
+          SPACE_WORKFLOW_REPO="${workflow_ref%%/.github/workflows/*}"
+          SPACE_WORKFLOW_REF="${workflow_ref##*@}"
+          {
+            echo "repository=${SPACE_WORKFLOW_REPO}"
+            echo "ref=${SPACE_WORKFLOW_REF}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout Space packaging scripts
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ steps.space-workflow-ref.outputs.repository }}
+          ref: ${{ steps.space-workflow-ref.outputs.ref }}
+          path: space-packaging
+
+      - name: Normalize app metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          python3 space-packaging/scripts/normalize-app-metadata.py \
+            --repo-root app \
+            --space-version "${{ inputs.space-version }}" \
+            --app-name "${{ inputs.app-name }}" \
+            --app-id "${{ inputs.app-id }}" \
+            --entrypoint "${{ inputs.entrypoint }}" \
+            --assets-dir "${{ inputs.assets-dir }}" \
+            --icon-path "${{ inputs.icon-path }}" \
+            --linux-profile "${{ inputs.linux-profile }}" \
+            --release-version "${{ inputs.release-version }}" \
+            --output build/app-metadata.json
+
+      - name: Download pinned Space Linux release artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p build/space-release
+          SPACE_PROFILE_SUFFIX=""
+          if [[ "${{ inputs.linux-profile }}" == "minimal" ]]; then
+            SPACE_PROFILE_SUFFIX="-minimal"
+          fi
+          SPACE_TARBALL_NAME="space-linux-x86_64${SPACE_PROFILE_SUFFIX}.tar.gz"
+          case "${SPACE_TARBALL_NAME}" in
+            space-linux-x86_64.tar.gz|space-linux-x86_64-minimal.tar.gz) ;;
+            *) echo "Unsupported Space Linux artifact: ${SPACE_TARBALL_NAME}" >&2; exit 1 ;;
+          esac
+          gh release download "${{ inputs.space-version }}" \
+            --repo semanticdreams/space2 \
+            --pattern "${SPACE_TARBALL_NAME}" \
+            --dir build/space-release
+          test -f "build/space-release/${SPACE_TARBALL_NAME}"
+
+      - name: Install Linux app packaging tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev rpm desktop-file-utils file fuse libfuse2
+
+      - name: Build Linux app packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          SPACE_PROFILE_SUFFIX=""
+          if [[ "${{ inputs.linux-profile }}" == "minimal" ]]; then
+            SPACE_PROFILE_SUFFIX="-minimal"
+          fi
+          python3 space-packaging/scripts/package-linux-app.py \
+            --metadata-json build/app-metadata.json \
+            --space-tarball "build/space-release/space-linux-x86_64${SPACE_PROFILE_SUFFIX}.tar.gz" \
+            --output-dir build/linux-dist \
+            --targets deb,rpm,tarball,appimage
+
+      - name: Resolve Linux app release artifacts
+        id: linux-release-artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="build/linux-dist/app-release-artifacts-linux.txt"
+          test -f "${manifest}"
+          {
+            echo 'files<<EOF'
+            while IFS= read -r artifact; do
+              test -n "${artifact}"
+              test -f "build/linux-dist/${artifact}"
+              echo "build/linux-dist/${artifact}"
+            done < "${manifest}"
+            echo 'EOF'
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Upload Linux app artifacts to GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref_type == 'tag'
+        with:
+          files: ${{ steps.linux-release-artifacts.outputs.files }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  bundle-windows:
+    name: Bundle Windows app artifacts
+    runs-on: windows-latest
+    steps:
+      - name: Checkout caller app
+        uses: actions/checkout@v5
+        with:
+          path: app
+
+      - name: Resolve Space workflow repository ref
+        id: space-workflow-ref
+        shell: bash
+        env:
+          GITHUB_WORKFLOW_REF_VALUE: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          workflow_ref="${GITHUB_WORKFLOW_REF_VALUE}"
+          if [[ "${workflow_ref}" != *@* || "${workflow_ref}" != */.github/workflows/* ]]; then
+            echo "Unable to parse github.workflow_ref: ${workflow_ref}" >&2
+            exit 1
+          fi
+          SPACE_WORKFLOW_REPO="${workflow_ref%%/.github/workflows/*}"
+          SPACE_WORKFLOW_REF="${workflow_ref##*@}"
+          {
+            echo "repository=${SPACE_WORKFLOW_REPO}"
+            echo "ref=${SPACE_WORKFLOW_REF}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout Space packaging scripts
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ steps.space-workflow-ref.outputs.repository }}
+          ref: ${{ steps.space-workflow-ref.outputs.ref }}
+          path: space-packaging
+
+      - name: Normalize app metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          python space-packaging/scripts/normalize-app-metadata.py \
+            --repo-root app \
+            --space-version "${{ inputs.space-version }}" \
+            --app-name "${{ inputs.app-name }}" \
+            --app-id "${{ inputs.app-id }}" \
+            --entrypoint "${{ inputs.entrypoint }}" \
+            --assets-dir "${{ inputs.assets-dir }}" \
+            --icon-path "${{ inputs.icon-path }}" \
+            --linux-profile "${{ inputs.linux-profile }}" \
+            --release-version "${{ inputs.release-version }}" \
+            --output build/app-metadata.json
+
+      - name: Download pinned Space Windows release artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p build/space-release
+          gh release download "${{ inputs.space-version }}" \
+            --repo semanticdreams/space2 \
+            --pattern "space-windows-x86_64.zip" \
+            --dir build/space-release
+          test -f build/space-release/space-windows-x86_64.zip
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Install Pillow for icon conversion
+        shell: pwsh
+        run: python -m pip install Pillow
+
+      - name: Build Windows app packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          python space-packaging/scripts/package-windows-app.py \
+            --metadata-json build/app-metadata.json \
+            --space-zip build/space-release/space-windows-x86_64.zip \
+            --output-dir build/windows-dist \
+            --targets zip,installer-stage
+          python space-packaging/scripts/build-windows-installer.py \
+            --root-dir space-packaging \
+            --build-dir space-packaging/build/windows \
+            --dist-dir build/windows-dist/installer-stage \
+            --output-dir build/windows-dist \
+            --iss-path space-packaging/scripts/windows-installer.iss \
+            --metadata-json build/app-metadata.json
+
+      - name: Resolve Windows app release artifacts
+        id: windows-release-artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="build/windows-dist/app-release-artifacts-windows.txt"
+          test -f "${manifest}"
+          {
+            echo 'files<<EOF'
+            while IFS= read -r artifact; do
+              test -n "${artifact}"
+              test -f "build/windows-dist/${artifact}"
+              echo "build/windows-dist/${artifact}"
+            done < "${manifest}"
+            echo 'EOF'
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Upload Windows app artifacts to GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref_type == 'tag'
+        with:
+          files: ${{ steps.windows-release-artifacts.outputs.files }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
