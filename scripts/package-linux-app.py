@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -26,7 +27,7 @@ from app_packaging import (  # noqa: E402
 
 
 MANIFEST_NAME = "app-release-artifacts-linux.txt"
-SUPPORTED_TARGETS = {"deb", "rpm", "tarball"}
+SUPPORTED_TARGETS = {"deb", "rpm", "tarball", "appimage"}
 
 
 def load_metadata(path: str | Path) -> AppMetadata:
@@ -196,6 +197,29 @@ def build_tarball(metadata: AppMetadata, tarball_root: Path, output_dir: Path) -
     return output
 
 
+def build_appimage(metadata: AppMetadata, metadata_json: str | Path, runtime_root: Path, output_dir: Path) -> Path:
+    build_dir = runtime_root.parent / "appimage-build"
+    if build_dir.exists():
+        shutil.rmtree(build_dir)
+    build_dir.mkdir(parents=True)
+    env = os.environ.copy()
+    env.update(
+        {
+            "SPACE_APP_METADATA_JSON": str(metadata_json),
+            "SPACE_INSTALL_PREFIX": str(runtime_root),
+            "SPACE_BUILD_DIR": str(build_dir),
+            "SPACE_APPIMAGE_BASENAME": metadata.app_id,
+        }
+    )
+    subprocess.run([str(SCRIPT_DIR / "build-appimage.sh")], check=True, env=env)
+    generated = sorted(build_dir.glob(f"{metadata.app_id}-*-x86_64.AppImage"))
+    if not generated:
+        raise MetadataError(f"build-appimage.sh completed without producing an AppImage in {build_dir}")
+    output = output_dir / artifact_name(metadata, "appimage")
+    shutil.copy2(generated[0], output)
+    return output
+
+
 def write_manifest(output_dir: str | Path, artifacts: list[Path]) -> Path:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -219,7 +243,13 @@ def parse_targets(value: str) -> list[str]:
     return targets
 
 
-def package_linux_app(metadata: AppMetadata, output_dir: str | Path, targets: list[str], space_tarball: str | Path) -> list[Path]:
+def package_linux_app(
+    metadata: AppMetadata,
+    output_dir: str | Path,
+    targets: list[str],
+    space_tarball: str | Path,
+    metadata_json: str | Path,
+) -> list[Path]:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     artifacts: list[Path] = []
@@ -233,6 +263,14 @@ def package_linux_app(metadata: AppMetadata, output_dir: str | Path, targets: li
         if "tarball" in targets:
             tarball_root = stage_tarball_root(metadata, space_tarball, tmp_path / "tarball-root")
             artifacts.append(build_tarball(metadata, tarball_root, output_path))
+        if "appimage" in targets:
+            appimage_root = tmp_path / "appimage-root"
+            stage_tarball_root(metadata, space_tarball, appimage_root)
+            shutil.rmtree(appimage_root / "share" / metadata.app_id, ignore_errors=True)
+            appimage_launcher = appimage_root / metadata.app_id
+            if appimage_launcher.exists():
+                appimage_launcher.unlink()
+            artifacts.append(build_appimage(metadata, metadata_json, appimage_root, output_path))
     write_manifest(output_path, artifacts)
     return artifacts
 
@@ -251,7 +289,7 @@ def main() -> int:
     try:
         metadata = load_metadata(args.metadata_json)
         targets = parse_targets(args.targets)
-        artifacts = package_linux_app(metadata, args.output_dir, targets, args.space_tarball)
+        artifacts = package_linux_app(metadata, args.output_dir, targets, args.space_tarball, args.metadata_json)
     except (MetadataError, OSError, subprocess.CalledProcessError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

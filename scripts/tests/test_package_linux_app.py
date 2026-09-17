@@ -111,9 +111,11 @@ def test_artifact_names_include_profile_only_for_self_contained_outputs(tmp_path
     assert packager.artifact_name(full, "deb") == "mygame-linux-amd64.deb"
     assert packager.artifact_name(full, "rpm") == "mygame-linux-x86_64.rpm"
     assert packager.artifact_name(full, "tarball") == "mygame-linux-x86_64.tar.gz"
+    assert packager.artifact_name(full, "appimage") == "mygame-linux-x86_64.AppImage"
     assert packager.artifact_name(minimal, "deb") == "mygame-linux-amd64.deb"
     assert packager.artifact_name(minimal, "rpm") == "mygame-linux-x86_64.rpm"
     assert packager.artifact_name(minimal, "tarball") == "mygame-linux-x86_64-minimal.tar.gz"
+    assert packager.artifact_name(minimal, "appimage") == "mygame-linux-x86_64-minimal.AppImage"
 
 
 def test_manifest_lists_built_artifacts(tmp_path: Path) -> None:
@@ -152,3 +154,31 @@ def test_deb_build_forces_root_payload_ownership(tmp_path: Path, monkeypatch: py
     assert commands == [
         ["dpkg-deb", "--root-owner-group", "--build", str(package_root), str(output)]
     ]
+
+
+def test_appimage_target_delegates_to_build_appimage_and_records_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    packager = load_packager()
+    metadata_json = make_metadata(tmp_path)
+    metadata = packager.load_metadata(metadata_json)
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    commands: list[list[str]] = []
+    environments: list[dict[str, str]] = []
+
+    def fake_run(command: list[str], check: bool, env: dict[str, str]) -> None:
+        commands.append(command)
+        environments.append(env)
+        Path(env["SPACE_BUILD_DIR"]).mkdir(parents=True, exist_ok=True)
+        (Path(env["SPACE_BUILD_DIR"]) / "mygame-v1.2.3-x86_64.AppImage").write_text(
+            "appimage\n", encoding="utf-8"
+        )
+
+    monkeypatch.setattr(packager.subprocess, "run", fake_run)
+
+    artifacts = packager.package_linux_app(metadata, output_dir, ["appimage"], make_space_tarball(tmp_path), metadata_json)
+
+    assert artifacts == [output_dir / "mygame-linux-x86_64.AppImage"]
+    assert (output_dir / "mygame-linux-x86_64.AppImage").read_text(encoding="utf-8") == "appimage\n"
+    assert (output_dir / "app-release-artifacts-linux.txt").read_text(encoding="utf-8") == "mygame-linux-x86_64.AppImage\n"
+    assert commands == [[str(REPO_ROOT / "scripts" / "build-appimage.sh")]]
+    assert environments[0]["SPACE_APP_METADATA_JSON"] == str(metadata_json)

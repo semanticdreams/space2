@@ -13,10 +13,50 @@ TOOLS_DIR="${APPIMAGE_WORK_DIR}/tools"
 APPIMAGE_BASENAME="${SPACE_APPIMAGE_BASENAME:-space}"
 LINUXDEPLOY_URL="${LINUXDEPLOY_URL:-https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20240109-1/linuxdeploy-x86_64.AppImage}"
 APPIMAGETOOL_URL="${APPIMAGETOOL_URL:-https://github.com/AppImage/AppImageKit/releases/download/12/appimagetool-x86_64.AppImage}"
+APP_METADATA_JSON="${SPACE_APP_METADATA_JSON:-}"
+APPIMAGE_STAGE_ONLY="${SPACE_APPIMAGE_STAGE_ONLY:-0}"
+
+APP_MODE=false
+if [[ -n "${APP_METADATA_JSON}" ]]; then
+    APP_MODE=true
+fi
+
+if [[ "${APP_MODE}" == true ]]; then
+    if [[ -z "${INSTALL_PREFIX}" ]]; then
+        echo "error: SPACE_INSTALL_PREFIX is required when SPACE_APP_METADATA_JSON is set" >&2
+        exit 1
+    fi
+    if [[ ! -d "${INSTALL_PREFIX}" ]]; then
+        echo "error: Space runtime tree does not exist: ${INSTALL_PREFIX}" >&2
+        exit 1
+    fi
+    if [[ ! -f "${APP_METADATA_JSON}" ]]; then
+        echo "error: app metadata JSON does not exist: ${APP_METADATA_JSON}" >&2
+        exit 1
+    fi
+    eval "$(python3 - "${APP_METADATA_JSON}" <<'PY'
+import json
+import shlex
+import sys
+
+metadata = json.loads(open(sys.argv[1], encoding="utf-8").read())
+for key in ("app_name", "app_id", "entrypoint", "assets_dir", "icon_path", "release_version"):
+    value = metadata.get(key)
+    if value is None:
+        value = ""
+    print(f"APP_{key.upper()}={shlex.quote(str(value))}")
+PY
+)"
+fi
 
 USE_INSTALL_TREE=false
 if [[ -n "${INSTALL_PREFIX}" && -d "${INSTALL_PREFIX}/bin" ]]; then
     USE_INSTALL_TREE=true
+fi
+
+if [[ "${APP_MODE}" == true && "${USE_INSTALL_TREE}" == false ]]; then
+    echo "error: SPACE_INSTALL_PREFIX must point to an extracted Space runtime tree with bin/" >&2
+    exit 1
 fi
 
 if [[ "${USE_INSTALL_TREE}" == false && ! -f "${BUILD_DIR}/space" ]]; then
@@ -36,6 +76,37 @@ if [[ "${USE_INSTALL_TREE}" == true ]]; then
         cp -a "${INSTALL_PREFIX}/lib" "${APPDIR}/usr/"
     fi
     cp -a "${INSTALL_PREFIX}/share" "${APPDIR}/usr/"
+    if [[ "${APP_MODE}" == true ]]; then
+        if [[ ! -f "${APPDIR}/usr/bin/space" ]]; then
+            echo "error: bundled Space runtime is missing bin/space" >&2
+            exit 1
+        fi
+        if [[ ! -d "${APP_ASSETS_DIR}" ]]; then
+            echo "error: app assets directory does not exist: ${APP_ASSETS_DIR}" >&2
+            exit 1
+        fi
+        mkdir -p "${APPDIR}/usr/share/${APP_APP_ID}"
+        cp -a "${APP_ASSETS_DIR}" "${APPDIR}/usr/share/${APP_APP_ID}/assets"
+        mkdir -p "${APPDIR}/usr/share/applications"
+        cat > "${APPDIR}/usr/share/applications/${APP_APP_ID}.desktop" <<DESKTOP
+[Desktop Entry]
+Name=${APP_APP_NAME}
+Comment=${APP_APP_NAME}
+Exec=${APP_APP_ID} %U
+Icon=${APP_APP_ID}
+Terminal=false
+Type=Application
+Categories=Game;
+DESKTOP
+        mkdir -p "${APPDIR}/usr/share/icons/hicolor/256x256/apps"
+        if [[ -n "${APP_ICON_PATH}" ]]; then
+            cp "${APP_ICON_PATH}" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/${APP_APP_ID}.png"
+        elif [[ -f "${APPDIR}/usr/share/space/assets/pics/space.png" ]]; then
+            cp "${APPDIR}/usr/share/space/assets/pics/space.png" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/space.png"
+        elif [[ -f "${ROOT_DIR}/assets/pics/space.png" ]]; then
+            cp "${ROOT_DIR}/assets/pics/space.png" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/space.png"
+        fi
+    fi
 else
     copy_if_exists() {
         local src="$1"
@@ -141,7 +212,26 @@ ensure_tool() {
     fi
 }
 
-cat > "${APPDIR}/AppRun" <<'APP_RUN'
+if [[ "${APP_MODE}" == true ]]; then
+    cat > "${APPDIR}/AppRun" <<APP_RUN
+#!/bin/sh
+set -eu
+HERE="\$(dirname "\$(readlink -f "\$0")")"
+export SPACE_ASSETS_PATH="\$HERE/usr/share/${APP_APP_ID}/assets:\$HERE/usr/share/space/assets\${SPACE_ASSETS_PATH:+:\$SPACE_ASSETS_PATH}"
+if [ -d "\$HERE/usr/lib" ]; then
+    export LD_LIBRARY_PATH="\$HERE/usr/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
+fi
+if [ -d "\$HERE/usr/lib/space/cef" ]; then
+    export LD_LIBRARY_PATH="\$HERE/usr/lib/space/cef\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
+fi
+if [ ! -x "\$HERE/usr/bin/space" ]; then
+    echo "error: bundled Space runtime is missing usr/bin/space" >&2
+    exit 1
+fi
+exec "\$HERE/usr/bin/space" -m ${APP_ENTRYPOINT} "\$@"
+APP_RUN
+else
+    cat > "${APPDIR}/AppRun" <<'APP_RUN'
 #!/bin/sh
 set -eu
 HERE="$(dirname "$(readlink -f "$0")")"
@@ -154,30 +244,48 @@ if [ -d "$HERE/usr/lib/space/cef" ]; then
 fi
 exec "$HERE/usr/bin/space" "$@"
 APP_RUN
+fi
 chmod +x "${APPDIR}/AppRun"
+
+if [[ "${APPIMAGE_STAGE_ONLY}" == "1" ]]; then
+    echo "AppDir staged: ${APPDIR}"
+    exit 0
+fi
 
 LINUXDEPLOY="${TOOLS_DIR}/linuxdeploy-x86_64.AppImage"
 APPIMAGETOOL="${TOOLS_DIR}/appimagetool-x86_64.AppImage"
 ensure_tool "${LINUXDEPLOY}" "${LINUXDEPLOY_URL}" "${LINUXDEPLOY}.url"
 ensure_tool "${APPIMAGETOOL}" "${APPIMAGETOOL_URL}" "${APPIMAGETOOL}.url"
 
+DESKTOP_FILE="${APPDIR}/usr/share/applications/space.desktop"
+ICON_FILE="${APPDIR}/usr/share/icons/hicolor/256x256/apps/space.png"
+if [[ "${APP_MODE}" == true ]]; then
+    DESKTOP_FILE="${APPDIR}/usr/share/applications/${APP_APP_ID}.desktop"
+    if [[ -f "${APPDIR}/usr/share/icons/hicolor/256x256/apps/${APP_APP_ID}.png" ]]; then
+        ICON_FILE="${APPDIR}/usr/share/icons/hicolor/256x256/apps/${APP_APP_ID}.png"
+    fi
+fi
+
 APPIMAGELAUNCHER_DISABLE=1 APPIMAGE_EXTRACT_AND_RUN=1 "${LINUXDEPLOY}" \
     --appdir "${APPDIR}" \
     --executable "${APPDIR}/usr/bin/space" \
-    --desktop-file "${APPDIR}/usr/share/applications/space.desktop" \
-    --icon-file "${APPDIR}/usr/share/icons/hicolor/256x256/apps/space.png"
+    --desktop-file "${DESKTOP_FILE}" \
+    --icon-file "${ICON_FILE}"
 
-if [[ ! -f "${BUILD_DIR}/CPackConfig.cmake" ]]; then
+if [[ "${APP_MODE}" == true ]]; then
+    VERSION="${APP_RELEASE_VERSION}"
+elif [[ ! -f "${BUILD_DIR}/CPackConfig.cmake" ]]; then
     echo "error: ${BUILD_DIR}/CPackConfig.cmake not found; package metadata is required for AppImage versioning" >&2
     exit 1
-fi
-VERSION="$(
+else
+    VERSION="$(
     sed -nE 's/^set\(CPACK_PACKAGE_VERSION[[:space:]]+"?([^")]+)"?\)$/\1/p' "${BUILD_DIR}/CPackConfig.cmake" \
         | head -n1
 )"
-if [[ -z "${VERSION}" ]]; then
-    echo "error: failed to resolve CPACK_PACKAGE_VERSION from ${BUILD_DIR}/CPackConfig.cmake" >&2
-    exit 1
+    if [[ -z "${VERSION}" ]]; then
+        echo "error: failed to resolve CPACK_PACKAGE_VERSION from ${BUILD_DIR}/CPackConfig.cmake" >&2
+        exit 1
+    fi
 fi
 OUT_APPIMAGE="${BUILD_DIR}/${APPIMAGE_BASENAME}-${VERSION}-x86_64.AppImage"
 APPIMAGE_MARKER="${BUILD_DIR}/.appimage-build-start"

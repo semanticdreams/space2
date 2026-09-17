@@ -115,6 +115,9 @@ def linux_artifact_name(app_id: str, target: str, linux_profile: str = "full") -
     if target == "tarball":
         profile_suffix = "-minimal" if linux_profile == "minimal" else ""
         return f"{app_id}-linux-x86_64{profile_suffix}.tar.gz"
+    if target == "appimage":
+        profile_suffix = "-minimal" if linux_profile == "minimal" else ""
+        return f"{app_id}-linux-x86_64{profile_suffix}.AppImage"
     raise MetadataError(f"unsupported Linux package target: {target}")
 
 
