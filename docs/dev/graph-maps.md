@@ -96,6 +96,30 @@ Owned per graph map:
 - Focused node key.
 - Open graph node panels.
 
+#### Presentation islands
+
+`GraphMap` persists presentation islands as map-local presentation state over
+graph-exposed objects. Domain stores continue to own domain data; island records
+only describe how already-exposed graph members should be presented in this map.
+
+Persisted island records use the generic shape:
+
+```text
+{:id string
+ :kind string
+ :members [graph-key ...]
+ :state presenter-owned-table}
+```
+
+`GraphView` hosts presenters by island `:kind`. Presenter behavior such as
+`ordered-list` is registered through the island presenter host rather than a
+hardcoded list-entity branch in GraphView.
+
+Removing an island removes only the map-local presentation record. It does not
+delete member nodes or any backing domain entities. Initial `ordered-list`
+islands provide snap-back vertical presentation in stored list order; they are
+not domain reorder controls.
+
 ### Graph View State
 
 Runtime only:
