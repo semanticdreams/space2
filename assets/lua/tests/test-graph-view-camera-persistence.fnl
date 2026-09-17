@@ -3,6 +3,7 @@
 (local JsonUtils (require :json-utils))
 (local glm (require :glm))
 (local Graph (require :graph/init))
+(local GraphMap (require :graph/map))
 (local GraphView (require :graph/view))
 (local GraphViewPersistence (require :graph/view/persistence))
 (local BuildContext (require :build-context))
@@ -25,7 +26,17 @@
            :label-target-pixels 13.0
            :label-min-scale 4.0
            :edge-color (glm.vec4 0.6 0.6 0.6 1)}
-   :input {:focus-outline (glm.vec4 0.2 0.6 1 1)}})
+    :input {:focus-outline (glm.vec4 0.2 0.6 1 1)}})
+
+(fn make-test-graph []
+  (local graph (Graph {:with-start false}))
+  (local original-has-key-loader graph.has-key-loader-for-key)
+  (set graph.has-key-loader-for-key
+       (fn [self key]
+         (if (and original-has-key-loader (original-has-key-loader self key))
+             true
+             (if key true false))))
+  graph)
 
 (fn make-view-fixture-with-camera-position [dir camera-position]
   (local focus-manager (FocusManager {:root-name "graph-camera-persistence"}))
@@ -35,14 +46,16 @@
                             :focus-manager focus-manager
                             :focus-scope focus-scope}))
   (local camera (Camera {:position camera-position}))
-  (local graph (Graph {:with-start false}))
-  (local view (GraphView {:graph-map graph
+  (local graph (make-test-graph))
+  (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
+  (local view (GraphView {:graph-map graph-map
                           :ctx ctx
                           :camera camera
                           :data-dir dir}))
   {:camera camera
    :focus-manager focus-manager
-   :graph-map graph
+   :graph graph
+   :graph-map graph-map
    :view view})
 
 (fn make-view-fixture [dir]
@@ -51,6 +64,7 @@
 (fn drop-view-fixture! [fixture]
   (when fixture.view (fixture.view:drop))
   (when fixture.graph-map (fixture.graph-map:drop))
+  (when fixture.graph (fixture.graph:drop))
   (when fixture.camera (fixture.camera:drop))
   (when fixture.focus-manager (fixture.focus-manager:drop)))
 

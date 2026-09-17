@@ -311,8 +311,12 @@
                     (set pruned-nodes? true)))
             (when data-dir
                 (prune-metadata-for-state (metadata-path-for entry.id) valid-keys entry.id))
-            (when pruned-nodes?
+            (local pruned-islands (entry.map:prune-islands-for-node-keys valid-keys))
+            (when (if pruned-nodes? true (> (length pruned-islands) 0))
+                (local state (entry.map:capture-state))
                 (set entry.nodes kept-nodes)
+                (set entry.islands state.islands)
+                (set entry.next_island_id state.next_island_id)
                 (entry.map:clear-unresolved-restored-state)))
         (when (and entry entry.map entry.edges (> (length entry.edges) 0))
             (local valid-keys {})
@@ -330,19 +334,23 @@
                 (entry.map:clear-unresolved-restored-state)
                 true)))
 
-    (fn construct-map [id name node-keys edge-list selected-keys focused-key]
+    (fn construct-map [id name node-keys edge-list selected-keys focused-key islands next-island-id]
         (local map (GraphMap.GraphMap {:graph shared-graph :id id :name name}))
         (local (ok result)
             (pcall
               (fn []
                 (when (or (> (length (or node-keys [])) 0)
                           (> (length (or edge-list [])) 0)
+                          (> (length (or islands [])) 0)
                           (> (length (or selected-keys [])) 0)
+                          (not (= next-island-id nil))
                           (not (= focused-key nil)))
                     (map:restore-state {:nodes (or node-keys [])
-                                        :edges (or edge-list [])
-                                        :selected_node_keys (or selected-keys [])
-                                        :focused_node_key focused-key}))
+                                         :edges (or edge-list [])
+                                         :islands (or islands [])
+                                         :next_island_id next-island-id
+                                         :selected_node_keys (or selected-keys [])
+                                         :focused_node_key focused-key}))
                 true)))
         (when (not ok)
             (map:drop)
@@ -355,6 +363,8 @@
             (local state (entry.map:capture-state))
             {:nodes (or state.nodes [])
              :edges (or state.edges [])
+             :islands (or state.islands [])
+             :next_island_id state.next_island_id
              :selected_node_keys (or state.selected_node_keys [])
              :focused_node_key state.focused_node_key}))
 
@@ -367,10 +377,12 @@
                   (fn []
                     (set entry.map (construct-map target-id
                                                   (or entry.name target-id)
-                                                  (or entry.nodes [])
-                                                  (or entry.edges [])
-                                                  (or entry.selected_node_keys [])
-                                                  entry.focused_node_key))
+                                                   (or entry.nodes [])
+                                                   (or entry.edges [])
+                                                   (or entry.selected_node_keys [])
+                                                   entry.focused_node_key
+                                                   (or entry.islands [])
+                                                   entry.next_island_id))
                     (prune-hydrated-map! entry)
                     (when (and (or (not entry.restored-from-state?) entry.seed-start?)
                                (= (length (or entry.nodes [])) 0)
@@ -401,10 +413,12 @@
                 (set constructed-for-capture? true)
                 (set entry.map (construct-map entry.id
                                               (or entry.name entry.id)
-                                              (or entry.nodes [])
-                                              (or entry.edges [])
-                                              (or entry.selected_node_keys [])
-                                              entry.focused_node_key)))
+                                               (or entry.nodes [])
+                                               (or entry.edges [])
+                                               (or entry.selected_node_keys [])
+                                               entry.focused_node_key
+                                               (or entry.islands [])
+                                               entry.next_island_id)))
             (local (ok result)
                 (pcall
                   (fn []
@@ -412,6 +426,8 @@
                     (local state (entry.map:capture-state))
                     (set entry.nodes (or state.nodes []))
                     (set entry.edges (or state.edges []))
+                    (set entry.islands (or state.islands []))
+                    (set entry.next_island_id state.next_island_id)
                     (set entry.selected_node_keys (or state.selected_node_keys []))
                     (set entry.focused_node_key state.focused_node_key)
                     true)))
@@ -434,6 +450,8 @@
                 (local state (entry.map:capture-state))
                 (set entry.nodes (or state.nodes []))
                 (set entry.edges (or state.edges []))
+                (set entry.islands (or state.islands []))
+                (set entry.next_island_id state.next_island_id)
                 (set entry.selected_node_keys (or state.selected_node_keys []))
                 (set entry.focused_node_key state.focused_node_key)
                 (entry.map:drop)
@@ -460,11 +478,13 @@
                 ;; Double-wrapped legacy: {:graph {:graph {:nodes [...], :edges [...]}}}
                 (local core (or graph.graph {}))
                 (table.insert maps-list {:id "main"
-                                          :name "Main"
-                                          :nodes (or core.nodes [])
-                                          :edges (explicit-legacy-edges core.edges)
-                                          :selected_node_keys (or core.selected_node_keys [])
-                                          :focused_node_key core.focused_node_key})
+                                           :name "Main"
+                                           :nodes (or core.nodes [])
+                                           :edges (explicit-legacy-edges core.edges)
+                                           :islands []
+                                           :next_island_id nil
+                                           :selected_node_keys (or core.selected_node_keys [])
+                                           :focused_node_key core.focused_node_key})
                 (when (not (= graph.active_map_id nil))
                     (set active-id-result (sanitize-id graph.active_map_id "legacy-graph.active_map_id")))
                 (when graph.next_map_id
@@ -475,11 +495,13 @@
                         (local map-id (sanitize-id legacy-map.id (.. "legacy-graph.maps[" i "].id")))
                         (when map-id
                             (table.insert maps-list {:id map-id
-                                                     :name (or legacy-map.name legacy-map.id)
-                                                     :nodes (or legacy-map.nodes [])
-                                                     :edges (explicit-legacy-edges legacy-map.edges)
-                                                     :selected_node_keys (or legacy-map.selected_node_keys [])
-                                                     :focused_node_key legacy-map.focused_node_key}))))
+                                                      :name (or legacy-map.name legacy-map.id)
+                                                      :nodes (or legacy-map.nodes [])
+                                                      :edges (explicit-legacy-edges legacy-map.edges)
+                                                      :islands []
+                                                      :next_island_id nil
+                                                      :selected_node_keys (or legacy-map.selected_node_keys [])
+                                                      :focused_node_key legacy-map.focused_node_key}))))
                 (values active-id-result next-map-id maps-list))
             (or (= (type payload.maps) :table)
                 (not (= payload.active_map_id nil)))
@@ -497,21 +519,25 @@
                         (local map-id (sanitize-id entry.id (.. "maps-entry.id=" (tostring entry.id))))
                         (when map-id
                             (table.insert maps-list {:id map-id
-                                                     :name (or entry.name entry.id)
-                                                     :nodes (or entry.nodes [])
-                                                     :edges (or entry.edges [])
-                                                     :selected_node_keys (or entry.selected_node_keys [])
-                                                     :focused_node_key entry.focused_node_key}))))
+                                                      :name (or entry.name entry.id)
+                                                      :nodes (or entry.nodes [])
+                                                      :edges (or entry.edges [])
+                                                      :islands (or entry.islands [])
+                                                      :next_island_id entry.next_island_id
+                                                      :selected_node_keys (or entry.selected_node_keys [])
+                                                      :focused_node_key entry.focused_node_key}))))
                 (values active-id-result next-map-id maps-list))
             (= (type graph.nodes) :table)
             (do
                 ;; Single-wrapped HomeWorld legacy: {:graph {:nodes [...], :edges [...]}}
                 (table.insert maps-list {:id "main"
-                                          :name "Main"
-                                          :nodes (or graph.nodes [])
-                                          :edges (explicit-legacy-edges graph.edges)
-                                          :selected_node_keys (or graph.selected_node_keys [])
-                                          :focused_node_key graph.focused_node_key})
+                                           :name "Main"
+                                           :nodes (or graph.nodes [])
+                                           :edges (explicit-legacy-edges graph.edges)
+                                           :islands []
+                                           :next_island_id nil
+                                           :selected_node_keys (or graph.selected_node_keys [])
+                                           :focused_node_key graph.focused_node_key})
                 (when (not (= graph.active_map_id nil))
                     (set active-id-result (sanitize-id graph.active_map_id "legacy-graph.active_map_id")))
                 (when graph.next_map_id
@@ -522,11 +548,13 @@
                         (local map-id (sanitize-id legacy-map.id (.. "legacy-graph.maps[" i "].id")))
                         (when map-id
                             (table.insert maps-list {:id map-id
-                                                     :name (or legacy-map.name legacy-map.id)
-                                                     :nodes (or legacy-map.nodes [])
-                                                     :edges (explicit-legacy-edges legacy-map.edges)
-                                                     :selected_node_keys (or legacy-map.selected_node_keys [])
-                                                     :focused_node_key legacy-map.focused_node_key}))))
+                                                      :name (or legacy-map.name legacy-map.id)
+                                                      :nodes (or legacy-map.nodes [])
+                                                      :edges (explicit-legacy-edges legacy-map.edges)
+                                                      :islands []
+                                                      :next_island_id nil
+                                                      :selected_node_keys (or legacy-map.selected_node_keys [])
+                                                      :focused_node_key legacy-map.focused_node_key}))))
                 (values active-id-result next-map-id maps-list))
             (do
                 (set active-id-result (sanitize-id (if (not (= payload.active_map_id nil))
@@ -543,11 +571,13 @@
                         (local map-id (sanitize-id entry.id (.. "maps-entry.id=" (tostring entry.id))))
                         (when map-id
                             (table.insert maps-list {:id map-id
-                                                     :name (or entry.name entry.id)
-                                                     :nodes (or entry.nodes [])
-                                                     :edges (or entry.edges [])
-                                                     :selected_node_keys (or entry.selected_node_keys [])
-                                                     :focused_node_key entry.focused_node_key}))))
+                                                      :name (or entry.name entry.id)
+                                                      :nodes (or entry.nodes [])
+                                                      :edges (or entry.edges [])
+                                                      :islands (or entry.islands [])
+                                                      :next_island_id entry.next_island_id
+                                                      :selected_node_keys (or entry.selected_node_keys [])
+                                                      :focused_node_key entry.focused_node_key}))))
                 (values active-id-result next-map-id maps-list))))
 
     (local init-state (or options.state {}))
@@ -569,9 +599,11 @@
         (local (migrated-entry _activity-migrated?) (migrate-map-entry-state entry))
         (set (. entries migrated-entry.id) {:id migrated-entry.id
                                             :name migrated-entry.name
-                                            :nodes migrated-entry.nodes
-                                            :edges migrated-entry.edges
-                                            :selected_node_keys (or migrated-entry.selected_node_keys [])
+                                             :nodes migrated-entry.nodes
+                                             :edges migrated-entry.edges
+                                             :islands (or migrated-entry.islands [])
+                                             :next_island_id migrated-entry.next_island_id
+                                             :selected_node_keys (or migrated-entry.selected_node_keys [])
                                             :focused_node_key migrated-entry.focused_node_key
                                             :restored-from-state? restored-from-state?
                                             :seed-start? seed-start-for-legacy-empty?
@@ -585,9 +617,11 @@
     (when (= entry-count 0)
         (set (. entries "main") {:id "main"
                                   :name "Main"
-                                  :nodes []
-                                  :edges []
-                                  :selected_node_keys []
+                                   :nodes []
+                                   :edges []
+                                   :islands []
+                                   :next_island_id nil
+                                   :selected_node_keys []
                                   :focused_node_key nil
                                   :restored-from-state? false
                                   :map nil})
@@ -688,9 +722,11 @@
             (error (.. "GraphMapManager.create-map! duplicate id: " id)))
          (set (. entries id) {:id id
                                :name resolved-name
-                               :nodes []
-                               :edges []
-                               :selected_node_keys []
+                                :nodes []
+                                :edges []
+                                :islands []
+                                :next_island_id nil
+                                :selected_node_keys []
                                :focused_node_key nil
                                :restored-from-state? false
                                :map nil})
@@ -744,13 +780,17 @@
                     (capture-active-map-state)
                     {:nodes (or entry.nodes [])
                      :edges (or entry.edges [])
+                     :islands (or entry.islands [])
+                     :next_island_id entry.next_island_id
                      :selected_node_keys (or entry.selected_node_keys [])
                      :focused_node_key entry.focused_node_key}))
             (table.insert maps-list {:id entry.id
-                                     :name entry.name
-                                     :nodes (or state.nodes [])
-                                     :edges (or state.edges [])
-                                     :selected_node_keys (or state.selected_node_keys [])
+                                      :name entry.name
+                                      :nodes (or state.nodes [])
+                                      :edges (or state.edges [])
+                                      :islands (or state.islands [])
+                                      :next_island_id state.next_island_id
+                                      :selected_node_keys (or state.selected_node_keys [])
                                      :focused_node_key state.focused_node_key}))
         (table.sort maps-list (fn [a b] (< a.id b.id)))
         {:active_map_id active-id

@@ -1,5 +1,6 @@
 (local fs (require :fs))
 (local Graph (require :graph/core))
+(local GraphMap (require :graph/map))
 (local GraphView (require :graph/view/init))
 (local LinkEntityStore (require :entities/link))
 (local BuildContext (require :build-context))
@@ -7,6 +8,15 @@
 
 (var temp-counter 0)
 (local temp-root (fs.join-path "/tmp/space/tests" "link-entity-crash"))
+
+(fn allow-test-keys! [graph]
+  (local original-has-key-loader graph.has-key-loader-for-key)
+  (set graph.has-key-loader-for-key
+       (fn [self key]
+         (if (and original-has-key-loader (original-has-key-loader self key))
+             true
+             (if key true false))))
+  graph)
 
 (fn make-temp-dir []
   (set temp-counter (+ temp-counter 1))
@@ -18,7 +28,8 @@
     (fs.remove-all dir))
   (fs.create-dirs dir)
   (local store (LinkEntityStore.LinkEntityStore {:base-dir dir}))
-  (local graph (Graph {:with-start false :link-store store}))
+  (local graph (allow-test-keys! (Graph {:with-start false :link-store store})))
+  (local graph-map (GraphMap.GraphMap {:graph graph :id "link-entity-crash"}))
   ;; Use a real build context so vector buffers and handles are real usertypes.
   ;; We keep focus/clickables lightweight because the crash repro is about edge creation.
   (local clickables {:register (fn []) :register-double-click (fn [])
@@ -47,13 +58,18 @@
   (set ctx.height 100)
   (set ctx.units-per-pixel 1)
   (set ctx.focus focus)
-  (local view (GraphView {:graph-map graph :ctx ctx :data-dir dir}))
+  (local view (GraphView {:graph-map graph-map :ctx ctx :data-dir dir}))
   
-  (local (ok result) (pcall f store graph view))
+  (local (ok result) (pcall f store graph-map view))
+  (view:drop)
+  (graph-map:drop)
+  (graph:drop)
   (fs.remove-all dir)
   (if ok
       result
       (error result)))
+
+(local tests [])
 
 (fn test-graph-view-crash-reproduction []
   (with-temp-env
@@ -79,7 +95,16 @@
       
       ;; We don't have easy introspection into view internals here without mocking, 
       ;; but if it didn't crash, that's the primary success criteria.
-      )))
+  )))
 
-[{:name "test-graph-view-crash-reproduction"
-  :fn test-graph-view-crash-reproduction}]
+(table.insert tests {:name "test-graph-view-crash-reproduction"
+                     :fn test-graph-view-crash-reproduction})
+
+(local main
+  (fn []
+    (local runner (require :tests/runner))
+    (runner.run-tests {:name "link-entity-crash" :tests tests})))
+
+{:name "link-entity-crash"
+ :tests tests
+ :main main}

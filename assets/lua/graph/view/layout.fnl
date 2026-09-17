@@ -278,7 +278,7 @@
         (when position
             (local idx (. indices node))
             (assert idx (string.format "GraphViewLayout.set-node-position missing index for node %s"
-                                       (node-id node)))
+                                        (node-id node)))
             (assert-valid-position position "GraphViewLayout.set-node-position" node)
             (layout:set-position idx position)
             (set-point-position node position "GraphViewLayout.set-node-position")
@@ -287,6 +287,13 @@
             (when (not skip-labels?)
                 (update-labels [node] {:force? true})
                 (refresh-label-positions [node]))))
+
+    (fn set-node-pinned [_self node pinned?]
+        (local idx (. indices node))
+        (assert idx (string.format "GraphViewLayout.set-node-pinned missing index for node %s"
+                                   (node-id node)))
+        (layout:pin-node idx (if pinned? true false))
+        true)
 
     (fn rebuild []
         (local ordered [])
@@ -338,6 +345,7 @@
     (set self.add-edge add-edge)
     (set self.update update)
     (set self.set-node-position set-node-position)
+    (set self.set-node-pinned set-node-pinned)
     (set self.rebuild rebuild)
     (set self.start start)
     (set self.update-lines update-lines)

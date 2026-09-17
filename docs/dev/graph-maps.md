@@ -96,6 +96,30 @@ Owned per graph map:
 - Focused node key.
 - Open graph node panels.
 
+#### Presentation islands
+
+`GraphMap` persists presentation islands as map-local presentation state over
+graph-exposed objects. Domain stores continue to own domain data; island records
+only describe how already-exposed graph members should be presented in this map.
+
+Persisted island records use the generic shape:
+
+```text
+{:id string
+ :kind string
+ :members [graph-key ...]
+ :state presenter-owned-table}
+```
+
+`GraphView` hosts presenters by island `:kind`. Presenter behavior such as
+`ordered-list` is registered through the island presenter host rather than a
+hardcoded list-entity branch in GraphView.
+
+Removing an island removes only the map-local presentation record. It does not
+delete member nodes or any backing domain entities. Initial `ordered-list`
+islands provide snap-back vertical presentation in stored list order; they are
+not domain reorder controls.
+
 ### Graph View State
 
 Runtime only:
@@ -375,19 +399,20 @@ Global compatibility can keep `app.graph` and `app.graph-view` during the transi
 
 ## Graph View Changes
 
-`GraphView` should attach to a `GraphMap` instead of a shared `Graph`.
+`GraphView` attaches to a `GraphMap`, not a shared/raw `Graph`. The transitional
+constructor key `:graph` and raw-Graph compatibility path have been removed; all
+callers must pass a real `GraphMap` via `:graph-map`.
 
-Minimal migration:
+Required runtime contract:
 
-- Keep constructor key `:graph` temporarily, but pass the active graph map.
-- Internally treat the object as the graph-like interaction source.
+- Construct `GraphView` with `:graph-map` set to the active graph map.
+- Require the supplied graph map to expose GraphMap island APIs such as `list-islands`.
 - Store map id on the view.
 - Construct `GraphViewPersistence` with `:graph-map-id` or a per-map data directory.
 - `capture-state` should capture selected/focused keys and delegate panel state to the map-specific node-view manager.
 
 Later cleanup:
 
-- Rename constructor option to `:graph-map` when call sites are migrated.
 - Reduce reliance on globals such as `app.graph-view` in node views and tools.
 
 ## Sidebar UX

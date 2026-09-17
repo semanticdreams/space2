@@ -18,6 +18,7 @@
 (local Runtime (require :state-runtime))
 (local BuildContext (require :build-context))
 (local Graph (require :graph/init))
+(local GraphMap (require :graph/map))
 (local GraphView (require :graph/view))
 (local Intersectables (require :intersectables))
 (local Clickables (require :clickables))
@@ -33,6 +34,21 @@
 (local InputModel (require :input-model))
 (local StateSystemBindings (require :state-system-bindings))
 (local TestSupport (require :tests/test-support))
+
+(fn make-test-graph-map []
+  (local graph (Graph {:with-start false}))
+  (local original-has-key-loader graph.has-key-loader-for-key)
+  (set graph.has-key-loader-for-key
+       (fn [self key]
+         (if (and original-has-key-loader (original-has-key-loader self key))
+             true
+             (if key true false))))
+  (GraphMap.GraphMap {:graph graph :id "states-graph-focus"}))
+
+(fn drop-test-graph-map! [graph-map]
+  (local graph graph-map.graph)
+  (graph-map:drop)
+  (graph:drop))
 (local viewport-utils (require :viewport-utils))
 
 (local tests [])
@@ -717,7 +733,7 @@
                                                 (or (and screen screen.y) 0)
                                                 10)
                               :direction (glm.vec3 0 0 -1)})})
-        (set graph (Graph {:with-start false}))
+        (set graph (make-test-graph-map))
         (set view (GraphView {:graph-map graph
                               :ctx ctx
                               :pointer-target pointer-target}))
@@ -739,7 +755,7 @@
   (when view
     (view:drop))
   (when graph
-    (graph:drop))
+    (drop-test-graph-map! graph))
   (set app.active-pointer-controls original-active-controls)
   (set app.hoverables original-hoverables)
   (set app.clickables original-clickables)
