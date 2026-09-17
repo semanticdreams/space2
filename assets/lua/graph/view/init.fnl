@@ -41,7 +41,7 @@
             (graph-map:load-by-key other-key)
             (table.insert next-frontier (tostring other-key))))
     next-frontier)
-
+(fn list-graph-islands [graph-map] (if graph-map.list-islands (graph-map:list-islands) []))
 (fn GraphView [opts]
     (local options (or opts {}))
     (local graph-map (or options.graph-map options.graph))
@@ -527,7 +527,7 @@
     (fn reconcile-graph-islands! []
         (with-island-label-refresh
             (fn []
-                (island-host:reconcile-all (graph-map:list-islands)))))
+                (island-host:reconcile-all (list-graph-islands graph-map)))))
 
     (fn reconcile-graph-island! [island]
         (with-island-label-refresh

@@ -4581,6 +4581,49 @@
 (table.insert tests {:name "FsNode directory listing behavior remains unchanged"
                      :fn fs-node-directory-listing-behavior-remains-unchanged})
 
+(fn graph-view-transitional-graph-without-islands-survives-startup-and-drag-end []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local registered [])
+            (local persistence {:saved-position (fn [_self _node] nil)
+                                :saved-presentation (fn [_self _node] nil)
+                                :saved-size (fn [_self _node] nil)
+                                :set-size (fn [_self _node _size] nil)
+                                :set-presentation (fn [_self _node _presentation] nil)
+                                :persist (fn [_self _points _force?] nil)
+                                :schedule-save (fn [_self] nil)})
+            (local movables {:register (fn [_self point opts]
+                                           (table.insert registered {:point point :opts opts}))
+                              :unregister (fn [_self _node] nil)})
+            (local graph (Graph {:with-start false}))
+            (assert (= graph.list-islands nil)
+                    "raw Graph transitional input should not expose island listing")
+            (local node (Graph.GraphNode {:key "transitional-drag"}))
+            (graph:add-node node {:position (glm.vec3 0 0 0)})
+            (local (ok view-or-err)
+                (pcall
+                    (fn []
+                        (GraphView {:graph graph
+                                    :ctx ctx
+                                    :movables movables
+                                    :persistence persistence}))))
+            (assert ok (.. "GraphView startup should tolerate graph-like inputs without list-islands: "
+                           (tostring view-or-err)))
+            (local view view-or-err)
+            (local opts (. (. registered 1) :opts))
+            (assert opts "GraphView should register transitional graph node with movables")
+            (local on-drag-end opts.on-drag-end)
+            (assert on-drag-end "Movables registration should include drag end handler")
+            (local (drag-ok drag-err) (pcall (fn [] (on-drag-end {}))))
+            (assert drag-ok (.. "GraphView drag end should tolerate graph-like inputs without list-islands: "
+                                (tostring drag-err)))
+            (view:drop)
+            (graph:drop))))
+
+(table.insert tests {:name "GraphView transitional graph without islands survives startup and drag end"
+                     :fn graph-view-transitional-graph-without-islands-survives-startup-and-drag-end})
+
 (local main
   (fn []
     (local runner (require :tests/runner))
