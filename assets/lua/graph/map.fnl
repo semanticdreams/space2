@@ -1,5 +1,6 @@
 (local Signal (require :signal))
 (local Edge (require :graph/edge))
+(local GraphIslands (require :graph/islands))
 (local NodeBase (require :graph/node-base))
 (local LinkEntityStore (require :entities/link))
 (local IdentityStore (require :entities/identity))
@@ -47,7 +48,11 @@
     (local nodes {})
     (local edges [])
     (local edge-map {})
+    (local islands {})
     (local derived-edge-keys {})
+    (local island-added (Signal))
+    (local island-updated (Signal))
+    (local island-removed (Signal))
     (local node-added (Signal))
     (local node-removed (Signal))
     (local node-replaced (Signal))
@@ -56,18 +61,23 @@
     (local edge-removed (Signal))
     (var unresolved-restored-node-keys [])
     (var unresolved-restored-edge-list [])
+    (var next-island-id 1)
     (var add-edge nil)
     (var recompute-link-edges-for-node nil)
 
     (local self {:id id
                  :name name
                  :graph shared-graph
-                 :nodes nodes
-                 :edges edges
-                 :edge-map edge-map
-                :selected_node_keys []
-                :focused_node_key nil
-                 :node-added node-added
+                  :nodes nodes
+                  :edges edges
+                  :edge-map edge-map
+                  :islands islands
+                 :selected_node_keys []
+                 :focused_node_key nil
+                  :island-added island-added
+                  :island-updated island-updated
+                  :island-removed island-removed
+                  :node-added node-added
                  :node-removed node-removed
                  :node-replaced node-replaced
                  :node-morphed node-morphed
@@ -100,6 +110,123 @@
 
     (fn lookup [_self key]
         (and key (. nodes key)))
+
+    (fn next-island-number-after-records []
+        (var next-value 1)
+        (each [id _ (pairs islands)]
+            (local suffix (and (= (type id) "string") (string.match id "^island%-(%d+)$")))
+            (when suffix
+                (local number (tonumber suffix))
+                (when (and number (>= number next-value))
+                    (set next-value (+ number 1)))))
+        next-value)
+
+    (fn allocate-island-id []
+        (var id (.. "island-" next-island-id))
+        (while (. islands id)
+            (set next-island-id (+ next-island-id 1))
+            (set id (.. "island-" next-island-id)))
+        (set next-island-id (+ next-island-id 1))
+        id)
+
+    (fn normalize-island-options [opts context]
+        (GraphIslands.normalize-record opts context))
+
+    (fn create-island [_self opts]
+        (local payload (or opts {}))
+        (local id (if (= payload.id nil) (allocate-island-id) payload.id))
+        (when (. islands id)
+            (error (.. "GraphMap.create-island duplicate island id: " id)))
+        (local record (normalize-island-options {:id id
+                                                 :kind payload.kind
+                                                 :members payload.members
+                                                 :state payload.state}
+                                                "GraphMap.create-island"))
+        (set (. islands record.id) record)
+        (local returned (GraphIslands.clone-record record))
+        (island-added:emit {:island returned})
+        returned)
+
+    (fn update-island [_self id patch]
+        (assert (= (type id) "string") "GraphMap.update-island requires string id")
+        (local existing (. islands id))
+        (assert existing (.. "GraphMap.update-island missing island id: " id))
+        (local payload (or patch {}))
+        (when (and payload.id (not (= payload.id id)))
+            (error "GraphMap.update-island cannot change island id"))
+        (when (and payload.kind (not (= payload.kind existing.kind)))
+            (error "GraphMap.update-island cannot change island kind"))
+        (local record (normalize-island-options {:id id
+                                                 :kind existing.kind
+                                                 :members (if (= payload.members nil)
+                                                              existing.members
+                                                              payload.members)
+                                                 :state (if (not (= payload.state nil)) payload.state existing.state)}
+                                                "GraphMap.update-island"))
+        (local previous (GraphIslands.clone-record existing))
+        (set (. islands id) record)
+        (local returned (GraphIslands.clone-record record))
+        (when (not (GraphIslands.records-equal? previous returned))
+            (island-updated:emit {:island returned :previous previous}))
+        returned)
+
+    (fn upsert-island [_self opts]
+        (assert (= (type opts) "table") "GraphMap.upsert-island requires opts table")
+        (local payload opts)
+        (if (and payload.id (. islands payload.id))
+            (update-island self payload.id payload)
+            (create-island self payload)))
+
+    (fn remove-island [_self id opts]
+        (local existing (. islands id))
+        (if (not existing)
+            nil
+            (do
+                (set (. islands id) nil)
+                (local returned (GraphIslands.clone-record existing))
+                (island-removed:emit {:island returned :opts opts})
+                returned)))
+
+    (fn get-island [_self id]
+        (local record (. islands id))
+        (and record (GraphIslands.clone-record record)))
+
+    (fn list-islands [_self]
+        (local ids (icollect [id _ (pairs islands)] id))
+        (table.sort ids)
+        (icollect [_ id (ipairs ids)]
+            (GraphIslands.clone-record (. islands id))))
+
+    (fn prune-islands-for-node-keys [_self valid-node-keys]
+        (assert (= (type valid-node-keys) "table")
+                "GraphMap.prune-islands-for-node-keys requires key set table")
+        (local affected [])
+        (local ids (icollect [id _ (pairs islands)] id))
+        (table.sort ids)
+        (each [_ id (ipairs ids)]
+            (local record (. islands id))
+            (local members [])
+            (each [_ key (ipairs record.members)]
+                (when (. valid-node-keys key)
+                    (table.insert members key)))
+            (when (not (= (length members) (length record.members)))
+                (local previous (GraphIslands.clone-record record))
+                (if (= (length members) 0)
+                    (do
+                        (set (. islands id) nil)
+                        (island-removed:emit {:island previous})
+                        (table.insert affected {:id id :removed true :island previous}))
+                    (do
+                        (local updated (GraphIslands.normalize-record {:id record.id
+                                                                        :kind record.kind
+                                                                        :members members
+                                                                        :state record.state}
+                                                                       "GraphMap.prune-islands-for-node-keys"))
+                        (set (. islands id) updated)
+                        (local returned (GraphIslands.clone-record updated))
+                        (island-updated:emit {:island returned :previous previous})
+                        (table.insert affected {:id id :island returned :previous previous})))))
+        affected)
 
     (fn replace-node [_self existing node]
         (when existing.unmount
@@ -273,12 +400,23 @@
                     (set self.selected_node_keys kept-selection))
                 (when (and self.focused_node_key (. removed-keys self.focused_node_key))
                     (set self.focused_node_key nil))
+                (local valid-node-keys {})
+                (each [key _node (pairs nodes)]
+                    (set (. valid-node-keys key) true))
+                (prune-islands-for-node-keys self valid-node-keys)
                 (length removed))))
 
     (set self.add-node add-node)
     (set self.add-edge add-edge)
     (set self.remove-edge remove-edge)
     (set self.remove-nodes remove-nodes)
+    (set self.create-island create-island)
+    (set self.upsert-island upsert-island)
+    (set self.update-island update-island)
+    (set self.remove-island remove-island)
+    (set self.get-island get-island)
+    (set self.list-islands list-islands)
+    (set self.prune-islands-for-node-keys prune-islands-for-node-keys)
 
     (set self.edge-count (fn [_self] (length edges)))
     (set self.node-count (fn [_self] (length (icollect [_ _ (pairs nodes)] true))))
@@ -410,16 +548,20 @@
                     key))
             {:nodes node-keys
              :edges edge-list
-             :selected_node_keys captured-selected-keys
-             :focused_node_key self.focused_node_key}))
+              :islands (list-islands self)
+              :next_island_id next-island-id
+              :selected_node_keys captured-selected-keys
+              :focused_node_key self.focused_node_key}))
 
     (set self.restore-state
         (fn [_self state]
             (local payload (or state {}))
             (local node-keys (or payload.nodes []))
             (local edge-list (or payload.edges []))
+            (local island-list (or payload.islands []))
             (assert (= (type node-keys) :table) "GraphMap.restore-state requires :nodes table")
             (assert (= (type edge-list) :table) "GraphMap.restore-state requires :edges table")
+            (assert (= (type island-list) :table) "GraphMap.restore-state requires :islands table")
             (local restored-node-key-set {})
             (each [_ key (ipairs node-keys)]
                 (when (= (type key) :string)
@@ -445,8 +587,11 @@
                 (set (. nodes k) nil))
             (each [k _ (pairs derived-edge-keys)]
                 (set (. derived-edge-keys k) nil))
+            (each [k _ (pairs islands)]
+                (set (. islands k) nil))
             (set unresolved-restored-node-keys [])
             (set unresolved-restored-edge-list [])
+            (set next-island-id 1)
             (each [_ key (ipairs node-keys)]
                 (assert (= (type key) :string) "GraphMap.restore-state node keys must be strings")
                 (local node (self:load-by-key key))
@@ -470,6 +615,20 @@
                                                     :target target-node})))))
             (each [key _ (pairs nodes)]
                 (recompute-link-edges-for-node self key))
+            (each [_ island (ipairs island-list)]
+                (local record (GraphIslands.normalize-record island "GraphMap.restore-state"))
+                (when (. islands record.id)
+                    (error (.. "GraphMap.restore-state duplicate island id: " record.id)))
+                (set (. islands record.id) record)
+                (island-added:emit {:island (GraphIslands.clone-record record)}))
+            (set next-island-id
+                 (if (and (= (type payload.next_island_id) "number")
+                          (>= payload.next_island_id 1))
+                     payload.next_island_id
+                     (next-island-number-after-records)))
+            (local computed-next-island-id (next-island-number-after-records))
+            (when (< next-island-id computed-next-island-id)
+                (set next-island-id computed-next-island-id))
             (set self.selected_node_keys
                  (or (and (= (type payload.selected_node_keys) :table)
                           (icollect [_ key (ipairs payload.selected_node_keys)]
@@ -734,8 +893,13 @@
                 (set (. edge-map k) nil))
             (each [k _ (pairs derived-edge-keys)]
                 (set (. derived-edge-keys k) nil))
+            (each [k _ (pairs islands)]
+                (set (. islands k) nil))
             (each [k _ (pairs nodes)]
                 (set (. nodes k) nil))
+            (island-added:clear)
+            (island-updated:clear)
+            (island-removed:clear)
             (node-added:clear)
             (node-removed:clear)
             (node-replaced:clear)
