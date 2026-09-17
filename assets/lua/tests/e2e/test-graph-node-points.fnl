@@ -1,10 +1,26 @@
 (local Harness (require :tests.e2e.harness))
 (local glm (require :glm))
 (local Graph (require :graph/init))
+(local GraphMap (require :graph/map))
 (local GraphView (require :graph/view))
 (local {:FocusManager FocusManager} (require :focus))
 (local {:Layout Layout} (require :layout))
 (local fs (require :fs))
+
+(fn make-test-graph-map []
+  (local graph (Graph {:with-start false}))
+  (local original-has-key-loader graph.has-key-loader-for-key)
+  (set graph.has-key-loader-for-key
+       (fn [self key]
+         (if (and original-has-key-loader (original-has-key-loader self key))
+             true
+             (if key true false))))
+  (GraphMap.GraphMap {:graph graph :id "e2e-graph-node-points"}))
+
+(fn drop-test-graph-map! [graph-map]
+  (local graph graph-map.graph)
+  (graph-map:drop)
+  (graph:drop))
 
 (fn run [ctx]
   (local focus-manager (FocusManager {:root-name "e2e-graph"}))
@@ -19,7 +35,7 @@
     (Harness.make-screen-target
       {:focus-manager focus-manager
        :builder (fn [ctx]
-                  (set graph (Graph {:with-start false}))
+                   (set graph (make-test-graph-map))
                   (set view (GraphView {:graph-map graph
                                         :ctx ctx
                                         :data-dir data-root}))
@@ -61,8 +77,8 @@
                    :drop (fn [_self]
                            (when view
                              (view:drop))
-                           (when graph
-                             (graph:drop))
+                            (when graph
+                              (drop-test-graph-map! graph))
                            (layout:drop))})}))
   (Harness.draw-targets ctx.width ctx.height [{:target screen-target}])
   (Harness.capture-snapshot {:name "graph-node-points"
