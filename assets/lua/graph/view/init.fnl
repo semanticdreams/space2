@@ -14,6 +14,8 @@
 (local GraphViewPersistence (require :graph/view/persistence)) (local ActivityCameraState (require :activity-camera-state))
 (local NodeBase (require :graph/node-base))
 (local GraphNodePresentation (require :graph/view/presentation))
+(local IslandHost (require :graph/view/island-host))
+(local IslandPresenters (require :graph/view/island-presenters))
 
 (local new-triangle-line GraphViewEdge.new-triangle-line)
 (local ensure-glm-vec3 Utils.ensure-glm-vec3)
@@ -443,8 +445,29 @@
                         :set-point-position set-point-position
                         :update-labels update-labels
                         :refresh-label-positions refresh-label-positions
-                        :get-position get-position
-                        :get-position-raw get-position-raw}))
+                         :get-position get-position
+                         :get-position-raw get-position-raw}))
+
+    (local island-host
+        (IslandHost.GraphViewIslandHost
+            {:presenters IslandPresenters
+             :node-for-key (fn [_host-options key]
+                             (graph-map:lookup key))
+             :position-for-key (fn [_host-options key]
+                                 (local node (graph-map:lookup key))
+                                 (and node (get-position nil node)))
+             :set-node-position (fn [_host-options key position]
+                                  (local node (graph-map:lookup key))
+                                  (assert node (.. "GraphView island host missing node for key: " (tostring key)))
+                                  (graph-layout:set-node-position node position {:skip-labels? true}))
+             :set-node-pinned (fn [_host-options key pinned?]
+                                (local node (graph-map:lookup key))
+                                (assert node (.. "GraphView island host missing node for key: " (tostring key)))
+                                (set (. pinned node) (if pinned? true nil))
+                                (graph-layout:set-node-pinned node pinned?))}))
+
+    (fn reconcile-graph-islands! []
+        (island-host:reconcile-all (graph-map:list-islands)))
 
     (var batch-depth 0)
     (var batched-layout-dirty? false)
@@ -512,11 +535,12 @@
                          :on-drag-start (fn [node _entry]
                                             (set drag-active? true)
                                             (set drag-node node))
-                         :on-drag-end (fn [node _entry]
-                                          (set drag-active? false)
-                                          (set drag-node nil)
-                                          (update-labels [node] {:force? true})
-                                          (refresh-label-positions [node]))}))
+                          :on-drag-end (fn [node _entry]
+                                           (set drag-active? false)
+                                           (set drag-node nil)
+                                           (update-labels [node] {:force? true})
+                                           (refresh-label-positions [node])
+                                           (reconcile-graph-islands!))}))
 
     (set register-movable
          (fn [node point]
@@ -998,7 +1022,22 @@
     (var node-replaced-handler nil)
     (var edge-added-handler nil)
     (var edge-removed-handler nil)
+    (var island-added-handler nil)
+    (var island-updated-handler nil)
+    (var island-removed-handler nil)
     (var stabilized-handler nil)
+
+    (fn handle-island-added-or-updated [payload]
+        (assert-not-dropped "handle-island-added-or-updated")
+        (local island (and payload payload.island))
+        (when island
+            (island-host:reconcile-island island)))
+
+    (fn handle-island-removed [payload]
+        (assert-not-dropped "handle-island-removed")
+        (local island (and payload payload.island))
+        (when island
+            (island-host:drop-island island.id)))
 
     (fn attach-graph []
         (when (and graph-map.node-added (not node-added-handler))
@@ -1015,7 +1054,16 @@
                  (graph-map.edge-added:connect handle-edge-added)))
         (when (and graph-map.edge-removed (not edge-removed-handler))
             (set edge-removed-handler
-                 (graph-map.edge-removed:connect handle-edge-removed))))
+                 (graph-map.edge-removed:connect handle-edge-removed)))
+        (when (and graph-map.island-added (not island-added-handler))
+            (set island-added-handler
+                 (graph-map.island-added:connect handle-island-added-or-updated)))
+        (when (and graph-map.island-updated (not island-updated-handler))
+            (set island-updated-handler
+                 (graph-map.island-updated:connect handle-island-added-or-updated)))
+        (when (and graph-map.island-removed (not island-removed-handler))
+            (set island-removed-handler
+                 (graph-map.island-removed:connect handle-island-removed))))
 
     (fn detach-graph []
         (when (and graph-map.node-added node-added-handler)
@@ -1032,7 +1080,16 @@
             (set edge-added-handler nil))
         (when (and graph-map.edge-removed edge-removed-handler)
             (graph-map.edge-removed:disconnect edge-removed-handler true)
-            (set edge-removed-handler nil)))
+            (set edge-removed-handler nil))
+        (when (and graph-map.island-added island-added-handler)
+            (graph-map.island-added:disconnect island-added-handler true)
+            (set island-added-handler nil))
+        (when (and graph-map.island-updated island-updated-handler)
+            (graph-map.island-updated:disconnect island-updated-handler true)
+            (set island-updated-handler nil))
+        (when (and graph-map.island-removed island-removed-handler)
+            (graph-map.island-removed:disconnect island-removed-handler true)
+            (set island-removed-handler nil)))
 
     (when layout.stabilized
         (set stabilized-handler
@@ -1056,7 +1113,8 @@
             (each [_ node (pairs graph-map.nodes)]
                 (handle-node-added {:node node}))
             (each [_ edge (ipairs graph-map.edges)]
-                (handle-edge-added {:edge edge}))))
+                (handle-edge-added {:edge edge}))
+            (reconcile-graph-islands!)))
     (when (and graph-map.selected_node_keys
                (> (length graph-map.selected_node_keys) 0))
         (local restored-selection [])
@@ -1092,10 +1150,11 @@
                  :views views
                  :pinned pinned
                  :persistence persistence
-                 :selection selection
-                 :graph-layout graph-layout
-                  :extra-panels []
-                  :extra-panel-runtimes []})
+                  :selection selection
+                  :graph-layout graph-layout
+                  :island-host island-host
+                   :extra-panels []
+                   :extra-panel-runtimes []})
 
     (fn extra-panel-persistence-matches? [persistence entry]
         (and (= (type persistence) :table)
@@ -1538,9 +1597,10 @@
     (set view.drop
          (fn [_self]
              (assert-not-dropped "drop")
-             (set dropped? true)
-             (detach-graph)
-             (selection:drop)
+              (set dropped? true)
+              (detach-graph)
+              (island-host:drop)
+              (selection:drop)
              (when (and selected-nodes-changed selection-handler)
                  (selected-nodes-changed:disconnect selection-handler true)
                  (set selection-handler nil))
