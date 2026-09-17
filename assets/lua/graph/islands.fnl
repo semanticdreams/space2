@@ -19,6 +19,40 @@
             copy)
         value))
 
+(fn position-array? [value]
+    (and (= (type value) "table")
+         (= (type (. value 1)) "number")
+         (= (type (. value 2)) "number")
+         (= (type (. value 3)) "number")))
+
+(fn vec3-components [value]
+    (pcall (fn [] (values value.x value.y value.z))))
+
+(fn vec3-like? [value]
+    (when value
+        (local (ok x y z) (vec3-components value))
+        (and ok
+             (= (type x) "number")
+             (= (type y) "number")
+             (= (type z) "number"))))
+
+(fn normalize-state-position [position context]
+    (if (= position nil)
+        nil
+        (position-array? position)
+        [(. position 1) (. position 2) (. position 3)]
+        (vec3-like? position)
+        [position.x position.y position.z]
+        (error (.. (context-prefix context) "state.position must be a [x y z] array or vec3-like value"))))
+
+(fn clone-state [state context]
+    (local copy {})
+    (each [k v (pairs state)]
+        (if (= k :position)
+            (set (. copy k) (normalize-state-position v context))
+            (set (. copy k) (clone-value v))))
+    copy)
+
 (fn clone-members [members]
     (icollect [_ key (ipairs members)] key))
 
@@ -26,7 +60,7 @@
     {:id record.id
      :kind record.kind
      :members (clone-members record.members)
-     :state (clone-value record.state)})
+     :state (clone-state (or record.state {}) "GraphIslands.clone-record")})
 
 (fn normalize-record [record context]
     (assert (= (type record) "table")
@@ -60,7 +94,7 @@
     {:id id
      :kind kind
      :members normalized-members
-     :state (clone-value state)})
+     :state (clone-state state context)})
 
 (fn values-equal? [left right]
     (if (not (= (type left) (type right)))

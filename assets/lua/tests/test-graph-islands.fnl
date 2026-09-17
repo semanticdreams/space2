@@ -1,6 +1,7 @@
 (local Graph (require :graph/init))
 (local GraphMap (require :graph/map))
 (local GraphMapManager (require :graph/map-manager))
+(local glm (require :glm))
 
 (local tests [])
 
@@ -161,6 +162,45 @@
             "restore-state should remove islands that are absent from restored state")
     (cleanup fixture))
 
+(fn graph-map-capture-restore-preserves-json-safe-state-position []
+    (local fixture (make-map "island-position-capture"))
+    (local map fixture.map)
+    (map:create-island {:id "island-1"
+                        :kind "ordered-list"
+                        :members ["test:a"]
+                        :state {:position (glm.vec3 7 8 9)}})
+    (local captured (map:capture-state))
+    (local captured-position (. captured.islands 1 :state :position))
+    (assert (= (type captured-position) :table)
+            "capture-state should normalize state.position to a JSON-safe array")
+    (assert (= (. captured-position 1) 7) "captured state.position x should survive")
+    (assert (= (. captured-position 2) 8) "captured state.position y should survive")
+    (assert (= (. captured-position 3) 9) "captured state.position z should survive")
+    (cleanup fixture)
+    (local restored-fixture (make-map "island-position-restore"))
+    (local restored-map restored-fixture.map)
+    (restored-map:restore-state captured)
+    (local restored-island (restored-map:get-island "island-1"))
+    (local restored-position restored-island.state.position)
+    (assert (= (. restored-position 1) 7) "restored state.position x should survive")
+    (assert (= (. restored-position 2) 8) "restored state.position y should survive")
+    (assert (= (. restored-position 3) 9) "restored state.position z should survive")
+    (cleanup restored-fixture))
+
+(fn graph-map-rejects-invalid-state-position []
+    (local fixture (make-map "island-position-invalid"))
+    (local map fixture.map)
+    (local (ok err)
+        (pcall (fn []
+            (map:create-island {:id "island-1"
+                                :kind "ordered-list"
+                                :members ["test:a"]
+                                :state {:position "bad"}}))))
+    (assert (not ok) "GraphMap should reject invalid state.position before persistence")
+    (assert (string.find (tostring err) "state.position" 1 true)
+            "invalid state.position error should identify the field")
+    (cleanup fixture))
+
 (fn find-map-entry [state id]
     (assert (= (type state.maps) :table) "find-map-entry requires state maps")
     (var found nil)
@@ -249,6 +289,10 @@
 (table.insert tests {:name "GraphMap removes origin node while island remains" :fn graph-map-removes-origin-node-while-island-remains})
 (table.insert tests {:name "GraphMap prunes removed member nodes from islands" :fn graph-map-prunes-removed-member-nodes-from-islands})
 (table.insert tests {:name "GraphMap restore emits removed for replaced islands" :fn graph-map-restore-emits-removed-for-replaced-islands})
+(table.insert tests {:name "GraphMap capture restore preserves JSON-safe state position"
+                     :fn graph-map-capture-restore-preserves-json-safe-state-position})
+(table.insert tests {:name "GraphMap rejects invalid state position"
+                     :fn graph-map-rejects-invalid-state-position})
 (table.insert tests {:name "GraphMapManager captures and restores island records" :fn graph-map-manager-captures-and-restores-island-records})
 (table.insert tests {:name "GraphMapManager prunes unresolved island members during hydration" :fn graph-map-manager-prunes-unresolved-island-members-during-hydration})
 (table.insert tests {:name "GraphMapManager drops empty island after member pruning" :fn graph-map-manager-drops-empty-island-after-member-pruning})

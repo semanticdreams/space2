@@ -69,7 +69,21 @@
     (assert-vec3 (. layout "item:a") (glm.vec3 7 8 9)
                  "explicit island state position should be preferred")
     (assert-vec3 (. layout "item:b") (glm.vec3 7 -16 9)
-                 "default spacing should be applied from explicit state position"))
+                  "default spacing should be applied from explicit state position"))
+
+(fn ordered-list-presenter-uses-restored-array-state-position []
+    (local host (make-host {:positions {"list:1" (glm.vec3 100 200 3)
+                                        "item:a" (glm.vec3 10 20 30)}}))
+    (local island {:id "island-1"
+                   :kind "ordered-list"
+                   :members ["item:a" "item:b"]
+                   :state {:list-key "list:1"
+                           :position [7 8 9]}})
+    (local layout (OrderedListPresenter.layout-island island host))
+    (assert-vec3 (. layout "item:a") (glm.vec3 7 8 9)
+                 "restored array state position should be preferred")
+    (assert-vec3 (. layout "item:b") (glm.vec3 7 -16 9)
+                 "default spacing should apply from restored array state position"))
 
 (fn island-host-errors-on-missing-presenter-kind []
     (fn no-presenter-for-kind [_kind]
@@ -137,6 +151,8 @@
                      :fn ordered-list-presenter-computes-deterministic-vertical-placements})
 (table.insert tests {:name "OrderedListPresenter uses state position before member fallback"
                      :fn ordered-list-presenter-uses-state-position-before-member-fallback})
+(table.insert tests {:name "OrderedListPresenter uses restored array state position"
+                     :fn ordered-list-presenter-uses-restored-array-state-position})
 (table.insert tests {:name "IslandHost errors on missing presenter kind"
                      :fn island-host-errors-on-missing-presenter-kind})
 (table.insert tests {:name "IslandHost pins and unpins island members through host callbacks"
