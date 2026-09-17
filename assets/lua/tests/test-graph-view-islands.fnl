@@ -4,6 +4,11 @@
 (local GraphMap (require :graph/map))
 (local GraphView (require :graph/view/init))
 (local BuildContext (require :build-context))
+(local StringEntityStore (require :entities/string))
+(local ListEntityStore (require :entities/list))
+(local IdentityStore (require :entities/identity))
+(local {:register-loader register-string-loader} (require :graph/nodes/string-entity))
+(local {:register-loader register-list-loader} (require :graph/nodes/list-entity))
 (local {:FocusManager FocusManager} (require :focus))
 (local {:Layout Layout :LayoutRoot LayoutRoot} (require :layout))
 
@@ -258,6 +263,41 @@
     (assert-vec3 (view:get-position node-a) (glm.vec3 5 6 0)
                  "drag end should reconcile island and snap member back"))
 
+(fn check-list-created-island-uses-list-node-offset-after-unrelated-drag-end [fixture]
+    (local map fixture.map)
+    (local view fixture.view)
+    (local movables fixture.movables)
+    (local list-node (map:lookup fixture.list-key))
+    (local item-node (map:lookup fixture.item-key))
+    (local unrelated-node (map:lookup fixture.unrelated-key))
+    (local list-entry (. movables.by-node list-node))
+    (local item-entry (. movables.by-node item-node))
+    (local unrelated-entry (. movables.by-node unrelated-node))
+    (assert list-entry "list node should be movable")
+    (assert item-entry "list item should be movable")
+    (assert unrelated-entry "unrelated node should be movable")
+    (list-entry.target:set-position (glm.vec3 24 0 0))
+    (assert-vec3 (view:get-position list-node) (glm.vec3 24 0 0)
+                 "fixture should place list node at non-origin position")
+    (assert (. map.presentation-points list-node.key) "graph map should expose GraphView presentation point")
+    (list-node:expand-items-as-island)
+    (local island (map:get-island "ordered-list:list"))
+    (assert (= (. island.state.position 1) 48)
+            (.. "island origin x should be offset from list node, got " (. island.state.position 1)))
+    (item-entry.target:set-position (glm.vec3 300 400 0))
+    (unrelated-entry.on-drag-end unrelated-entry)
+    (local reconciled-position (view:get-position item-node))
+    (assert (= reconciled-position.x 48)
+            (.. "unrelated drag-end reconciliation should keep first item offset from list node x, got " reconciled-position.x))
+    (assert-vec3 reconciled-position (glm.vec3 48 0 0)
+                 "unrelated drag-end reconciliation should keep first item offset from list node")
+    (local list-position (view:get-position list-node))
+    (local item-position (view:get-position item-node))
+    (assert (not (and (= item-position.x list-position.x)
+                      (= item-position.y list-position.y)
+                      (= item-position.z list-position.z)))
+            "first list island member should not overlap its list node after unrelated drag-end"))
+
 (fn with-fixture [opts f]
     (local options (or opts {}))
     (local dir (make-temp-dir))
@@ -281,6 +321,54 @@
                                       :data-dir dir
                                       :movables movables}))
                 (f {:graph graph :map map :view view :movables movables :dir dir}))))
+    (when view
+        (view:drop))
+    (map:drop)
+    (graph:drop)
+    (fs.remove-all dir)
+    (if ok
+        result
+        (error result)))
+
+(fn with-list-fixture [f]
+    (local dir (make-temp-dir))
+    (when (fs.exists dir)
+        (fs.remove-all dir))
+    (fs.create-dirs dir)
+    (local string-store (StringEntityStore.StringEntityStore {:base-dir (fs.join-path dir "string")}))
+    (local list-store (ListEntityStore.ListEntityStore {:base-dir (fs.join-path dir "list")}))
+    (local identity-store (IdentityStore.IdentityStore {:base-dir (fs.join-path dir "identity")}))
+    (local graph (Graph {:with-start false :identity-store identity-store}))
+    (register-string-loader graph {:store string-store})
+    (register-list-loader graph {:store list-store :identity-store identity-store})
+    (local map (GraphMap.GraphMap {:graph graph :id "graph-view-list-islands"}))
+    (local item (string-store:create-entity {:id "item-a" :value "A"}))
+    (local unrelated (string-store:create-entity {:id "unrelated" :value "Unrelated"}))
+    (local list (list-store:create-entity {:id "list" :name "List" :items [(.. "string-entity:" item.id)]}))
+    (local list-key (.. "list-entity:" list.id))
+    (local item-key (.. "string-entity:" item.id))
+    (local unrelated-key (.. "string-entity:" unrelated.id))
+    (map:load-by-key list-key)
+    (map:load-by-key item-key)
+    (map:load-by-key unrelated-key)
+    (local ctx (make-ctx))
+    (local movables (make-movables-stub))
+    (var view nil)
+    (local (ok result)
+        (pcall
+            (fn []
+                (set view (GraphView {:graph-map map
+                                      :ctx ctx
+                                      :data-dir dir
+                                      :movables movables}))
+                (f {:graph graph
+                    :map map
+                    :view view
+                    :movables movables
+                    :dir dir
+                    :list-key list-key
+                    :item-key item-key
+                    :unrelated-key unrelated-key}))))
     (when view
         (view:drop))
     (map:drop)
@@ -341,6 +429,10 @@
                                                    :spacing 7}})}
         check-snaps-island-member-back-after-drag-end))
 
+(fn graph-view-list-created-island-uses-list-node-offset-after-unrelated-drag-end []
+    (with-list-fixture
+        check-list-created-island-uses-list-node-offset-after-unrelated-drag-end))
+
 (table.insert tests {:name "GraphView applies ordered-list island positions"
                      :fn graph-view-applies-ordered-list-island-positions})
 (table.insert tests {:name "GraphView updates island layout when island changes"
@@ -361,6 +453,8 @@
                      :fn graph-view-removes-island-member-node-without-pin-cleanup-error})
 (table.insert tests {:name "GraphView snaps island member back after drag end"
                      :fn graph-view-snaps-island-member-back-after-drag-end})
+(table.insert tests {:name "GraphView list-created island uses list node offset after unrelated drag end"
+                     :fn graph-view-list-created-island-uses-list-node-offset-after-unrelated-drag-end})
 
 (local main
     (fn []

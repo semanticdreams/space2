@@ -27,6 +27,18 @@
 (fn ordered-list-island-id [entity-id]
   (.. "ordered-list:" (tostring entity-id)))
 
+(fn island-origin-position [list-node existing-island]
+  (if (and existing-island existing-island.state existing-island.state.position)
+      existing-island.state.position
+      (do
+        (local graph list-node.graph)
+        (local list-point (and graph graph.presentation-points
+                               (. graph.presentation-points list-node.key)))
+        (local list-position (and list-point list-point.position))
+        (if list-position
+            [(+ list-position.x 24) list-position.y list-position.z]
+            [24 0 0]))))
+
 (fn remove-edge-by-key [graph key]
   (when (and graph graph.edges graph.edge-map key)
     (local existing (. graph.edge-map key))
@@ -197,6 +209,7 @@
          (assert (and graph graph.load-by-key graph.upsert-island)
                  "ListEntityNode.expand-items-as-island requires mounted graph map with load-by-key and upsert-island")
           (local island-id (ordered-list-island-id self.entity-id))
+          (local existing-island (and graph.get-island (graph:get-island island-id)))
           (local current (self:get-entity))
           (local items (or (and current current.items) []))
           (local members [])
@@ -206,12 +219,13 @@
               (table.insert members (tostring target.key))))
           (if (> (length members) 0)
               (graph:upsert-island {:id island-id
-                                    :kind "ordered-list"
-                                    :members members
-                                    :state {:list-key self.key
-                                            :interaction-policy "snap-back"
-                                            :spacing 24}})
-              (if (and graph.get-island (graph:get-island island-id))
+                                     :kind "ordered-list"
+                                     :members members
+                                     :state {:list-key self.key
+                                             :interaction-policy "snap-back"
+                                             :spacing 24
+                                             :position (island-origin-position self existing-island)}})
+              (if existing-island
                   (do
                     (assert graph.remove-island
                             "ListEntityNode.expand-items-as-island requires remove-island to clear empty ordered-list island")

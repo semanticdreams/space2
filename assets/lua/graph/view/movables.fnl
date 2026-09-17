@@ -50,6 +50,10 @@
 
     (fn register [_self node point]
         (when (and movables point)
+            (when (and node node.graph node.key)
+                (when (not node.graph.presentation-points)
+                    (set node.graph.presentation-points {}))
+                (set (. node.graph.presentation-points node.key) point))
             (local target (make-target node point))
             (set (. movable-targets node) target)
             (movables:register point {:target target
@@ -68,6 +72,8 @@
 
     (fn unregister [_self node]
         (when node
+            (when (and node.graph node.graph.presentation-points node.key)
+                (set (. node.graph.presentation-points node.key) nil))
             (when (and movables node)
                 (movables:unregister node))
             (set (. movable-targets node) nil)))
