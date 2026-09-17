@@ -285,6 +285,12 @@ fi
 if [ -n "${CMAKE_CXX_COMPILER_LAUNCHER:-}" ]; then
     cmake_args+=(-DCMAKE_CXX_COMPILER_LAUNCHER="${CMAKE_CXX_COMPILER_LAUNCHER}")
 fi
+if [ -n "${CMAKE_ASM_MASM_COMPILER:-}" ]; then
+    cmake_args+=(-DCMAKE_ASM_MASM_COMPILER="${CMAKE_ASM_MASM_COMPILER}")
+fi
+if [ -n "${CMAKE_ASM_MASM_FLAGS:-}" ]; then
+    cmake_args+=(-DCMAKE_ASM_MASM_FLAGS="${CMAKE_ASM_MASM_FLAGS}")
+fi
 
 if [ -n "${CMAKE_GENERATOR:-}" ]; then
     cmake_args+=(-G "${CMAKE_GENERATOR}")
