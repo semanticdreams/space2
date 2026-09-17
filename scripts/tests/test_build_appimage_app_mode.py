@@ -29,13 +29,16 @@ def write_metadata(tmp_path: Path, *, icon_path: Path | None = None) -> Path:
     return path
 
 
-def make_space_runtime(tmp_path: Path, *, with_space: bool = True) -> Path:
+def make_space_runtime(tmp_path: Path, *, with_space: bool = True, with_space_icon: bool = True) -> Path:
     runtime = tmp_path / "space-runtime"
     (runtime / "bin").mkdir(parents=True)
     (runtime / "share" / "space" / "assets" / "lua").mkdir(parents=True)
     (runtime / "share" / "space" / "assets" / "lua" / "main.fnl").write_text(
         "(print :space)\n", encoding="utf-8"
     )
+    if with_space_icon:
+        (runtime / "share" / "space" / "assets" / "pics").mkdir(parents=True)
+        (runtime / "share" / "space" / "assets" / "pics" / "space.png").write_bytes(b"png")
     if with_space:
         space = runtime / "bin" / "space"
         space.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -121,3 +124,13 @@ def test_app_mode_fails_loudly_when_bundled_space_binary_is_missing(tmp_path: Pa
 
     assert result.returncode != 0
     assert "bundled Space runtime is missing bin/space" in result.stderr
+
+
+def test_app_mode_fails_when_no_app_icon_or_pinned_runtime_icon_exists(tmp_path: Path) -> None:
+    metadata = write_metadata(tmp_path)
+    runtime = make_space_runtime(tmp_path, with_space_icon=False)
+
+    result = run_stage_only(tmp_path, metadata, runtime)
+
+    assert result.returncode != 0
+    assert "app mode requires either icon_path or bundled Space runtime icon" in result.stderr

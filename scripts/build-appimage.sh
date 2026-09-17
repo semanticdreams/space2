@@ -103,8 +103,9 @@ DESKTOP
             cp "${APP_ICON_PATH}" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/${APP_APP_ID}.png"
         elif [[ -f "${APPDIR}/usr/share/space/assets/pics/space.png" ]]; then
             cp "${APPDIR}/usr/share/space/assets/pics/space.png" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/space.png"
-        elif [[ -f "${ROOT_DIR}/assets/pics/space.png" ]]; then
-            cp "${ROOT_DIR}/assets/pics/space.png" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/space.png"
+        else
+            echo "error: app mode requires either icon_path or bundled Space runtime icon at usr/share/space/assets/pics/space.png" >&2
+            exit 1
         fi
     fi
 else
