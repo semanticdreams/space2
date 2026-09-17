@@ -80,6 +80,7 @@ def resolve_existing_dir(repo_root: Path, relative_or_absolute: str, description
     if not path.is_absolute():
         path = repo_root / path
     path = path.resolve()
+    require_path_under_repo_root(repo_root, path, description)
     if not path.is_dir():
         raise MetadataError(f"{description} does not exist: {path}")
     return path
@@ -90,9 +91,17 @@ def resolve_existing_file(repo_root: Path, relative_or_absolute: str, descriptio
     if not path.is_absolute():
         path = repo_root / path
     path = path.resolve()
+    require_path_under_repo_root(repo_root, path, description)
     if not path.is_file():
         raise MetadataError(f"{description} does not exist: {path}")
     return path
+
+
+def require_path_under_repo_root(repo_root: Path, path: Path, description: str) -> None:
+    try:
+        path.relative_to(repo_root)
+    except ValueError as error:
+        raise MetadataError(f"{description} must be inside repo root: {path}") from error
 
 
 def normalize_metadata(

@@ -131,6 +131,57 @@ def test_release_version_requires_explicit_value_or_ref_name(tmp_path: Path) -> 
     assert_cli_failed_with(result, "release-version is required when no tag/ref name is available")
 
 
+@pytest.mark.parametrize(
+    ("extra", "expected"),
+    [
+        (("--assets-dir", ".."), "assets directory must be inside repo root"),
+        (("--assets-dir", "/tmp"), "assets directory must be inside repo root"),
+    ],
+)
+def test_assets_dir_must_remain_inside_repo_root(
+    tmp_path: Path,
+    extra: tuple[str, ...],
+    expected: str,
+) -> None:
+    repo = make_app_repo(tmp_path)
+    output = tmp_path / "metadata.json"
+
+    result = run_cli(repo, output, *extra, env={"GITHUB_REF_NAME": "v1.2.3"})
+
+    assert_cli_failed_with(result, expected)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    ("icon_path", "expected"),
+    [
+        ("../icon.png", "icon path must be inside repo root"),
+        ("__absolute_outside_icon__", "icon path must be inside repo root"),
+    ],
+)
+def test_icon_path_must_remain_inside_repo_root(
+    tmp_path: Path,
+    icon_path: str,
+    expected: str,
+) -> None:
+    repo = make_app_repo(tmp_path)
+    (tmp_path / "icon.png").write_text("outside icon\n", encoding="utf-8")
+    if icon_path == "__absolute_outside_icon__":
+        icon_path = str(tmp_path / "icon.png")
+    output = tmp_path / "metadata.json"
+
+    result = run_cli(
+        repo,
+        output,
+        "--icon-path",
+        icon_path,
+        env={"GITHUB_REF_NAME": "v1.2.3"},
+    )
+
+    assert_cli_failed_with(result, expected)
+    assert not output.exists()
+
+
 def test_normalizer_does_not_read_space_app_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = make_app_repo(tmp_path)
     (repo / "space-app.json").write_text("not json", encoding="utf-8")
