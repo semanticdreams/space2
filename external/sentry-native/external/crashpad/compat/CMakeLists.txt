@@ -69,6 +69,7 @@ if(MSVC)
 elseif(MINGW)
     list(APPEND COMPAT_SOURCES
         mingw/dbghelp.h
+        mingw/processthreadsapi.h
         mingw/winnt.h
     )
 else()
