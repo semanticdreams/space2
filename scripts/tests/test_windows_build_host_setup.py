@@ -89,14 +89,19 @@ def test_windows_under_wine_resolves_wine_command_with_fallbacks() -> None:
     assert "wine64 \"${CLI_EXE}\"" not in wine_script
 
 
-def test_test_workflow_windows_smoke_uses_wine_fallback() -> None:
-    workflow = read_repo_text(".github/workflows/test.yml")
+def test_workflow_windows_smoke_uses_wine_fallback() -> None:
+    workflow_paths = [
+        ".github/workflows/test.yml",
+        ".github/workflows/build.yml",
+    ]
 
-    assert "WINE_CMD=wine64" in workflow
-    assert "WINE_CMD=wine" in workflow
-    assert "Missing required command: wine64 or wine" in workflow
-    assert 'timeout 60s "${WINE_CMD}" build/windows/space-cli.exe --help >/dev/null' in workflow
-    assert "timeout 60s wine64 build/windows/space-cli.exe --help >/dev/null" not in workflow
+    for workflow_path in workflow_paths:
+        workflow = read_repo_text(workflow_path)
+        assert "WINE_CMD=wine64" in workflow
+        assert "WINE_CMD=wine" in workflow
+        assert "Missing required command: wine64 or wine" in workflow
+        assert 'timeout 60s "${WINE_CMD}" build/windows/space-cli.exe --help >/dev/null' in workflow
+        assert "timeout 60s wine64 build/windows/space-cli.exe --help >/dev/null" not in workflow
 
 
 def test_gitignore_ignores_default_vcpkg_checkout() -> None:
