@@ -5,6 +5,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WERAPI_COMPAT = REPO_ROOT / "external/sentry-native/external/crashpad/compat/mingw/werapi.h"
 DBGHELP_COMPAT = REPO_ROOT / "external/sentry-native/external/crashpad/compat/mingw/dbghelp.h"
 WINNT_COMPAT = REPO_ROOT / "external/sentry-native/external/crashpad/compat/mingw/winnt.h"
+PROCESSTHREADSAPI_COMPAT = REPO_ROOT / "external/sentry-native/external/crashpad/compat/mingw/processthreadsapi.h"
+COMPAT_CMAKE = REPO_ROOT / "external/sentry-native/external/crashpad/compat/CMakeLists.txt"
+SNAPSHOT_CMAKE = REPO_ROOT / "external/sentry-native/external/crashpad/snapshot/CMakeLists.txt"
 MINI_CHROMIUM_RAND_UTIL = REPO_ROOT / "external/sentry-native/external/crashpad/third_party/mini_chromium/mini_chromium/base/rand_util.cc"
 
 
@@ -18,6 +21,19 @@ def read_dbghelp_compat() -> str:
 
 def read_winnt_compat() -> str:
     return WINNT_COMPAT.read_text(encoding="utf-8")
+
+
+def read_processthreadsapi_compat() -> str:
+    assert PROCESSTHREADSAPI_COMPAT.exists()
+    return PROCESSTHREADSAPI_COMPAT.read_text(encoding="utf-8")
+
+
+def read_compat_cmake() -> str:
+    return COMPAT_CMAKE.read_text(encoding="utf-8")
+
+
+def read_snapshot_cmake() -> str:
+    return SNAPSHOT_CMAKE.read_text(encoding="utf-8")
 
 
 def read_mini_chromium_rand_util() -> str:
@@ -103,3 +119,40 @@ def test_old_mingw_winnt_cet_xstate_fallbacks_follow_system_header_before_sdk_fa
     assert "ULONG64 Ia32CetUMsr;" in header
     assert "ULONG64 Ia32Pl3SspMsr;" in header
     assert "} XSAVE_CET_U_FORMAT" in header
+
+
+def test_process_reader_initialize_context2_sdk_definitions_do_not_apply_to_mingw() -> None:
+    cmake = read_snapshot_cmake()
+    definitions = "WINVER=0x0A00 _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000006"
+    cmake_before_definitions = cmake[: cmake.index(definitions)]
+    lines_before_definitions = cmake_before_definitions.splitlines()
+    condition = next(line.strip() for line in reversed(lines_before_definitions) if line.strip().startswith("if") and "(" in line)
+
+    assert "if(NOT MINGW)" in cmake_before_definitions
+    assert "MINGW" not in condition
+    assert "CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION" in condition
+    assert "CMAKE_SYSTEM_VERSION LESS 10" in condition
+
+
+def test_old_mingw_initialize_context2_fallback_is_available_after_system_header_with_c_linkage() -> None:
+    header = read_processthreadsapi_compat()
+    include_next = header.index("#include_next <processthreadsapi.h>")
+    guard = "#if defined(__MINGW64_VERSION_MAJOR) && __MINGW64_VERSION_MAJOR <= 8"
+    declaration = (
+        "WINBASEAPI WINBOOL WINAPI InitializeContext2(PVOID Buffer,\n"
+        "                                             DWORD ContextFlags,\n"
+        "                                             PCONTEXT* Context,\n"
+        "                                             PDWORD ContextLength,\n"
+        "                                             ULONG64 XStateCompactionMask);"
+    )
+
+    assert header.index(guard) > include_next
+    assert header.index(declaration) > header.index(guard)
+    assert "#ifdef __cplusplus\nextern \"C\" {\n#endif" in header
+    assert "#ifdef __cplusplus\n}\n#endif" in header
+
+
+def test_mingw_processthreadsapi_compat_header_is_in_compat_source_list() -> None:
+    cmake = read_compat_cmake()
+
+    assert "mingw/processthreadsapi.h" in cmake
