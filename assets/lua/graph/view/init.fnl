@@ -448,6 +448,38 @@
                          :get-position get-position
                          :get-position-raw get-position-raw}))
 
+    (local island-label-nodes {})
+    (var island-reconcile-depth 0)
+
+    (fn mark-island-label-node! [node]
+        (when node
+            (set (. island-label-nodes node) true)))
+
+    (fn flush-island-label-nodes! []
+        (local nodes-to-refresh
+            (icollect [node _ (pairs island-label-nodes)]
+                node))
+        (each [node _ (pairs island-label-nodes)]
+            (set (. island-label-nodes node) nil))
+        (when (> (length nodes-to-refresh) 0)
+            (update-labels nodes-to-refresh {:force? true})
+            (refresh-label-positions nodes-to-refresh)))
+
+    (fn with-island-label-refresh [cb]
+        (set island-reconcile-depth (+ island-reconcile-depth 1))
+        (local (ok result) (pcall cb))
+        (set island-reconcile-depth (- island-reconcile-depth 1))
+        (if ok
+            (do
+                (when (= island-reconcile-depth 0)
+                    (flush-island-label-nodes!))
+                result)
+            (do
+                (when (= island-reconcile-depth 0)
+                    (each [node _ (pairs island-label-nodes)]
+                        (set (. island-label-nodes node) nil)))
+                (error result))))
+
     (local island-host
         (IslandHost.GraphViewIslandHost
             {:presenters IslandPresenters
@@ -459,7 +491,8 @@
              :set-node-position (fn [_host-options key position]
                                   (local node (graph-map:lookup key))
                                   (assert node (.. "GraphView island host missing node for key: " (tostring key)))
-                                  (graph-layout:set-node-position node position {:skip-labels? true}))
+                                  (graph-layout:set-node-position node position {:skip-labels? true})
+                                  (mark-island-label-node! node))
              :set-node-pinned (fn [_host-options key pinned?]
                                 (local node (graph-map:lookup key))
                                 (assert node (.. "GraphView island host missing node for key: " (tostring key)))
@@ -467,7 +500,14 @@
                                 (graph-layout:set-node-pinned node pinned?))}))
 
     (fn reconcile-graph-islands! []
-        (island-host:reconcile-all (graph-map:list-islands)))
+        (with-island-label-refresh
+            (fn []
+                (island-host:reconcile-all (graph-map:list-islands)))))
+
+    (fn reconcile-graph-island! [island]
+        (with-island-label-refresh
+            (fn []
+                (island-host:reconcile-island island))))
 
     (var batch-depth 0)
     (var batched-layout-dirty? false)
@@ -1031,7 +1071,7 @@
         (assert-not-dropped "handle-island-added-or-updated")
         (local island (and payload payload.island))
         (when island
-            (island-host:reconcile-island island)))
+            (reconcile-graph-island! island)))
 
     (fn handle-island-removed [payload]
         (assert-not-dropped "handle-island-removed")

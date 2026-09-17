@@ -34,7 +34,6 @@
             (set (. member-pin-counts key) (+ (member-pin-count key) 1))))
 
     (fn remove-member-pin-owner [island-id key]
-        (resolve-node key)
         (local tracked (. pinned-by-island island-id))
         (when (and tracked (. tracked key))
             (set (. tracked key) nil)
@@ -43,7 +42,8 @@
                 (set (. member-pin-counts key) next-count)
                 (do
                     (set (. member-pin-counts key) nil)
-                    (set-node-pinned options key false)))))
+                    (when (node-for-key options key)
+                        (set-node-pinned options key false))))))
 
     (fn unpin-island-members [island-id]
         (local tracked (. pinned-by-island island-id))

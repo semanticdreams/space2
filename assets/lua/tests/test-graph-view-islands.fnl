@@ -114,6 +114,28 @@
     (assert-vec3 (view:get-position (map:lookup "test:b")) (glm.vec3 30 55 1)
                  "updated spacing should move second member"))
 
+(fn label-position-for-node [view node]
+    (local span (. view.labels.labels node))
+    (assert span "expected label span for node")
+    (assert span.layout "expected label span layout")
+    span.layout.position)
+
+(fn check-refreshes-labels-after-island-update [fixture]
+    (local map fixture.map)
+    (local view fixture.view)
+    (local node-a (map:lookup "test:a"))
+    (view:update 0.016)
+    (local before-label (label-position-for-node view node-a))
+    (local before-node (view:get-position node-a))
+    (map:update-island "island-1" {:state {:position (glm.vec3 80 90 0)
+                                           :spacing 10}})
+    (local after-label (label-position-for-node view node-a))
+    (local after-node (view:get-position node-a))
+    (local node-delta (- after-node before-node))
+    (local expected-label (+ before-label node-delta))
+    (assert-vec3 after-label expected-label
+                 "label should move with node after island update reconciliation"))
+
 (fn no-op-fixture [_fixture]
     nil)
 
@@ -127,6 +149,16 @@
     (map:remove-island "island-1")
     (assert (not (. view.pinned node-a)) "first member should unpin after island removal")
     (assert (not (. view.pinned node-b)) "second member should unpin after island removal"))
+
+(fn check-removes-island-member-node-without-pin-cleanup-error [fixture]
+    (local map fixture.map)
+    (local view fixture.view)
+    (local node-a (map:lookup "test:a"))
+    (assert (. view.pinned node-a) "fixture should start with removed member pinned")
+    (local (ok err) (pcall (fn [] (map:remove-nodes [node-a]))))
+    (assert ok (.. "removing island member should not fail: " (tostring err)))
+    (assert (not (map:lookup "test:a")) "removed node should leave graph map")
+    (assert (not (. view.pinned node-a)) "removed member should not remain pinned in view"))
 
 (fn check-snaps-island-member-back-after-drag-end [fixture]
     (local map fixture.map)
@@ -184,6 +216,11 @@
                                                    :spacing 10}})}
         check-updates-island-layout-when-island-changes))
 
+(fn graph-view-refreshes-labels-after-island-update []
+    (with-fixture {:island (island-record {:state {:position (glm.vec3 10 20 0)
+                                                   :spacing 10}})}
+        check-refreshes-labels-after-island-update))
+
 (fn graph-view-fails-visibly-for-missing-island-presenter []
     (local (ok err)
         (pcall
@@ -199,6 +236,10 @@
     (with-fixture {:island (island-record {})}
         check-unpins-members-after-island-removal))
 
+(fn graph-view-removes-island-member-node-without-pin-cleanup-error []
+    (with-fixture {:island (island-record {})}
+        check-removes-island-member-node-without-pin-cleanup-error))
+
 (fn graph-view-snaps-island-member-back-after-drag-end []
     (with-fixture {:island (island-record {:state {:position (glm.vec3 5 6 0)
                                                    :spacing 7}})}
@@ -208,10 +249,14 @@
                      :fn graph-view-applies-ordered-list-island-positions})
 (table.insert tests {:name "GraphView updates island layout when island changes"
                      :fn graph-view-updates-island-layout-when-island-changes})
+(table.insert tests {:name "GraphView refreshes labels after island update"
+                     :fn graph-view-refreshes-labels-after-island-update})
 (table.insert tests {:name "GraphView fails visibly for missing island presenter"
                      :fn graph-view-fails-visibly-for-missing-island-presenter})
 (table.insert tests {:name "GraphView unpins members after island removal"
                      :fn graph-view-unpins-members-after-island-removal})
+(table.insert tests {:name "GraphView removes island member node without pin cleanup error"
+                     :fn graph-view-removes-island-member-node-without-pin-cleanup-error})
 (table.insert tests {:name "GraphView snaps island member back after drag end"
                      :fn graph-view-snaps-island-member-back-after-drag-end})
 
