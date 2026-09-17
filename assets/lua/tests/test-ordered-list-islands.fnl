@@ -110,6 +110,18 @@
       (fixture.identity-store:update-entity "alias-a" {:target-key key-b})
       (assert-members (fixture.map:get-island "ordered-list:list") [key-b]))))
 
+(fn list-entity-node-removes-existing-island-when-last-item-is-removed []
+  (with-fixture
+    (fn [fixture]
+      (local key-a (create-string fixture "a" "A"))
+      (local entity (create-list fixture "list" [key-a]))
+      (local list-node (fixture.map:load-by-key (.. "list-entity:" entity.id)))
+      (list-node:expand-items-as-island)
+      (assert (fixture.map:get-island "ordered-list:list") "fixture should start with island")
+      (list-node:remove-item key-a)
+      (assert (not (fixture.map:get-island "ordered-list:list"))
+              "existing ordered-list island should be removed when it has no members"))))
+
 (fn removing-ordered-list-island-does-not-delete-list-or-item-entities []
   (with-fixture
     (fn [fixture]
@@ -145,9 +157,11 @@
 (table.insert tests {:name "ListEntityNode resolves identity items to visible target keys"
                      :fn list-entity-node-resolves-identity-items-to-visible-target-keys})
 (table.insert tests {:name "ListEntityNode refreshes island when identity target changes"
-                     :fn list-entity-node-refreshes-island-when-identity-target-changes})
+                      :fn list-entity-node-refreshes-island-when-identity-target-changes})
+(table.insert tests {:name "ListEntityNode removes existing island when last item is removed"
+                     :fn list-entity-node-removes-existing-island-when-last-item-is-removed})
 (table.insert tests {:name "Removing ordered-list island does not delete list or item entities"
-                     :fn removing-ordered-list-island-does-not-delete-list-or-item-entities})
+                      :fn removing-ordered-list-island-does-not-delete-list-or-item-entities})
 (table.insert tests {:name "ListEntityNode exposes Expand items as island action"
                      :fn list-entity-node-exposes-expand-items-as-island-action})
 

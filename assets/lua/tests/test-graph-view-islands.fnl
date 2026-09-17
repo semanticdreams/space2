@@ -5,6 +5,7 @@
 (local GraphView (require :graph/view/init))
 (local BuildContext (require :build-context))
 (local {:FocusManager FocusManager} (require :focus))
+(local {:Layout Layout :LayoutRoot LayoutRoot} (require :layout))
 
 (local tests [])
 (var temp-counter 0)
@@ -31,9 +32,10 @@
                  :glyph-map {65533 glyph 4242 glyph}})
     (local stub {:font font
                  :codepoints {:open_in_new 4242
-                              :content_copy 4242
-                              :open_in_full 4242
-                              :close_fullscreen 4242}})
+                               :content_copy 4242
+                               :open_in_full 4242
+                               :close_fullscreen 4242
+                               :more_vert 4242}})
     (set stub.get
          (fn [self name]
              (local value (. self.codepoints name))
@@ -49,8 +51,10 @@
 (fn make-ctx []
     (local focus-manager (FocusManager {:root-name "test-graph-view-islands"}))
     (local focus-scope (focus-manager:create-scope {:name "graph-view-islands"}))
+    (local layout-root (LayoutRoot {:log-dirt? false}))
     (local ctx
-        (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+        (BuildContext {:layout-root layout-root
+                       :clickables (assert app.clickables "test requires app.clickables")
                        :hoverables (assert app.hoverables "test requires app.hoverables")
                        :theme {:graph {:selection-border-color (glm.vec4 1 0.6 0.2 1)
                                        :label-color (glm.vec4 1 1 1 1)
@@ -63,10 +67,37 @@
     (set ctx.icons (make-icons-stub))
     ctx)
 
+(fn island-preview-measurer [self]
+    (set self.measure (glm.vec3 40 24 0)))
+
+(fn island-preview-constrained-measurer [self _constraints]
+    (set self.measure (glm.vec3 40 24 0)))
+
+(fn island-preview-layouter [_self]
+    nil)
+
+(fn build-island-preview [_ctx]
+    (local widget {})
+    (local layout (Layout {:name "graph-view-island-preview"
+                          :measurer island-preview-measurer
+                          :constrained-measurer island-preview-constrained-measurer
+                          :layouter island-preview-layouter}))
+    (set widget.layout layout)
+    (set widget.drop (fn [_self] (layout:drop)))
+    widget)
+
+(fn make-preview []
+    (fn preview-factory [_node _opts]
+        build-island-preview))
+
 (fn register-test-loader [graph]
     (graph:register-key-loader "test"
         (fn [key]
-            (Graph.GraphNode {:key key :label key :size 10 :color (glm.vec4 0.4 0.6 1 1)})))
+            (Graph.GraphNode {:key key
+                              :label key
+                              :size 10
+                              :color (glm.vec4 0.4 0.6 1 1)
+                              :preview (make-preview)})))
     graph)
 
 (fn make-movables-stub []
@@ -149,6 +180,19 @@
     (map:remove-island "island-1")
     (assert (not (. view.pinned node-a)) "first member should unpin after island removal")
     (assert (not (. view.pinned node-b)) "second member should unpin after island removal"))
+
+(fn check-preserves-expanded-member-pin-after-island-removal [fixture]
+    (local map fixture.map)
+    (local view fixture.view)
+    (local node-a (map:lookup "test:a"))
+    (local point-a (. view.points node-a))
+    (assert point-a "fixture should have first member point")
+    (assert point-a.on-double-click "fixture point should expose double-click expansion")
+    (point-a:on-double-click {})
+    (assert (. (. view.points node-a) :_card-size) "member should expand into a card")
+    (assert (. view.pinned node-a) "expanded member should be pinned before island removal")
+    (map:remove-island "island-1")
+    (assert (. view.pinned node-a) "expanded member should remain pinned after island removal"))
 
 (fn check-removes-island-member-node-without-pin-cleanup-error [fixture]
     (local map fixture.map)
@@ -236,6 +280,10 @@
     (with-fixture {:island (island-record {})}
         check-unpins-members-after-island-removal))
 
+(fn graph-view-preserves-expanded-member-pin-after-island-removal []
+    (with-fixture {:island (island-record {})}
+        check-preserves-expanded-member-pin-after-island-removal))
+
 (fn graph-view-removes-island-member-node-without-pin-cleanup-error []
     (with-fixture {:island (island-record {})}
         check-removes-island-member-node-without-pin-cleanup-error))
@@ -255,6 +303,8 @@
                      :fn graph-view-fails-visibly-for-missing-island-presenter})
 (table.insert tests {:name "GraphView unpins members after island removal"
                      :fn graph-view-unpins-members-after-island-removal})
+(table.insert tests {:name "GraphView preserves expanded member pin after island removal"
+                     :fn graph-view-preserves-expanded-member-pin-after-island-removal})
 (table.insert tests {:name "GraphView removes island member node without pin cleanup error"
                      :fn graph-view-removes-island-member-node-without-pin-cleanup-error})
 (table.insert tests {:name "GraphView snaps island member back after drag end"

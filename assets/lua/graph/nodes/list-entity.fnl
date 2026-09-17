@@ -196,19 +196,27 @@
          (local graph self.graph)
          (assert (and graph graph.load-by-key graph.upsert-island)
                  "ListEntityNode.expand-items-as-island requires mounted graph map with load-by-key and upsert-island")
-         (local current (self:get-entity))
-         (local items (or (and current current.items) []))
-         (local members [])
-         (each [_ item-key (ipairs items)]
-           (local target (resolve-item-target self item-key))
-           (when (and target target.key)
-             (table.insert members (tostring target.key))))
-         (graph:upsert-island {:id (ordered-list-island-id self.entity-id)
-                               :kind "ordered-list"
-                               :members members
-                               :state {:list-key self.key
-                                       :interaction-policy "snap-back"
-                                       :spacing 24}})))
+          (local island-id (ordered-list-island-id self.entity-id))
+          (local current (self:get-entity))
+          (local items (or (and current current.items) []))
+          (local members [])
+          (each [_ item-key (ipairs items)]
+            (local target (resolve-item-target self item-key))
+            (when (and target target.key)
+              (table.insert members (tostring target.key))))
+          (if (> (length members) 0)
+              (graph:upsert-island {:id island-id
+                                    :kind "ordered-list"
+                                    :members members
+                                    :state {:list-key self.key
+                                            :interaction-policy "snap-back"
+                                            :spacing 24}})
+              (if (and graph.get-island (graph:get-island island-id))
+                  (do
+                    (assert graph.remove-island
+                            "ListEntityNode.expand-items-as-island requires remove-island to clear empty ordered-list island")
+                    (graph:remove-island island-id))
+                  (error "ListEntityNode.expand-items-as-island requires at least one list item")))))
 
   (set node.update-name
        (fn [self new-name]

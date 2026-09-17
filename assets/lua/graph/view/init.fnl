@@ -493,11 +493,29 @@
                                   (assert node (.. "GraphView island host missing node for key: " (tostring key)))
                                   (graph-layout:set-node-position node position {:skip-labels? true})
                                   (mark-island-label-node! node))
-             :set-node-pinned (fn [_host-options key pinned?]
-                                (local node (graph-map:lookup key))
-                                (assert node (.. "GraphView island host missing node for key: " (tostring key)))
-                                (set (. pinned node) (if pinned? true nil))
-                                (graph-layout:set-node-pinned node pinned?))}))
+              :set-node-pinned (fn [_host-options key pinned?]
+                                 (local node (graph-map:lookup key))
+                                 (assert node (.. "GraphView island host missing node for key: " (tostring key)))
+                                 (if pinned?
+                                     (do
+                                         (when (not pinned.__island_pinned)
+                                             (set pinned.__island_pinned {}))
+                                         (when (not pinned.__before_island)
+                                             (set pinned.__before_island {}))
+                                         (when (and (. pinned node) (not (. pinned.__island_pinned node)))
+                                             (set (. pinned.__before_island node) true))
+                                         (set (. pinned.__island_pinned node) true)
+                                         (set (. pinned node) true)
+                                         (graph-layout:set-node-pinned node true))
+                                     (do
+                                         (when pinned.__island_pinned
+                                             (set (. pinned.__island_pinned node) nil))
+                                         (set (. pinned node)
+                                              (if (or (. expanded-nodes node)
+                                                      (and pinned.__before_island (. pinned.__before_island node)))
+                                                  true
+                                                  nil))
+                                         (graph-layout:set-node-pinned node (. pinned node)))))}))
 
     (fn reconcile-graph-islands! []
         (with-island-label-refresh
@@ -1039,6 +1057,10 @@
                         (persistence:prune-node-key node.key))
                     (set (. expanded-nodes node) nil)
                     (set (. pinned-before-expand node) nil)
+                    (when pinned.__island_pinned
+                        (set (. pinned.__island_pinned node) nil))
+                    (when pinned.__before_island
+                        (set (. pinned.__before_island node) nil))
                     (local focus-node (. focus-nodes node))
                     (when focus-node
                         (focus-node:drop)
