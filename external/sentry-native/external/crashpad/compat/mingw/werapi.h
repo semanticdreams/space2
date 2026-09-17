@@ -21,14 +21,14 @@ typedef HANDLE HREPORT;
 #define WER_MAX_PREFERRED_MODULES_BUFFER 256
 #endif
 
-// Ubuntu 22.04/Jammy's MinGW-w64 8.0.0 werapi.h declares
-// WER_SUBMIT_RESULT but omits the PWER_SUBMIT_RESULT pointer typedef while
+// Ubuntu 22.04/Jammy's MinGW-w64 8.0.0 and MinGW-w64 11.0.1 werapi.h declare
+// WER_SUBMIT_RESULT but omit the PWER_SUBMIT_RESULT pointer typedef while
 // still using PWER_SUBMIT_RESULT in WerReportSubmit(). Define the missing name
-// before include_next so that the old header can parse its own prototype. Newer
-// MinGW headers include *PWER_SUBMIT_RESULT in the enum typedef, so limit this
-// workaround to detected old MinGW versions; predefining it for fixed headers
-// would corrupt that typedef.
-#if defined(__MINGW64_VERSION_MAJOR) && __MINGW64_VERSION_MAJOR <= 8
+// before include_next so that the affected headers can parse their own prototype.
+// Newer MinGW headers include *PWER_SUBMIT_RESULT in the enum typedef, so limit
+// this workaround to detected affected MinGW versions; predefining it for fixed
+// headers would corrupt that typedef.
+#if defined(__MINGW64_VERSION_MAJOR) && __MINGW64_VERSION_MAJOR <= 11
 #ifndef PWER_SUBMIT_RESULT
 #define PWER_SUBMIT_RESULT WER_SUBMIT_RESULT*
 #endif

@@ -9,6 +9,7 @@ PROCESSTHREADSAPI_COMPAT = REPO_ROOT / "external/sentry-native/external/crashpad
 COMPAT_CMAKE = REPO_ROOT / "external/sentry-native/external/crashpad/compat/CMakeLists.txt"
 SNAPSHOT_CMAKE = REPO_ROOT / "external/sentry-native/external/crashpad/snapshot/CMakeLists.txt"
 MINI_CHROMIUM_RAND_UTIL = REPO_ROOT / "external/sentry-native/external/crashpad/third_party/mini_chromium/mini_chromium/base/rand_util.cc"
+PE_IMAGE_READER = REPO_ROOT / "external/sentry-native/external/crashpad/snapshot/win/pe_image_reader.cc"
 
 
 def read_werapi_compat() -> str:
@@ -40,13 +41,19 @@ def read_mini_chromium_rand_util() -> str:
     return MINI_CHROMIUM_RAND_UTIL.read_text(encoding="utf-8")
 
 
+def read_pe_image_reader() -> str:
+    return PE_IMAGE_READER.read_text(encoding="utf-8")
+
+
 def test_old_mingw_pwer_submit_result_workaround_precedes_system_header() -> None:
     header = read_werapi_compat()
 
     workaround = "#define PWER_SUBMIT_RESULT WER_SUBMIT_RESULT*"
+    guard = "#if defined(__MINGW64_VERSION_MAJOR) && __MINGW64_VERSION_MAJOR <= 11"
     assert "__MINGW64_VERSION_MAJOR" in header
+    assert "MinGW-w64 11.0.1" in header
+    assert header.index(guard) < header.index("#include_next <werapi.h>")
     assert header.index(workaround) < header.index("#include_next <werapi.h>")
-    assert "__MINGW64_VERSION_MAJOR <= 8" in header
 
 
 def test_runtime_exception_information_fallback_is_available_after_system_header() -> None:
@@ -149,10 +156,10 @@ def test_process_reader_initialize_context2_sdk_definitions_do_not_apply_to_ming
     assert "CMAKE_SYSTEM_VERSION LESS 10" in condition
 
 
-def test_old_mingw_initialize_context2_fallback_is_available_after_system_header_with_c_linkage() -> None:
+def test_mingw_initialize_context2_fallback_covers_low_api_target_mingw_11_after_system_header_with_c_linkage() -> None:
     header = read_processthreadsapi_compat()
     include_next = header.index("#include_next <processthreadsapi.h>")
-    guard = "#if defined(__MINGW64_VERSION_MAJOR) && __MINGW64_VERSION_MAJOR <= 8"
+    guard = "#if defined(__MINGW64_VERSION_MAJOR) && __MINGW64_VERSION_MAJOR <= 11"
     declaration = (
         "WINBASEAPI WINBOOL WINAPI InitializeContext2(PVOID Buffer,\n"
         "                                             DWORD ContextFlags,\n"
@@ -161,6 +168,8 @@ def test_old_mingw_initialize_context2_fallback_is_available_after_system_header
         "                                             ULONG64 XStateCompactionMask);"
     )
 
+    assert "MinGW-w64 11.0.1" in header
+    assert "_WIN32_WINNT targets older Windows" in header
     assert header.index(guard) > include_next
     assert header.index(declaration) > header.index(guard)
     assert "#ifdef __cplusplus\nextern \"C\" {\n#endif" in header
@@ -171,3 +180,12 @@ def test_mingw_processthreadsapi_compat_header_is_in_compat_source_list() -> Non
     cmake = read_compat_cmake()
 
     assert "mingw/processthreadsapi.h" in cmake
+
+
+def test_pe_image_reader_data_directory_offset_uses_constant_offset_and_runtime_entry_size() -> None:
+    source = read_pe_image_reader()
+
+    assert "offsetof(decltype(nt_headers.OptionalHeader), DataDirectory[index])" not in source
+    assert "offsetof(decltype(nt_headers.OptionalHeader), DataDirectory)" in source
+    assert "sizeof(nt_headers.OptionalHeader.DataDirectory[0])" in source
+    assert "data_directory_entry_size * index" in source

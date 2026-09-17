@@ -431,10 +431,17 @@ bool PEImageReader::ImageDataDirectoryEntryT(
     return false;
   }
 
+  if (nt_headers.OptionalHeader.NumberOfRvaAndSizes <= index) {
+    return false;
+  }
+
+  const size_t data_directory_entry_size =
+      sizeof(nt_headers.OptionalHeader.DataDirectory[0]);
+  const size_t data_directory_entry_offset =
+      offsetof(decltype(nt_headers.OptionalHeader), DataDirectory) +
+      data_directory_entry_size * index;
   if (nt_headers.FileHeader.SizeOfOptionalHeader <
-          offsetof(decltype(nt_headers.OptionalHeader), DataDirectory[index]) +
-              sizeof(nt_headers.OptionalHeader.DataDirectory[index]) ||
-      nt_headers.OptionalHeader.NumberOfRvaAndSizes <= index) {
+      data_directory_entry_offset + data_directory_entry_size) {
     return false;
   }
 
