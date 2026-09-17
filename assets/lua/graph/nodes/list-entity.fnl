@@ -269,14 +269,17 @@
            (when (= (tostring updated.id) (tostring entity-id))
              (node:refresh-label)))))
 
+  (fn refresh-existing-island [self]
+    (local graph self.graph)
+    (when (and graph graph.get-island (graph:get-island (ordered-list-island-id self.entity-id)))
+      (self:expand-items-as-island)))
+
   (fn handle-items-changed [payload]
     (local id (or (and payload payload.id) ""))
     (when (= (tostring id) (tostring entity-id))
       (node.items-changed:emit payload)
       (node:add-item-nodes)
-      (local graph node.graph)
-      (when (and graph graph.get-island (graph:get-island (ordered-list-island-id entity-id)))
-        (node:expand-items-as-island))))
+      (refresh-existing-island node)))
 
   (set items-handler
        (store.list-entity-items-changed:connect handle-items-changed))
@@ -334,19 +337,21 @@
                   (fn [payload]
                     (local current (self:get-entity))
                     (when (and current (entity-affected-by-morph? current payload))
-                      ;; Morph can transiently resolve old type during identity update.
-                      ;; Refresh once more after graph finishes node replacement.
-                      (self.items-changed:emit {:id self.entity-id :items current.items})
-                      (self:add-item-nodes))))))
+                       ;; Morph can transiently resolve old type during identity update.
+                       ;; Refresh once more after graph finishes node replacement.
+                       (self.items-changed:emit {:id self.entity-id :items current.items})
+                       (self:add-item-nodes)
+                       (refresh-existing-island self))))))
          (when (and self.identity-store self.identity-store.identity-updated (not identity-updated-handler))
            (set identity-updated-handler
                 (self.identity-store.identity-updated:connect
                   (fn [entity]
-                    (local identity-key (.. IDENTITY_KEY_PREFIX (tostring entity.id)))
-                    (local current (self:get-entity))
-                    (when (and current (entity-contains-node-key? current identity-key))
-                      (self.items-changed:emit {:id self.entity-id :items current.items})
-                      (self:add-item-nodes))))))
+                     (local identity-key (.. IDENTITY_KEY_PREFIX (tostring entity.id)))
+                     (local current (self:get-entity))
+                     (when (and current (entity-contains-node-key? current identity-key))
+                       (self.items-changed:emit {:id self.entity-id :items current.items})
+                       (self:add-item-nodes)
+                       (refresh-existing-island self))))))
          (when (and self.identity-store self.identity-store.identity-deleted (not identity-deleted-handler))
            (set identity-deleted-handler
                 (self.identity-store.identity-deleted:connect

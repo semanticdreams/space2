@@ -97,6 +97,19 @@
       (assert (= (fixture.map:lookup "identity:alias-a") nil)
               "identity item should materialize visible target, not identity adapter"))))
 
+(fn list-entity-node-refreshes-island-when-identity-target-changes []
+  (with-fixture
+    (fn [fixture]
+      (local key-a (create-string fixture "a" "A"))
+      (local key-b (create-string fixture "b" "B"))
+      (fixture.identity-store:create-entity {:id "alias-a" :target-key key-a})
+      (local entity (create-list fixture "list" ["identity:alias-a"]))
+      (local list-node (fixture.map:load-by-key (.. "list-entity:" entity.id)))
+      (list-node:expand-items-as-island)
+      (assert-members (fixture.map:get-island "ordered-list:list") [key-a])
+      (fixture.identity-store:update-entity "alias-a" {:target-key key-b})
+      (assert-members (fixture.map:get-island "ordered-list:list") [key-b]))))
+
 (fn removing-ordered-list-island-does-not-delete-list-or-item-entities []
   (with-fixture
     (fn [fixture]
@@ -131,6 +144,8 @@
                      :fn list-entity-node-updates-existing-ordered-list-island-in-store-order})
 (table.insert tests {:name "ListEntityNode resolves identity items to visible target keys"
                      :fn list-entity-node-resolves-identity-items-to-visible-target-keys})
+(table.insert tests {:name "ListEntityNode refreshes island when identity target changes"
+                     :fn list-entity-node-refreshes-island-when-identity-target-changes})
 (table.insert tests {:name "Removing ordered-list island does not delete list or item entities"
                      :fn removing-ordered-list-island-does-not-delete-list-or-item-entities})
 (table.insert tests {:name "ListEntityNode exposes Expand items as island action"
