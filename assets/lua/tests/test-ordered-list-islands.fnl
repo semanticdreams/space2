@@ -6,6 +6,7 @@
 (local IdentityStore (require :entities/identity))
 (local {:register-loader register-string-loader} (require :graph/nodes/string-entity))
 (local {:register-loader register-list-loader} (require :graph/nodes/list-entity))
+(local OrderedListPresenter (require :graph/view/island-presenters/ordered-list))
 
 (local tests [])
 (var temp-counter 0)
@@ -54,6 +55,21 @@
     (assert (= (. island.members i) (. expected i))
             (.. "member " i " should be " (. expected i) ", got " (tostring (. island.members i))))))
 
+(fn assert-position-array [actual expected message]
+  (assert actual (or message "expected position array"))
+  (for [i 1 3]
+    (assert (= (. actual i) (. expected i))
+            (.. (or message "position") " component " i " expected " (. expected i)
+                ", got " (tostring (. actual i))))))
+
+(fn make-reconcile-host [positions]
+  {:position-for-key (fn [_self key]
+                       (. positions key))
+   :set-member-position (fn [_self _island-id key position]
+                          (set (. positions key) position))
+   :set-member-pinned (fn [_self _island-id _key _pinned?]
+                        nil)})
+
 (fn list-entity-node-expands-item-nodes-as-ordered-list-island []
   (with-fixture
     (fn [fixture]
@@ -68,8 +84,36 @@
       (assert (= island.state.list-key list-node.key) "island should remember source list node key")
       (assert (= island.state.interaction-policy "snap-back") "island should request snap-back interactions")
       (assert (= island.state.spacing 24) "island should set default spacing")
+      (assert-position-array island.state.position [24 0 0]
+                             "island should store a JSON-safe stable origin offset from the list node")
       (assert (fixture.map:lookup key-a) "expansion should load first item node")
       (assert (fixture.map:lookup key-b) "expansion should load second item node"))))
+
+(fn list-entity-node-created-island-keeps-first-item-offset-after-reconcile []
+  (with-fixture
+    (fn [fixture]
+      (local key-a (create-string fixture "a" "A"))
+      (local key-b (create-string fixture "b" "B"))
+      (local entity (create-list fixture "list" [key-a key-b]))
+      (local list-node (fixture.map:load-by-key (.. "list-entity:" entity.id)))
+      (local island (list-node:expand-items-as-island))
+      (local positions {})
+      (set (. positions list-node.key) {:x 0 :y 0 :z 0})
+      (set (. positions key-a) {:x 500 :y 500 :z 0})
+      (set (. positions key-b) {:x 600 :y 600 :z 0})
+      (set (. positions "string-entity:unrelated") {:x -100 :y -100 :z 0})
+      (local host (make-reconcile-host positions))
+      (OrderedListPresenter.apply island host)
+      (local first-position (. positions key-a))
+      (local list-position (. positions list-node.key))
+      (assert-position-array island.state.position [24 0 0]
+                             "list-created island should persist its reconciliation origin")
+      (assert (= first-position.x 24) "first item should reconcile to island origin x, not list node x")
+      (assert (= first-position.y 0) "first item should reconcile to island origin y")
+      (assert (not (and (= first-position.x list-position.x)
+                        (= first-position.y list-position.y)
+                        (= first-position.z list-position.z)))
+              "first item should not overlap the list node after unrelated drag reconciliation"))))
 
 (fn list-entity-node-updates-existing-ordered-list-island-in-store-order []
   (with-fixture
@@ -83,6 +127,25 @@
       (fixture.list-store:reorder-items entity.id [key-c key-b key-a])
       (local island (fixture.map:get-island "ordered-list:list"))
       (assert-members island [key-c key-b key-a]))))
+
+(fn list-entity-node-preserves-existing-ordered-list-island-position-on-update []
+  (with-fixture
+    (fn [fixture]
+      (local key-a (create-string fixture "a" "A"))
+      (local key-b (create-string fixture "b" "B"))
+      (local key-c (create-string fixture "c" "C"))
+      (local entity (create-list fixture "list" [key-a key-b]))
+      (local list-node (fixture.map:load-by-key (.. "list-entity:" entity.id)))
+      (list-node:expand-items-as-island)
+      (fixture.map:update-island "ordered-list:list" {:state {:list-key list-node.key
+                                                               :interaction-policy "snap-back"
+                                                               :spacing 24
+                                                               :position [111 222 3]}})
+      (fixture.list-store:reorder-items entity.id [key-c key-b key-a])
+      (local island (fixture.map:get-island "ordered-list:list"))
+      (assert-members island [key-c key-b key-a])
+      (assert-position-array island.state.position [111 222 3]
+                             "refresh should preserve explicit island origin"))))
 
 (fn list-entity-node-resolves-identity-items-to-visible-target-keys []
   (with-fixture
@@ -152,8 +215,12 @@
 
 (table.insert tests {:name "ListEntityNode expands item nodes as ordered-list island"
                      :fn list-entity-node-expands-item-nodes-as-ordered-list-island})
+(table.insert tests {:name "ListEntityNode-created island keeps first item offset after reconcile"
+                     :fn list-entity-node-created-island-keeps-first-item-offset-after-reconcile})
 (table.insert tests {:name "ListEntityNode updates existing ordered-list island in store order"
                      :fn list-entity-node-updates-existing-ordered-list-island-in-store-order})
+(table.insert tests {:name "ListEntityNode preserves existing ordered-list island position on update"
+                     :fn list-entity-node-preserves-existing-ordered-list-island-position-on-update})
 (table.insert tests {:name "ListEntityNode resolves identity items to visible target keys"
                      :fn list-entity-node-resolves-identity-items-to-visible-target-keys})
 (table.insert tests {:name "ListEntityNode refreshes island when identity target changes"
