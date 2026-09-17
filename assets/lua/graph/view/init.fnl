@@ -41,11 +41,11 @@
             (graph-map:load-by-key other-key)
             (table.insert next-frontier (tostring other-key))))
     next-frontier)
-(fn list-graph-islands [graph-map] (if graph-map.list-islands (graph-map:list-islands) []))
+
 (fn GraphView [opts]
     (local options (or opts {}))
-    (local graph-map (or options.graph-map options.graph))
-    (assert graph-map "GraphView requires a graph-map")
+    (local graph-map options.graph-map)
+    (assert graph-map "GraphView requires :graph-map") (assert graph-map.list-islands "GraphView requires :graph-map with list-islands")
     (local graph-map-id (or graph-map.id "main"))
     (local ctx options.ctx)
     (assert ctx "GraphView requires a build context with triangle-vector and points")
@@ -527,7 +527,7 @@
     (fn reconcile-graph-islands! []
         (with-island-label-refresh
             (fn []
-                (island-host:reconcile-all (list-graph-islands graph-map)))))
+                (island-host:reconcile-all (graph-map:list-islands)))))
 
     (fn reconcile-graph-island! [island]
         (with-island-label-refresh

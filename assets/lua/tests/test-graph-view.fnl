@@ -140,6 +140,7 @@
     ctx)
 
 (fn register-graph-map-test-loaders [graph keys]
+    (local provider (or graph.graph graph))
     (local seen {})
     (each [_ key (ipairs (or keys []))]
         (local key-str (tostring key))
@@ -147,20 +148,31 @@
         (local scheme (if colon-at (string.sub key-str 1 (- colon-at 1)) key-str))
         (when (and (> (string.len scheme) 0)
                    (not (. seen scheme))
-                   (not (graph:has-key-loader-for-key key-str)))
+                   (not (provider:has-key-loader-for-key key-str)))
             (set (. seen scheme) true)
-            (graph:register-key-loader scheme
+            (provider:register-key-loader scheme
                 (fn [loaded-key]
                     (Graph.GraphNode {:key loaded-key})))))
     graph)
 
+(fn make-test-graph []
+    (local graph (Graph {:with-start false}))
+    (local original-has-key-loader graph.has-key-loader-for-key)
+    (set graph.has-key-loader-for-key
+         (fn [self key]
+             (if (and original-has-key-loader (original-has-key-loader self key))
+                 true
+                 (if key true false))))
+    graph)
+(fn make-test-graph-map [opts]
+    (local options (if opts opts {}))
+    (local graph (make-test-graph))
+    (GraphMap.GraphMap {:graph graph :id (if options.id options.id "main")}))
 (var temp-counter 0)
 (local temp-root (fs.join-path "/tmp/space/tests" "graph-fs-node-tmp"))
-
 (fn make-temp-dir []
     (set temp-counter (+ temp-counter 1))
     (fs.join-path temp-root (.. "fs-node-" (os.time) "-" temp-counter)))
-
 (fn with-temp-dir [f]
     (local dir (make-temp-dir))
     (when (fs.exists dir)
@@ -171,7 +183,6 @@
     (if ok
         result
         (error result)))
-
 (fn with-data-dir [dir f]
     (assert appdirs "appdirs module must be available")
     (local original appdirs.user-data-dir)
@@ -181,13 +192,11 @@
     (if ok
         result
         (error result)))
-
 (fn with-temp-data-dir [f]
     (with-temp-dir
         (fn [root]
             (with-data-dir root
                 (fn [] (f root))))))
-
 (fn make-heightfield-terrain-record [opts]
     (local options (or opts {}))
     (local chunk-samples (or options.chunk-samples [5 5]))
@@ -208,7 +217,6 @@
                              0 0 0 0 0
                              0 0 0 0 0
                              0 0 0 0 0]}])})
-
 (fn make-skybox-state [opts]
     (local options (or opts {}))
     (SkyboxState.normalize-complete-state
@@ -217,13 +225,11 @@
                  :brightness (or options.brightness 0.1)}
        :by-theme (or options.by-theme {})}
       "test-graph-view skybox state"))
-
 (fn make-background-state [opts]
     (local options (or opts {}))
     (BackgroundState.normalize-complete-state
       {:color (or options.color [0.0 0.0 0.0])}
       "test-graph-view background state"))
-
 (fn make-world-entry [opts]
     (local options (or opts {}))
     (local runtime (or options.runtime nil))
@@ -272,7 +278,6 @@
      :world {:state state
              :get-runtime (fn [_self] runtime)
              :save-state (fn [_self] true)}})
-
 (fn make-world-manager [opts]
     (local options (or opts {}))
     (local entry (assert options.entry "make-world-manager requires :entry"))
@@ -281,15 +286,13 @@
                         (if (= world-id entry.id) entry nil))
      :active-world-id (fn [_self] (or options.active-world-id entry.id))
      :active-world (fn [_self] entry)})
-
 (fn unwrap-element [item]
     (or (and item item.element) item))
-
 (fn edge-produces-triangles []
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph :ctx ctx}))
             (local a (Graph.GraphNode {:key "a" :color (glm.vec4 0.2 0.6 1.0 1)}))
             (local b (Graph.GraphNode {:key "b" :color (glm.vec4 1 0.4 0.2 1)}))
@@ -303,12 +306,11 @@
                     "Triangle edge should emit exactly one wedge (3 vertices)")
             (view:drop)
             (graph:drop))))
-
 (fn graph-view-does-not-subscribe-to-raw-engine-updates []
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local node (Graph.GraphNode {:key "a" :label "Alpha"}))
             (local raw-updated-signal (and app.engine app.engine.events app.engine.events.updated))
             (assert raw-updated-signal "GraphView test requires app.engine.events.updated")
@@ -328,12 +330,11 @@
                     "GraphView should still create labels from graph changes")
             (view:drop)
             (graph:drop))))
-
 (fn graph-view-update-after-drop-errors []
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph :ctx ctx}))
             (view:drop)
             (local (ok err)
@@ -348,7 +349,7 @@
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph :ctx ctx}))
             (view:drop)
             (local (ok err)
@@ -363,7 +364,7 @@
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local node (Graph.GraphNode {:key "a" :label "Alpha"}))
             (local view (GraphView {:graph-map graph :ctx ctx}))
             (graph:add-node node {:position (glm.vec3 0 0 0)})
@@ -410,7 +411,7 @@
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
-            (local graph (Graph {}))
+            (local graph (make-test-graph-map))
             (local start ((require :graph/nodes/start))) (graph:add-node start {:auto-focus? true})
             (local builder (start.view start))
             (local view (builder ctx))
@@ -430,7 +431,7 @@
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
-            (local graph (Graph {}))
+            (local graph (make-test-graph-map))
             (local start ((require :graph/nodes/start))) (graph:add-node start {:auto-focus? true})
             (local builder (start.view start))
             (local view (builder ctx))
@@ -749,7 +750,7 @@
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph :ctx ctx}))
             (local center (glm.vec3 15 25 0))
             (view.layout:set-center-position center)
@@ -766,7 +767,6 @@
             (assert (= pos.z center.z))
             (view:drop)
             (graph:drop))))
-
 (fn fs-node-view-adds-child-nodes-for-entries []
     (with-temp-data-dir
         (fn [_root]
@@ -808,6 +808,7 @@
                                            edge-count))
                     (view:drop)
                     (graph:drop))))))
+
 
 (fn fs-node-view-ripgrep-button-opens-ripgrep-view-with-prefilled-path []
     (with-temp-data-dir
@@ -923,7 +924,6 @@
       (when (not ok)
         (error err))
       true)))
-
 (fn table-node-view-adds-child-nodes []
     (with-temp-data-dir
         (fn [_root]
@@ -999,6 +999,7 @@
             (graph:drop)
             (selector:drop))))
 
+
 (fn graph-removing-node-closes-live-scene-cube-panel []
     (with-temp-data-dir
         (fn [_root]
@@ -1016,18 +1017,19 @@
                     (fn []
                         (set app.scene scene)
                         (local ctx (make-ctx))
-                        (local graph (Graph {:with-start false}))
+                        (local graph (make-test-graph))
                         (register-graph-map-test-loaders graph ["test:cube-node"])
                         (local graph-map (GraphMap.GraphMap {:graph graph :id "cube-map"}))
                         (local view (GraphView {:graph-map graph-map :ctx ctx}))
-                        (local node (graph-map:load-by-key "test:cube-node"))
+                        (local node (Graph.GraphNode {:key "test:cube-node"}))
+                        (graph-map:add-node node)
                         (local element {:layout (Layout {:name "live-cube-panel"})})
                         (table.insert scene.scene-children
                                       {:element element
                                        :persistence {:kind "graph-node-cube"
                                                      :node-key "test:cube-node"
                                                      :graph-map-id "cube-map"}})
-                        (graph-map:remove-nodes [node])
+                        (view:remove-nodes [node])
                         (assert (= (length removed) 1)
                                 "Removing a map node should close its live scene cube panel")
                         (assert (= (. removed 1) element)
@@ -1107,7 +1109,6 @@
             (assert (= (. node :tool-call-id) "call-2"))
             (view:drop)
             (graph:drop))))
-
 (fn llm-node-view-adds-conversations []
     (with-temp-data-dir
         (fn [_root]
@@ -1149,7 +1150,7 @@
             (local selector (ObjectSelector {:project (fn [position _opts] position)
                                              :ctx ctx
                                              :enabled? true}))
-            (local graph (Graph {}))
+            (local graph (make-test-graph-map))
             (local start ((require :graph/nodes/start))) (graph:add-node start {:position (glm.vec3 0 0 0)})
             (local view-controller (GraphView {:graph-map graph
                                                  :ctx ctx
@@ -1201,7 +1202,7 @@
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph
                                     :ctx ctx}))
             (local state {:measure (glm.vec3 73 37 0)
@@ -1271,7 +1272,7 @@
             (local selector (ObjectSelector {:project (fn [position _opts] position)
                                              :ctx ctx
                                              :enabled? true}))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :selector selector}))
@@ -1304,7 +1305,7 @@
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph
                                     :ctx ctx}))
             (local node (Graph.GraphNode {:key "center-toggle"
@@ -1346,7 +1347,7 @@
             (local selector (ObjectSelector {:project (fn [position _opts] position)
                                              :ctx ctx
                                              :enabled? true}))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :selector selector}))
@@ -1398,7 +1399,7 @@
             (local selector (ObjectSelector {:project (fn [position _opts] position)
                                              :ctx ctx
                                              :enabled? true}))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :selector selector}))
@@ -1443,7 +1444,7 @@
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph
                                     :ctx ctx}))
             (local first-state {})
@@ -1479,7 +1480,7 @@
                                                 (table.insert self.children opts)
                                                 opts)
                            :remove-panel-child (fn [_self _element] nil)})
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :view-target target}))
@@ -1605,7 +1606,7 @@
             (local selector (ObjectSelector {:project (fn [position _opts] position)
                                              :ctx ctx
                                              :enabled? true}))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :selector selector}))
@@ -1642,7 +1643,7 @@
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph
                                     :ctx ctx}))
             (local first-state {})
@@ -1697,7 +1698,7 @@
                                                         (table.insert presentations [node.key presentation]))
                                 :persist (fn [_self _points _force?] nil)
                                 :schedule-save (fn [_self] nil)})
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :persistence persistence}))
@@ -1730,7 +1731,7 @@
                         (with-temp-data-dir
                             (fn [_root]
                                 (local ctx (make-ctx))
-                                (local graph (Graph {:with-start false}))
+                                (local graph (make-test-graph-map))
                                 (local view (GraphView {:graph-map graph :ctx ctx}))
                                 (local node (Graph.GraphNode {:key "remove-resize"
                                                               :preview (tracked-preview {})}))
@@ -1762,7 +1763,7 @@
                                 :set-presentation (fn [_self _node _presentation] nil)
                                 :persist (fn [_self _points _force?] nil)
                                 :schedule-save (fn [_self] nil)})
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :persistence persistence}))
@@ -1888,7 +1889,7 @@
                :register-double-click (fn [_self obj] (table.insert registrations.double obj))
                :unregister-double-click (fn [_self obj] nil)})
             (local ctx (make-ctx {:clickables instrumented-clickables}))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph :ctx ctx}))
             (local node (Graph.GraphNode {:key "reg-test"
                                           :preview (tracked-preview {})}))
@@ -1969,7 +1970,7 @@
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (var opened nil)
             (local original-menu-manager app.menu-manager)
             (set app.menu-manager nil)
@@ -2069,7 +2070,7 @@
             (local selector (ObjectSelector {:project (fn [position _opts] position)
                                              :ctx ctx
                                              :enabled? true}))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :selector selector}))
@@ -2105,7 +2106,7 @@
                                                  (for [i (length self.children) 1 -1]
                                                      (when (= (. self.children i) element)
                                                          (table.remove self.children i))))})
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view-controller (GraphView {:graph-map graph
                                                :view-target target
                                                :ctx ctx
@@ -2231,7 +2232,7 @@
             (states:set-state :normal)
             (set suspended-state (TestSupport.suspend-active-state original-states))
             (set-app-states! states)
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local node (HeightfieldPerlinToolNode {:world-id "world-a"
                                                     :activity-id "sandbox"
                                                     :world-manager manager
@@ -2377,7 +2378,7 @@
             (states:set-state :normal)
             (set suspended-state (TestSupport.suspend-active-state original-states))
             (set-app-states! states)
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local node (HeightfieldPerlinToolNode {:world-id "world-a"
                                                     :activity-id "sandbox"
                                                     :world-manager manager
@@ -2526,7 +2527,7 @@
             (states:set-state :normal)
             (set suspended-state (TestSupport.suspend-active-state original-states))
             (set-app-states! states)
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local node (HeightfieldPerlinToolNode {:world-id "world-a"
                                                     :activity-id "sandbox"
                                                     :world-manager manager
@@ -2657,7 +2658,7 @@
         (fn [_root]
             (local ctx (make-ctx))
             (set ctx.theme.card {:background light-card-background})
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph :ctx ctx}))
             (local node (Graph.GraphNode {:key "theme-card-node"
                                           :preview (tracked-preview {})}))
@@ -2681,7 +2682,7 @@
         (fn [_root]
             (local ctx (make-ctx))
             (set ctx.theme.card {:background light-card-background})
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph :ctx ctx}))
             (local node (Graph.GraphNode {:key "outline-node"
                                           :preview (tracked-preview {})}))
@@ -2974,7 +2975,7 @@
                         (with-temp-data-dir
                             (fn [_root]
                                 (local ctx (make-ctx))
-                                (local graph (Graph {:with-start false}))
+                                (local graph (make-test-graph-map))
                                 (local view (GraphView {:graph-map graph :ctx ctx}))
                                 (local node (Graph.GraphNode {:key "resizable-node"
                                                               :preview (tracked-preview {})}))
@@ -3002,7 +3003,7 @@
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph :ctx ctx}))
             (local node (Graph.GraphNode {:key "border-node" :size 8}))
             (graph:add-node node {:position (glm.vec3 0 0 0) :run-force? false})
@@ -3029,7 +3030,7 @@
         (fn [_root]
             (local ctx (make-ctx))
             (local focus-manager (. ctx.focus :manager))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph :ctx ctx}))
             (local node (Graph.GraphNode {:key "auto-focus-node" :size 6}))
             (focus-manager:arm-auto-focus {:event {:mod 0}})
@@ -3075,7 +3076,7 @@
                                                    :direction (glm.vec3 0 0 -1)})})
                         (local ctx (make-ctx))
                         (local focus-manager (. ctx.focus :manager))
-                        (set graph (Graph {:with-start false}))
+                        (set graph (make-test-graph-map))
                         (set view (GraphView {:graph-map graph
                                               :ctx ctx
                                               :pointer-target pointer-target}))
@@ -3127,7 +3128,7 @@
                                           (table.insert registered {:point point :opts opts}))
                              :unregister (fn [_self node]
                                              (table.insert unregistered node))})
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :movables movables
@@ -3171,7 +3172,7 @@
             (set app.active-interaction-surface :scene)
             (set app.scene-interactive? true)
             (set app.canvas-interactive? false)
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :movables movables}))
@@ -3222,7 +3223,7 @@
             (set app.active-interaction-surface :scene)
             (set app.scene-interactive? true)
             (set app.canvas-interactive? false)
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :movables movables}))
@@ -3337,14 +3338,15 @@
                     "GraphViewPersistence should compact wrong-map extra panels on disk")
             (assert (= (. compacted.extra_panels 1 :node-key) "cube-keep")))))
 
-(fn graph-view-accepts-transitional-graph-option []
+(fn graph-view-rejects-graph-option-without-graph-map []
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph :ctx ctx}))
-            (assert view "GraphView should accept documented transitional :graph option")
-            (view:drop)
+            (local (ok err) (pcall (fn [] (GraphView {:graph graph :ctx ctx}))))
+            (assert (not ok) "GraphView should reject :graph without :graph-map")
+            (assert (string.find (tostring err) "GraphView requires :graph-map" 1 true)
+                    "GraphView should explain that :graph-map is required")
             (graph:drop))))
 
 (fn graph-view-restores-extra-panel-size-and-rotation []
@@ -3360,7 +3362,7 @@
                                             (set captured opts)
                                             {:ok true})})
                         (local ctx (make-ctx))
-                        (local graph (Graph {:with-start false}))
+                        (local graph (make-test-graph))
                         (local graph-map (GraphMap.GraphMap {:graph graph :id "cube-map"}))
                         (local view (GraphView {:graph-map graph-map :ctx ctx}))
                         (view:restore-state {:extra_panels [{:kind "graph-node-cube"
@@ -3397,7 +3399,7 @@
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph))
             (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
             (local view (GraphView {:graph-map graph-map :ctx ctx}))
             (local (ok err)
@@ -3420,7 +3422,7 @@
         (fn [_root]
             (local original-scene app.scene)
             (local ctx (make-ctx))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph))
             (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
             (local view (GraphView {:graph-map graph-map :ctx ctx}))
             (set app.scene nil)
@@ -3448,7 +3450,7 @@
             (local metadata-path (fs.join-path graph-dir "metadata.json"))
             (JsonUtils.write-json! metadata-path {:positions {:persisted [12 34 0]}})
             (local ctx (make-ctx))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph :ctx ctx}))
             (local node (Graph.GraphNode {:key "persisted"}))
             (graph:add-node node {})
@@ -3464,7 +3466,7 @@
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph :ctx ctx}))
             (local a (Graph.GraphNode {:key "a"}))
             (local b (Graph.GraphNode {:key "b"}))
@@ -3489,13 +3491,13 @@
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph :ctx ctx}))
             (local node (Graph.GraphNode {:key "sticky"}))
             (graph:add-node node {:position (glm.vec3 7 9 0)})
             (view:drop)
             (graph:drop)
-            (local graph2 (Graph {:with-start false}))
+            (local graph2 (make-test-graph-map))
             (local view2 (GraphView {:graph-map graph2 :ctx (make-ctx)}))
             (local node2 (Graph.GraphNode {:key "sticky"}))
             (graph2:add-node node2 {})
@@ -3511,7 +3513,7 @@
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph))
             (graph:register-key-loader
                 "test"
                 (fn [key]
@@ -3553,7 +3555,7 @@
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local camera {:position (glm.vec3 0 0 0)})
             (local view (GraphView {:graph-map graph
                                     :ctx ctx
@@ -3685,7 +3687,7 @@
 (table.insert tests {:name "GraphViewPersistence rejects unsafe map-id" :fn graph-persistence-rejects-unsafe-map-id})
 (table.insert tests {:name "GraphViewPersistence saves and restores positions" :fn graph-persistence-class-saves-and-restores})
 (table.insert tests {:name "GraphViewPersistence filters wrong-map panels" :fn graph-persistence-filters-wrong-map-panels})
-(table.insert tests {:name "GraphView accepts transitional graph option" :fn graph-view-accepts-transitional-graph-option})
+(table.insert tests {:name "GraphView rejects graph option without graph-map" :fn graph-view-rejects-graph-option-without-graph-map})
 (table.insert tests {:name "GraphView restores extra panel size and rotation" :fn graph-view-restores-extra-panel-size-and-rotation})
 (table.insert tests {:name "GraphView extra panel restore errors on missing restorer"
                       :fn graph-view-extra-panel-restore-errors-on-missing-restorer})
@@ -3700,7 +3702,7 @@
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local node (Graph.GraphNode {:key "a" :label "A"}))
             (local view (GraphView {:graph-map graph :ctx ctx}))
             (graph:add-node node {:position (glm.vec3 0 0 0)})
@@ -3716,7 +3718,7 @@
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local a (Graph.GraphNode {:key "a" :label "A"}))
             (local b (Graph.GraphNode {:key "b" :label "B"}))
             (local view (GraphView {:graph-map graph :ctx ctx}))
@@ -3747,7 +3749,7 @@
                                                  (for [i (length self.children) 1 -1]
                                                      (when (= (. self.children i) element)
                                                          (table.remove self.children i))))})
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph))
             (register-graph-map-test-loaders graph ["scoped-node"])
             (local graph-map (GraphMap.GraphMap {:graph graph :id "scoped-map"}))
             (local node (Graph.GraphNode {:key "scoped-node"
@@ -3782,7 +3784,7 @@
                            :capture-panel-element-state (fn [_self _element]
                                                           {:position [11 12 0]
                                                            :size [40 20 0]})})
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph))
             (register-graph-map-test-loaders graph ["persist-node"])
             (local graph-map (GraphMap.GraphMap {:graph graph :id "persist-panels"}))
             (local node (Graph.GraphNode {:key "persist-node"
@@ -3815,7 +3817,7 @@
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph))
             (register-graph-map-test-loaders graph ["scoped-node"])
             (local graph-map (GraphMap.GraphMap {:graph graph :id "scoped-map"}))
             (local node (Graph.GraphNode {:key "scoped-node"
@@ -3854,7 +3856,7 @@
           (pcall
             (fn []
               (local ctx (make-ctx))
-              (local graph (Graph {:with-start false}))
+              (local graph (make-test-graph))
               (register-graph-map-test-loaders graph ["llm-conversation:conv-drop"])
               (local graph-map (GraphMap.GraphMap {:graph graph :id "llm-map"}))
               (local view (GraphView {:graph-map graph-map
@@ -3908,7 +3910,7 @@
           (pcall
             (fn []
               (local ctx (make-ctx))
-              (local graph (Graph {:with-start false}))
+              (local graph (make-test-graph))
               (register-graph-map-test-loaders graph ["llm-conversation:conv-reopen"])
               (local graph-map (GraphMap.GraphMap {:graph graph :id "llm-map"}))
               (local view (GraphView {:graph-map graph-map
@@ -3967,7 +3969,7 @@
           (pcall
             (fn []
               (local ctx (make-ctx))
-              (local graph (Graph {:with-start false}))
+              (local graph (make-test-graph))
               (register-graph-map-test-loaders graph ["llm-conversation:conv-placement"])
               (local graph-map (GraphMap.GraphMap {:graph graph :id "llm-map"}))
               (local view (GraphView {:graph-map graph-map
@@ -4016,7 +4018,7 @@
           (pcall
             (fn []
               (local ctx (make-ctx))
-              (local graph (Graph {:with-start false}))
+              (local graph (make-test-graph))
               (local graph-map (GraphMap.GraphMap {:graph graph :id "llm-map"}))
               (local view (GraphView {:graph-map graph-map
                                       :ctx ctx
@@ -4081,7 +4083,7 @@
             (fn []
               (set app.panel-transfer {:panel-transferred (Signal)})
               (local ctx (make-ctx))
-              (local graph (Graph {:with-start false}))
+              (local graph (make-test-graph))
               (register-graph-map-test-loaders graph ["llm-conversation:conv-transfer"])
               (local graph-map (GraphMap.GraphMap {:graph graph :id "llm-map"}))
               (local view (GraphView {:graph-map graph-map
@@ -4139,7 +4141,7 @@
                            :capture-panel-element-state (fn [_self _element]
                                                           {:position [21 22 0]
                                                            :size [50 25 0]})})
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph))
             (local graph-map (GraphMap.GraphMap {:graph graph :id "persist-extra"}))
             (local view (GraphView {:graph-map graph-map
                                     :ctx ctx
@@ -4209,7 +4211,7 @@
     camera)
 
 (fn graph-view-reveal-node-selects-focuses-and-centers []
-    (local graph (Graph {:with-start false}))
+    (local graph (make-test-graph))
     (local graph-map (GraphMap.GraphMap {:graph graph :id "main" :name "Main"}))
     (register-graph-map-test-loaders graph ["test:alpha"])
     (local node (Graph.GraphNode {:key "test:alpha" :label "Alpha"}))
@@ -4244,7 +4246,7 @@
             (set opened-count (+ opened-count 1))
             {:layout (Layout {:name "test-node-view"})
              :drop (fn [_self])}))
-    (local graph (Graph {:with-start false}))
+    (local graph (make-test-graph))
     (local graph-map (GraphMap.GraphMap {:graph graph :id "main" :name "Main"}))
     (register-graph-map-test-loaders graph ["test:open"])
     (local node (Graph.GraphNode {:key "test:open" :label "Open Me" :view TestNodeView}))
@@ -4581,48 +4583,6 @@
 (table.insert tests {:name "FsNode directory listing behavior remains unchanged"
                      :fn fs-node-directory-listing-behavior-remains-unchanged})
 
-(fn graph-view-transitional-graph-without-islands-survives-startup-and-drag-end []
-    (with-temp-data-dir
-        (fn [_root]
-            (local ctx (make-ctx))
-            (local registered [])
-            (local persistence {:saved-position (fn [_self _node] nil)
-                                :saved-presentation (fn [_self _node] nil)
-                                :saved-size (fn [_self _node] nil)
-                                :set-size (fn [_self _node _size] nil)
-                                :set-presentation (fn [_self _node _presentation] nil)
-                                :persist (fn [_self _points _force?] nil)
-                                :schedule-save (fn [_self] nil)})
-            (local movables {:register (fn [_self point opts]
-                                           (table.insert registered {:point point :opts opts}))
-                              :unregister (fn [_self _node] nil)})
-            (local graph (Graph {:with-start false}))
-            (assert (= graph.list-islands nil)
-                    "raw Graph transitional input should not expose island listing")
-            (local node (Graph.GraphNode {:key "transitional-drag"}))
-            (graph:add-node node {:position (glm.vec3 0 0 0)})
-            (local (ok view-or-err)
-                (pcall
-                    (fn []
-                        (GraphView {:graph graph
-                                    :ctx ctx
-                                    :movables movables
-                                    :persistence persistence}))))
-            (assert ok (.. "GraphView startup should tolerate graph-like inputs without list-islands: "
-                           (tostring view-or-err)))
-            (local view view-or-err)
-            (local opts (. (. registered 1) :opts))
-            (assert opts "GraphView should register transitional graph node with movables")
-            (local on-drag-end opts.on-drag-end)
-            (assert on-drag-end "Movables registration should include drag end handler")
-            (local (drag-ok drag-err) (pcall (fn [] (on-drag-end {}))))
-            (assert drag-ok (.. "GraphView drag end should tolerate graph-like inputs without list-islands: "
-                                (tostring drag-err)))
-            (view:drop)
-            (graph:drop))))
-
-(table.insert tests {:name "GraphView transitional graph without islands survives startup and drag end"
-                     :fn graph-view-transitional-graph-without-islands-survives-startup-and-drag-end})
 
 (local main
   (fn []
