@@ -197,6 +197,7 @@
          (assert (and graph graph.load-by-key graph.upsert-island)
                  "ListEntityNode.expand-items-as-island requires mounted graph map with load-by-key and upsert-island")
           (local island-id (ordered-list-island-id self.entity-id))
+          (local existing-island (and graph.get-island (graph:get-island island-id)))
           (local current (self:get-entity))
           (local items (or (and current current.items) []))
           (local members [])
@@ -206,12 +207,13 @@
               (table.insert members (tostring target.key))))
           (if (> (length members) 0)
               (graph:upsert-island {:id island-id
-                                    :kind "ordered-list"
-                                    :members members
-                                    :state {:list-key self.key
-                                            :interaction-policy "snap-back"
-                                            :spacing 24}})
-              (if (and graph.get-island (graph:get-island island-id))
+                                     :kind "ordered-list"
+                                     :members members
+                                     :state {:list-key self.key
+                                             :interaction-policy "snap-back"
+                                             :spacing 24
+                                             :position (if (and existing-island existing-island.state existing-island.state.position) existing-island.state.position [24 0 0])}})
+              (if existing-island
                   (do
                     (assert graph.remove-island
                             "ListEntityNode.expand-items-as-island requires remove-island to clear empty ordered-list island")
