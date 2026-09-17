@@ -103,3 +103,17 @@ def test_manifest_lists_zip_and_installer_stage_when_requested(tmp_path: Path) -
     assert (output_dir / "app-release-artifacts-windows.txt").read_text(encoding="utf-8") == (
         "mygame-windows-x86_64.zip\nmygame-windows-x86_64-setup.exe\n"
     )
+
+
+def test_invalid_entrypoint_fails_before_windows_runtime_staging(tmp_path: Path) -> None:
+    packager = load_packager()
+    metadata_json = make_metadata(tmp_path, entrypoint="main & del *")
+
+    try:
+        packager.load_metadata(metadata_json)
+    except packager.MetadataError as error:
+        assert "invalid entrypoint" in str(error)
+    else:
+        raise AssertionError("invalid entrypoint should fail before packaging")
+
+    assert not (tmp_path / "out").exists()

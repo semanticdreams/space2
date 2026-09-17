@@ -72,6 +72,7 @@ def load_metadata_json(path: str | Path) -> AppMetadata:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     metadata = AppMetadata(**data)
     validate_app_id(metadata.app_id)
+    validate_entrypoint(metadata.entrypoint)
     return metadata
 
 

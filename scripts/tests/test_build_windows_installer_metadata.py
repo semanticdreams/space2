@@ -39,14 +39,14 @@ def make_dist_dir(tmp_path: Path) -> Path:
     return dist_dir
 
 
-def make_metadata(tmp_path: Path, *, icon_path: str | None = None) -> Path:
+def make_metadata(tmp_path: Path, *, icon_path: str | None = None, entrypoint: str = "game.main") -> Path:
     tmp_path.mkdir(parents=True, exist_ok=True)
     assets = tmp_path / "assets"
     assets.mkdir()
     metadata = {
         "app_name": "My Game",
         "app_id": "mygame",
-        "entrypoint": "game.main",
+        "entrypoint": entrypoint,
         "assets_dir": str(assets),
         "icon_path": icon_path,
         "linux_profile": "full",
@@ -180,3 +180,20 @@ def test_iss_template_targets_space_exe_with_optional_app_args_and_optional_icon
     assert "SetupIconFile={#AppIconFile}" in text
     assert "Parameters: \"{#AppExeArgs}\"" in text
     assert "Filename: \"{app}\\{#AppExeName}\"" in text
+
+
+def test_app_metadata_mode_rejects_invalid_entrypoint_before_iscc_invocation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    helper = load_helper()
+    metadata_json = make_metadata(tmp_path, entrypoint="game.main & calc.exe")
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], check: bool) -> None:
+        commands.append(command)
+        raise AssertionError("packaging tools must not run for invalid metadata")
+
+    monkeypatch.setattr(helper.subprocess, "run", fake_run)
+
+    with pytest.raises(helper.MetadataError, match="invalid entrypoint"):
+        helper.app_metadata_command_defines(metadata_json, tmp_path / "out")
+
+    assert commands == []

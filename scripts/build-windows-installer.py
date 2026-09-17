@@ -2,13 +2,18 @@
 from __future__ import annotations
 
 import argparse
-import json
 import pathlib
 import re
 import shutil
 import subprocess
 import sys
 import uuid
+
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from app_packaging import AppMetadata, MetadataError, load_metadata_json  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -95,25 +100,20 @@ def resolve_app_icon(icon_path: str | pathlib.Path, output_dir: str | pathlib.Pa
 
 
 def app_metadata_command_defines(metadata_json: pathlib.Path, output_dir: pathlib.Path) -> dict[str, str]:
-    metadata = json.loads(metadata_json.read_text(encoding="utf-8"))
-    required = ["app_name", "app_id", "entrypoint", "package_version"]
-    missing = [key for key in required if not metadata.get(key)]
-    if missing:
-        raise SystemExit(f"Missing app metadata field(s): {', '.join(missing)}")
+    metadata: AppMetadata = load_metadata_json(metadata_json)
     defines = {
-        "AppId": deterministic_app_id(str(metadata["app_id"])),
-        "AppName": str(metadata["app_name"]),
-        "AppVersion": str(metadata["package_version"]),
-        "AppPublisher": str(metadata["app_name"]),
+        "AppId": deterministic_app_id(metadata.app_id),
+        "AppName": metadata.app_name,
+        "AppVersion": metadata.package_version,
+        "AppPublisher": metadata.app_name,
         "AppExeName": "space.exe",
-        "AppExeArgs": f'-m {metadata["entrypoint"]}',
-        "AppDirName": str(metadata["app_id"]),
-        "AppGroupName": str(metadata["app_name"]),
-        "OutputBaseFilename": f'{metadata["app_id"]}-windows-x86_64-setup',
+        "AppExeArgs": f"-m {metadata.entrypoint}",
+        "AppDirName": metadata.app_id,
+        "AppGroupName": metadata.app_name,
+        "OutputBaseFilename": f"{metadata.app_id}-windows-x86_64-setup",
     }
-    icon_path = metadata.get("icon_path")
-    if icon_path:
-        defines["AppIconFile"] = str(resolve_app_icon(str(icon_path), output_dir))
+    if metadata.icon_path:
+        defines["AppIconFile"] = str(resolve_app_icon(metadata.icon_path, output_dir))
     return defines
 
 
