@@ -17,7 +17,9 @@
 
 #include_next <processthreadsapi.h>
 
-#if defined(__MINGW64_VERSION_MAJOR) && __MINGW64_VERSION_MAJOR <= 8
+// MinGW-w64 11.0.1 can hide InitializeContext2 when
+// _WIN32_WINNT targets older Windows; Crashpad loads it dynamically at runtime.
+#if defined(__MINGW64_VERSION_MAJOR) && __MINGW64_VERSION_MAJOR <= 11
 
 #ifdef __cplusplus
 extern "C" {
