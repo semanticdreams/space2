@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -6,6 +7,30 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def read_repo_text(relative_path: str) -> str:
     return (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+
+
+def test_mingw_epoxy_imported_target_filters_host_include_directories() -> None:
+    cmake = read_repo_text("CMakeLists.txt")
+    epoxy_pkg_check = "pkg_check_modules(EPOXY REQUIRED IMPORTED_TARGET epoxy)"
+
+    assert epoxy_pkg_check in cmake
+
+    _, epoxy_following_cmake = cmake.split(epoxy_pkg_check, 1)
+    mingw_filter = re.search(
+        r"if\s*\([^)]*MINGW[^)]*\)(?P<body>.*?)endif\s*\(",
+        epoxy_following_cmake,
+        re.DOTALL,
+    )
+
+    assert mingw_filter is not None
+
+    body = mingw_filter.group("body")
+    assert "PkgConfig::EPOXY" in body
+    assert "INTERFACE_INCLUDE_DIRECTORIES" in body
+    assert "get_target_property" in body
+    assert "set_target_properties" in body
+    assert re.search(r"list\s*\(REMOVE_ITEM\b[^)]*/usr/include", body, re.DOTALL)
+    assert re.search(r"list\s*\(REMOVE_ITEM\b[^)]*/usr/local/include", body, re.DOTALL)
 
 
 def test_windows_smoke_rg_dependency_is_installed_and_guarded() -> None:

@@ -1,7 +1,23 @@
 diff --git a/configure.ac b/configure.ac
-index ca5b7b2..b059402 100644
+index ca5b7b2..133de15 100644
 --- a/configure.ac
 +++ b/configure.ac
+@@ -249,6 +249,15 @@ if test no = "$ac_cv_prog_cxx_works" ; then
+ 
+ dnl Probe for any options needed to enable C++11 support.
+ AX_CXX_COMPILE_STDCXX([11])
++
++dnl Force C++14 on MinGW: GCC 13 defaults to C++17, where std::byte collides
++dnl with the byte typedef in MinGW Windows headers when building xapian 1.4.22.
++case $host in
++  *-mingw*)
++    CXXFLAGS="$CXXFLAGS -std=gnu++14"
++    ;;
++esac
++
+ 
+ dnl We don't use a C compiler to compile Xapian's code, but on some platforms
+ dnl (e.g. mingw) libtool uses $LTCC which defaults to $CC, and it's also use to
 @@ -870,6 +870,7 @@ case $enable_backend_chert$enable_backend_glass in
    dnl
    dnl Similarly for uuid support.
@@ -16,7 +32,7 @@ index ca5b7b2..b059402 100644
      ])
 +  fi
 +  PKG_CHECK_MODULES([ZLIB], [zlib], [],[AC_MSG_ERROR([zlib library not found])])
-+  CFLAGS="$LIBS $ZLIB_CFLAGS"
++  CPPFLAGS="$CPPFLAGS $ZLIB_CFLAGS"
 +  LIBS="$ZLIB_LIBS $LIBS"
  
    dnl Find a way to generate UUIDs.
