@@ -35,6 +35,13 @@ def test_linux_packaging_names_follow_stable_hierarchy() -> None:
     assert_absent(script, "space-minimal-linux", "scripts/build-linux.sh")
 
 
+def test_appimage_builder_keeps_space_release_basename_default() -> None:
+    script = read_repo_text("scripts/build-appimage.sh")
+
+    assert 'APPIMAGE_BASENAME="${SPACE_APPIMAGE_BASENAME:-space}"' in script
+    assert '${APPIMAGE_BASENAME}-${VERSION}-x86_64.AppImage' in script
+
+
 def test_workflows_use_new_release_artifact_names() -> None:
     build_workflow = read_repo_text(".github/workflows/build.yml")
     test_workflow = read_repo_text(".github/workflows/test.yml")
