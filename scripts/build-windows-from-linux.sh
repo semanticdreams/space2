@@ -24,6 +24,7 @@ require_cmd "${CMAKE_ASM_MASM_COMPILER}" "Run scripts/setup-windows-build-host.s
 require_cmd curl "Run scripts/setup-windows-build-host.sh"
 require_cmd zip "Run scripts/setup-windows-build-host.sh"
 require_cmd pwsh "Run scripts/setup-windows-build-host.sh"
+require_cmd autoconf "Run scripts/setup-windows-build-host.sh"
 require_cmd x86_64-w64-mingw32-gcc-posix "Run scripts/setup-windows-build-host.sh"
 require_cmd x86_64-w64-mingw32-g++-posix "Run scripts/setup-windows-build-host.sh"
 

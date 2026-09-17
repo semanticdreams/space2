@@ -62,6 +62,9 @@ sudo apt-get install -y \
     nasm \
     llvm-14 \
     curl \
+    autoconf \
+    automake \
+    libtool \
     python3 \
     python3-pil \
     ripgrep \
@@ -87,6 +90,11 @@ fi
 
 if ! command -v zip >/dev/null 2>&1; then
     echo "Missing zip after setup." >&2
+    exit 1
+fi
+
+if ! command -v autoconf >/dev/null 2>&1; then
+    echo "Missing autoconf after setup." >&2
     exit 1
 fi
 

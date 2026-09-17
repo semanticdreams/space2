@@ -7,10 +7,27 @@ CLI_EXE="${BUILD_DIR}/space-cli.exe"
 TEST_MODULE="${SPACE_TEST_MODULE:-tests.fast:main}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-180}"
 
-if ! command -v wine64 >/dev/null 2>&1; then
-    echo "Missing required command: wine64" >&2
+resolve_wine_cmd() {
+    if [ -n "${WINE_CMD:-}" ]; then
+        printf '%s\n' "${WINE_CMD}"
+        return 0
+    fi
+
+    if command -v wine64 >/dev/null 2>&1; then
+        printf '%s\n' wine64
+        return 0
+    fi
+
+    if command -v wine >/dev/null 2>&1; then
+        printf '%s\n' wine
+        return 0
+    fi
+
+    echo "Missing required command: wine64 or wine" >&2
     exit 1
-fi
+}
+
+WINE_CMD="$(resolve_wine_cmd)"
 
 "${ROOT_DIR}/scripts/prepare-windows-wine-runtime.sh" "${CLI_EXE}"
 
@@ -22,4 +39,4 @@ exec timeout "${TIMEOUT_SECONDS}s" env \
     SPACE_ASSETS_PATH="${ROOT_DIR}/assets" \
     FENNEL_PATH="${ROOT_DIR}/assets/lua/?.fnl;${ROOT_DIR}/assets/lua/?/init.fnl" \
     FENNEL_MACRO_PATH="${ROOT_DIR}/assets/lua/?.fnl;${ROOT_DIR}/assets/lua/?/init.fnl" \
-    wine64 "${CLI_EXE}" -m "${TEST_MODULE}"
+    "${WINE_CMD}" "${CLI_EXE}" -m "${TEST_MODULE}"

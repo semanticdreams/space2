@@ -155,7 +155,15 @@ jobs:
           test -f build/dist/windows/space-cli.exe
           x86_64-w64-mingw32-objdump -p build/windows/space.exe | rg "Subsystem.*Windows GUI"
           x86_64-w64-mingw32-objdump -p build/windows/space-cli.exe | rg "Subsystem.*Windows CUI"
-          timeout 60s wine64 build/windows/space-cli.exe --help >/dev/null
+          if command -v wine64 >/dev/null 2>&1; then
+            WINE_CMD=wine64
+          elif command -v wine >/dev/null 2>&1; then
+            WINE_CMD=wine
+          else
+            echo "Missing required command: wine64 or wine" >&2
+            exit 1
+          fi
+          timeout 60s "${WINE_CMD}" build/windows/space-cli.exe --help >/dev/null
 
       - name: Create Windows ZIP
         run: |
