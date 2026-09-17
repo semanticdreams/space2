@@ -3,11 +3,16 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WERAPI_COMPAT = REPO_ROOT / "external/sentry-native/external/crashpad/compat/mingw/werapi.h"
+DBGHELP_COMPAT = REPO_ROOT / "external/sentry-native/external/crashpad/compat/mingw/dbghelp.h"
 MINI_CHROMIUM_RAND_UTIL = REPO_ROOT / "external/sentry-native/external/crashpad/third_party/mini_chromium/mini_chromium/base/rand_util.cc"
 
 
 def read_werapi_compat() -> str:
     return WERAPI_COMPAT.read_text(encoding="utf-8")
+
+
+def read_dbghelp_compat() -> str:
+    return DBGHELP_COMPAT.read_text(encoding="utf-8")
 
 
 def read_mini_chromium_rand_util() -> str:
@@ -60,3 +65,15 @@ def test_mini_chromium_windows_sdk_includes_use_mingw_case_sensitive_names() -> 
 
     assert "#include <ntsecapi.h>" in source
     assert "#include <NTSecAPI.h>" not in source
+
+
+def test_old_mingw_dbghelp_thread_names_stream_fallback_precedes_thread_name_structs() -> None:
+    header = read_dbghelp_compat()
+    include_next = header.index("#include_next <dbghelp.h>")
+    thread_name_comment = header.index("//! \\brief Contains the name of the thread")
+    fallback = "#define ThreadNamesStream 24"
+
+    assert "__MINGW64_VERSION_MAJOR" in header
+    assert "__MINGW64_VERSION_MAJOR <= 8" in header
+    assert header.index(fallback) > include_next
+    assert header.index(fallback) < thread_name_comment

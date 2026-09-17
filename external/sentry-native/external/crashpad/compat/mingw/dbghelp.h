@@ -20,6 +20,11 @@
 #pragma clang diagnostic ignored "-Wzero-length-array"
 
 #include_next <dbghelp.h>
+
+#if defined(__MINGW64_VERSION_MAJOR) && __MINGW64_VERSION_MAJOR <= 8
+#define ThreadNamesStream 24
+#endif
+
 #include <stdint.h>
 #include <timezoneapi.h>
 #include <winnt.h>
