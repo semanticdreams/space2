@@ -4,6 +4,7 @@
 (local BoxSelector (require :box-selector))
 (local BuildContext (require :build-context))
 (local Graph (require :graph/init))
+(local GraphMap (require :graph/map))
 (local GraphView (require :graph/view))
 (local State (require :state))
 (local Routes (require :state-routes))
@@ -23,6 +24,21 @@
 
 (var temp-counter 0)
 (local temp-root (fs.join-path "/tmp/space/tests" "selection-data-tmp"))
+
+(fn make-test-graph-map []
+    (local graph (Graph {:with-start false}))
+    (local original-has-key-loader graph.has-key-loader-for-key)
+    (set graph.has-key-loader-for-key
+         (fn [self key]
+             (if (and original-has-key-loader (original-has-key-loader self key))
+                 true
+                 (if key true false))))
+    (GraphMap.GraphMap {:graph graph :id "selection-test"}))
+
+(fn drop-test-graph-map! [graph-map]
+    (local graph graph-map.graph)
+    (graph-map:drop)
+    (graph:drop))
 
 (fn make-temp-dir []
     (set temp-counter (+ temp-counter 1))
@@ -418,7 +434,7 @@
             (local selector (ObjectSelector {:project (fn [position _opts] position)
                                              :ctx ctx
                                              :enabled? true}))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :selector selector}))
@@ -431,7 +447,7 @@
             (assert (= (. view.selected-nodes 1) start)
                     "GraphView selection should contain the start node")
             (view:drop)
-            (graph:drop)
+            (drop-test-graph-map! graph)
             (selector:drop))))
 
 (fn graph-ignores-start-node-outside-box []
@@ -441,7 +457,7 @@
             (local selector (ObjectSelector {:project (fn [position _opts] position)
                                              :ctx ctx
                                              :enabled? true}))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :selector selector}))
@@ -452,7 +468,7 @@
             (assert (= (length view.selected-nodes) 0)
                     "GraphView should not select start node when outside selection box")
             (view:drop)
-            (graph:drop)
+            (drop-test-graph-map! graph)
             (selector:drop))))
 
 (fn graph-registers-selectables-with-selector []
@@ -462,7 +478,7 @@
             (local selector (ObjectSelector {:project (fn [position _opts] position)
                                              :ctx ctx
                                              :enabled? true}))
-            (local graph (Graph {:with-start false}))
+            (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :selector selector}))
@@ -475,7 +491,7 @@
             (assert (= (length view.selected-nodes) 1)
                     "GraphView should mirror selector changes")
             (view:drop)
-            (graph:drop)
+            (drop-test-graph-map! graph)
             (selector:drop))))
 
 (fn graph-selects-with-default-projection []

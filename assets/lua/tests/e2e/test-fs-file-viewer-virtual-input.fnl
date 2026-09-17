@@ -2,6 +2,7 @@
 (local fs (require :fs))
 (local glm (require :glm))
 (local Graph (require :graph/init))
+(local GraphMap (require :graph/map))
 (local GraphView (require :graph/view))
 (local InputState (require :input-state-router))
 (local {:FsFileViewerNode FsFileViewerNode} (require :graph/nodes/fs-file-viewer))
@@ -11,6 +12,21 @@
 
 (var temp-counter 0)
 (local temp-root (fs.join-path "/tmp/space/tests" "e2e-fs-file-viewer-virtual-input"))
+
+(fn make-test-graph-map []
+  (local graph (Graph {:with-start false}))
+  (local original-has-key-loader graph.has-key-loader-for-key)
+  (set graph.has-key-loader-for-key
+       (fn [self key]
+         (if (and original-has-key-loader (original-has-key-loader self key))
+             true
+             (if key true false))))
+  (GraphMap.GraphMap {:graph graph :id "e2e-fs-file-viewer"}))
+
+(fn drop-test-graph-map! [graph-map]
+  (local graph graph-map.graph)
+  (graph-map:drop)
+  (graph:drop))
 
 (fn make-temp-dir []
   (set temp-counter (+ temp-counter 1))
@@ -123,18 +139,23 @@
              :layouter (expanded-target-root-layouter ctx)}))
   {:layout layout
    :drop (fn [_self]
-           (when view-ref.graph-view
-             (view-ref.graph-view:drop))
-           (when graph-ref.graph
-             (graph-ref.graph:drop))
-           (layout:drop))})
+            (when view-ref.graph-view
+              (view-ref.graph-view:drop))
+            (when graph-ref.graph-map
+              (drop-test-graph-map! graph-ref.graph-map)
+              (set graph-ref.graph-map nil)
+              (set graph-ref.graph nil))
+            (when graph-ref.graph
+              (graph-ref.graph:drop))
+            (layout:drop))})
 
 (fn make-expanded-graph-builder [ctx node graph-ref view-ref position]
   (fn [child-ctx]
-    (set graph-ref.graph (Graph {:with-start false}))
-    (graph-ref.graph:add-node node)
+    (set graph-ref.graph-map (make-test-graph-map))
+    (set graph-ref.graph graph-ref.graph-map.graph)
+    (graph-ref.graph-map:add-node node)
     (set view-ref.graph-view
-         (GraphView {:graph-map graph-ref.graph
+         (GraphView {:graph-map graph-ref.graph-map
                      :ctx child-ctx
                      :data-dir (fs.join-path "/tmp/space/tests" "graph-fs-file-viewer-virtual-input")
                      :persistence (make-expanded-persistence node position)}))
