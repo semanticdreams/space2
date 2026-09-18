@@ -1348,11 +1348,7 @@
       (each [_ marker (ipairs ["auth" "token" "secret" "credential" "keyring"])] (local deny-pattern (string.gsub pattern "%*%*$" (.. "*" marker "*"))) (local nested-deny-pattern (string.gsub pattern "/%*%*$" (.. "/**/*" marker "*"))) (assert-pattern-permission permissions deny-pattern "deny" (.. tool-name " should deny secret-looking path: " deny-pattern)) (assert-pattern-permission permissions nested-deny-pattern "deny" (.. tool-name " should deny nested secret-looking path: " nested-deny-pattern)))))
   (each [_ name (ipairs ["read" "list" "glob" "grep" "external_directory"])] (assert-bounded-tool name))
   (assert (= (length status.allowed-roots) (length allowed-patterns)) "bridge status should report allowed roots")
-  (each [i pattern (ipairs allowed-patterns)]
-    (local actual-pattern (. status.allowed-roots i))
-    (local expected-root (slash-path pattern))
-    (local actual-root (slash-path actual-pattern))
-    (assert (= actual-root expected-root) (.. "bridge status allowed root should match: expected " expected-root " actual " actual-root)))
+  (each [i pattern (ipairs allowed-patterns)] (assert (= (slash-path (. status.allowed-roots i)) (slash-path pattern)) (.. "bridge status allowed root should match: expected " (slash-path pattern) " actual " (slash-path (. status.allowed-roots i)))))
   (bridge:refresh-config!) (local refreshed (json.loads (fs.read-file status.config-path))) (assert (= refreshed.mcp.space.url status.url) "refresh-config should preserve current MCP URL") (bridge:stop) (clean-dir dir))
 
 (fn test-opencode-mcp-bridge-refreshes-provider-table []
