@@ -75,7 +75,8 @@
 
   (fn turn [self direction-name]
     (assert (. directions direction-name) "unknown snake direction")
-    (if (= direction-name (. opposites self.direction))
+    (if (or (= direction-name self.direction)
+            (= direction-name (. opposites self.direction)))
         false
         (do
           (set self.direction direction-name)

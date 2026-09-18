@@ -21,6 +21,8 @@
     (local game (Snake.create {:width 8 :height 6
                                :initial-snake [{:x 3 :y 3} {:x 2 :y 3}]
                                :initial-food {:x 6 :y 3}}))
+    (assert (= (game:turn :right) false) "same-direction turn should not report a change")
+    (assert (= game.direction :right) "same-direction turn should keep direction")
     (assert (= (game:turn :left) false) "right-moving snake cannot reverse left")
     (assert (= game.direction :right) "direction should remain right")
     (assert (= (game:turn :up) true) "perpendicular turn should be accepted")
