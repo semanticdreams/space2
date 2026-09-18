@@ -46,16 +46,16 @@
     (set host.pinned pinned)
     host)
 
-(fn ordered-list-presenter-computes-deterministic-vertical-placements []
+(fn ordered-list-presenter-offsets-list-key-anchored-vertical-placements []
     (local host (make-host {:positions {"list:1" (glm.vec3 100 200 3)}}))
     (local island {:id "island-1"
                    :kind "ordered-list"
                    :members ["item:a" "item:b" "item:c"]
                    :state {:list-key "list:1" :spacing 10}})
     (local layout (OrderedListPresenter.layout-island island host))
-    (assert-vec3 (. layout "item:a") (glm.vec3 100 200 3) "first member uses base position")
-    (assert-vec3 (. layout "item:b") (glm.vec3 100 190 3) "second member offsets by spacing")
-    (assert-vec3 (. layout "item:c") (glm.vec3 100 180 3) "third member offsets deterministically"))
+    (assert-vec3 (. layout "item:a") (glm.vec3 124 200 3) "first member uses offset list-key anchor")
+    (assert-vec3 (. layout "item:b") (glm.vec3 124 190 3) "second member offsets from list-key anchor by spacing")
+    (assert-vec3 (. layout "item:c") (glm.vec3 124 180 3) "third member offsets from list-key anchor deterministically"))
 
 (fn ordered-list-presenter-uses-state-position-before-member-fallback []
     (local host (make-host {:positions {"list:1" (glm.vec3 100 200 3)
@@ -147,8 +147,8 @@
     (assert (= (count-pin-events backing-host.pinned "shared" false) 1)
             "dropping the last island owner should unpin the shared member"))
 
-(table.insert tests {:name "OrderedListPresenter computes deterministic vertical placements"
-                     :fn ordered-list-presenter-computes-deterministic-vertical-placements})
+(table.insert tests {:name "OrderedListPresenter offsets list-key anchored vertical placements"
+                     :fn ordered-list-presenter-offsets-list-key-anchored-vertical-placements})
 (table.insert tests {:name "OrderedListPresenter uses state position before member fallback"
                      :fn ordered-list-presenter-uses-state-position-before-member-fallback})
 (table.insert tests {:name "OrderedListPresenter uses restored array state position"
