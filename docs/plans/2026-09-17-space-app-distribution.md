@@ -338,7 +338,7 @@
 
 - [ ] **Step 4: Implement Linux workflow job**
   - Checkout caller app into `app/`.
-  - Parse `${{ github.workflow_ref }}` to checkout Space packaging scripts into `space-packaging/`.
+  - Parse <code v-pre>${{ github.workflow_ref }}</code> to checkout Space packaging scripts into `space-packaging/`.
   - Normalize metadata to `build/app-metadata.json`.
   - Download `space-linux-x86_64.tar.gz` or `space-linux-x86_64-minimal.tar.gz` from the requested `space-version`.
   - Install packaging tools needed for app DEB/RPM/AppImage staging.
