@@ -3,6 +3,7 @@
 
 (local kind "ordered-list")
 (local default-spacing 24)
+(local default-anchor-offset 24)
 
 (fn position-array? [position]
     (and (= (type position) "table")
@@ -45,7 +46,9 @@
     (if state-position
         state-position
         list-position
-        list-position
+        (glm.vec3 (+ list-position.x default-anchor-offset)
+                  list-position.y
+                  list-position.z)
         member-position
         member-position
         (fallback-origin)))
