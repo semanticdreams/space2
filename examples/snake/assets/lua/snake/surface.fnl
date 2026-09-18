@@ -6,15 +6,28 @@
 
 (local identity-view (glm.mat4 1))
 (local default-viewport {:x 0 :y 0 :width 800 :height 600})
+(local default-world-units-per-pixel 0.05)
 
 (fn finite-size [value]
   (math.max (or value 0) 1))
 
+(fn resolve-world-units-per-pixel [value]
+  (local units (or value default-world-units-per-pixel))
+  (assert (and (= (type units) :number) (> units 0))
+          "SnakeSurface requires positive :world-units-per-pixel")
+  units)
+
+(fn viewport-world-size [viewport world-units-per-pixel]
+  (local safe-width (finite-size viewport.width))
+  (local safe-height (finite-size viewport.height))
+  (glm.vec3 (* safe-width world-units-per-pixel)
+            (* safe-height world-units-per-pixel)
+            1))
+
 (fn apply-root-layout [self]
   (when (and self.entity self.entity.layout)
-    (local safe-width (finite-size self.viewport.width))
-    (local safe-height (finite-size self.viewport.height))
-    (set self.entity.layout.size (glm.vec3 safe-width safe-height 1))
+    (local root-size (viewport-world-size self.viewport self.world-units-per-pixel))
+    (set self.entity.layout.size root-size)
     (set self.entity.layout.position (glm.vec3 0 0 0))
     (self.entity.layout:mark-measure-dirty)))
 
@@ -31,19 +44,20 @@
   (local layout-root (LayoutRoot))
   (local build-context (BuildContext {:layout-root layout-root
                                       :quad-unlit? true}))
+  (local world-units-per-pixel (resolve-world-units-per-pixel options.world-units-per-pixel))
   (local self {:projection nil
-               :viewport default-viewport
-               :entity nil
-               :layout-root layout-root
-               :build-context build-context})
+                :viewport default-viewport
+                :world-units-per-pixel world-units-per-pixel
+                :entity nil
+                :layout-root layout-root
+                :build-context build-context})
 
   (fn update-viewport [self viewport]
     (local vp (viewport-utils.to-table (or viewport self.viewport default-viewport)))
     (set self.viewport vp)
-    (local safe-width (finite-size vp.width))
-    (local safe-height (finite-size vp.height))
+    (local world-size (viewport-world-size vp self.world-units-per-pixel))
     (if glm.ortho
-        (set self.projection (glm.ortho 0 safe-width safe-height 0 -100.0 100.0))
+        (set self.projection (glm.ortho 0 world-size.x world-size.y 0 -100.0 100.0))
         (set self.projection identity-view))
     (apply-root-layout self)
     nil)

@@ -1,5 +1,6 @@
 (local Runner (require :tests/runner))
 (local BuildContext (require :build-context))
+(local {: Layout} (require :layout))
 (local Snake (require :snake/game))
 (local SnakeSurface (require :snake/surface))
 (local SnakeView (require :snake/view))
@@ -7,6 +8,13 @@
 
 (fn add-test [name test-fn]
   (table.insert tests {:name name :fn test-fn}))
+
+(fn assert-layout-size [layout width height label]
+  (assert layout (.. label " should have layout"))
+  (assert (= layout.size.x width)
+          (string.format "%s width should be %.2f, got %.2f" label width layout.size.x))
+  (assert (= layout.size.y height)
+          (string.format "%s height should be %.2f, got %.2f" label height layout.size.y)))
 
 (add-test "snake board builds one cell per coordinate"
   (fn []
@@ -70,6 +78,18 @@
     (assert target.projection "surface target should expose projection")
     (assert (= (length (target:get-render-contexts)) 1)
             "surface target should expose one render context")
+    (surface:drop)))
+
+(add-test "snake surface scales root layout to HUD world units"
+  (fn []
+    (local surface (SnakeSurface.create {:viewport {:x 0 :y 0 :width 640 :height 480}}))
+    (local entity (surface:build (fn [_ctx]
+                                   {:layout (Layout {:name "snake-surface-probe"})
+                                    :update (fn [_self] nil)
+                                    :drop (fn [self] (self.layout:drop))})))
+    (assert-layout-size entity.layout 32 24 "default snake surface root")
+    (surface:update-viewport {:x 0 :y 0 :width 800 :height 600})
+    (assert-layout-size entity.layout 40 30 "resized snake surface root")
     (surface:drop)))
 
 (fn main []
