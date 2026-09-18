@@ -822,6 +822,16 @@ set_tests_properties(test_vector_buffer PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
+add_executable(test_window_title
+    tests/test_window_title.cpp
+)
+target_include_directories(test_window_title PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(test_window_title ${PROJECT_NAME}_lib)
+add_test(NAME test_window_title COMMAND test_window_title)
+set_tests_properties(test_window_title PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
 add_executable(test_error_reporting tests/test_error_reporting.cpp)
 target_link_libraries(test_error_reporting ${PROJECT_NAME}_lib)
 target_include_directories(test_error_reporting PRIVATE external/cpp-httplib)

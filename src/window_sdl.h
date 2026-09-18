@@ -14,6 +14,8 @@ extern const float SCREEN_WIDTH;
 extern const float SCREEN_HEIGHT;
 extern LogConfig LOG_CONFIG;
 
+std::string format_window_title_with_fps(const std::string& title, double fps);
+
 // Used by SDL_Window unique pointer
 struct SdlWindowDestroyer {
     void operator()(SDL_Window* window) const {
@@ -54,7 +56,7 @@ public:
 
     void clean() ;
 
-    static std::unique_ptr<WindowSdl> create();
+    static std::unique_ptr<WindowSdl> create(std::string title = "space");
 
     void toggleFullscreen();
     void setTextInputEnabled(bool enabled);

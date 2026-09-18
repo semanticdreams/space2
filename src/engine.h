@@ -30,6 +30,7 @@ struct EngineConfig {
     bool headless { false };
     int width { 0 };
     int height { 0 };
+    std::string title { "space" };
     WindowStartupMode window_mode { WindowStartupMode::Maximized };
 };
 
