@@ -14,7 +14,6 @@ snake/
 │       ├── snake/
 │       │   ├── app.fnl
 │       │   ├── game.fnl
-│       │   ├── surface.fnl
 │       │   └── view.fnl
 │       └── tests/
 │           ├── test-snake-game.fnl
@@ -24,7 +23,7 @@ snake/
         └── release.yml
 ```
 
-`assets/lua/main.fnl` is the default `entrypoint: main` bridge. `snake/game.fnl` is pure Snake logic; `snake/view.fnl` and `snake/surface.fnl` provide the graphical widget-based board; `snake/app.fnl` owns the Space engine runtime glue.
+`assets/lua/main.fnl` is the default `entrypoint: main` bridge. `snake/game.fnl` is pure Snake logic; `snake/view.fnl` provides the graphical widget-based board; `snake/app.fnl` owns the Space engine runtime glue. The graphical presentation uses Space's shared orthographic-ui-surface module from assets/lua for retained HUD-style rendering.
 
 ## Local development
 

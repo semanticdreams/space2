@@ -3,7 +3,7 @@
 (local BuildContext (require :build-context))
 (local {: Layout} (require :layout))
 (local Snake (require :snake/game))
-(local SnakeSurface (require :snake/surface))
+(local OrthographicUiSurface (require :orthographic-ui-surface))
 (local SnakeView (require :snake/view))
 (local tests [])
 
@@ -29,7 +29,7 @@
   (assert-approx center-x (/ root-width 2) label))
 
 (fn assert-surface-create-fails [opts label]
-  (local (ok err) (pcall SnakeSurface.create opts))
+  (local (ok err) (pcall OrthographicUiSurface.create opts))
   (assert (not ok) (.. label " should reject invalid surface options"))
   (assert (string.find (tostring err) "world-units-per-pixel" 1 true)
           (.. label " should report world-units-per-pixel error")))
@@ -106,32 +106,32 @@
 (add-test "snake screen sync updates status text" test-screen-sync-updates-status)
 
 (fn test-surface-presentation-target []
-    (local surface (SnakeSurface.create {:viewport {:x 0 :y 0 :width 640 :height 480}}))
+    (local surface (OrthographicUiSurface.create {:viewport {:x 0 :y 0 :width 640 :height 480}}))
     (local entity (surface:build render-target-probe-builder))
     (assert entity "surface should return built entity")
     (surface:update)
     (local target (surface:presentation-target))
     (assert target "surface should expose presentation target")
-    (assert (= target.kind :hud) "snake surface should render as a HUD-like orthographic target")
+    (assert (= target.kind :hud) "orthographic surface should render as a HUD-like orthographic target")
     (assert target.projection "surface target should expose projection")
     (assert (= (length (target:get-render-contexts)) 1)
             "surface target should expose one render context")
     (surface:drop))
 
-(add-test "snake surface exposes render presentation target" test-surface-presentation-target)
+(add-test "orthographic surface exposes render presentation target" test-surface-presentation-target)
 
 (fn test-surface-scales-root-layout []
-    (local surface (SnakeSurface.create {:viewport {:x 0 :y 0 :width 640 :height 480}}))
+    (local surface (OrthographicUiSurface.create {:viewport {:x 0 :y 0 :width 640 :height 480}}))
     (local entity (surface:build layout-probe-builder))
-    (assert-layout-size entity.layout 32 24 "default snake surface root")
+    (assert-layout-size entity.layout 32 24 "default orthographic surface root")
     (surface:update-viewport {:x 0 :y 0 :width 800 :height 600})
-    (assert-layout-size entity.layout 40 30 "resized snake surface root")
+    (assert-layout-size entity.layout 40 30 "resized orthographic surface root")
     (surface:drop))
 
-(add-test "snake surface scales root layout to HUD world units" test-surface-scales-root-layout)
+(add-test "orthographic surface scales root layout to HUD world units" test-surface-scales-root-layout)
 
 (fn test-surface-projection-non-inverted []
-    (local surface (SnakeSurface.create {:viewport {:x 0 :y 0 :width 640 :height 480}}))
+    (local surface (OrthographicUiSurface.create {:viewport {:x 0 :y 0 :width 640 :height 480}}))
     (local world-height 24)
     (local bottom (* surface.projection (glm.vec4 0 0 0 1)))
     (local top (* surface.projection (glm.vec4 0 world-height 0 1)))
@@ -141,11 +141,11 @@
     (assert-approx top.y 1 "projection top y")
     (surface:drop))
 
-(add-test "snake surface projection uses non-inverted y for upright text" test-surface-projection-non-inverted)
+(add-test "orthographic surface projection uses non-inverted y for upright text" test-surface-projection-non-inverted)
 
 (fn test-screen-centers-and-expands-board []
     (local game (Snake.create {:width 24 :height 16}))
-    (local surface (SnakeSurface.create {:viewport {:x 0 :y 0 :width 800 :height 600}}))
+    (local surface (OrthographicUiSurface.create {:viewport {:x 0 :y 0 :width 800 :height 600}}))
     (local screen (surface:build (SnakeView.SnakeScreen {:game game})))
     (surface:update)
     (assert screen.board "SnakeScreen should expose board")
@@ -167,7 +167,7 @@
 
 (fn test-screen-stack-order-non-inverted []
     (local game (Snake.create {:width 24 :height 16}))
-    (local surface (SnakeSurface.create {:viewport {:x 0 :y 0 :width 800 :height 600}}))
+    (local surface (OrthographicUiSurface.create {:viewport {:x 0 :y 0 :width 800 :height 600}}))
     (local screen (surface:build (SnakeView.SnakeScreen {:game game})))
     (surface:update)
     (assert (> screen.title-text.layout.position.y (layout-top screen.board.layout))
@@ -184,7 +184,7 @@
     (local game (Snake.create {:width 4 :height 3
                                :initial-snake [{:x 2 :y 2} {:x 2 :y 3}]
                                :initial-food {:x 4 :y 3}}))
-    (local surface (SnakeSurface.create {:viewport {:x 0 :y 0 :width 800 :height 600}}))
+    (local surface (OrthographicUiSurface.create {:viewport {:x 0 :y 0 :width 800 :height 600}}))
     (local screen (surface:build (SnakeView.SnakeScreen {:game game})))
     (surface:update)
     (local current-row (. (. screen.board.cells 2) 2))
@@ -199,7 +199,7 @@
     (local game (Snake.create {:width 4 :height 3
                                :initial-snake [{:x 2 :y 2} {:x 1 :y 2}]
                                :initial-food {:x 4 :y 3}}))
-    (local surface (SnakeSurface.create {:viewport {:x 0 :y 0 :width 800 :height 600}}))
+    (local surface (OrthographicUiSurface.create {:viewport {:x 0 :y 0 :width 800 :height 600}}))
     (local screen (surface:build (SnakeView.SnakeScreen {:game game})))
     (surface:update)
     (local original-set-text screen.status-text.set-text)
@@ -225,7 +225,7 @@
     (assert-surface-create-fails {:world-units-per-pixel false} "false world scale")
     (assert-surface-create-fails {:world-units-per-pixel 0} "zero world scale"))
 
-(add-test "snake surface rejects invalid explicit world scale" test-surface-rejects-invalid-scale)
+(add-test "orthographic surface rejects invalid explicit world scale" test-surface-rejects-invalid-scale)
 
 (fn main []
   (Runner.run-tests {:name "snake-view" :tests tests}))
