@@ -1,5 +1,6 @@
 (local Runner (require :tests/runner))
 (local BuildContext (require :build-context))
+(local {: Layout} (require :layout))
 (local Snake (require :snake/game))
 (local SnakeSurface (require :snake/surface))
 (local SnakeView (require :snake/view))
@@ -7,6 +8,19 @@
 
 (fn add-test [name test-fn]
   (table.insert tests {:name name :fn test-fn}))
+
+(fn assert-layout-size [layout width height label]
+  (assert layout (.. label " should have layout"))
+  (assert (= layout.size.x width)
+          (string.format "%s width should be %.2f, got %.2f" label width layout.size.x))
+  (assert (= layout.size.y height)
+          (string.format "%s height should be %.2f, got %.2f" label height layout.size.y)))
+
+(fn assert-surface-create-fails [opts label]
+  (local (ok err) (pcall SnakeSurface.create opts))
+  (assert (not ok) (.. label " should reject invalid surface options"))
+  (assert (string.find (tostring err) "world-units-per-pixel" 1 true)
+          (.. label " should report world-units-per-pixel error")))
 
 (add-test "snake board builds one cell per coordinate"
   (fn []
@@ -71,6 +85,23 @@
     (assert (= (length (target:get-render-contexts)) 1)
             "surface target should expose one render context")
     (surface:drop)))
+
+(add-test "snake surface scales root layout to HUD world units"
+  (fn []
+    (local surface (SnakeSurface.create {:viewport {:x 0 :y 0 :width 640 :height 480}}))
+    (local entity (surface:build (fn [_ctx]
+                                   {:layout (Layout {:name "snake-surface-probe"})
+                                    :update (fn [_self] nil)
+                                    :drop (fn [self] (self.layout:drop))})))
+    (assert-layout-size entity.layout 32 24 "default snake surface root")
+    (surface:update-viewport {:x 0 :y 0 :width 800 :height 600})
+    (assert-layout-size entity.layout 40 30 "resized snake surface root")
+    (surface:drop)))
+
+(add-test "snake surface rejects invalid explicit world scale"
+  (fn []
+    (assert-surface-create-fails {:world-units-per-pixel false} "false world scale")
+    (assert-surface-create-fails {:world-units-per-pixel 0} "zero world scale")))
 
 (fn main []
   (Runner.run-tests {:name "snake-view" :tests tests}))
