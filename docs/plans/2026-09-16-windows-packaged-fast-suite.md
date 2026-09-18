@@ -24,7 +24,7 @@
 
 - PR #127 Windows `test-windows` job runs `build/dist/windows/space-cli.exe -m tests.fast:main` successfully.
 - `test-lazy-text-buffer` and `test-fs` child processes use the resolved Space executable and fail with an explicit lookup error if none is available.
-- Windows CI sets `SPACE_BIN` to `${{ github.workspace }}\build\dist\windows\space-cli.exe`.
+- Windows CI sets `SPACE_BIN` to <code v-pre>${{ github.workspace }}\build\dist\windows\space-cli.exe</code>.
 - Agent permission assertions remain complete but compare path patterns slash-normalized.
 - Agent runner default artifact root treats both `/agent-sessions` and `\agent-sessions` as the special sibling-artifact case.
 - Workflow graph and graph view tests do not read or write repo-relative/package-relative mutable paths under packaged assets.
