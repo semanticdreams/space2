@@ -68,7 +68,7 @@ With this layout, the default `entrypoint: main` resolves `assets/lua/main.fnl`.
 
 ## Copyable example template
 
-See `examples/snake/` for a small independent Snake app template that can be copied into a new repository. It demonstrates the expected `assets/lua/main.fnl` default entrypoint, a focused Fennel logic test under the app assets tree, and the small caller workflow needed to invoke Space's reusable bundle workflow.
+See `examples/snake/` for a small independent graphical Snake app template that can be copied into a new repository. It demonstrates the expected `assets/lua/main.fnl` default entrypoint, pure app-owned game logic, a small widget/rendering surface that uses Space reusable UI modules through the runtime asset path, focused Fennel tests under the app assets tree, and the small caller workflow needed to invoke Space's reusable bundle workflow.
 
 ## Developer run commands
 
