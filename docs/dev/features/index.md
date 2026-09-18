@@ -20,6 +20,7 @@ Detailed design and implementation notes for major feature systems.
 - [Kernel System](./kernel-system)
 - [Lazy Text Buffer and Virtual Input](./lazy-text-buffer-virtual-input)
 - [OpenCode Agent Workflow](./opencode-agent-workflow)
+- [Orthographic UI Surface](./orthographic-ui-surface) — standalone retained orthographic UI target for examples and simple apps.
 - [Layout Widget Engine](./layout-widget-engine)
 - [Panel Transfer System](./panel-transfer-system)
 - [Stylus Drawing Input](./stylus-drawing-input)
