@@ -2,7 +2,9 @@ name: Deploy VitePress site to Pages
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - opencode/workflow-debug/docs-pages-20260918074236
     paths:
       - 'docs/**'
       - 'assets/pics/space.png'
