@@ -71,16 +71,16 @@
                                :initial-snake [{:x 3 :y 3} {:x 2 :y 3}]
                                :initial-food {:x 6 :y 3}}))
     (var render-count 0)
-    (fn render [_game]
+    (fn on-step [_game]
       (set render-count (+ render-count 1)))
-    (var elapsed (utils.advance-game game 16 0 render))
+    (var elapsed (utils.advance-game game 16 0 on-step))
     (local head-before (. game.snake 1))
     (assert (= head-before.x 3) "16 ms frame should not advance a 150 ms snake tick")
-    (assert (= render-count 0) "sub-tick frame should not render a game step")
-    (set elapsed (utils.advance-game game 134 elapsed render))
+    (assert (= render-count 0) "sub-tick frame should not invoke sync callback")
+    (set elapsed (utils.advance-game game 134 elapsed on-step))
     (local head-after (. game.snake 1))
     (assert (= head-after.x 4) "150 accumulated ms should advance exactly one step")
-    (assert (= render-count 1) "one accumulated tick should render once")))
+    (assert (= render-count 1) "one accumulated tick should invoke sync callback once")))
 
 (add-test "runtime-stops-catchup-after-game-over"
   (fn []

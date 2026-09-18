@@ -1,8 +1,8 @@
 # Snake Space App Template
 
-This example is a copyable independent Space/Fennel app template. It demonstrates the app-distribution repository layout, a default `main` entrypoint, pure game logic with a focused Fennel test, and the small release workflow a downstream app repository can call.
+This example is a copyable independent Space/Fennel app template. It demonstrates the app-distribution repository layout, a default `main` entrypoint, pure game logic with focused Fennel tests, a small graphical widget-based runtime, and the release workflow a downstream app repository can call.
 
-The runtime display is intentionally terminal/text based. That keeps the example independent from Space's default app rendering, HUD, graph, LLM, wallet, and other default-app modules.
+The runtime display is a simple 2D graphical Snake board rendered with Space widgets and rendering systems. The pure game rules stay separate from the view/runtime code so the example remains easy to copy and test.
 
 ## Directory layout
 
@@ -13,15 +13,18 @@ snake/
 │       ├── main.fnl
 │       ├── snake/
 │       │   ├── app.fnl
-│       │   └── game.fnl
+│       │   ├── game.fnl
+│       │   ├── surface.fnl
+│       │   └── view.fnl
 │       └── tests/
-│           └── test-snake-game.fnl
+│           ├── test-snake-game.fnl
+│           └── test-snake-view.fnl
 └── .github/
     └── workflows/
         └── release.yml
 ```
 
-`assets/lua/main.fnl` is the default `entrypoint: main` bridge. `snake/game.fnl` is pure Snake logic; `snake/app.fnl` owns the Space engine runtime glue.
+`assets/lua/main.fnl` is the default `entrypoint: main` bridge. `snake/game.fnl` is pure Snake logic; `snake/view.fnl` and `snake/surface.fnl` provide the graphical widget-based board; `snake/app.fnl` owns the Space engine runtime glue.
 
 ## Local development
 
@@ -37,10 +40,16 @@ From the Space repository root:
 SPACE_ASSETS_PATH="$(pwd)/examples/snake/assets:$(pwd)/assets" ./build/space -m main
 ```
 
-Run the focused Snake logic test from the Space repository root:
+Controls: arrows/WASD move, Space/Enter restart after game over, and Q/Escape quit.
+
+Run the focused Snake logic and view tests from the Space repository root:
 
 ```sh
 SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/examples/snake/assets:$(pwd)/assets ./build/space -m tests.test-snake-game:main
+```
+
+```sh
+SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/examples/snake/assets:$(pwd)/assets ./build/space -m tests.test-snake-view:main
 ```
 
 ## Copying into a new app repository
