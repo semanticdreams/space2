@@ -12,7 +12,7 @@
   (math.max (or value 0) 1))
 
 (fn resolve-world-units-per-pixel [value]
-  (local units (or value default-world-units-per-pixel))
+  (local units (if (= value nil) default-world-units-per-pixel value))
   (assert (and (= (type units) :number) (> units 0))
           "SnakeSurface requires positive :world-units-per-pixel")
   units)

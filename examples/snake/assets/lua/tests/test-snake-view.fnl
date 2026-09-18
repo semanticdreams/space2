@@ -16,6 +16,12 @@
   (assert (= layout.size.y height)
           (string.format "%s height should be %.2f, got %.2f" label height layout.size.y)))
 
+(fn assert-surface-create-fails [opts label]
+  (local (ok err) (pcall SnakeSurface.create opts))
+  (assert (not ok) (.. label " should reject invalid surface options"))
+  (assert (string.find (tostring err) "world-units-per-pixel" 1 true)
+          (.. label " should report world-units-per-pixel error")))
+
 (add-test "snake board builds one cell per coordinate"
   (fn []
     (local game (Snake.create {:width 4 :height 3
@@ -91,6 +97,11 @@
     (surface:update-viewport {:x 0 :y 0 :width 800 :height 600})
     (assert-layout-size entity.layout 40 30 "resized snake surface root")
     (surface:drop)))
+
+(add-test "snake surface rejects invalid explicit world scale"
+  (fn []
+    (assert-surface-create-fails {:world-units-per-pixel false} "false world scale")
+    (assert-surface-create-fails {:world-units-per-pixel 0} "zero world scale")))
 
 (fn main []
   (Runner.run-tests {:name "snake-view" :tests tests}))
