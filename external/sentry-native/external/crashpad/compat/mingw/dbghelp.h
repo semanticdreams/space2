@@ -23,6 +23,7 @@
 
 #if defined(__MINGW64_VERSION_MAJOR) && __MINGW64_VERSION_MAJOR <= 8
 #define ThreadNamesStream 24
+#define MiniDumpWithAvxXStateContext 0x00200000
 #endif
 
 #include <stdint.h>
