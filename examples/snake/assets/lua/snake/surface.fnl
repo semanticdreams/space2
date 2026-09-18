@@ -9,7 +9,9 @@
 (local default-world-units-per-pixel 0.05)
 
 (fn finite-size [value]
-  (math.max (or value 0) 1))
+  (assert (or (= value nil) (= (type value) :number))
+          "SnakeSurface viewport dimensions must be numeric")
+  (math.max (if (= value nil) 0 value) 1))
 
 (fn resolve-world-units-per-pixel [value]
   (local units (if (= value nil) default-world-units-per-pixel value))
@@ -40,6 +42,8 @@
         (. ctx field-name))))
 
 (fn create [opts]
+  (assert (or (= opts nil) (= (type opts) :table))
+          "SnakeSurface.create requires table options")
   (local options (or opts {}))
   (local layout-root (LayoutRoot))
   (local build-context (BuildContext {:layout-root layout-root
@@ -53,11 +57,16 @@
                 :build-context build-context})
 
   (fn update-viewport [self viewport]
-    (local vp (viewport-utils.to-table (or viewport self.viewport default-viewport)))
+    (local next-viewport (if viewport
+                             viewport
+                             (if self.viewport
+                                 self.viewport
+                                 default-viewport)))
+    (local vp (viewport-utils.to-table next-viewport))
     (set self.viewport vp)
     (local world-size (viewport-world-size vp self.world-units-per-pixel))
     (if glm.ortho
-        (set self.projection (glm.ortho 0 world-size.x world-size.y 0 -100.0 100.0))
+        (set self.projection (glm.ortho 0 world-size.x 0 world-size.y -100.0 100.0))
         (set self.projection identity-view))
     (apply-root-layout self)
     nil)
@@ -83,6 +92,7 @@
     (LightingViewState.orthographic (glm.vec3 0 0 -1)))
 
   (fn presentation-target [self]
+    (assert self.projection "SnakeSurface presentation target requires projection")
     {:kind :hud
      :surface self
      :projection self.projection
