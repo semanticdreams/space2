@@ -66,6 +66,10 @@ mygame/
 
 With this layout, the default `entrypoint: main` resolves `assets/lua/main.fnl`. Apps that want namespaced modules can use a layout such as `assets/lua/mygame/main.fnl` and set `entrypoint: mygame.main`.
 
+## Copyable example template
+
+See `examples/snake/` for a small independent Snake app template that can be copied into a new repository. It demonstrates the expected `assets/lua/main.fnl` default entrypoint, a focused Fennel logic test under the app assets tree, and the small caller workflow needed to invoke Space's reusable bundle workflow.
+
 ## Developer run commands
 
 From an app repository whose working directory exposes `assets/` as the app assets root:
