@@ -245,7 +245,7 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
         std::memset(inputState.keyboardState.previousValue, 0, SDL_SCANCODE_COUNT);
     };
     if (!config.headless) {
-        window = WindowSdl::create();
+        window = WindowSdl::create(config.title);
         int target_width = config.width > 0 ? config.width : screenWidth;
         int target_height = config.height > 0 ? config.height : screenHeight;
         if (!window->init(target_width, target_height, config.window_mode)) {

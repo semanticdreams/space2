@@ -30,21 +30,57 @@
 (local startup-viewport {:x 0 :y 0 :width 800 :height 600})
 
 (fn restart-key? [key]
-  (or (= key SDLK_SPACE) (= key SDLK_RETURN)))
+  (if (= key SDLK_SPACE)
+      true
+      (= key SDLK_RETURN)
+      true
+      false))
 
 (fn quit-key? [key]
-  (or (= key SDLK_ESCAPE) (= key KEY_Q) (= key KEY_Q_UPPER)))
+  (if (= key SDLK_ESCAPE)
+      true
+      (= key KEY_Q)
+      true
+      (= key KEY_Q_UPPER)
+      true
+      false))
 
 (fn direction-for-key [key]
-  (if (or (= key SDLK_UP) (= key KEY_W) (= key KEY_W_UPPER))
+  (if (= key SDLK_UP)
       :up
-      (or (= key SDLK_DOWN) (= key KEY_S) (= key KEY_S_UPPER))
+      (= key KEY_W)
+      :up
+      (= key KEY_W_UPPER)
+      :up
+      (= key SDLK_DOWN)
       :down
-      (or (= key SDLK_LEFT) (= key KEY_A) (= key KEY_A_UPPER))
+      (= key KEY_S)
+      :down
+      (= key KEY_S_UPPER)
+      :down
+      (= key SDLK_LEFT)
       :left
-      (or (= key SDLK_RIGHT) (= key KEY_D) (= key KEY_D_UPPER))
+      (= key KEY_A)
+      :left
+      (= key KEY_A_UPPER)
+      :left
+      (= key SDLK_RIGHT)
+      :right
+      (= key KEY_D)
+      :right
+      (= key KEY_D_UPPER)
       :right
       nil))
+
+(fn viewport-width [payload]
+  (if (and payload payload.width)
+      payload.width
+      800))
+
+(fn viewport-height [payload]
+  (if (and payload payload.height)
+      payload.height
+      600))
 
 (fn finite-number? [value]
   (and (= (type value) :number)
@@ -68,14 +104,15 @@
       (set stepped? true))
     (when (and stepped? on-step)
       (on-step game)))
-  next-elapsed)
+  (values next-elapsed stepped?))
 
 (fn update-surface-viewport [surface viewport]
   (when surface
     (surface:update-viewport viewport)))
 
 (fn run []
-  (local engine (EngineModule.Engine {:width 800 :height 600}))
+  (local engine (EngineModule.Engine {:width 800 :height 600
+                                      :title "Snake"}))
   (set app.engine engine)
   (when (not (engine:start))
     (error "[snake] engine failed to start"))
@@ -92,9 +129,11 @@
   (local screen (surface:build (SnakeView.SnakeScreen {:game game})))
   (var elapsed 0)
 
+  (fn presentation-render-targets [_self]
+    [(surface:presentation-target)])
+
   (set app.active-world-runtime
-       {:presentation {:render-targets (fn [_self]
-                                         [(surface:presentation-target)])}})
+       {:presentation {:render-targets presentation-render-targets}})
 
   (fn sync-screen []
     (screen:sync)
@@ -125,35 +164,57 @@
     true)
 
   (fn handle-update [delta]
-    (var stepped? false)
-    (set elapsed (advance-game game delta elapsed
-                               (fn [_game]
-                                 (set stepped? true)
-                                 (sync-screen))))
-    (when (not stepped?)
-      (refresh-screen)))
+    (local (next-elapsed stepped?) (advance-game game delta elapsed nil))
+    (set elapsed next-elapsed)
+    (if stepped?
+        (sync-screen)
+        (refresh-screen)))
 
   (fn handle-viewport [payload]
     (local next-viewport (app.set-viewport {:x 0
-                                            :y 0
-                                            :width (or (and payload payload.width) 800)
-                                            :height (or (and payload payload.height) 600)}))
+                                             :y 0
+                                             :width (viewport-width payload)
+                                             :height (viewport-height payload)}))
     (update-surface-viewport surface next-viewport)
     (refresh-screen))
 
+  (fn handle-engine-tick [_payload]
+    (handle-update (* tick-interval 1000)))
+
+  (var key-down-connected? false)
+  (var updated-connected? false)
+  (var engine-tick-connected? false)
+  (var window-resized-connected? false)
+
+  (fn cleanup-engine-events []
+    (when (and key-down-connected? engine.events engine.events.key-down)
+      (engine.events.key-down:disconnect handle-key-down true))
+    (when (and updated-connected? engine.events engine.events.updated)
+      (engine.events.updated:disconnect handle-update true))
+    (when (and engine-tick-connected? engine.events engine.events.engine-tick)
+      (engine.events.engine-tick:disconnect handle-engine-tick true))
+    (when (and window-resized-connected? engine.events engine.events.window-resized)
+      (engine.events.window-resized:disconnect handle-viewport true)))
+
   (when (and engine.events engine.events.key-down)
-    (engine.events.key-down:connect handle-key-down))
+    (engine.events.key-down:connect handle-key-down)
+    (set key-down-connected? true))
   (if (and engine.events engine.events.updated)
-      (engine.events.updated:connect handle-update)
+      (do
+        (engine.events.updated:connect handle-update)
+        (set updated-connected? true))
       (and engine.events engine.events.engine-tick)
-      (engine.events.engine-tick:connect (fn [_payload]
-                                           (handle-update (* tick-interval 1000)))))
+      (do
+        (engine.events.engine-tick:connect handle-engine-tick)
+        (set engine-tick-connected? true)))
   (when (and engine.events engine.events.window-resized)
-    (engine.events.window-resized:connect handle-viewport))
+    (engine.events.window-resized:connect handle-viewport)
+    (set window-resized-connected? true))
 
   (sync-screen)
   (engine:run)
 
+  (cleanup-engine-events)
   (when screen
     (screen:drop)
     (set surface.entity nil))

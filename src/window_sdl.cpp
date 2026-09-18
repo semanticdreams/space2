@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <iostream>
 #include <utility>
 
@@ -7,6 +8,17 @@
 #include "gl_debug.hpp"
 #include "asset_manager.h"
 #include "image_loader.h"
+
+std::string format_window_title_with_fps(const std::string& title, double fps)
+{
+    char tmp[128];
+#if __linux__
+    snprintf(tmp, sizeof(tmp), "%s @ fps: %.2f", title.c_str(), fps);
+#else
+    sprintf_s(tmp, "%s @ fps: %.2f", title.c_str(), fps);
+#endif
+    return std::string(tmp);
+}
 
 WindowSdl::WindowSdl(std::string title) : title(std::move(title)) {
 }
@@ -233,14 +245,9 @@ void WindowSdl::updateFpsCounter(Uint64 dt) {
     /* limit text updates to 4 per second */
     if (elapsedSeconds > 0.25) {
         previousSeconds = currentSeconds;
-        char tmp[128];
         double fps = (double) frameCount / elapsedSeconds;
-#if __linux__
-        sprintf(tmp, "%s @ fps: %.2f", title.c_str(), fps);
-#else
-        sprintf_s(tmp, "%s @ fps: %.2f", title.c_str(), fps);
-#endif
-        SDL_SetWindowTitle(window.get(), tmp);
+        const std::string window_title = format_window_title_with_fps(title, fps);
+        SDL_SetWindowTitle(window.get(), window_title.c_str());
         frameCount = 0;
     }
     frameCount++;
@@ -267,9 +274,8 @@ void WindowSdl::clean() {
     SDL_GL_DestroyContext(context);
 }
 
-std::unique_ptr<WindowSdl> WindowSdl::create() {
-    std::string title = "space";
-    return std::make_unique<WindowSdl>(title);
+std::unique_ptr<WindowSdl> WindowSdl::create(std::string title) {
+    return std::make_unique<WindowSdl>(std::move(title));
 }
 
 void WindowSdl::toggleFullscreen() {

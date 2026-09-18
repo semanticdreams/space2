@@ -72,6 +72,13 @@ EngineConfig parse_engine_config(const sol::object& options)
         if (height && *height > 0) {
             config.height = *height;
         }
+        sol::optional<std::string> title = opts["title"];
+        if (title) {
+            if (title->empty()) {
+                throw sol::error("engine.Engine options.title must be a non-empty string");
+            }
+            config.title = *title;
+        }
         sol::optional<std::string> window_mode = opts["window-mode"];
         if (window_mode) {
             if (*window_mode == "windowed") {
