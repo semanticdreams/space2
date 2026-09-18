@@ -162,6 +162,24 @@
 
 (add-test "snake screen centers and expands board within viewport" test-screen-centers-and-expands-board)
 
+(fn layout-top [layout]
+    (+ layout.position.y layout.size.y))
+
+(fn test-screen-stack-order-non-inverted []
+    (local game (Snake.create {:width 24 :height 16}))
+    (local surface (SnakeSurface.create {:viewport {:x 0 :y 0 :width 800 :height 600}}))
+    (local screen (surface:build (SnakeView.SnakeScreen {:game game})))
+    (surface:update)
+    (assert (> screen.title-text.layout.position.y (layout-top screen.board.layout))
+            "title should render above the board on a non-inverted surface")
+    (assert (> screen.board.layout.position.y (layout-top screen.status-text.layout))
+            "status should render below the board on a non-inverted surface")
+    (assert (> screen.status-text.layout.position.y (layout-top screen.controls-text.layout))
+            "controls should render below status on a non-inverted surface")
+    (surface:drop))
+
+(add-test "snake screen stacks title board status and controls in visual order" test-screen-stack-order-non-inverted)
+
 (fn test-board-game-up-renders-upward []
     (local game (Snake.create {:width 4 :height 3
                                :initial-snake [{:x 2 :y 2} {:x 2 :y 3}]
