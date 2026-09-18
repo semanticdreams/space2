@@ -64,11 +64,57 @@
 
 (fn make-reconcile-host [positions]
   {:position-for-key (fn [_self key]
-                       (. positions key))
+                        (. positions key))
    :set-member-position (fn [_self _island-id key position]
                           (set (. positions key) position))
-   :set-member-pinned (fn [_self _island-id _key _pinned?]
-                        nil)})
+    :set-member-pinned (fn [_self _island-id _key _pinned?]
+                         nil)})
+
+(fn assert-vec3-position [actual expected message]
+  (assert actual (or message "expected position"))
+  (assert (= actual.x expected.x)
+          (.. (or message "position") " x expected " expected.x ", got " (tostring actual.x)))
+  (assert (= actual.y expected.y)
+          (.. (or message "position") " y expected " expected.y ", got " (tostring actual.y)))
+  (assert (= actual.z expected.z)
+          (.. (or message "position") " z expected " expected.z ", got " (tostring actual.z))))
+
+(fn ordered-list-presenter-offsets-old-format-list-key-anchor []
+  (local list-key "list-entity:list")
+  (local member-key "string-entity:a")
+  (local positions {})
+  (set (. positions list-key) {:x 24 :y 0 :z 0})
+  (set (. positions member-key) {:x 300 :y 400 :z 0})
+  (local island {:id "ordered-list:list"
+                 :kind "ordered-list"
+                 :members [member-key]
+                 :state {:list-key list-key
+                         :spacing 24}})
+  (OrderedListPresenter.apply island (make-reconcile-host positions))
+  (local first-position (. positions member-key))
+  (assert-vec3-position first-position {:x 48 :y 0 :z 0}
+                        "old-format island should offset from list-key anchor")
+  (local list-position (. positions list-key))
+  (assert (not (and (= first-position.x list-position.x)
+                    (= first-position.y list-position.y)
+                    (= first-position.z list-position.z)))
+          "old-format island first item should not overlap list node"))
+
+(fn ordered-list-presenter-prefers-explicit-state-position-over-list-key-anchor []
+  (local list-key "list-entity:list")
+  (local member-key "string-entity:a")
+  (local positions {})
+  (set (. positions list-key) {:x 24 :y 0 :z 0})
+  (set (. positions member-key) {:x 300 :y 400 :z 0})
+  (local island {:id "ordered-list:list"
+                 :kind "ordered-list"
+                 :members [member-key]
+                 :state {:list-key list-key
+                         :position [111 222 3]
+                         :spacing 24}})
+  (OrderedListPresenter.apply island (make-reconcile-host positions))
+  (assert-vec3-position (. positions member-key) {:x 111 :y 222 :z 3}
+                        "explicit island position should win over list-key anchor"))
 
 (fn list-entity-node-expands-item-nodes-as-ordered-list-island []
   (with-fixture
@@ -215,6 +261,10 @@
 
 (table.insert tests {:name "ListEntityNode expands item nodes as ordered-list island"
                      :fn list-entity-node-expands-item-nodes-as-ordered-list-island})
+(table.insert tests {:name "OrderedListPresenter offsets old-format list-key anchor"
+                     :fn ordered-list-presenter-offsets-old-format-list-key-anchor})
+(table.insert tests {:name "OrderedListPresenter prefers explicit state position over list-key anchor"
+                     :fn ordered-list-presenter-prefers-explicit-state-position-over-list-key-anchor})
 (table.insert tests {:name "ListEntityNode-created island keeps first item offset after reconcile"
                      :fn list-entity-node-created-island-keeps-first-item-offset-after-reconcile})
 (table.insert tests {:name "ListEntityNode updates existing ordered-list island in store order"

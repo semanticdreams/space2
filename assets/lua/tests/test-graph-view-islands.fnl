@@ -4,6 +4,7 @@
 (local GraphMap (require :graph/map))
 (local GraphView (require :graph/view/init))
 (local BuildContext (require :build-context))
+(local JsonUtils (require :json-utils))
 (local StringEntityStore (require :entities/string))
 (local ListEntityStore (require :entities/list))
 (local IdentityStore (require :entities/identity))
@@ -298,6 +299,29 @@
                       (= item-position.z list-position.z)))
             "first list island member should not overlap its list node after unrelated drag-end"))
 
+(fn check-restored-old-format-list-island-offsets-from-list-node-after-drag-end [fixture]
+    (local map fixture.map)
+    (local view fixture.view)
+    (local movables fixture.movables)
+    (local list-node (map:lookup fixture.list-key))
+    (local item-node (map:lookup fixture.item-key))
+    (local unrelated-node (map:lookup fixture.unrelated-key))
+    (local unrelated-entry (. movables.by-node unrelated-node))
+    (assert unrelated-entry "unrelated node should be movable")
+    (assert-vec3 (view:get-position list-node) (glm.vec3 24 0 0)
+                 "restored fixture should materialize list node at non-origin position")
+    (assert (map:get-island "ordered-list:list")
+            "restored fixture should have old-format ordered-list island")
+    (unrelated-entry.on-drag-end unrelated-entry)
+    (local list-position (view:get-position list-node))
+    (local item-position (view:get-position item-node))
+    (assert-vec3 item-position (glm.vec3 48 0 0)
+                 "old-format island should reconcile first member away from list node")
+    (assert (not (and (= item-position.x list-position.x)
+                      (= item-position.y list-position.y)
+                      (= item-position.z list-position.z)))
+            "restored old-format island first member should not overlap list node after unrelated drag-end"))
+
 (fn with-fixture [opts f]
     (local options (or opts {}))
     (local dir (make-temp-dir))
@@ -330,7 +354,10 @@
         result
         (error result)))
 
-(fn with-list-fixture [f]
+(fn with-list-fixture [maybe-opts maybe-f]
+    (local options (if (= (type maybe-opts) :function) {} (or maybe-opts {})))
+    (local f (if (= (type maybe-opts) :function) maybe-opts maybe-f))
+    (assert (= (type f) :function) "with-list-fixture requires callback")
     (local dir (make-temp-dir))
     (when (fs.exists dir)
         (fs.remove-all dir))
@@ -351,6 +378,13 @@
     (map:load-by-key list-key)
     (map:load-by-key item-key)
     (map:load-by-key unrelated-key)
+    (when options.restore-state
+        (map:restore-state options.restore-state))
+    (when options.persisted-positions
+        (local graph-dir (fs.join-path (fs.join-path (fs.join-path dir "graph") "maps") "graph-view-list-islands"))
+        (fs.create-dirs graph-dir)
+        (JsonUtils.write-json! (fs.join-path graph-dir "metadata.json")
+                               {:positions options.persisted-positions}))
     (local ctx (make-ctx))
     (local movables (make-movables-stub))
     (var view nil)
@@ -433,6 +467,20 @@
     (with-list-fixture
         check-list-created-island-uses-list-node-offset-after-unrelated-drag-end))
 
+(fn graph-view-restored-old-format-list-island-offsets-from-list-node-after-drag-end []
+    (with-list-fixture
+        {:restore-state {:nodes ["list-entity:list" "string-entity:item-a" "string-entity:unrelated"]
+                         :edges []
+                         :islands [{:id "ordered-list:list"
+                                    :kind "ordered-list"
+                                    :members ["string-entity:item-a"]
+                                    :state {:list-key "list-entity:list"
+                                            :spacing 24}}]}
+         :persisted-positions {"list-entity:list" [24 0 0]
+                               "string-entity:item-a" [300 400 0]
+                               "string-entity:unrelated" [-100 -100 0]}}
+        check-restored-old-format-list-island-offsets-from-list-node-after-drag-end))
+
 (table.insert tests {:name "GraphView applies ordered-list island positions"
                      :fn graph-view-applies-ordered-list-island-positions})
 (table.insert tests {:name "GraphView updates island layout when island changes"
@@ -455,6 +503,8 @@
                      :fn graph-view-snaps-island-member-back-after-drag-end})
 (table.insert tests {:name "GraphView list-created island uses list node offset after unrelated drag end"
                      :fn graph-view-list-created-island-uses-list-node-offset-after-unrelated-drag-end})
+(table.insert tests {:name "GraphView restored old-format list island offsets from list node after unrelated drag end"
+                     :fn graph-view-restored-old-format-list-island-offsets-from-list-node-after-drag-end})
 
 (local main
     (fn []
