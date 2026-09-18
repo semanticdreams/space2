@@ -5,7 +5,7 @@
 (local EngineModule (require :engine))
 (local Renderers (require :renderers))
 (local Snake (require :snake/game))
-(local SnakeSurface (require :snake/surface))
+(local OrthographicUiSurface (require :orthographic-ui-surface))
 (local SnakeView (require :snake/view))
 
 (local SDLK_ESCAPE 27)
@@ -125,7 +125,7 @@
     (set app.renderers (Renderers)))
 
   (local game (Snake.create {}))
-  (local surface (SnakeSurface.create {:viewport viewport}))
+  (local surface (OrthographicUiSurface.create {:viewport viewport}))
   (local screen (surface:build (SnakeView.SnakeScreen {:game game})))
   (var elapsed 0)
 
