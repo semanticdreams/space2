@@ -1,7 +1,12 @@
 (global app (or app {}))
 
+(local AppBootstrap (require :app-bootstrap))
+(local AppViewport (require :app-viewport))
 (local EngineModule (require :engine))
+(local Renderers (require :renderers))
 (local Snake (require :snake/game))
+(local SnakeSurface (require :snake/surface))
+(local SnakeView (require :snake/view))
 
 (local SDLK_ESCAPE 27)
 (local SDLK_RETURN 13)
@@ -22,18 +27,7 @@
 (local KEY_W_UPPER (string.byte "W"))
 
 (local tick-interval 0.15)
-
-(fn clear-screen []
-  (io.write "\27[2J\27[H"))
-
-(fn render [game]
-  (clear-screen)
-  (each [_ line (ipairs (game:board-lines))]
-    (print line))
-  (print (.. "Score: " (tostring game.score)))
-  (if game.game-over?
-      (print "Game over — press Space or Enter to restart, Q/Escape to quit.")
-      (print "Move with arrows or WASD. Quit with Q or Escape.")))
+(local startup-viewport {:x 0 :y 0 :width 800 :height 600})
 
 (fn restart-key? [key]
   (or (= key SDLK_SPACE) (= key SDLK_RETURN)))
@@ -64,20 +58,52 @@
          (* tick-interval 1000))
      1000))
 
-(fn advance-game [game delta-ms elapsed render-fn]
+(fn advance-game [game delta-ms elapsed on-step]
   (var next-elapsed (+ elapsed (delta-ms->seconds delta-ms)))
+  (var stepped? false)
   (when (and (not game.game-over?) (>= next-elapsed tick-interval))
     (while (and (not game.game-over?) (>= next-elapsed tick-interval))
       (set next-elapsed (- next-elapsed tick-interval))
-      (game:step))
-    (render-fn game))
+      (game:step)
+      (set stepped? true))
+    (when (and stepped? on-step)
+      (on-step game)))
   next-elapsed)
+
+(fn update-surface-viewport [surface viewport]
+  (when surface
+    (surface:update-viewport viewport)))
 
 (fn run []
   (local engine (EngineModule.Engine {:width 800 :height 600}))
   (set app.engine engine)
+  (when (not (engine:start))
+    (error "[snake] engine failed to start"))
+
+  (set app.set-viewport AppViewport.set-viewport)
+  (local viewport (app.set-viewport startup-viewport))
+  (AppBootstrap.init-themes)
+  (set app.renderers (AppBootstrap.init-renderers {:viewport viewport}))
+  (when (not app.renderers)
+    (set app.renderers (Renderers)))
+
   (local game (Snake.create {}))
+  (local surface (SnakeSurface.create {:viewport viewport}))
+  (local screen (surface:build (SnakeView.SnakeScreen {:game game})))
   (var elapsed 0)
+
+  (set app.active-world-runtime
+       {:presentation {:render-targets (fn [_self]
+                                         [(surface:presentation-target)])}})
+
+  (fn sync-screen []
+    (screen:sync)
+    (surface:update)
+    (app.renderers:update))
+
+  (fn refresh-screen []
+    (surface:update)
+    (app.renderers:update))
 
   (fn quit []
     (when (and engine engine.quit)
@@ -85,31 +111,56 @@
 
   (fn handle-key-down [payload]
     (local key (and payload payload.key))
+    (local direction (direction-for-key key))
     (if (quit-key? key)
         (quit)
         (and game.game-over? (restart-key? key))
         (do
           (game:restart)
           (set elapsed 0)
-          (render game))
-        (direction-for-key key)
-        (game:turn (direction-for-key key)))
+          (sync-screen))
+        direction
+        (when (game:turn direction)
+          (sync-screen)))
     true)
 
   (fn handle-update [delta]
-    (set elapsed (advance-game game delta elapsed render)))
+    (var stepped? false)
+    (set elapsed (advance-game game delta elapsed
+                               (fn [_game]
+                                 (set stepped? true)
+                                 (sync-screen))))
+    (when (not stepped?)
+      (refresh-screen)))
+
+  (fn handle-viewport [payload]
+    (local next-viewport (app.set-viewport {:x 0
+                                            :y 0
+                                            :width (or (and payload payload.width) 800)
+                                            :height (or (and payload payload.height) 600)}))
+    (update-surface-viewport surface next-viewport)
+    (refresh-screen))
 
   (when (and engine.events engine.events.key-down)
     (engine.events.key-down:connect handle-key-down))
   (if (and engine.events engine.events.updated)
       (engine.events.updated:connect handle-update)
       (and engine.events engine.events.engine-tick)
-      (engine.events.engine-tick:connect (fn [_payload] (handle-update (* tick-interval 1000)))))
+      (engine.events.engine-tick:connect (fn [_payload]
+                                           (handle-update (* tick-interval 1000)))))
+  (when (and engine.events engine.events.window-resized)
+    (engine.events.window-resized:connect handle-viewport))
 
-  (when (not (engine:start))
-    (error "[snake] engine failed to start"))
-  (render game)
+  (sync-screen)
   (engine:run)
+
+  (when screen
+    (screen:drop)
+    (set surface.entity nil))
+  (when surface
+    (surface:drop))
+  (when (and app.renderers app.renderers.drop)
+    (app.renderers:drop))
   (when engine.shutdown
     (engine:shutdown))
   nil)

@@ -1,6 +1,7 @@
 (local Runner (require :tests/runner))
 (local BuildContext (require :build-context))
 (local Snake (require :snake/game))
+(local SnakeSurface (require :snake/surface))
 (local SnakeView (require :snake/view))
 (local tests [])
 
@@ -53,6 +54,23 @@
     (assert (string.find screen.status-content "Game Over" 1 true)
             "screen status should show game over")
     (screen:drop)))
+
+(add-test "snake surface exposes render presentation target"
+  (fn []
+    (local surface (SnakeSurface.create {:viewport {:x 0 :y 0 :width 640 :height 480}}))
+    (local entity (surface:build (fn [_ctx]
+                                   {:layout nil
+                                    :update (fn [_self] nil)
+                                    :drop (fn [_self] nil)})))
+    (assert entity "surface should return built entity")
+    (surface:update)
+    (local target (surface:presentation-target))
+    (assert target "surface should expose presentation target")
+    (assert (= target.kind :hud) "snake surface should render as a HUD-like orthographic target")
+    (assert target.projection "surface target should expose projection")
+    (assert (= (length (target:get-render-contexts)) 1)
+            "surface target should expose one render context")
+    (surface:drop)))
 
 (fn main []
   (Runner.run-tests {:name "snake-view" :tests tests}))
