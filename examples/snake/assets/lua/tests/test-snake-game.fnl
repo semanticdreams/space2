@@ -1,5 +1,6 @@
 (local Runner (require :tests/runner))
 (local Snake (require :snake/game))
+(local SnakeApp (require :snake/app))
 (local tests [])
 
 (fn add-test [name test-fn]
@@ -60,6 +61,40 @@
     (local event (game:step))
     (assert (= event.status :self-hit) "head should collide with body")
     (assert game.game-over? "self hit should end game")))
+
+(add-test "runtime-waits-for-150ms-before-step"
+  (fn []
+    (local utils SnakeApp.test-utils)
+    (assert (= (type utils) :table) "snake app should expose focused runtime test helpers")
+    (assert (= (type utils.advance-game) :function) "snake app should expose advance-game helper")
+    (local game (Snake.create {:width 8 :height 6
+                               :initial-snake [{:x 3 :y 3} {:x 2 :y 3}]
+                               :initial-food {:x 6 :y 3}}))
+    (var render-count 0)
+    (fn render [_game]
+      (set render-count (+ render-count 1)))
+    (var elapsed (utils.advance-game game 16 0 render))
+    (local head-before (. game.snake 1))
+    (assert (= head-before.x 3) "16 ms frame should not advance a 150 ms snake tick")
+    (assert (= render-count 0) "sub-tick frame should not render a game step")
+    (set elapsed (utils.advance-game game 134 elapsed render))
+    (local head-after (. game.snake 1))
+    (assert (= head-after.x 4) "150 accumulated ms should advance exactly one step")
+    (assert (= render-count 1) "one accumulated tick should render once")))
+
+(add-test "runtime-stops-catchup-after-game-over"
+  (fn []
+    (local utils SnakeApp.test-utils)
+    (assert (= (type utils) :table) "snake app should expose focused runtime test helpers")
+    (assert (= (type utils.advance-game) :function) "snake app should expose advance-game helper")
+    (var step-count 0)
+    (local fake-game {:game-over? false
+                      :step (fn [self]
+                              (set step-count (+ step-count 1))
+                              (set self.game-over? true)
+                              {:status :wall-hit})})
+    (utils.advance-game fake-game 450 0 (fn [_game] nil))
+    (assert (= step-count 1) "catch-up loop should stop once a tick ends the game")))
 
 (fn main []
   (Runner.run-tests {:name "snake-game" :tests tests}))

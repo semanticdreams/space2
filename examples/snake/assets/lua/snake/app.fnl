@@ -58,6 +58,21 @@
        (not (= value math.huge))
        (not (= value (- math.huge)))))
 
+(fn delta-ms->seconds [delta-ms]
+  (/ (if (finite-number? delta-ms)
+         (math.max delta-ms 0)
+         (* tick-interval 1000))
+     1000))
+
+(fn advance-game [game delta-ms elapsed render-fn]
+  (var next-elapsed (+ elapsed (delta-ms->seconds delta-ms)))
+  (when (and (not game.game-over?) (>= next-elapsed tick-interval))
+    (while (and (not game.game-over?) (>= next-elapsed tick-interval))
+      (set next-elapsed (- next-elapsed tick-interval))
+      (game:step))
+    (render-fn game))
+  next-elapsed)
+
 (fn run []
   (local engine (EngineModule.Engine {:width 800 :height 600}))
   (set app.engine engine)
@@ -82,21 +97,14 @@
     true)
 
   (fn handle-update [delta]
-    (set elapsed (+ elapsed (if (finite-number? delta)
-                               (math.max delta 0)
-                               tick-interval)))
-    (when (and (not game.game-over?) (>= elapsed tick-interval))
-      (while (>= elapsed tick-interval)
-        (set elapsed (- elapsed tick-interval))
-        (game:step))
-      (render game)))
+    (set elapsed (advance-game game delta elapsed render)))
 
   (when (and engine.events engine.events.key-down)
     (engine.events.key-down:connect handle-key-down))
   (if (and engine.events engine.events.updated)
       (engine.events.updated:connect handle-update)
       (and engine.events engine.events.engine-tick)
-      (engine.events.engine-tick:connect (fn [_payload] (handle-update tick-interval))))
+      (engine.events.engine-tick:connect (fn [_payload] (handle-update (* tick-interval 1000)))))
 
   (when (not (engine:start))
     (error "[snake] engine failed to start"))
@@ -106,4 +114,6 @@
     (engine:shutdown))
   nil)
 
-{:run run}
+{:run run
+ :test-utils {:advance-game advance-game
+              :delta-ms->seconds delta-ms->seconds}}
