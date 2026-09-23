@@ -264,7 +264,7 @@
     (assert-vec3 (view:get-position node-a) (glm.vec3 5 6 0)
                  "drag end should reconcile island and snap member back"))
 
-(fn check-list-created-island-uses-list-node-offset-after-unrelated-drag-end [fixture]
+(fn check-list-created-island-preserves-body-position-after-unrelated-drag-end [fixture]
     (local map fixture.map)
     (local view fixture.view)
     (local movables fixture.movables)
@@ -284,22 +284,22 @@
     (list-node:expand-items-as-island)
     (local island (map:get-island "ordered-list:list"))
     (assert (= (. island.state.position 1) 48)
-            (.. "island origin x should be offset from list node, got " (. island.state.position 1)))
+            (.. "island body x should initialize near list node, got " (. island.state.position 1)))
+    (list-entry.target:set-position (glm.vec3 500 0 0))
+    (assert-vec3 (view:get-position list-node) (glm.vec3 500 0 0)
+                 "source list node should be allowed to move after island creation")
     (item-entry.target:set-position (glm.vec3 300 400 0))
     (unrelated-entry.on-drag-end unrelated-entry)
     (local reconciled-position (view:get-position item-node))
-    (assert (= reconciled-position.x 48)
-            (.. "unrelated drag-end reconciliation should keep first item offset from list node x, got " reconciled-position.x))
     (assert-vec3 reconciled-position (glm.vec3 48 0 0)
-                 "unrelated drag-end reconciliation should keep first item offset from list node")
+                 "unrelated drag-end reconciliation should use stored island body position")
     (local list-position (view:get-position list-node))
-    (local item-position (view:get-position item-node))
-    (assert (not (and (= item-position.x list-position.x)
-                      (= item-position.y list-position.y)
-                      (= item-position.z list-position.z)))
-            "first list island member should not overlap its list node after unrelated drag-end"))
+    (assert (not (and (= reconciled-position.x (+ list-position.x 24))
+                      (= reconciled-position.y list-position.y)
+                      (= reconciled-position.z list-position.z)))
+            "first list island member should not be recomputed from current list node position"))
 
-(fn check-restored-old-format-list-island-offsets-from-list-node-after-drag-end [fixture]
+(fn check-restored-old-format-list-island-uses-member-fallback-after-drag-end [fixture]
     (local map fixture.map)
     (local view fixture.view)
     (local movables fixture.movables)
@@ -315,8 +315,8 @@
     (unrelated-entry.on-drag-end unrelated-entry)
     (local list-position (view:get-position list-node))
     (local item-position (view:get-position item-node))
-    (assert-vec3 item-position (glm.vec3 48 0 0)
-                 "old-format island should reconcile first member away from list node")
+    (assert-vec3 item-position (glm.vec3 300 400 0)
+                 "old-format island without body position should fall back to member position")
     (assert (not (and (= item-position.x list-position.x)
                       (= item-position.y list-position.y)
                       (= item-position.z list-position.z)))
@@ -463,11 +463,11 @@
                                                    :spacing 7}})}
         check-snaps-island-member-back-after-drag-end))
 
-(fn graph-view-list-created-island-uses-list-node-offset-after-unrelated-drag-end []
+(fn graph-view-list-created-island-preserves-body-position-after-unrelated-drag-end []
     (with-list-fixture
-        check-list-created-island-uses-list-node-offset-after-unrelated-drag-end))
+        check-list-created-island-preserves-body-position-after-unrelated-drag-end))
 
-(fn graph-view-restored-old-format-list-island-offsets-from-list-node-after-drag-end []
+(fn graph-view-restored-old-format-list-island-uses-member-fallback-after-drag-end []
     (with-list-fixture
         {:restore-state {:nodes ["list-entity:list" "string-entity:item-a" "string-entity:unrelated"]
                          :edges []
@@ -477,9 +477,9 @@
                                     :state {:list-key "list-entity:list"
                                             :spacing 24}}]}
          :persisted-positions {"list-entity:list" [24 0 0]
-                               "string-entity:item-a" [300 400 0]
-                               "string-entity:unrelated" [-100 -100 0]}}
-        check-restored-old-format-list-island-offsets-from-list-node-after-drag-end))
+                                "string-entity:item-a" [300 400 0]
+                                "string-entity:unrelated" [-100 -100 0]}}
+        check-restored-old-format-list-island-uses-member-fallback-after-drag-end))
 
 (table.insert tests {:name "GraphView applies ordered-list island positions"
                      :fn graph-view-applies-ordered-list-island-positions})
@@ -501,10 +501,10 @@
                      :fn graph-view-removes-island-member-node-without-pin-cleanup-error})
 (table.insert tests {:name "GraphView snaps island member back after drag end"
                      :fn graph-view-snaps-island-member-back-after-drag-end})
-(table.insert tests {:name "GraphView list-created island uses list node offset after unrelated drag end"
-                     :fn graph-view-list-created-island-uses-list-node-offset-after-unrelated-drag-end})
-(table.insert tests {:name "GraphView restored old-format list island offsets from list node after unrelated drag end"
-                     :fn graph-view-restored-old-format-list-island-offsets-from-list-node-after-drag-end})
+(table.insert tests {:name "GraphView list-created island preserves body position after unrelated drag end"
+                     :fn graph-view-list-created-island-preserves-body-position-after-unrelated-drag-end})
+(table.insert tests {:name "GraphView restored old-format list island uses member fallback after unrelated drag end"
+                     :fn graph-view-restored-old-format-list-island-uses-member-fallback-after-drag-end})
 
 (local main
     (fn []
