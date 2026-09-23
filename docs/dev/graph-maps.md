@@ -111,9 +111,17 @@ Persisted island records use the generic shape:
  :state presenter-owned-table}
 ```
 
+For presenters that lay out graph members spatially, `state.position` is the
+island body's absolute graph-space position. A node action may choose an initial
+body position near the creating node, but after creation the stored island body
+position is authoritative and must not be recomputed from source-node metadata.
+
 `GraphView` hosts presenters by island `:kind`. Presenter behavior such as
 `ordered-list` is registered through the island presenter host rather than a
-hardcoded list-entity branch in GraphView.
+hardcoded list-entity branch in GraphView. The `ordered-list` presenter places
+the first member at `state.position` and offsets later members vertically by
+`state.spacing`; legacy records with no `state.position` fall back to an existing
+member position or the presenter's default origin, not a list/source-node anchor.
 
 Removing an island removes only the map-local presentation record. It does not
 delete member nodes or any backing domain entities. Initial `ordered-list`

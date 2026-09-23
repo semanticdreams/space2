@@ -28,8 +28,8 @@
   (.. "ordered-list:" (tostring entity-id)))
 
 (fn island-origin-position [list-node existing-island]
-  (if (and existing-island existing-island.state existing-island.state.position)
-      existing-island.state.position
+  (if existing-island
+      (and existing-island.state existing-island.state.position)
       (do
         (local graph list-node.graph)
         (local list-point (and graph graph.presentation-points
@@ -206,10 +206,10 @@
   (set node.expand-items-as-island
        (fn [self _opts]
          (local graph self.graph)
-         (assert (and graph graph.load-by-key graph.upsert-island)
-                 "ListEntityNode.expand-items-as-island requires mounted graph map with load-by-key and upsert-island")
+         (assert (and graph graph.load-by-key graph.get-island graph.upsert-island)
+                 "ListEntityNode.expand-items-as-island requires mounted GraphMap APIs: load-by-key, get-island, and upsert-island")
           (local island-id (ordered-list-island-id self.entity-id))
-          (local existing-island (and graph.get-island (graph:get-island island-id)))
+          (local existing-island (graph:get-island island-id))
           (local current (self:get-entity))
           (local items (or (and current current.items) []))
           (local members [])

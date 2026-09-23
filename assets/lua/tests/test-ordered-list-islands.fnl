@@ -1,4 +1,5 @@
 (local fs (require :fs))
+(local glm (require :glm))
 (local Graph (require :graph/init))
 (local GraphMap (require :graph/map))
 (local StringEntityStore (require :entities/string))
@@ -79,7 +80,7 @@
   (assert (= actual.z expected.z)
           (.. (or message "position") " z expected " expected.z ", got " (tostring actual.z))))
 
-(fn ordered-list-presenter-offsets-old-format-list-key-anchor []
+(fn ordered-list-presenter-uses-member-position-for-old-format-island []
   (local list-key "list-entity:list")
   (local member-key "string-entity:a")
   (local positions {})
@@ -92,13 +93,13 @@
                          :spacing 24}})
   (OrderedListPresenter.apply island (make-reconcile-host positions))
   (local first-position (. positions member-key))
-  (assert-vec3-position first-position {:x 48 :y 0 :z 0}
-                        "old-format island should offset from list-key anchor")
+  (assert-vec3-position first-position {:x 300 :y 400 :z 0}
+                        "old-format island should fall back to existing member position")
   (local list-position (. positions list-key))
   (assert (not (and (= first-position.x list-position.x)
                     (= first-position.y list-position.y)
                     (= first-position.z list-position.z)))
-          "old-format island first item should not overlap list node"))
+          "old-format island first item should not re-anchor to the list node"))
 
 (fn ordered-list-presenter-prefers-explicit-state-position-over-list-key-anchor []
   (local list-key "list-entity:list")
@@ -134,6 +135,28 @@
                              "island should store a JSON-safe stable origin offset from the list node")
       (assert (fixture.map:lookup key-a) "expansion should load first item node")
       (assert (fixture.map:lookup key-b) "expansion should load second item node"))))
+
+(fn list-entity-node-initializes-island-body-near-list-node-then-preserves-it []
+  (with-fixture
+    (fn [fixture]
+      (local key-a (create-string fixture "a" "A"))
+      (local key-b (create-string fixture "b" "B"))
+      (local key-c (create-string fixture "c" "C"))
+      (local entity (create-list fixture "list" [key-a key-b]))
+      (local list-node (fixture.map:load-by-key (.. "list-entity:" entity.id)))
+      (set fixture.map.presentation-points {})
+      (set (. fixture.map.presentation-points list-node.key)
+           {:position (glm.vec3 100 200 3)})
+      (local island (list-node:expand-items-as-island))
+      (assert-position-array island.state.position [124 200 3]
+                             "new list-created island should initialize near current list node")
+      (set (. fixture.map.presentation-points list-node.key)
+           {:position (glm.vec3 900 901 9)})
+      (fixture.list-store:reorder-items entity.id [key-c key-b key-a])
+      (local refreshed (fixture.map:get-island "ordered-list:list"))
+      (assert-members refreshed [key-c key-b key-a])
+      (assert-position-array refreshed.state.position [124 200 3]
+                             "refresh should preserve island body position instead of re-reading source position"))))
 
 (fn list-entity-node-created-island-keeps-first-item-offset-after-reconcile []
   (with-fixture
@@ -192,6 +215,56 @@
       (assert-members island [key-c key-b key-a])
       (assert-position-array island.state.position [111 222 3]
                              "refresh should preserve explicit island origin"))))
+
+(fn list-entity-node-preserves-missing-legacy-island-position-on-update []
+  (with-fixture
+    (fn [fixture]
+      (local key-a (create-string fixture "a" "A"))
+      (local key-b (create-string fixture "b" "B"))
+      (local key-c (create-string fixture "c" "C"))
+      (local entity (create-list fixture "list" [key-a key-b]))
+      (local list-key (.. "list-entity:" entity.id))
+      (fixture.map:restore-state {:nodes [list-key key-a key-b key-c]
+                                  :islands [{:id "ordered-list:list"
+                                             :kind "ordered-list"
+                                             :members [key-a key-b]
+                                             :state {:list-key list-key
+                                                     :spacing 24}}]})
+      (local list-node (fixture.map:lookup list-key))
+      (assert list-node "restored list node should be present")
+      (set fixture.map.presentation-points {})
+      (set (. fixture.map.presentation-points list-key)
+           {:position (glm.vec3 900 901 9)})
+      (fixture.list-store:reorder-items entity.id [key-c key-b key-a])
+      (local refreshed (fixture.map:get-island "ordered-list:list"))
+      (assert-members refreshed [key-c key-b key-a])
+      (assert (= refreshed.state.position nil)
+              "refreshing restored legacy island should preserve missing body position instead of re-reading source node"))))
+
+(fn incomplete-map-load-by-key [_self key]
+  {:key key})
+
+(fn incomplete-map-upsert-island [_self _record]
+  (error "upsert-island should not be called without get-island"))
+
+(fn expand-items-as-island-for-test [list-node]
+  (list-node:expand-items-as-island))
+
+(fn assert-expand-requires-get-island [fixture]
+  (local key-a (create-string fixture "a" "A"))
+  (local entity (create-list fixture "list" [key-a]))
+  (local list-node (fixture.map:load-by-key (.. "list-entity:" entity.id)))
+  (local incomplete-map {:presentation-points fixture.map.presentation-points
+                         :load-by-key incomplete-map-load-by-key
+                         :upsert-island incomplete-map-upsert-island})
+  (set list-node.graph incomplete-map)
+  (local (ok err) (pcall expand-items-as-island-for-test list-node))
+  (assert (not ok) "expand-items-as-island should fail without get-island")
+  (assert (string.find (tostring err) "load-by-key, get-island, and upsert-island" 1 true)
+          (.. "missing API error should name required GraphMap APIs, got: " (tostring err))))
+
+(fn list-entity-node-requires-get-island-api-for-island-expansion []
+  (with-fixture assert-expand-requires-get-island))
 
 (fn list-entity-node-resolves-identity-items-to-visible-target-keys []
   (with-fixture
@@ -261,8 +334,10 @@
 
 (table.insert tests {:name "ListEntityNode expands item nodes as ordered-list island"
                      :fn list-entity-node-expands-item-nodes-as-ordered-list-island})
-(table.insert tests {:name "OrderedListPresenter offsets old-format list-key anchor"
-                     :fn ordered-list-presenter-offsets-old-format-list-key-anchor})
+(table.insert tests {:name "ListEntityNode initializes island body near list node then preserves it"
+                     :fn list-entity-node-initializes-island-body-near-list-node-then-preserves-it})
+(table.insert tests {:name "OrderedListPresenter uses member position for old-format island"
+                     :fn ordered-list-presenter-uses-member-position-for-old-format-island})
 (table.insert tests {:name "OrderedListPresenter prefers explicit state position over list-key anchor"
                      :fn ordered-list-presenter-prefers-explicit-state-position-over-list-key-anchor})
 (table.insert tests {:name "ListEntityNode-created island keeps first item offset after reconcile"
@@ -271,6 +346,10 @@
                      :fn list-entity-node-updates-existing-ordered-list-island-in-store-order})
 (table.insert tests {:name "ListEntityNode preserves existing ordered-list island position on update"
                      :fn list-entity-node-preserves-existing-ordered-list-island-position-on-update})
+(table.insert tests {:name "ListEntityNode preserves missing legacy island position on update"
+                     :fn list-entity-node-preserves-missing-legacy-island-position-on-update})
+(table.insert tests {:name "ListEntityNode requires get-island API for island expansion"
+                     :fn list-entity-node-requires-get-island-api-for-island-expansion})
 (table.insert tests {:name "ListEntityNode resolves identity items to visible target keys"
                      :fn list-entity-node-resolves-identity-items-to-visible-target-keys})
 (table.insert tests {:name "ListEntityNode refreshes island when identity target changes"
