@@ -216,6 +216,31 @@
       (assert-position-array island.state.position [111 222 3]
                              "refresh should preserve explicit island origin"))))
 
+(fn list-entity-node-preserves-missing-legacy-island-position-on-update []
+  (with-fixture
+    (fn [fixture]
+      (local key-a (create-string fixture "a" "A"))
+      (local key-b (create-string fixture "b" "B"))
+      (local key-c (create-string fixture "c" "C"))
+      (local entity (create-list fixture "list" [key-a key-b]))
+      (local list-key (.. "list-entity:" entity.id))
+      (fixture.map:restore-state {:nodes [list-key key-a key-b key-c]
+                                  :islands [{:id "ordered-list:list"
+                                             :kind "ordered-list"
+                                             :members [key-a key-b]
+                                             :state {:list-key list-key
+                                                     :spacing 24}}]})
+      (local list-node (fixture.map:lookup list-key))
+      (assert list-node "restored list node should be present")
+      (set fixture.map.presentation-points {})
+      (set (. fixture.map.presentation-points list-key)
+           {:position (glm.vec3 900 901 9)})
+      (fixture.list-store:reorder-items entity.id [key-c key-b key-a])
+      (local refreshed (fixture.map:get-island "ordered-list:list"))
+      (assert-members refreshed [key-c key-b key-a])
+      (assert (= refreshed.state.position nil)
+              "refreshing restored legacy island should preserve missing body position instead of re-reading source node"))))
+
 (fn incomplete-map-load-by-key [_self key]
   {:key key})
 
@@ -321,6 +346,8 @@
                      :fn list-entity-node-updates-existing-ordered-list-island-in-store-order})
 (table.insert tests {:name "ListEntityNode preserves existing ordered-list island position on update"
                      :fn list-entity-node-preserves-existing-ordered-list-island-position-on-update})
+(table.insert tests {:name "ListEntityNode preserves missing legacy island position on update"
+                     :fn list-entity-node-preserves-missing-legacy-island-position-on-update})
 (table.insert tests {:name "ListEntityNode requires get-island API for island expansion"
                      :fn list-entity-node-requires-get-island-api-for-island-expansion})
 (table.insert tests {:name "ListEntityNode resolves identity items to visible target keys"

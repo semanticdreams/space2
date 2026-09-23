@@ -28,8 +28,8 @@
   (.. "ordered-list:" (tostring entity-id)))
 
 (fn island-origin-position [list-node existing-island]
-  (if (and existing-island existing-island.state existing-island.state.position)
-      existing-island.state.position
+  (if existing-island
+      (and existing-island.state existing-island.state.position)
       (do
         (local graph list-node.graph)
         (local list-point (and graph graph.presentation-points
