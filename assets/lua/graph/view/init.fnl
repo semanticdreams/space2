@@ -614,8 +614,8 @@
                                             (set drag-active? true)
                                             (set drag-node (if (Modifiers.alt-held? (and payload payload.mod)) :alt node)))
                           :on-drag-end (fn [node _entry _drag]
-                                           (when (= drag-node :alt) (update-islands-after-member-drag-end! graph-map island-host get-position node))
-                                           (set drag-active? false) (set drag-node nil)
+                                           (local alt-drag? (= drag-node :alt)) (set drag-active? false) (set drag-node nil)
+                                           (when alt-drag? (update-islands-after-member-drag-end! graph-map island-host get-position node))
                                            (update-labels [node] {:force? true})
                                            (refresh-label-positions [node])
                                            (reconcile-graph-islands!))}))

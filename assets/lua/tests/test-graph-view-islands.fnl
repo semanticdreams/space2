@@ -346,6 +346,25 @@
     (assert-vec3 (view:get-position second-node) (glm.vec3 200 300 0)
                  "dragged second member should stay at dropped position after reconcile"))
 
+(fn check-alt-drag-end-clears-state-before-visible-update-failure [fixture]
+    (local map fixture.map)
+    (local movables fixture.movables)
+    (local list-node (map:lookup fixture.list-key))
+    (local second-node (map:lookup fixture.second-item-key))
+    (local list-entry (. movables.by-node list-node))
+    (local second-entry (. movables.by-node second-node))
+    (list-entry.target:set-position (glm.vec3 24 0 0))
+    (list-node:expand-items-as-island)
+    (set map.update-island false)
+    (second-entry.on-drag-start second-entry {} {:mod 256})
+    (second-entry.target:set-position (glm.vec3 200 300 0))
+    (local (failed? err) (pcall (fn [] (second-entry.on-drag-end second-entry {}))))
+    (assert (not failed?) "alt drag end should still fail visibly when update-island is missing")
+    (assert (string.find (tostring err) "GraphView island member alt-drag requires GraphMap.update-island" 1 true)
+            "failure should explain missing update-island")
+    (local (cleared? second-err) (pcall (fn [] (second-entry.on-drag-end second-entry {}))))
+    (assert cleared? (.. "drag state should clear before visible update failure: " (tostring second-err))))
+
 (fn with-fixture [opts f]
     (local options (or opts {}))
     (local dir (make-temp-dir))
@@ -516,6 +535,10 @@
     (with-list-fixture
         check-alt-dragging-second-island-member-moves-whole-island-on-drag-end))
 
+(fn graph-view-alt-drag-end-clears-state-before-visible-update-failure []
+    (with-list-fixture
+        check-alt-drag-end-clears-state-before-visible-update-failure))
+
 (table.insert tests {:name "GraphView applies ordered-list island positions"
                      :fn graph-view-applies-ordered-list-island-positions})
 (table.insert tests {:name "GraphView updates island layout when island changes"
@@ -542,6 +565,8 @@
                      :fn graph-view-restored-old-format-list-island-uses-member-fallback-after-drag-end})
 (table.insert tests {:name "GraphView alt-dragging second island member moves whole island on drag end"
                      :fn graph-view-alt-dragging-second-island-member-moves-whole-island-on-drag-end})
+(table.insert tests {:name "GraphView alt drag end clears state before visible update failure"
+                     :fn graph-view-alt-drag-end-clears-state-before-visible-update-failure})
 
 (local main
     (fn []
