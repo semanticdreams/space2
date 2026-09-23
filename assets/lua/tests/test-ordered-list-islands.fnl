@@ -1,4 +1,5 @@
 (local fs (require :fs))
+(local glm (require :glm))
 (local Graph (require :graph/init))
 (local GraphMap (require :graph/map))
 (local StringEntityStore (require :entities/string))
@@ -135,6 +136,28 @@
       (assert (fixture.map:lookup key-a) "expansion should load first item node")
       (assert (fixture.map:lookup key-b) "expansion should load second item node"))))
 
+(fn list-entity-node-initializes-island-body-near-list-node-then-preserves-it []
+  (with-fixture
+    (fn [fixture]
+      (local key-a (create-string fixture "a" "A"))
+      (local key-b (create-string fixture "b" "B"))
+      (local key-c (create-string fixture "c" "C"))
+      (local entity (create-list fixture "list" [key-a key-b]))
+      (local list-node (fixture.map:load-by-key (.. "list-entity:" entity.id)))
+      (set fixture.map.presentation-points {})
+      (set (. fixture.map.presentation-points list-node.key)
+           {:position (glm.vec3 100 200 3)})
+      (local island (list-node:expand-items-as-island))
+      (assert-position-array island.state.position [124 200 3]
+                             "new list-created island should initialize near current list node")
+      (set (. fixture.map.presentation-points list-node.key)
+           {:position (glm.vec3 900 901 9)})
+      (fixture.list-store:reorder-items entity.id [key-c key-b key-a])
+      (local refreshed (fixture.map:get-island "ordered-list:list"))
+      (assert-members refreshed [key-c key-b key-a])
+      (assert-position-array refreshed.state.position [124 200 3]
+                             "refresh should preserve island body position instead of re-reading source position"))))
+
 (fn list-entity-node-created-island-keeps-first-item-offset-after-reconcile []
   (with-fixture
     (fn [fixture]
@@ -261,6 +284,8 @@
 
 (table.insert tests {:name "ListEntityNode expands item nodes as ordered-list island"
                      :fn list-entity-node-expands-item-nodes-as-ordered-list-island})
+(table.insert tests {:name "ListEntityNode initializes island body near list node then preserves it"
+                     :fn list-entity-node-initializes-island-body-near-list-node-then-preserves-it})
 (table.insert tests {:name "OrderedListPresenter uses member position for old-format island"
                      :fn ordered-list-presenter-uses-member-position-for-old-format-island})
 (table.insert tests {:name "OrderedListPresenter prefers explicit state position over list-key anchor"
