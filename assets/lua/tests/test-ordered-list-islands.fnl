@@ -79,7 +79,7 @@
   (assert (= actual.z expected.z)
           (.. (or message "position") " z expected " expected.z ", got " (tostring actual.z))))
 
-(fn ordered-list-presenter-offsets-old-format-list-key-anchor []
+(fn ordered-list-presenter-uses-member-position-for-old-format-island []
   (local list-key "list-entity:list")
   (local member-key "string-entity:a")
   (local positions {})
@@ -92,13 +92,13 @@
                          :spacing 24}})
   (OrderedListPresenter.apply island (make-reconcile-host positions))
   (local first-position (. positions member-key))
-  (assert-vec3-position first-position {:x 48 :y 0 :z 0}
-                        "old-format island should offset from list-key anchor")
+  (assert-vec3-position first-position {:x 300 :y 400 :z 0}
+                        "old-format island should fall back to existing member position")
   (local list-position (. positions list-key))
   (assert (not (and (= first-position.x list-position.x)
                     (= first-position.y list-position.y)
                     (= first-position.z list-position.z)))
-          "old-format island first item should not overlap list node"))
+          "old-format island first item should not re-anchor to the list node"))
 
 (fn ordered-list-presenter-prefers-explicit-state-position-over-list-key-anchor []
   (local list-key "list-entity:list")
@@ -261,8 +261,8 @@
 
 (table.insert tests {:name "ListEntityNode expands item nodes as ordered-list island"
                      :fn list-entity-node-expands-item-nodes-as-ordered-list-island})
-(table.insert tests {:name "OrderedListPresenter offsets old-format list-key anchor"
-                     :fn ordered-list-presenter-offsets-old-format-list-key-anchor})
+(table.insert tests {:name "OrderedListPresenter uses member position for old-format island"
+                     :fn ordered-list-presenter-uses-member-position-for-old-format-island})
 (table.insert tests {:name "OrderedListPresenter prefers explicit state position over list-key anchor"
                      :fn ordered-list-presenter-prefers-explicit-state-position-over-list-key-anchor})
 (table.insert tests {:name "ListEntityNode-created island keeps first item offset after reconcile"

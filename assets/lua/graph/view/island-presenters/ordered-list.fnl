@@ -3,7 +3,6 @@
 
 (local kind "ordered-list")
 (local default-spacing 24)
-(local default-anchor-offset 24)
 
 (fn position-array? [position]
     (and (= (type position) "table")
@@ -36,19 +35,12 @@
 (fn base-position [island host]
     (local state (if island.state island.state {}))
     (local state-position (vec3-copy state.position "OrderedListPresenter state.position"))
-    (local list-position (if state.list-key
-                             (vec3-copy (host:position-for-key state.list-key)
-                                        "OrderedListPresenter list position")))
     (local first-member-key (. island.members 1))
     (local member-position (if first-member-key
                                (vec3-copy (host:position-for-key first-member-key)
                                           "OrderedListPresenter member position")))
     (if state-position
         state-position
-        list-position
-        (glm.vec3 (+ list-position.x default-anchor-offset)
-                  list-position.y
-                  list-position.z)
         member-position
         member-position
         (fallback-origin)))
