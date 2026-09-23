@@ -143,6 +143,40 @@
                                      :position (glm.vec3 10 10 0)}))
     (assert (= next-state nil) "non-member drag should not update island state"))
 
+(fn presenters-for-fixture [presenter]
+    {:presenter-for-kind (fn [kind]
+                           (if (= kind presenter.kind)
+                               presenter
+                               nil))})
+
+(fn island-host-delegates-member-drag-end-state []
+    (var called? false)
+    (local presenter {:kind "custom"
+                      :apply (fn [_island _host] {})
+                      :member-drag-end-state
+                      (fn [island _host request]
+                          (set called? true)
+                          {:position [request.position.x request.position.y request.position.z]
+                           :source island.id})})
+    (local host (IslandHost.GraphViewIslandHost
+                  (make-host {:presenters (presenters-for-fixture presenter)
+                              :positions {"item:a" (glm.vec3 0 0 0)}})))
+    (local state (host:state-after-member-drag-end
+                   {:id "island-1" :kind "custom" :members ["item:a"]}
+                   {:member-key "item:a" :position (glm.vec3 9 8 7)}))
+    (assert called? "host should call presenter hook")
+    (assert (= state.source "island-1") "host should return presenter state"))
+
+(fn island-host-returns-nil-when-presenter-has-no-member-drag-hook []
+    (local presenter {:kind "custom" :apply (fn [_island _host] {})})
+    (local host (IslandHost.GraphViewIslandHost
+                  (make-host {:presenters (presenters-for-fixture presenter)
+                              :positions {"item:a" (glm.vec3 0 0 0)}})))
+    (local state (host:state-after-member-drag-end
+                   {:id "island-1" :kind "custom" :members ["item:a"]}
+                   {:member-key "item:a" :position (glm.vec3 1 2 3)}))
+    (assert (= state nil) "presenters without hook should decline island movement"))
+
 (fn island-host-errors-on-missing-presenter-kind []
     (fn no-presenter-for-kind [_kind]
         nil)
@@ -219,6 +253,10 @@
                      :fn ordered-list-presenter-upgrades-legacy-island-on-member-drop})
 (table.insert tests {:name "OrderedListPresenter ignores non-member drop"
                      :fn ordered-list-presenter-ignores-non-member-drop})
+(table.insert tests {:name "IslandHost delegates member drag end state"
+                     :fn island-host-delegates-member-drag-end-state})
+(table.insert tests {:name "IslandHost returns nil when presenter has no member drag hook"
+                     :fn island-host-returns-nil-when-presenter-has-no-member-drag-hook})
 (table.insert tests {:name "IslandHost errors on missing presenter kind"
                       :fn island-host-errors-on-missing-presenter-kind})
 (table.insert tests {:name "IslandHost pins and unpins island members through host callbacks"
