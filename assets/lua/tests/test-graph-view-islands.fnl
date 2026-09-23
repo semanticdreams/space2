@@ -322,6 +322,30 @@
                       (= item-position.z list-position.z)))
             "restored old-format island first member should not overlap list node after unrelated drag-end"))
 
+(fn check-alt-dragging-second-island-member-moves-whole-island-on-drag-end [fixture]
+    (local map fixture.map)
+    (local view fixture.view)
+    (local movables fixture.movables)
+    (local list-node (map:lookup fixture.list-key))
+    (local item-node (map:lookup fixture.item-key))
+    (local second-node (map:lookup fixture.second-item-key))
+    (local list-entry (. movables.by-node list-node))
+    (local second-entry (. movables.by-node second-node))
+    (list-entry.target:set-position (glm.vec3 24 0 0))
+    (list-node:expand-items-as-island)
+    (second-entry.on-drag-start second-entry {} {:mod 256})
+    (second-entry.target:set-position (glm.vec3 200 300 0))
+    (assert-vec3 (view:get-position item-node) (glm.vec3 48 0 0)
+                 "other members should not live-move during alt drag")
+    (second-entry.on-drag-end second-entry {})
+    (local island (map:get-island "ordered-list:list"))
+    (assert (= (. island.state.position 1) 200) "island body x should update from second member drop")
+    (assert (= (. island.state.position 2) 324) "island body y should keep second member at drop")
+    (assert-vec3 (view:get-position item-node) (glm.vec3 200 324 0)
+                 "first member should move to new island body")
+    (assert-vec3 (view:get-position second-node) (glm.vec3 200 300 0)
+                 "dragged second member should stay at dropped position after reconcile"))
+
 (fn with-fixture [opts f]
     (local options (or opts {}))
     (local dir (make-temp-dir))
@@ -370,13 +394,19 @@
     (register-list-loader graph {:store list-store :identity-store identity-store})
     (local map (GraphMap.GraphMap {:graph graph :id "graph-view-list-islands"}))
     (local item (string-store:create-entity {:id "item-a" :value "A"}))
+    (local item-b (string-store:create-entity {:id "item-b" :value "B"}))
     (local unrelated (string-store:create-entity {:id "unrelated" :value "Unrelated"}))
-    (local list (list-store:create-entity {:id "list" :name "List" :items [(.. "string-entity:" item.id)]}))
+    (local list (list-store:create-entity {:id "list"
+                                           :name "List"
+                                           :items [(.. "string-entity:" item.id)
+                                                   (.. "string-entity:" item-b.id)]}))
     (local list-key (.. "list-entity:" list.id))
     (local item-key (.. "string-entity:" item.id))
+    (local second-item-key (.. "string-entity:" item-b.id))
     (local unrelated-key (.. "string-entity:" unrelated.id))
     (map:load-by-key list-key)
     (map:load-by-key item-key)
+    (map:load-by-key second-item-key)
     (map:load-by-key unrelated-key)
     (when options.restore-state
         (map:restore-state options.restore-state))
@@ -399,10 +429,11 @@
                     :map map
                     :view view
                     :movables movables
-                    :dir dir
-                    :list-key list-key
-                    :item-key item-key
-                    :unrelated-key unrelated-key}))))
+                     :dir dir
+                     :list-key list-key
+                     :item-key item-key
+                     :second-item-key second-item-key
+                     :unrelated-key unrelated-key}))))
     (when view
         (view:drop))
     (map:drop)
@@ -478,8 +509,12 @@
                                             :spacing 24}}]}
          :persisted-positions {"list-entity:list" [24 0 0]
                                 "string-entity:item-a" [300 400 0]
-                                "string-entity:unrelated" [-100 -100 0]}}
+                                 "string-entity:unrelated" [-100 -100 0]}}
         check-restored-old-format-list-island-uses-member-fallback-after-drag-end))
+
+(fn graph-view-alt-dragging-second-island-member-moves-whole-island-on-drag-end []
+    (with-list-fixture
+        check-alt-dragging-second-island-member-moves-whole-island-on-drag-end))
 
 (table.insert tests {:name "GraphView applies ordered-list island positions"
                      :fn graph-view-applies-ordered-list-island-positions})
@@ -505,6 +540,8 @@
                      :fn graph-view-list-created-island-preserves-body-position-after-unrelated-drag-end})
 (table.insert tests {:name "GraphView restored old-format list island uses member fallback after unrelated drag end"
                      :fn graph-view-restored-old-format-list-island-uses-member-fallback-after-drag-end})
+(table.insert tests {:name "GraphView alt-dragging second island member moves whole island on drag end"
+                     :fn graph-view-alt-dragging-second-island-member-moves-whole-island-on-drag-end})
 
 (local main
     (fn []
