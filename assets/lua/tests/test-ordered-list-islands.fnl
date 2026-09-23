@@ -216,6 +216,31 @@
       (assert-position-array island.state.position [111 222 3]
                              "refresh should preserve explicit island origin"))))
 
+(fn incomplete-map-load-by-key [_self key]
+  {:key key})
+
+(fn incomplete-map-upsert-island [_self _record]
+  (error "upsert-island should not be called without get-island"))
+
+(fn expand-items-as-island-for-test [list-node]
+  (list-node:expand-items-as-island))
+
+(fn assert-expand-requires-get-island [fixture]
+  (local key-a (create-string fixture "a" "A"))
+  (local entity (create-list fixture "list" [key-a]))
+  (local list-node (fixture.map:load-by-key (.. "list-entity:" entity.id)))
+  (local incomplete-map {:presentation-points fixture.map.presentation-points
+                         :load-by-key incomplete-map-load-by-key
+                         :upsert-island incomplete-map-upsert-island})
+  (set list-node.graph incomplete-map)
+  (local (ok err) (pcall expand-items-as-island-for-test list-node))
+  (assert (not ok) "expand-items-as-island should fail without get-island")
+  (assert (string.find (tostring err) "load-by-key, get-island, and upsert-island" 1 true)
+          (.. "missing API error should name required GraphMap APIs, got: " (tostring err))))
+
+(fn list-entity-node-requires-get-island-api-for-island-expansion []
+  (with-fixture assert-expand-requires-get-island))
+
 (fn list-entity-node-resolves-identity-items-to-visible-target-keys []
   (with-fixture
     (fn [fixture]
@@ -296,6 +321,8 @@
                      :fn list-entity-node-updates-existing-ordered-list-island-in-store-order})
 (table.insert tests {:name "ListEntityNode preserves existing ordered-list island position on update"
                      :fn list-entity-node-preserves-existing-ordered-list-island-position-on-update})
+(table.insert tests {:name "ListEntityNode requires get-island API for island expansion"
+                     :fn list-entity-node-requires-get-island-api-for-island-expansion})
 (table.insert tests {:name "ListEntityNode resolves identity items to visible target keys"
                      :fn list-entity-node-resolves-identity-items-to-visible-target-keys})
 (table.insert tests {:name "ListEntityNode refreshes island when identity target changes"

@@ -206,10 +206,10 @@
   (set node.expand-items-as-island
        (fn [self _opts]
          (local graph self.graph)
-         (assert (and graph graph.load-by-key graph.upsert-island)
-                 "ListEntityNode.expand-items-as-island requires mounted graph map with load-by-key and upsert-island")
+         (assert (and graph graph.load-by-key graph.get-island graph.upsert-island)
+                 "ListEntityNode.expand-items-as-island requires mounted GraphMap APIs: load-by-key, get-island, and upsert-island")
           (local island-id (ordered-list-island-id self.entity-id))
-          (local existing-island (and graph.get-island (graph:get-island island-id)))
+          (local existing-island (graph:get-island island-id))
           (local current (self:get-entity))
           (local items (or (and current current.items) []))
           (local members [])
