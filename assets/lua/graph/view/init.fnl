@@ -53,16 +53,16 @@
 
 (fn clear-stale-before-island-pin-on-collapse! [pinned pinned-before-expand node]
     (when (and pinned.__before_island (not (. pinned-before-expand node)))
-        (set (. pinned.__before_island node) nil))) (var update-islands-after-member-drag-end! nil)
+        (set (. pinned.__before_island node) nil))) (var update-islands-after-member-drag-end! nil) (fn same-island-state-position? [a b] (local pa (and a a.state a.state.position)) (local pb (and b b.state b.state.position)) (and pa pb (do (local va (ensure-glm-vec3 pa)) (local vb (ensure-glm-vec3 pb)) (and (= va.x vb.x) (= va.y vb.y) (= va.z vb.z)))))
 
 (fn record-island-layout-position! [runtime island-id position]
     (assert island-id "GraphView island layout position requires island id")
     (local value (ensure-glm-vec3 position))
     (set (. runtime.positions island-id) (glm.vec3 value.x value.y value.z)))
 
-(fn cache-island-state-position! [runtime island]
+(fn cache-island-state-position! [runtime island previous]
     (local position (and island island.state island.state.position))
-    (when position
+    (when (if (not position) false (not (. runtime.positions island.id)) true (not (same-island-state-position? previous island)))
         (record-island-layout-position! runtime island.id position)))
 
 (fn island-with-runtime-position [runtime island]
@@ -1170,7 +1170,7 @@
          (assert-not-dropped "handle-island-added-or-updated")
          (local island (and payload payload.island))
          (when island
-             (cache-island-state-position! options._island-layout-runtime island)
+             (cache-island-state-position! options._island-layout-runtime island (and payload payload.previous))
              (reconcile-graph-island! island)))
 
     (fn handle-island-removed [payload]

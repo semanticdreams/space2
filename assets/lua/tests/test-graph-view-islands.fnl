@@ -361,6 +361,39 @@
     (assert-vec3 (view:get-position second-node) runtime-b
                  "unrelated drag-end reconciliation should keep second member at runtime island body"))
 
+(fn check-membership-refresh-preserves-runtime-island-body [fixture]
+    (local map fixture.map)
+    (local view fixture.view)
+    (local movables fixture.movables)
+    (local string-store fixture.string-store)
+    (local list-store fixture.list-store)
+    (local list-node (map:lookup fixture.list-key))
+    (local item-node (map:lookup fixture.item-key))
+    (local second-node (map:lookup fixture.second-item-key))
+    (local list-entry (. movables.by-node list-node))
+    (assert list-entry "list node should be movable")
+    (list-entry.target:set-position (glm.vec3 48 0 0))
+    (list-node:expand-items-as-island)
+    (local persisted-island (map:get-island "ordered-list:list"))
+    (local persisted-body-x (. persisted-island.state.position 1))
+    (for [_ 1 8]
+        (view:update 0.016))
+    (local runtime-a (view:get-position item-node))
+    (local runtime-b (view:get-position second-node))
+    (assert (> (math.abs (- runtime-a.x persisted-body-x)) 0.001)
+            "force layout should move island body away from persisted body before membership refresh")
+    (local third (string-store:create-entity {:id "item-c" :value "C"}))
+    (local third-key (.. "string-entity:" third.id))
+    (list-store:add-item "list" third-key)
+    (local third-node (map:lookup third-key))
+    (assert third-node "membership refresh should load new island member node")
+    (assert-vec3 (view:get-position item-node) runtime-a
+                 "membership refresh should preserve first member runtime island body")
+    (assert-vec3 (view:get-position second-node) runtime-b
+                 "membership refresh should preserve second member runtime island body")
+    (assert-vec3 (view:get-position third-node) (- runtime-b (glm.vec3 0 24 0))
+                 "membership refresh should place new member relative to runtime island body"))
+
 (fn check-expanded-member-stays-pinned-through-island-position-flush [fixture]
     (local map fixture.map)
     (local view fixture.view)
@@ -666,9 +699,10 @@
                 (f {:graph graph
                     :map map
                      :view view
-                     :movables movables
-                     :string-store string-store
-                      :dir dir
+                      :movables movables
+                      :string-store string-store
+                      :list-store list-store
+                       :dir dir
                      :list-key list-key
                      :item-key item-key
                      :second-item-key second-item-key
@@ -745,6 +779,10 @@
     (with-list-fixture
         check-force-moved-island-keeps-runtime-position-after-unrelated-drag-end))
 
+(fn graph-view-membership-refresh-preserves-runtime-island-body []
+    (with-list-fixture
+        check-membership-refresh-preserves-runtime-island-body))
+
 (fn graph-view-expanded-member-stays-pinned-through-island-position-flush []
     (with-list-fixture
         check-expanded-member-stays-pinned-through-island-position-flush))
@@ -813,6 +851,8 @@
                       :fn graph-view-list-created-island-moves-as-force-layout-unit})
 (table.insert tests {:name "GraphView force-moved island keeps runtime position after unrelated drag end"
                      :fn graph-view-force-moved-island-keeps-runtime-position-after-unrelated-drag-end})
+(table.insert tests {:name "GraphView membership refresh preserves runtime island body"
+                     :fn graph-view-membership-refresh-preserves-runtime-island-body})
 (table.insert tests {:name "GraphView expanded member stays pinned through island position flush"
                      :fn graph-view-expanded-member-stays-pinned-through-island-position-flush})
 (table.insert tests {:name "GraphView replacing expanded island member resyncs aggregate record"
