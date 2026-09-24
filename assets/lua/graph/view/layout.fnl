@@ -401,23 +401,23 @@
          (update-labels nil {:force? true})
          (refresh-label-positions))
 
-     (fn sync-island-layouts [_self records]
-         (local next-records (if records records []))
-         (each [k _ (pairs island-layouts)]
-             (set (. island-layouts k) nil))
-         (clear-island-member-layouts)
-         (each [_ record (ipairs next-records)]
-             (validate-island-layout-record record)
-             (local position (ensure-glm-vec3 record.position))
-             (assert-valid-position position "GraphViewLayout.sync-island-layouts" nil)
+      (fn sync-island-layouts [_self records]
+          (local should-rebuild? (do (assert (= (type records) :table) "GraphViewLayout.sync-island-layouts requires records table") (or (next island-layouts) (next island-member-layouts) (> (length records) 0))))
+          (each [k _ (pairs island-layouts)]
+              (set (. island-layouts k) nil))
+          (clear-island-member-layouts)
+          (each [_ record (ipairs records)]
+              (validate-island-layout-record record)
+              (local position (ensure-glm-vec3 record.position))
+              (assert-valid-position position "GraphViewLayout.sync-island-layouts" nil)
              (set record.position position)
              (set (. island-layouts record.id) record))
-         (each [_ record (pairs island-layouts)]
-             (each [_ member (ipairs record.members)]
-                 (when (not (. pinned member))
-                     (set (. island-member-layouts member) record))))
-         (rebuild)
-         true)
+          (each [_ record (pairs island-layouts)]
+              (each [_ member (ipairs record.members)]
+                  (when (not (. pinned member))
+                      (set (. island-member-layouts member) record))))
+          (when should-rebuild? (rebuild))
+          true)
 
     (fn update [_self _delta]
         (layout:update 40)

@@ -650,6 +650,41 @@
     (set map.update-island original-update-island)
     (assert cleared? (.. "drag state should clear before visible update failure: " (tostring second-err))))
 
+(fn check-empty-island-sync-does-not-start-force-layout [fixture]
+    (local map fixture.map)
+    (local view fixture.view)
+    (local node-a (Graph.GraphNode {:key "test:no-island-a"
+                                    :label "No island A"
+                                    :size 10
+                                    :color (glm.vec4 0.4 0.6 1 1)
+                                    :preview (make-preview)}))
+    (local node-b (Graph.GraphNode {:key "test:no-island-b"
+                                    :label "No island B"
+                                    :size 10
+                                    :color (glm.vec4 0.4 0.6 1 1)
+                                    :preview (make-preview)}))
+    (local node-c (Graph.GraphNode {:key "test:no-island-c"
+                                    :label "No island C"
+                                    :size 10
+                                    :color (glm.vec4 0.4 0.6 1 1)
+                                    :preview (make-preview)}))
+    (map:add-node node-a {:position (glm.vec3 8 9 0)
+                          :run-force? false})
+    (map:add-node node-b {:position (glm.vec3 16 6 0)
+                          :run-force? false})
+    (map:add-node node-c {:position (glm.vec3 24 12 0)
+                          :run-force? false})
+    (map:add-edge (Graph.GraphEdge {:source node-a
+                                    :target node-b})
+                  {:run-force? false})
+    (view:update 0.016)
+    (assert-vec3 (view:get-position node-a) (glm.vec3 8 9 0)
+                 "first node should stay fixed when no islands sync and force is disabled")
+    (assert-vec3 (view:get-position node-b) (glm.vec3 16 6 0)
+                 "second node should stay fixed when no islands sync and force is disabled")
+    (assert-vec3 (view:get-position node-c) (glm.vec3 24 12 0)
+                 "third node should stay fixed when no islands sync and force is disabled"))
+
 (fn with-fixture [opts f]
     (local options (or opts {}))
     (local dir (make-temp-dir))
@@ -862,6 +897,10 @@
     (with-list-fixture
         check-alt-drag-end-clears-state-before-visible-update-failure))
 
+(fn graph-view-empty-island-sync-does-not-start-force-layout []
+    (with-fixture {:keys []}
+        check-empty-island-sync-does-not-start-force-layout))
+
 (table.insert tests {:name "GraphView applies ordered-list island positions"
                      :fn graph-view-applies-ordered-list-island-positions})
 (table.insert tests {:name "GraphView updates island layout when island changes"
@@ -907,7 +946,9 @@
 (table.insert tests {:name "GraphView alt-dragging second island member moves whole island on drag end"
                      :fn graph-view-alt-dragging-second-island-member-moves-whole-island-on-drag-end})
 (table.insert tests {:name "GraphView alt drag end clears state before visible update failure"
-                     :fn graph-view-alt-drag-end-clears-state-before-visible-update-failure})
+                      :fn graph-view-alt-drag-end-clears-state-before-visible-update-failure})
+(table.insert tests {:name "GraphView empty island sync does not start force layout"
+                     :fn graph-view-empty-island-sync-does-not-start-force-layout})
 
 (local main
     (fn []
