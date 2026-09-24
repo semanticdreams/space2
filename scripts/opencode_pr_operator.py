@@ -444,6 +444,25 @@ def _failed_rollup_evidence(data: dict[str, Any], repo: Path) -> list[dict[str, 
     return [_failed_check_evidence(check, repo) for check in _failed_rollup_checks(data)]
 
 
+def _failed_check_log_waits_for_in_progress_run(evidence: dict[str, object]) -> bool:
+    if evidence.get("log_unavailable") != "gh run view --job failed":
+        return False
+    log_command = evidence.get("log_command")
+    if not isinstance(log_command, dict):
+        return False
+    stderr = log_command.get("stderr")
+    if not isinstance(stderr, str):
+        return False
+    normalized = stderr.lower()
+    return "is still in progress" in normalized and "logs will be available when it is complete" in normalized
+
+
+def _failed_check_evidence_waits_for_in_progress_logs(failed_checks: list[dict[str, object]], data: dict[str, Any]) -> bool:
+    if not _has_pending_rollup_check(data):
+        return False
+    return any(_failed_check_log_waits_for_in_progress_run(check) for check in failed_checks)
+
+
 def _normalized_rollup_value(value: Any) -> Any:
     if not isinstance(value, str):
         return value
@@ -505,6 +524,11 @@ def poll_merge_queue(repo_root: Path, branch: str, timeout_seconds: int, interva
                 return human_decision(action, "Pull request closed without mergedAt", {"branch": safe, "attempts": attempts})
             failed_checks = _failed_rollup_evidence(data, repo)
             if failed_checks:
+                if _failed_check_evidence_waits_for_in_progress_logs(failed_checks, data):
+                    if time.monotonic() >= deadline:
+                        return human_decision(action, "Timed out waiting for merge queue to merge pull request", {"branch": safe, "attempts": attempts})
+                    time.sleep(interval_seconds)
+                    continue
                 return human_decision(action, "Required merge queue check failed", {"branch": safe, "attempts": attempts, "failed_checks": failed_checks})
             merge_state = data.get("mergeStateStatus")
             normalized_merge_state = merge_state.lower() if isinstance(merge_state, str) else merge_state
