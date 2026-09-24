@@ -59,11 +59,11 @@
             nil))
 
     (fn label-text [node settings]
-        (local base (or node.label (node-id node)))
-        (local truncated (truncate-with-ellipsis base settings.text-length))
-        (if settings.line-length
-            (wrap-text truncated settings.line-length)
-            truncated))
+        (local compact node.compact-label)
+        (if (= compact false) false
+            (if settings.line-length
+                (wrap-text (truncate-with-ellipsis (or compact node.label (node-id node)) settings.text-length) settings.line-length)
+                (truncate-with-ellipsis (or compact node.label (node-id node)) settings.text-length))))
 
     (fn resolve-label-scale [point settings]
         (local pixels-per-world-unit
@@ -114,20 +114,19 @@
             (if (< target 3)
                 (do
                     (local text (label-text node settings))
-                    (local existing (. labels node))
-                    (var span existing)
-                    (if span
+                    (if (= text false)
+                        (drop-label node)
                         (do
-                            (span:set-text text {:mark-measure-dirty? true})
-                            (set span.style.scale next-scale))
-                        (do
-                            (local builder (Text {:text text
-                                                  :style (TextStyle {:color label-color
-                                                                     :scale next-scale})}))
-                            (set span (builder ctx))
-                            (set (. labels node) span)))
-                    (span.layout:measurer)
-                    (place-label span point))
+                            (local existing (. labels node))
+                            (var span existing)
+                            (if span
+                                (do (span:set-text text {:mark-measure-dirty? true}) (set span.style.scale next-scale))
+                                (do
+                                    (local style (TextStyle {:color label-color :scale next-scale}))
+                                    (local builder (Text {:text text :style style}))
+                                    (set span (builder ctx)) (set (. labels node) span)))
+                            (span.layout:measurer)
+                            (place-label span point))))
                 (drop-label node))
             (set (. node-scale node) next-scale)
             (set (. node-lod node) target)))

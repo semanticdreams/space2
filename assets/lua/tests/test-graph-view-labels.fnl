@@ -31,6 +31,13 @@
     {:camera camera
      :surface scene})
 
+(fn codepoints->text [codepoints]
+    (assert (= (type codepoints) :table) "codepoints->text requires codepoints")
+    (local chars [])
+    (each [_ codepoint (ipairs codepoints)]
+        (table.insert chars (string.char codepoint)))
+    (table.concat chars))
+
 (fn labels-create-span-with-defaults []
     (local ctx (make-ctx))
     (local camera {:position (glm.vec3 0 0 0)})
@@ -47,6 +54,51 @@
     (assert (= span.layout.depth-offset-index 1.0)
             "Label depth offset should default to 1.0")
     (assert span.layout.position "Label layout should assign a position")
+    (labels:drop-all))
+
+(fn labels-use-compact-label-string-when-present []
+    (local ctx (make-ctx))
+    (local camera {:position (glm.vec3 0 0 0)})
+    (local labels (GraphViewLabels {:ctx ctx :camera camera}))
+    (local node (GraphNode {:key "compact-string" :label "Raw Fallback"}))
+    (set node.compact-label "Friendly Name")
+    (local point {:position (glm.vec3 0 0 0) :size 6})
+    (local points {node point})
+    (labels:update points [node] {:force? true})
+    (local span (. labels.labels node))
+    (assert span "compact-label string should create a text span")
+    (assert (= (codepoints->text (span:get-codepoints)) "Friendly Name")
+            "compact-label string should override node.label for compact labels")
+    (labels:drop-all))
+
+(fn labels-preserve-fallback-when-compact-label-missing []
+    (local ctx (make-ctx))
+    (local camera {:position (glm.vec3 0 0 0)})
+    (local labels (GraphViewLabels {:ctx ctx :camera camera}))
+    (local node (GraphNode {:key "fallback-key" :label "Fallback Label"}))
+    (local point {:position (glm.vec3 0 0 0) :size 6})
+    (local points {node point})
+    (labels:update points [node] {:force? true})
+    (local span (. labels.labels node))
+    (assert span "missing compact-label should preserve existing label fallback")
+    (assert (= (codepoints->text (span:get-codepoints)) "Fallback Label")
+            "missing compact-label should render node.label")
+    (labels:drop-all))
+
+(fn labels-drop-span-when-compact-label-is-false []
+    (local ctx (make-ctx))
+    (local camera {:position (glm.vec3 0 0 0)})
+    (local labels (GraphViewLabels {:ctx ctx :camera camera}))
+    (local node (GraphNode {:key "list-entity:unnamed" :label "raw-list-id"}))
+    (set node.compact-label "Temporary Name")
+    (local point {:position (glm.vec3 0 0 0) :size 6})
+    (local points {node point})
+    (labels:update points [node] {:force? true})
+    (assert (. labels.labels node) "test should start with an existing span")
+    (set node.compact-label false)
+    (labels:update points [node] {:force? true})
+    (assert (not (. labels.labels node))
+            "compact-label false should drop existing compact label span")
     (labels:drop-all))
 
 (fn labels-move-reassigns-span []
@@ -195,6 +247,12 @@
     (camera:drop))
 
 (table.insert tests {:name "GraphView labels create spans with defaults" :fn labels-create-span-with-defaults})
+(table.insert tests {:name "GraphView labels use compact-label string when present"
+                     :fn labels-use-compact-label-string-when-present})
+(table.insert tests {:name "GraphView labels preserve fallback when compact-label missing"
+                     :fn labels-preserve-fallback-when-compact-label-missing})
+(table.insert tests {:name "GraphView labels drop span when compact-label is false"
+                     :fn labels-drop-span-when-compact-label-is-false})
 (table.insert tests {:name "GraphView labels move and drop reassigned spans" :fn labels-move-reassigns-span})
 (table.insert tests {:name "GraphView labels update when camera moves without debounce signal"
                      :fn labels-update-when-camera-moves-without-debounced-signal})
