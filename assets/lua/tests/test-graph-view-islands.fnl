@@ -421,6 +421,39 @@
     (assert-vec3 (view:get-position item-node) pinned-position
                  "island position flush reconciliation should not move expanded member while pinned"))
 
+(fn check-collapsed-expanded-member-rejoins-aggregate-placement [fixture]
+    (local map fixture.map)
+    (local view fixture.view)
+    (local movables fixture.movables)
+    (local list-node (map:lookup fixture.list-key))
+    (local item-node (map:lookup fixture.item-key))
+    (local second-node (map:lookup fixture.second-item-key))
+    (local list-entry (. movables.by-node list-node))
+    (assert list-entry "list node should be movable")
+    (list-entry.target:set-position (glm.vec3 48 0 0))
+    (list-node:expand-items-as-island)
+    (local aggregate-position (view:get-position item-node))
+    (local second-position (view:get-position second-node))
+    (local item-point (. view.points item-node))
+    (assert item-point "first list item should have a point")
+    (item-point:on-double-click {})
+    (assert (. view.pinned item-node) "expanded island member should be explicitly pinned")
+    (local item-entry (. movables.by-node item-node))
+    (assert item-entry "expanded item should remain movable")
+    (item-entry.target:set-position (glm.vec3 300 400 0))
+    (assert-vec3 (view:get-position item-node) (glm.vec3 300 400 0)
+                 "expanded pinned member should move away from aggregate before collapse")
+    (local card (. view.points item-node))
+    (local collapse-button (. card.header-bar.children 4 :element))
+    (assert collapse-button "expanded card should expose collapse button")
+    (collapse-button:on-click {})
+    (assert (not (. view.pinned item-node))
+            "collapsed member should release explicit expanded pin")
+    (assert-vec3 (view:get-position item-node) aggregate-position
+                 "collapsed member should immediately rejoin aggregate placement")
+    (assert-vec3 (view:get-position second-node) second-position
+                 "other member should preserve aggregate placement during collapse"))
+
 (fn check-replacing-expanded-island-member-resyncs-aggregate-record [fixture]
     (local map fixture.map)
     (local view fixture.view)
@@ -787,6 +820,10 @@
     (with-list-fixture
         check-expanded-member-stays-pinned-through-island-position-flush))
 
+(fn graph-view-collapsed-expanded-member-rejoins-aggregate-placement []
+    (with-list-fixture
+        check-collapsed-expanded-member-rejoins-aggregate-placement))
+
 (fn graph-view-replacing-expanded-island-member-resyncs-aggregate-record []
     (with-list-fixture
         check-replacing-expanded-island-member-resyncs-aggregate-record))
@@ -854,7 +891,9 @@
 (table.insert tests {:name "GraphView membership refresh preserves runtime island body"
                      :fn graph-view-membership-refresh-preserves-runtime-island-body})
 (table.insert tests {:name "GraphView expanded member stays pinned through island position flush"
-                     :fn graph-view-expanded-member-stays-pinned-through-island-position-flush})
+                      :fn graph-view-expanded-member-stays-pinned-through-island-position-flush})
+(table.insert tests {:name "GraphView collapsed expanded member rejoins aggregate placement"
+                     :fn graph-view-collapsed-expanded-member-rejoins-aggregate-placement})
 (table.insert tests {:name "GraphView replacing expanded island member resyncs aggregate record"
                      :fn graph-view-replacing-expanded-island-member-resyncs-aggregate-record})
 (table.insert tests {:name "GraphView adding node after island sync keeps public indices unique"
