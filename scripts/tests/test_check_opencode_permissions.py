@@ -182,13 +182,11 @@ def test_pr_recovery_operator_rejects_extra_bash_allow(tmp_path: Path, extra_ent
     assert "capability-boundary" in violation_codes(repo)
 
 
-def test_merged_old_pr_followup_recovery_is_documented_in_workflow_files():
+def test_stale_merged_pr_recovery_routes_through_recovery_operator():
     required_terms = [
-        "pr_head",
-        "current_head",
-        "MERGED",
-        "create-followup-branch",
-        "follow-up branch",
+        "pr-recovery-operator",
+        "create-current-with-followup-recovery",
+        "stale merged PR",
     ]
     documented_paths = [
         REPO_ROOT / ".opencode" / "skills" / "finishing-a-development-branch" / "SKILL.md",
