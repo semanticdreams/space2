@@ -16,7 +16,7 @@
 (local GraphNodePresentation (require :graph/view/presentation))
 (local IslandHost (require :graph/view/island-host))
 (local IslandPresenters (require :graph/view/island-presenters))
-
+(fn island-owned-pin-only? [pinned expanded-nodes pinned-before-expand node] (and pinned.__island_pinned (. pinned.__island_pinned node) (not (. expanded-nodes node)) (not (. pinned-before-expand node)) (not (and pinned.__before_island (. pinned.__before_island node)))))
 (local new-triangle-line GraphViewEdge.new-triangle-line)
 (local ensure-glm-vec3 Utils.ensure-glm-vec3)
 (local ensure-glm-vec4 Utils.ensure-glm-vec4)
@@ -563,8 +563,8 @@
              :set-node-position (fn [_host-options key position]
                                   (local node (graph-map:lookup key))
                                   (assert node (.. "GraphView island host missing node for key: " (tostring key)))
-                                  (graph-layout:set-node-position node position {:skip-labels? true})
-                                  (mark-island-label-node! node))
+                                  (when (or (not (. pinned node)) (island-owned-pin-only? pinned expanded-nodes pinned-before-expand node))
+                                      (graph-layout:set-node-position node position {:skip-labels? true}) (mark-island-label-node! node)))
               :set-node-pinned (fn [_host-options key pinned?]
                                  (local node (graph-map:lookup key))
                                  (assert node (.. "GraphView island host missing node for key: " (tostring key)))
@@ -593,8 +593,8 @@
      (fn reconcile-graph-islands! []
          (with-island-label-refresh
              (fn []
-                 (island-host:reconcile-all (graph-map:list-islands))
-                 (sync-island-layouts! options._island-layout-runtime graph-map island-host graph-layout))))
+                  (island-host:reconcile-all (icollect [_ island (ipairs (graph-map:list-islands))] (island-with-runtime-position options._island-layout-runtime island)))
+                  (sync-island-layouts! options._island-layout-runtime graph-map island-host graph-layout))))
 
      (fn reconcile-graph-island! [island]
          (with-island-label-refresh
@@ -1038,8 +1038,7 @@
                 (when replacement.point
                     (attach-presentation-events node replacement.point)
                     (set (. node-by-point replacement.point) node)
-                    (register-movable node replacement.point))
-                (sync-island-layouts! options._island-layout-runtime graph-map island-host graph-layout))
+                    (register-movable node replacement.point)))
             (labels:move-label existing node)
             (views:move-view existing node)
             (detach-node-signals existing)
@@ -1088,7 +1087,8 @@
                         (queue-label-refresh! node)
                         (persistence:set-presentation node nil)
                         (graph-layout:rebuild)
-                        (error replacement-card))))))
+                        (error replacement-card))))
+            (when replacement (sync-island-layouts! options._island-layout-runtime graph-map island-host graph-layout))))
 
     (fn handle-nodes-removed [payload]
         (assert-not-dropped "handle-nodes-removed")

@@ -333,6 +333,108 @@
     (assert-close (- after-a.y after-b.y) 24
                   "ordered-list island spacing should be preserved after force layout"))
 
+(fn check-force-moved-island-keeps-runtime-position-after-unrelated-drag-end [fixture]
+    (local map fixture.map)
+    (local view fixture.view)
+    (local movables fixture.movables)
+    (local list-node (map:lookup fixture.list-key))
+    (local item-node (map:lookup fixture.item-key))
+    (local second-node (map:lookup fixture.second-item-key))
+    (local unrelated-node (map:lookup fixture.unrelated-key))
+    (local list-entry (. movables.by-node list-node))
+    (local unrelated-entry (. movables.by-node unrelated-node))
+    (assert list-entry "list node should be movable")
+    (assert unrelated-entry "unrelated node should be movable")
+    (list-entry.target:set-position (glm.vec3 48 0 0))
+    (list-node:expand-items-as-island)
+    (local persisted-island (map:get-island "ordered-list:list"))
+    (local persisted-body-x (. persisted-island.state.position 1))
+    (for [_ 1 8]
+        (view:update 0.016))
+    (local runtime-a (view:get-position item-node))
+    (local runtime-b (view:get-position second-node))
+    (assert (> (math.abs (- runtime-a.x persisted-body-x)) 0.001)
+            "force layout should move island body away from persisted body x")
+    (unrelated-entry.on-drag-end unrelated-entry)
+    (assert-vec3 (view:get-position item-node) runtime-a
+                 "unrelated drag-end reconciliation should keep first member at runtime island body")
+    (assert-vec3 (view:get-position second-node) runtime-b
+                 "unrelated drag-end reconciliation should keep second member at runtime island body"))
+
+(fn check-expanded-member-stays-pinned-through-island-position-flush [fixture]
+    (local map fixture.map)
+    (local view fixture.view)
+    (local movables fixture.movables)
+    (local list-node (map:lookup fixture.list-key))
+    (local item-node (map:lookup fixture.item-key))
+    (local second-node (map:lookup fixture.second-item-key))
+    (local list-entry (. movables.by-node list-node))
+    (assert list-entry "list node should be movable")
+    (list-entry.target:set-position (glm.vec3 48 0 0))
+    (list-node:expand-items-as-island)
+    (local item-point (. view.points item-node))
+    (assert item-point "first list item should have a point")
+    (item-point:on-double-click {})
+    (assert (. view.pinned item-node) "expanded island member should be explicitly pinned")
+    (local pinned-position (view:get-position item-node))
+    (local second-before (view:get-position second-node))
+    (for [_ 1 8]
+        (view:update 0.016))
+    (assert-vec3 (view:get-position item-node) pinned-position
+                 "force layout refresh should not move expanded member while pinned")
+    (assert (> (glm.length (- (view:get-position second-node) second-before)) 0.001)
+            "unpinned island member should prove aggregate moved before flush")
+    (view:capture-state)
+    (assert-vec3 (view:get-position item-node) pinned-position
+                 "island position flush reconciliation should not move expanded member while pinned"))
+
+(fn check-replacing-expanded-island-member-resyncs-aggregate-record [fixture]
+    (local map fixture.map)
+    (local view fixture.view)
+    (local movables fixture.movables)
+    (local list-node (map:lookup fixture.list-key))
+    (local item-node (map:lookup fixture.item-key))
+    (local unrelated-node (map:lookup fixture.unrelated-key))
+    (local list-entry (. movables.by-node list-node))
+    (local unrelated-entry (. movables.by-node unrelated-node))
+    (assert list-entry "list node should be movable")
+    (assert unrelated-entry "unrelated node should be movable")
+    (list-entry.target:set-position (glm.vec3 48 0 0))
+    (list-node:expand-items-as-island)
+    (local item-point (. view.points item-node))
+    (assert item-point "first list item should have a point")
+    (item-point:on-double-click {})
+    (assert (. view.pinned item-node) "expanded member should be pinned before replacement")
+    (for [_ 1 4]
+        (view:update 0.016))
+    (local replacement (Graph.GraphNode {:key fixture.item-key
+                                         :label "replacement item"
+                                         :size 10
+                                         :color (glm.vec4 0.8 0.4 0.2 1)
+                                         :preview (make-preview)}))
+    (map:add-node replacement)
+    (assert (= (map:lookup fixture.item-key) replacement)
+            "graph map should replace expanded island member")
+    (assert (. view.pinned replacement) "replacement expanded member should inherit explicit pin")
+    (assert (not (. view.pinned item-node))
+            "old expanded member should no longer be pinned after replacement")
+    (local replacement-card (. view.points replacement))
+    (assert replacement-card._card-size "replacement should stay expanded before collapse")
+    (local collapse-button (. replacement-card.header-bar.children 4 :element))
+    (assert collapse-button "replacement expanded card should expose collapse button")
+    (collapse-button:on-click {})
+    (assert (not (. view.pinned replacement))
+            "replacement member should be unpinned after collapse")
+    (unrelated-entry.target:set-position (view:get-position (map:lookup fixture.second-item-key)))
+    (local (updated? update-err) (pcall (fn []
+                                          (for [_ 1 8]
+                                              (view:update 0.016)))))
+    (assert updated? (.. "layout update should resync expanded island replacement: " (tostring update-err)))
+    (assert (not (. view.points item-node))
+            "old expanded member point should be removed after replacement")
+    (assert (. view.points replacement)
+            "replacement expanded member point should stay mounted after update"))
+
 (fn assert-unique-public-indices [view]
     (local seen {})
     (each [node idx (pairs view.indices)]
@@ -637,6 +739,18 @@
     (with-list-fixture
         check-list-created-island-moves-as-force-layout-unit))
 
+(fn graph-view-force-moved-island-keeps-runtime-position-after-unrelated-drag-end []
+    (with-list-fixture
+        check-force-moved-island-keeps-runtime-position-after-unrelated-drag-end))
+
+(fn graph-view-expanded-member-stays-pinned-through-island-position-flush []
+    (with-list-fixture
+        check-expanded-member-stays-pinned-through-island-position-flush))
+
+(fn graph-view-replacing-expanded-island-member-resyncs-aggregate-record []
+    (with-list-fixture
+        check-replacing-expanded-island-member-resyncs-aggregate-record))
+
 (fn graph-view-adding-node-after-island-sync-keeps-public-indices-unique []
     (with-list-fixture
         check-adding-node-after-island-sync-keeps-public-indices-unique))
@@ -694,9 +808,15 @@
 (table.insert tests {:name "GraphView list-created island preserves body position after unrelated drag end"
                      :fn graph-view-list-created-island-preserves-body-position-after-unrelated-drag-end})
 (table.insert tests {:name "GraphView list-created island moves as force-layout unit"
-                     :fn graph-view-list-created-island-moves-as-force-layout-unit})
+                      :fn graph-view-list-created-island-moves-as-force-layout-unit})
+(table.insert tests {:name "GraphView force-moved island keeps runtime position after unrelated drag end"
+                     :fn graph-view-force-moved-island-keeps-runtime-position-after-unrelated-drag-end})
+(table.insert tests {:name "GraphView expanded member stays pinned through island position flush"
+                     :fn graph-view-expanded-member-stays-pinned-through-island-position-flush})
+(table.insert tests {:name "GraphView replacing expanded island member resyncs aggregate record"
+                     :fn graph-view-replacing-expanded-island-member-resyncs-aggregate-record})
 (table.insert tests {:name "GraphView adding node after island sync keeps public indices unique"
-                     :fn graph-view-adding-node-after-island-sync-keeps-public-indices-unique})
+                      :fn graph-view-adding-node-after-island-sync-keeps-public-indices-unique})
 (table.insert tests {:name "GraphView replacing node after island sync refreshes layout participant"
                      :fn graph-view-replacing-node-after-island-sync-refreshes-layout-participant})
 (table.insert tests {:name "GraphView capture fails visibly when moved island cannot flush position"
