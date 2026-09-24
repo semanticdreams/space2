@@ -20,7 +20,7 @@ class PolicyViolation:
 
 REQUIRED_AGENT_KEYS = {"description", "mode", "model", "permission"}
 REQUIRED_SKILL_KEYS = {"name", "description"}
-CAPABILITY_AGENTS = {"git-integrator", "github-operator", "config-auditor"}
+CAPABILITY_AGENTS = {"git-integrator", "github-operator", "config-auditor", "pr-recovery-operator"}
 GIT_INTEGRATOR_ALLOWED_WRAPPER_COMMANDS = {
     "python3 scripts/opencode_git_integrate.py status --repo-root .",
     "python3 scripts/opencode_git_integrate.py fetch-origin --repo-root .",
@@ -28,13 +28,16 @@ GIT_INTEGRATOR_ALLOWED_WRAPPER_COMMANDS = {
     "python3 scripts/opencode_git_integrate.py push-current --repo-root .",
     "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .",
 }
+PR_RECOVERY_ALLOWED_WRAPPER_COMMAND = "python3 scripts/opencode_pr_recovery.py create-current-with-followup-recovery --repo-root ."
 REQUIRED_CAPABILITY_FILES = (
     ".opencode/agents/git-integrator.md",
     ".opencode/agents/github-operator.md",
     ".opencode/agents/config-auditor.md",
+    ".opencode/agents/pr-recovery-operator.md",
     "scripts/opencode_capabilities.py",
     "scripts/opencode_git_integrate.py",
     "scripts/opencode_pr_operator.py",
+    "scripts/opencode_pr_recovery.py",
     "scripts/verify_opencode_home_config.py",
 )
 SECRET_EXTERNAL_PATTERNS = ("auth.json", "auth.jsonc", "secret", "token")
@@ -300,6 +303,28 @@ def _check_capability_boundary(path: Path, repo_root: Path, name: str, raw: str)
         for pattern, action in bash_entries:
             if action in BLOCKED_ACTIONS and pattern not in GIT_INTEGRATOR_ALLOWED_WRAPPER_COMMANDS:
                 violations.append(_violation(path, repo_root, "capability-boundary", f"git-integrator bash permission must be limited to approved wrapper commands: {pattern}: {action}"))
+    if name == "pr-recovery-operator":
+        bash_entries = _mapping_entries(raw, "bash")
+        bash_actions = dict(bash_entries)
+        if bash_actions.get(PR_RECOVERY_ALLOWED_WRAPPER_COMMAND) != "allow":
+            violations.append(
+                _violation(
+                    path,
+                    repo_root,
+                    "capability-boundary",
+                    f"pr-recovery-operator must allow guarded wrapper command exactly: {PR_RECOVERY_ALLOWED_WRAPPER_COMMAND}",
+                )
+            )
+        for pattern, action in bash_entries:
+            if action in BLOCKED_ACTIONS and pattern != PR_RECOVERY_ALLOWED_WRAPPER_COMMAND:
+                violations.append(
+                    _violation(
+                        path,
+                        repo_root,
+                        "capability-boundary",
+                        f"pr-recovery-operator bash permission must be limited to approved wrapper command: {pattern}: {action}",
+                    )
+                )
     return violations
 
 

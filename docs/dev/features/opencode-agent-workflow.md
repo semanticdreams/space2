@@ -211,33 +211,44 @@ until a later live MCP reload or smoke check succeeds.
 Space uses guarded capabilities to reduce routine OpenCode permission friction without broadening normal agent authority.
 
 - **Routine project-scoped operations** stay with normal agents when they are already part of the assigned role and repository workflow, such as focused validation commands and local Git inspection (`git status`, `git diff`).
-- **Privileged bounded operations** go through capability agents instead of broad direct permissions. `git-integrator` handles reviewed Git integration boundaries, `github-operator` handles bounded GitHub PR/check/merge-queue operations, and `config-auditor` verifies repo-local OpenCode policy and configuration.
+- **Privileged bounded operations** go through capability agents instead of broad direct permissions. `git-integrator` handles reviewed Git integration boundaries, `github-operator` handles bounded GitHub PR/check/merge-queue operations, `pr-recovery-operator` handles the single stale merged PR recovery wrapper, and `config-auditor` verifies repo-local OpenCode policy and configuration.
 - **Role-breaking or destructive/ambiguous operations** remain denied. Reviewer edit/bash, implementer push or external-directory access, web-researcher local read/bash, force-push, reset/clean, direct `origin/main` pushes, credential access, and similarly unsafe requests surface as `HUMAN_DECISION_REQUIRED` rather than being auto-approved.
 - **Wrapper JSON evidence is the reviewable handoff.** Capability wrappers emit structured JSON with `status`, `action`, `message`, and `evidence` so supervisors, reviewers, and weekly automation can inspect what happened without granting a broad shell or GitHub capability.
 - **OpenCode must be restarted after `.opencode/**` changes.** Agent definitions, skill instructions, and permission rules are startup-loaded, so restart OpenCode before relying on changed capability agents or policy rules.
 
-### Merged old PR follow-up branch recovery
+### Stale merged PR follow-up recovery
 
 If `github-operator create-current` reports `human_decision_required` because
 the current branch already has an existing PR whose `pr_state` is `MERGED` and
 whose `pr_head` differs from `current_head`, the supervisor uses the guarded
-follow-up branch recovery path instead of broad GitHub or raw `gh --head`
-permission.
+stale merged PR recovery path instead of broad GitHub or raw `gh --head`
+permission. This symptom usually means a previously merged PR reused the same
+branch name, so GitHub still finds the old merged PR even though local `HEAD` is
+a newer commit.
+
+The exact recovery command is exposed only through `pr-recovery-operator`:
+`create-current-with-followup-recovery`. The operator runs
+`scripts/opencode_pr_recovery.py create-current-with-followup-recovery --repo-root .`,
+which composes the guarded Git and GitHub wrappers and returns structured
+evidence. If it returns `pass`, the supervisor continues normal auto-merge and
+merge-queue polling for the returned PR through `github-operator`. If it returns
+`human_decision_required`, the supervisor reports the wrapper evidence to the
+human.
 
 The recovery branch name is deterministic:
-`<current-branch>-followup-<short-head-sha>`. The `git-integrator
-create-followup-branch` wrapper refuses unless the worktree is clean, the source
+`<current-branch>-followup-<short-head-sha>`. The recovery wrapper refuses unless
+the stale merged PR evidence is unambiguous, the worktree is clean, the source
 branch is named and not `main`, `HEAD` already contains current `origin/main`,
 the source and follow-up branch names satisfy the safe branch policy, and the
 target follow-up branch is absent both locally and on `origin`.
 
-The normal sequence is: create the follow-up branch through `git-integrator
-create-followup-branch`, push the current branch through `git-integrator
-push-current`, then create the current PR through `github-operator
-create-current`. Preserve wrapper evidence such as `branch`, `current_head`,
-`pr_head`, `pr_state`, and `pr_url` in handoffs. OpenCode must be restarted
-after `.opencode/**` changes before relying on updated routing or capability
-instructions.
+Normal `opencode_pr_operator.py create-current` remains GitHub-only: it reads PR
+state and creates PRs, but it must not hide branch creation, checkout, or push
+inside a GitHub capability. Stale merged PR recovery is therefore a separate
+explicit wrapper and capability agent. Preserve wrapper evidence such as
+`branch`, `current_head`, `pr_head`, `pr_state`, and `pr_url` in handoffs.
+OpenCode must be restarted after `.opencode/**` changes before relying on
+updated routing or capability instructions.
 
 ### Capability preflight
 

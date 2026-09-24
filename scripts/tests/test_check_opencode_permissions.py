@@ -84,10 +84,18 @@ def write_capability_files(root: Path) -> None:
             '  edit: deny\n  task: deny\n  webfetch: deny\n  websearch: deny\n  question: deny\n  external_directory:\n    "~/.config/opencode/**": allow\n    "~/.config/opencode/**/*auth.json*": deny\n    "~/.config/opencode/**/*auth.jsonc*": deny\n    "~/.config/opencode/**/*secret*": deny\n    "~/.config/opencode/**/*token*": deny\n  bash:\n    "python3 scripts/verify_opencode_home_config.py --repo-root . --require-clean": allow\n',
         ),
     )
+    write_file(
+        root / ".opencode" / "agents" / "pr-recovery-operator.md",
+        agent(
+            "pr-recovery-operator",
+            '  edit: deny\n  task: deny\n  external_directory: deny\n  webfetch: deny\n  websearch: deny\n  question: deny\n  bash:\n    "python3 scripts/opencode_pr_recovery.py create-current-with-followup-recovery --repo-root .": allow\n',
+        ),
+    )
     for script in [
         "opencode_capabilities.py",
         "opencode_git_integrate.py",
         "opencode_pr_operator.py",
+        "opencode_pr_recovery.py",
         "verify_opencode_home_config.py",
     ]:
         write_file(root / "scripts" / script, "#!/usr/bin/env python3\n")
@@ -133,13 +141,52 @@ def test_git_integrator_allows_exact_guarded_git_wrapper_commands():
     }
 
 
-def test_merged_old_pr_followup_recovery_is_documented_in_workflow_files():
+def test_pr_recovery_operator_allows_only_exact_guarded_recovery_command():
+    bash_entries = permission_entries(REPO_ROOT, "pr-recovery-operator", "bash")
+
+    allowed_entries = {pattern for pattern, action in bash_entries.items() if action == "allow"}
+    assert allowed_entries == {
+        "python3 scripts/opencode_pr_recovery.py create-current-with-followup-recovery --repo-root ."
+    }
+
+
+@pytest.mark.parametrize(
+    "extra_entry",
+    [
+        '    "git switch -c *": allow\n',
+        '    "git push *": allow\n',
+        '    "gh pr create *": allow\n',
+        '    "python3 scripts/opencode_pr_recovery.py *": allow\n',
+        '    "python3 scripts/opencode_pr_recovery.py create-current-with-followup-recovery --repo-root *": allow\n',
+    ],
+)
+def test_pr_recovery_operator_rejects_extra_bash_allow(tmp_path: Path, extra_entry: str):
+    repo = make_repo(tmp_path)
+    write_file(repo / "scripts" / "opencode_pr_recovery.py", "#!/usr/bin/env python3\n")
+    recovery_permissions = (
+        '  edit: deny\n'
+        '  task: deny\n'
+        '  external_directory: deny\n'
+        '  webfetch: deny\n'
+        '  websearch: deny\n'
+        '  question: deny\n'
+        '  bash:\n'
+        '    "python3 scripts/opencode_pr_recovery.py create-current-with-followup-recovery --repo-root .": allow\n'
+        + extra_entry
+    )
+    write_file(
+        repo / ".opencode" / "agents" / "pr-recovery-operator.md",
+        agent("pr-recovery-operator", recovery_permissions),
+    )
+
+    assert "capability-boundary" in violation_codes(repo)
+
+
+def test_stale_merged_pr_recovery_routes_through_recovery_operator():
     required_terms = [
-        "pr_head",
-        "current_head",
-        "MERGED",
-        "create-followup-branch",
-        "follow-up branch",
+        "pr-recovery-operator",
+        "create-current-with-followup-recovery",
+        "stale merged PR",
     ]
     documented_paths = [
         REPO_ROOT / ".opencode" / "skills" / "finishing-a-development-branch" / "SKILL.md",
