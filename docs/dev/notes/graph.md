@@ -63,6 +63,12 @@ Graph-selection actions must read active `GraphMap` selection, validate accepted
 
 Graph node adapters may expose `kind-badge` presentation metadata for preview-card and full node-view titlebars. Missing metadata derives compact badge text from a stable key scheme before the first `:` when one exists; explicit `false` opts out. Graph core and GraphMap persistence still capture topology only: node keys, edge source/target keys, and map-local interaction state. Badge text and colors remain render-time presentation metadata and must not be written into graph topology state.
 
+### Compact labels
+
+Graph node adapters may expose `compact-label` presentation metadata for collapsed graph labels. `graph/view/labels` treats `compact-label: false` as an explicit opt-out, a string value as the compact label text base, and missing metadata as the existing fallback to `node.label` or the node key. This metadata is render-time presentation state only; graph core and GraphMap persistence still capture topology only and must not write compact-label metadata into graph topology state.
+
+List entity adapters use this contract to keep raw ids available on non-compact surfaces while suppressing collapsed labels for unnamed lists. Named lists continue to expose their custom name as both the normal node label and compact label text base.
+
 ## Extracted
 - Graph model: `graph/core` owns nodes/edges, add/remove/replace, and emits signals (`node-added`, `node-removed`, `node-replaced`, `edge-added`, `edge-removed`).
 - Graph view: `graph/view` (`GraphView`) owns ForceLayout, points, labels, selection, movables, persistence, and node dialogs. It listens to graph signals and can be dropped/recreated without touching the graph model.

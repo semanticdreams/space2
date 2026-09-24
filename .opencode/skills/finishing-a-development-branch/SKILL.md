@@ -16,10 +16,12 @@ description: Use when implementation is complete and reviewed, to run final vali
 Safe base update and push steps dispatch `git-integrator`; do not request direct
 broad Git permission. PR creation, protection checks, auto-merge enablement, and
 merge-queue polling dispatch `github-operator`; do not request direct broad `gh`
-permission. OpenCode config verification, when needed, dispatches
-`config-auditor`. If a capability wrapper returns `human_decision_required`, the
-supervisor reports `HUMAN_DECISION_REQUIRED` with wrapper evidence and does not
-ask for a one-off broad command permission.
+permission. Stale merged PR recovery dispatches `pr-recovery-operator` for the
+guarded `create-current-with-followup-recovery` wrapper. OpenCode config
+verification, when needed, dispatches `config-auditor`. If a capability wrapper
+returns `human_decision_required`, the supervisor reports
+`HUMAN_DECISION_REQUIRED` with wrapper evidence and does not ask for a one-off
+broad command permission.
 
 ## Step 0: Verify Clean Working Tree
 
@@ -162,18 +164,16 @@ when permitted, and restart from Step 0.
       - Push the current branch through `git-integrator`.
       - Create a pull request targeting the base branch through `github-operator`.
         - If `github-operator create-current` returns
-          `human_decision_required` with evidence that an existing PR is
-          `MERGED` and `pr_head != current_head`, do not request broad `gh`
-          permission or any raw `gh --head` workaround. Treat it as the
-          merged-old-PR follow-up branch recovery path: confirm clean tree,
-          named non-`main` branch, and current `origin/main` base state through
-          `git-integrator`; dispatch `git-integrator create-followup-branch`;
-          dispatch `git-integrator push-current`; dispatch
-          `github-operator create-current`; then continue auto-merge and
-          merge-queue polling as usual. Preserve the wrapper evidence fields
-          (`branch`, `current_head`, `pr_head`, `pr_state`, `pr_url`) in the
-          handoff. Any refusal from the guarded wrapper remains
-          `HUMAN_DECISION_REQUIRED` with the wrapper evidence.
+          `human_decision_required` with stale merged PR evidence that an
+          existing PR is `MERGED` and `pr_head != current_head`, do not stop for
+          manual recovery, request broad `gh` permission, or use any raw
+          `gh --head` workaround. Dispatch `pr-recovery-operator` to run the
+          guarded `create-current-with-followup-recovery` wrapper. If it returns
+          `pass`, continue auto-merge and merge-queue polling through
+          `github-operator` for the returned PR. If it returns
+          `human_decision_required`, report `HUMAN_DECISION_REQUIRED` with the
+          wrapper evidence. Preserve the wrapper evidence fields (`branch`,
+          `current_head`, `pr_head`, `pr_state`, `pr_url`) in the handoff.
        - Enable auto-merge (or queue the PR) when branch protection allows it.
        - Dispatch `github-operator view-current` and
          `github-operator poll-merge-queue-current` wrapper actions until the
