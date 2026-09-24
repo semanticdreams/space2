@@ -90,7 +90,9 @@
     (graph-layout:sync-island-layouts records))
 
 (fn flush-island-layout-positions! [runtime graph-map]
-    (when (= (type graph-map.update-island) :function)
+    (when (next runtime.positions)
+        (assert (= (type graph-map.update-island) :function)
+                "GraphView island position flush requires GraphMap.update-island")
         (each [island-id position (pairs runtime.positions)]
             (local island (graph-map:get-island island-id))
             (if island
@@ -1036,7 +1038,8 @@
                 (when replacement.point
                     (attach-presentation-events node replacement.point)
                     (set (. node-by-point replacement.point) node)
-                    (register-movable node replacement.point)))
+                    (register-movable node replacement.point))
+                (sync-island-layouts! options._island-layout-runtime graph-map island-host graph-layout))
             (labels:move-label existing node)
             (views:move-view existing node)
             (detach-node-signals existing)

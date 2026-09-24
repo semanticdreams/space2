@@ -333,6 +333,85 @@
     (assert-close (- after-a.y after-b.y) 24
                   "ordered-list island spacing should be preserved after force layout"))
 
+(fn assert-unique-public-indices [view]
+    (local seen {})
+    (each [node idx (pairs view.indices)]
+        (assert (= (type idx) :number)
+                (.. "public registry index should be numeric for " (tostring (and node node.key))))
+        (assert (not (. seen idx))
+                (.. "public registry index collision at " idx))
+        (set (. seen idx) node)))
+
+(fn check-adding-node-after-island-sync-keeps-public-indices-unique [fixture]
+    (local map fixture.map)
+    (local view fixture.view)
+    (local movables fixture.movables)
+    (local string-store fixture.string-store)
+    (local list-node (map:lookup fixture.list-key))
+    (local item-node (map:lookup fixture.item-key))
+    (local second-node (map:lookup fixture.second-item-key))
+    (local list-entry (. movables.by-node list-node))
+    (assert list-entry "list node should be movable")
+    (list-entry.target:set-position (glm.vec3 48 0 0))
+    (list-node:expand-items-as-island)
+    (assert-unique-public-indices view)
+    (local extra (string-store:create-entity {:id "extra-after-island" :value "Extra"}))
+    (local extra-key (.. "string-entity:" extra.id))
+    (map:load-by-key extra-key)
+    (local extra-node (map:lookup extra-key))
+    (assert extra-node "extra node should be loaded after island sync")
+    (assert-unique-public-indices view)
+    (assert (= (. view.nodes-by-index (+ (. view.indices item-node) 1)) item-node)
+            "first island member public index should still point at member")
+    (assert (= (. view.nodes-by-index (+ (. view.indices second-node) 1)) second-node)
+            "second island member public index should still point at member")
+    (assert (= (. view.nodes-by-index (+ (. view.indices extra-node) 1)) extra-node)
+            "new node public index should point at new node"))
+
+(fn check-replacing-node-after-island-sync-refreshes-layout-participant [fixture]
+    (local map fixture.map)
+    (local view fixture.view)
+    (local movables fixture.movables)
+    (local list-node (map:lookup fixture.list-key))
+    (local unrelated-node (map:lookup fixture.unrelated-key))
+    (local list-entry (. movables.by-node list-node))
+    (assert list-entry "list node should be movable")
+    (list-entry.target:set-position (glm.vec3 48 0 0))
+    (list-node:expand-items-as-island)
+    (local replacement (Graph.GraphNode {:key fixture.unrelated-key
+                                         :label "replacement"
+                                         :size 10
+                                         :color (glm.vec4 0.8 0.4 0.2 1)
+                                         :preview (make-preview)}))
+    (map:add-node replacement)
+    (assert (= (map:lookup fixture.unrelated-key) replacement)
+            "graph map should replace unrelated node")
+    (local (updated? update-err) (pcall (fn [] (view:update 0.016))))
+    (assert updated? (.. "layout update should use replacement node: " (tostring update-err)))
+    (local (position-ok? position-err) (pcall (fn [] (view:get-position replacement))))
+    (assert position-ok? (.. "replacement point should stay mounted: " (tostring position-err)))
+    (assert (not (. view.points unrelated-node))
+            "old node point should be removed after replacement"))
+
+(fn check-capture-fails-visibly-when-moved-island-cannot-flush-position [fixture]
+    (local map fixture.map)
+    (local view fixture.view)
+    (local movables fixture.movables)
+    (local list-node (map:lookup fixture.list-key))
+    (local list-entry (. movables.by-node list-node))
+    (assert list-entry "list node should be movable")
+    (list-entry.target:set-position (glm.vec3 48 0 0))
+    (list-node:expand-items-as-island)
+    (for [_ 1 8]
+        (view:update 0.016))
+    (local original-update-island map.update-island)
+    (set map.update-island false)
+    (local (ok err) (pcall (fn [] (view:capture-state))))
+    (set map.update-island original-update-island)
+    (assert (not ok) "capture-state should fail when moved island position cannot be flushed")
+    (assert (string.find (tostring err) "GraphView island position flush requires GraphMap.update-island" 1 true)
+            "failure should explain missing update-island during island position flush"))
+
 (fn check-restored-old-format-list-island-uses-member-fallback-after-drag-end [fixture]
     (local map fixture.map)
     (local view fixture.view)
@@ -389,6 +468,7 @@
     (local second-entry (. movables.by-node second-node))
     (list-entry.target:set-position (glm.vec3 24 0 0))
     (list-node:expand-items-as-island)
+    (local original-update-island map.update-island)
     (set map.update-island false)
     (second-entry.on-drag-start second-entry {} {:mod 256})
     (second-entry.target:set-position (glm.vec3 200 300 0))
@@ -397,6 +477,7 @@
     (assert (string.find (tostring err) "GraphView island member alt-drag requires GraphMap.update-island" 1 true)
             "failure should explain missing update-island")
     (local (cleared? second-err) (pcall (fn [] (second-entry.on-drag-end second-entry {}))))
+    (set map.update-island original-update-island)
     (assert cleared? (.. "drag state should clear before visible update failure: " (tostring second-err))))
 
 (fn with-fixture [opts f]
@@ -480,9 +561,10 @@
                                       :movables movables}))
                 (f {:graph graph
                     :map map
-                    :view view
-                    :movables movables
-                     :dir dir
+                     :view view
+                     :movables movables
+                     :string-store string-store
+                      :dir dir
                      :list-key list-key
                      :item-key item-key
                      :second-item-key second-item-key
@@ -555,6 +637,18 @@
     (with-list-fixture
         check-list-created-island-moves-as-force-layout-unit))
 
+(fn graph-view-adding-node-after-island-sync-keeps-public-indices-unique []
+    (with-list-fixture
+        check-adding-node-after-island-sync-keeps-public-indices-unique))
+
+(fn graph-view-replacing-node-after-island-sync-refreshes-layout-participant []
+    (with-list-fixture
+        check-replacing-node-after-island-sync-refreshes-layout-participant))
+
+(fn graph-view-capture-fails-visibly-when-moved-island-cannot-flush-position []
+    (with-list-fixture
+        check-capture-fails-visibly-when-moved-island-cannot-flush-position))
+
 (fn graph-view-restored-old-format-list-island-uses-member-fallback-after-drag-end []
     (with-list-fixture
         {:restore-state {:nodes ["list-entity:list" "string-entity:item-a" "string-entity:unrelated"]
@@ -601,6 +695,12 @@
                      :fn graph-view-list-created-island-preserves-body-position-after-unrelated-drag-end})
 (table.insert tests {:name "GraphView list-created island moves as force-layout unit"
                      :fn graph-view-list-created-island-moves-as-force-layout-unit})
+(table.insert tests {:name "GraphView adding node after island sync keeps public indices unique"
+                     :fn graph-view-adding-node-after-island-sync-keeps-public-indices-unique})
+(table.insert tests {:name "GraphView replacing node after island sync refreshes layout participant"
+                     :fn graph-view-replacing-node-after-island-sync-refreshes-layout-participant})
+(table.insert tests {:name "GraphView capture fails visibly when moved island cannot flush position"
+                     :fn graph-view-capture-fails-visibly-when-moved-island-cannot-flush-position})
 (table.insert tests {:name "GraphView restored old-format list island uses member fallback after unrelated drag end"
                      :fn graph-view-restored-old-format-list-island-uses-member-fallback-after-drag-end})
 (table.insert tests {:name "GraphView alt-dragging second island member moves whole island on drag end"

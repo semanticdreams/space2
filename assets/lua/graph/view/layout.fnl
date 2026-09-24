@@ -130,6 +130,13 @@
          (when (and source-idx target-idx (not (= source-idx target-idx)))
              (layout:add-edge source-idx target-idx true)))
 
+     (fn allocate-public-index []
+         (var max-index -1)
+         (each [_ idx (pairs indices)]
+             (when (and (= (type idx) :number) (> idx max-index))
+                 (set max-index idx)))
+         (+ max-index 1))
+
     (local self {:layout layout
                  :nodes-by-index nodes-by-index
                  :indices indices
@@ -278,12 +285,13 @@
         (update-lines)
         self)
 
-     (fn add-node [_self node position pinned?]
-         (assert-valid-position position "GraphViewLayout.add-node" node)
-         (local idx (add-force-node {:kind :node :node node} position pinned?))
-         (set (. nodes-by-index (+ idx 1)) node)
-         (set (. indices node) idx)
-         idx)
+      (fn add-node [_self node position pinned?]
+          (assert-valid-position position "GraphViewLayout.add-node" node)
+          (add-force-node {:kind :node :node node} position pinned?)
+          (local public-idx (allocate-public-index))
+          (set (. nodes-by-index (+ public-idx 1)) node)
+          (set (. indices node) public-idx)
+          public-idx)
 
     (fn add-edge [_self edge]
         (assert edge "GraphViewLayout.add-edge requires an edge")
