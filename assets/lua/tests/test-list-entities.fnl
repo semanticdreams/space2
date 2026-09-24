@@ -173,6 +173,63 @@
       (assert node.delete-entity "should have delete-entity method")
       (node:drop))))
 
+(fn list-entity-node-sets-compact-label-for-named-list []
+  (with-temp-store
+    (fn [store _root]
+      (local entity (store:create-entity {:name "Named List"}))
+      (local {:ListEntityNode ListEntityNode} (require :graph/nodes/list-entity))
+      (local node (ListEntityNode {:entity-id entity.id :store store}))
+      (assert (= node.label "Named List")
+              "named list entity should keep custom name as node.label")
+      (assert (= node.compact-label "Named List")
+              "named list entity should use custom name as compact-label")
+      (node:drop))))
+
+(fn list-entity-node-opts-out-compact-label-for-unnamed-list []
+  (with-temp-store
+    (fn [store _root]
+      (local entity (store:create-entity {}))
+      (local {:ListEntityNode ListEntityNode} (require :graph/nodes/list-entity))
+      (local node (ListEntityNode {:entity-id entity.id :store store}))
+      (assert (= node.label entity.id)
+              "unnamed list entity should keep raw id fallback as node.label")
+      (assert (= node.compact-label false)
+              "unnamed list entity should opt out of compact labels")
+      (node:drop))))
+
+(fn list-entity-node-refreshes-compact-label-and-emits-changed []
+  (with-temp-store
+    (fn [store _root]
+      (local entity (store:create-entity {:name "Visible"}))
+      (local {:ListEntityNode ListEntityNode} (require :graph/nodes/list-entity))
+      (local node (ListEntityNode {:entity-id entity.id :store store}))
+      (var changed-count 0)
+      (var changed-payload nil)
+      (node.changed:connect
+        (fn [payload]
+          (set changed-count (+ changed-count 1))
+          (set changed-payload payload)))
+
+      (store:update-entity entity.id {:name ""})
+      (assert (= node.label entity.id)
+              "clearing the custom name should restore raw id fallback label")
+      (assert (= node.compact-label false)
+              "clearing the custom name should opt out of compact labels")
+      (assert (> changed-count 0)
+              "clearing the custom name should emit node.changed")
+      (assert (= changed-payload node)
+              "node.changed payload should be the list entity node")
+
+      (set changed-count 0)
+      (store:update-entity entity.id {:name "Restored"})
+      (assert (= node.label "Restored")
+              "setting the custom name should refresh node.label")
+      (assert (= node.compact-label "Restored")
+              "setting the custom name should refresh compact-label")
+      (assert (> changed-count 0)
+              "setting the custom name should emit node.changed")
+      (node:drop))))
+
 (fn list-entity-node-adds-item-edges-after-added []
   (with-temp-store
     (fn [store _root]
@@ -413,9 +470,15 @@
 (table.insert tests {:name "list entity node loads"
                      :fn list-entity-node-loads})
 (table.insert tests {:name "list entity node creates with correct properties"
-                     :fn list-entity-node-creates-with-correct-properties})
+                      :fn list-entity-node-creates-with-correct-properties})
+(table.insert tests {:name "list entity node sets compact-label for named list"
+                     :fn list-entity-node-sets-compact-label-for-named-list})
+(table.insert tests {:name "list entity node opts out compact-label for unnamed list"
+                     :fn list-entity-node-opts-out-compact-label-for-unnamed-list})
+(table.insert tests {:name "list entity node refreshes compact-label and emits changed"
+                     :fn list-entity-node-refreshes-compact-label-and-emits-changed})
 (table.insert tests {:name "list entity node adds item edges after added"
-                     :fn list-entity-node-adds-item-edges-after-added})
+                      :fn list-entity-node-adds-item-edges-after-added})
 (table.insert tests {:name "list entity node add-item wraps non-identity key and dedupes"
                      :fn list-entity-node-add-item-wraps-non-identity-key-and-dedupes})
 (table.insert tests {:name "list entity node removes direct item when node disappears"
@@ -435,6 +498,14 @@
 (table.insert tests {:name "list entity list node view loads"
                      :fn list-entity-list-node-view-loads})
 (table.insert tests {:name "entities node includes list type"
-                     :fn entities-node-includes-list-type})
+                      :fn entities-node-includes-list-type})
 
-tests
+(local main
+  (fn []
+    (local runner (require :tests/runner))
+    (runner.run-tests {:name "list-entities"
+                       :tests tests})))
+
+{:name "list-entities"
+ :tests tests
+ :main main}

@@ -15,11 +15,23 @@
 (local KEY_PREFIX (KeyLoaderUtils.key-prefix SCHEME))
 (local IDENTITY_KEY_PREFIX (KeyLoaderUtils.key-prefix "identity"))
 
+(fn custom-name [entity]
+  (local name (and entity entity.name))
+  (if (and name (> (string.len name) 0))
+      name
+      nil))
+
 (fn make-label [entity]
-  (local name (or (and entity entity.name) ""))
-  (if (> (string.len name) 0)
+  (local name (custom-name entity))
+  (if name
       (Utils.truncate-with-ellipsis name 50)
       (or (and entity entity.id) "list entity")))
+
+(fn make-compact-label [entity]
+  (local name (custom-name entity))
+  (if name
+      (Utils.truncate-with-ellipsis name 50)
+      false))
 
 (fn edge-key [source target]
   (.. (node-id source) "->" (node-id target)))
@@ -136,6 +148,7 @@
 
   (local entity (store:get-entity entity-id))
   (local initial-label (make-label entity))
+  (local initial-compact-label (make-compact-label entity))
 
   (local node
     (GraphNode {:key (.. KEY_PREFIX entity-id)
@@ -146,6 +159,7 @@
                 :view ListEntityNodeView}))
 
   (set node.entity-id entity-id)
+  (set node.compact-label initial-compact-label)
   (set node.identity-store identity-store)
   (set node.store store)
   (set node.entity-deleted (Signal))
@@ -156,6 +170,7 @@
   (fn refresh-label [self]
     (local current (self.store:get-entity self.entity-id))
     (set self.label (make-label current))
+    (set self.compact-label (make-compact-label current))
     (when self.changed
       (self.changed:emit self)))
 
