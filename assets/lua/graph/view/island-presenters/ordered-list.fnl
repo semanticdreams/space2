@@ -80,8 +80,7 @@
     (local placements (layout-island island host))
     (local members (if island.members island.members []))
     (each [_ key (ipairs members)]
-        (host:set-member-position island.id key (. placements key))
-        (host:set-member-pinned island.id key true))
+        (host:set-member-position island.id key (. placements key)))
     placements)
 
 (fn member-drag-end-state [island host request]

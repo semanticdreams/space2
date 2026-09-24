@@ -138,8 +138,10 @@
                  "first member should use island origin")
     (assert-vec3 (view:get-position (map:lookup "test:b")) (glm.vec3 50 55 2)
                  "second member should be vertically offset")
-    (assert (. view.pinned (map:lookup "test:a")) "first member should be pinned by island")
-    (assert (. view.pinned (map:lookup "test:b")) "second member should be pinned by island"))
+    (assert (not (. view.pinned (map:lookup "test:a")))
+            "first member should not be pinned by island by default")
+    (assert (not (. view.pinned (map:lookup "test:b")))
+            "second member should not be pinned by island by default"))
 
 (fn check-updates-island-layout-when-island-changes [fixture]
     (local map fixture.map)
@@ -176,13 +178,13 @@
 (fn no-op-fixture [_fixture]
     nil)
 
-(fn check-unpins-members-after-island-removal [fixture]
+(fn check-island-removal-keeps-default-unpinned-members-unpinned [fixture]
     (local map fixture.map)
     (local view fixture.view)
     (local node-a (map:lookup "test:a"))
     (local node-b (map:lookup "test:b"))
-    (assert (. view.pinned node-a) "fixture should start with first member pinned")
-    (assert (. view.pinned node-b) "fixture should start with second member pinned")
+    (assert (not (. view.pinned node-a)) "fixture should start with first member unpinned by default")
+    (assert (not (. view.pinned node-b)) "fixture should start with second member unpinned by default")
     (map:remove-island "island-1")
     (assert (not (. view.pinned node-a)) "first member should unpin after island removal")
     (assert (not (. view.pinned node-b)) "second member should unpin after island removal"))
@@ -235,7 +237,8 @@
     (assert (not (. view.pinned node-a))
             "collapsed member should release the expanded-card pin")
     (map:create-island (island-record {:id "island-2" :members ["test:a"]}))
-    (assert (. view.pinned node-a) "second island should pin member while present")
+    (assert (not (. view.pinned node-a))
+            "second island should leave collapsed member unpinned by default")
     (map:remove-island "island-2")
     (assert (not (. view.pinned node-a))
             "second island removal should not restore stale expanded-card pin ownership"))
@@ -244,7 +247,8 @@
     (local map fixture.map)
     (local view fixture.view)
     (local node-a (map:lookup "test:a"))
-    (assert (. view.pinned node-a) "fixture should start with removed member pinned")
+    (assert (not (. view.pinned node-a))
+            "fixture should start with removed member unpinned by default")
     (local (ok err) (pcall (fn [] (map:remove-nodes [node-a]))))
     (assert ok (.. "removing island member should not fail: " (tostring err)))
     (assert (not (map:lookup "test:a")) "removed node should leave graph map")
@@ -488,9 +492,9 @@
     (assert (string.find (tostring err) "missing graph island presenter kind: missing-kind" 1 true)
             "missing presenter error should include island kind"))
 
-(fn graph-view-unpins-members-after-island-removal []
+(fn graph-view-island-removal-keeps-default-unpinned-members-unpinned []
     (with-fixture {:island (island-record {})}
-        check-unpins-members-after-island-removal))
+        check-island-removal-keeps-default-unpinned-members-unpinned))
 
 (fn graph-view-preserves-expanded-member-pin-after-island-removal []
     (with-fixture {:island (island-record {})}
@@ -547,8 +551,8 @@
                      :fn graph-view-refreshes-labels-after-island-update})
 (table.insert tests {:name "GraphView fails visibly for missing island presenter"
                      :fn graph-view-fails-visibly-for-missing-island-presenter})
-(table.insert tests {:name "GraphView unpins members after island removal"
-                     :fn graph-view-unpins-members-after-island-removal})
+(table.insert tests {:name "GraphView island removal keeps default unpinned members unpinned"
+                     :fn graph-view-island-removal-keeps-default-unpinned-members-unpinned})
 (table.insert tests {:name "GraphView preserves expanded member pin after island removal"
                      :fn graph-view-preserves-expanded-member-pin-after-island-removal})
 (table.insert tests {:name "GraphView unpins expanded member after island removal and collapse"

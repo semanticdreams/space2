@@ -126,7 +126,9 @@ member position or the presenter's default origin, not a list/source-node anchor
 Removing an island removes only the map-local presentation record. It does not
 delete member nodes or any backing domain entities. Initial `ordered-list`
 islands provide snap-back vertical presentation in stored list order; they are
-not domain reorder controls.
+not domain reorder controls. Ordered-list island membership does not pin member
+nodes by default; only explicit node-pin reasons such as expanded cards should
+keep a member pinned.
 
 ### Graph View State
 
