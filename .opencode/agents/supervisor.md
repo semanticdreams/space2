@@ -276,6 +276,7 @@ blocking check, and available evidence.
 | **adjudicator** | Breaker cap: accept/park/escalate findings | gpt-5.5 (high) |
 | **git-integrator** | Guarded current-branch Git status, fetch, safe merge from origin/main, follow-up branch creation, and push wrappers | gpt-5.5 |
 | **github-operator** | Guarded GitHub auth/protection checks, PR creation, auto-merge, and merge-queue polling wrappers | gpt-5.5 |
+| **pr-recovery-operator** | Guarded stale merged PR recovery wrapper that creates/pushes a deterministic follow-up branch and opens a fresh PR | gpt-5.5 |
 | **config-auditor** | Guarded OpenCode home config verification for project-supplied non-secret support links | gpt-5.5 |
 
 Dispatch with the `task` tool and the appropriate `subagent_type`. Provide each
@@ -307,20 +308,19 @@ direct broad permission:
 - Dispatch `github-operator` for GitHub authentication checks, target-branch
   protection checks, PR creation, auto-merge enablement, PR state reads, and
   merge-queue polling through `scripts/opencode_pr_operator.py`.
+- Dispatch `pr-recovery-operator` for the single guarded stale merged PR
+  recovery wrapper, `create-current-with-followup-recovery`, when an existing
+  merged PR belongs to the current branch name but points at an old head.
 - Dispatch `config-auditor` for OpenCode home config verification through
   `scripts/verify_opencode_home_config.py`.
 
-When `github-operator create-current` reports `human_decision_required` because
-an existing PR for the current branch is `MERGED` and the evidence shows
-`pr_head != current_head`, route the merged-old-PR recovery through the guarded
-capabilities instead of asking for broad Git/GitHub access: preserve the
-evidence fields (`branch`, `current_head`, `pr_head`, `pr_state`, `pr_url`),
-dispatch `git-integrator` to confirm clean/current-base status, dispatch
-`git-integrator create-followup-branch` to create the deterministic follow-up
-branch, dispatch `git-integrator push-current`, then dispatch `github-operator
-create-current` and resume normal PR/merge-queue handling. Do not request raw
-`gh --head`, broad `gh`, rebase, reset, force-push, direct main push, or branch
-deletion permission for this path.
+If `github-operator` reports an existing merged PR whose `pr_head` differs from
+current `HEAD`, dispatch `pr-recovery-operator` to run the guarded
+`create-current-with-followup-recovery` wrapper. If it returns `pass`, continue
+with GitHub auto-merge/merge-queue polling for the returned PR. If it returns
+`human_decision_required`, report that wrapper evidence to the human. Do not
+request raw `gh --head`, broad `gh`, rebase, reset, force-push, direct main
+push, or branch deletion permission for this stale merged PR path.
 
 If a capability wrapper returns `human_decision_required`, report
 `HUMAN_DECISION_REQUIRED` with the wrapper evidence. Do not ask for one-off broad
