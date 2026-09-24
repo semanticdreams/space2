@@ -53,7 +53,7 @@
 
 (fn clear-stale-before-island-pin-on-collapse! [pinned pinned-before-expand node]
     (when (and pinned.__before_island (not (. pinned-before-expand node)))
-        (set (. pinned.__before_island node) nil)))
+        (set (. pinned.__before_island node) nil))) (var update-islands-after-member-drag-end! nil)
 
 (fn GraphView [opts]
     (local options (or opts {}))
@@ -609,13 +609,13 @@
                          :persistence persistence
                          :pointer-target options.pointer-target
                          :on-position (fn [node position]
-                                           (graph-layout:set-node-position node position {:skip-labels? true}))
-                         :on-drag-start (fn [node _entry]
+                                            (graph-layout:set-node-position node position {:skip-labels? true}))
+                         :on-drag-start (fn [node _entry _drag payload]
                                             (set drag-active? true)
-                                            (set drag-node node))
-                          :on-drag-end (fn [node _entry]
-                                           (set drag-active? false)
-                                           (set drag-node nil)
+                                            (set drag-node (if (Modifiers.alt-held? (and payload payload.mod)) :alt node)))
+                          :on-drag-end (fn [node _entry _drag]
+                                           (local alt-drag? (= drag-node :alt)) (set drag-active? false) (set drag-node nil)
+                                           (when alt-drag? (update-islands-after-member-drag-end! graph-map island-host get-position node))
                                            (update-labels [node] {:force? true})
                                            (refresh-label-positions [node])
                                            (reconcile-graph-islands!))}))
@@ -1762,6 +1762,6 @@
               (when (not capture-ok)
                   (error capture-err))))
     view)
-
-
+(set update-islands-after-member-drag-end!
+     (fn [graph-map island-host get-position node] (when (and node node.key) (assert graph-map.update-island "GraphView island member alt-drag requires GraphMap.update-island") (local member-key node.key) (local position (get-position nil node)) (each [_ island (ipairs (graph-map:list-islands))] (when (accumulate [found false _ key (ipairs (or island.members []))] (or found (= key member-key))) (local next-state (island-host:state-after-member-drag-end island {:member-key member-key :position position})) (when next-state (graph-map:update-island island.id {:state next-state})))))))
 GraphView

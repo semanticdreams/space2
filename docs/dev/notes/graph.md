@@ -38,6 +38,15 @@ Related objects become graph-visible only through explicit preview, view, search
 - `graph/nodes/*.fnl`: node constructors receive stores/world-manager, resolve domain records from them, and emit signals when underlying data changes.
 - `graph/view/`: owns visual/interactive systems (ForceLayout, points, labels, selection, movables, persistence metadata). Graph nodes do not track view instances.
 
+### Island member drag handles
+
+Alt-dragging a presentation island member moves the island body on drag end.
+During the drag, only the dragged member follows the pointer; after drop,
+`GraphView` asks the island presenter to derive the next island state and then
+reconciles the island. Ordered-list islands store the moved body as
+`island.state.position`. Normal non-alt member drag remains snap-back under
+island reconciliation.
+
 ### Preview vs UX node vs full view
 
 Previews expose compact state, high-frequency local actions, and short search/list controls. They are appropriate for status summaries, small action rows, revealing one selected related node, opening a focused UX node, or opening a full view/panel.

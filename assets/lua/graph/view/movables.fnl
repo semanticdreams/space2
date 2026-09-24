@@ -60,14 +60,14 @@
                                       :handle point
                                       :pointer-target target.pointer-target
                                       :key node
-                                      :on-drag-start (fn [entry]
-                                                       (when on-drag-start
-                                                           (on-drag-start node entry)))
-                                      :on-drag-end (fn [_entry]
-                                                      (when on-drag-end
-                                                          (on-drag-end node _entry))
-                                                      (when (and persistence persistence.schedule-save)
-                                                          (persistence:schedule-save)))})
+                                      :on-drag-start (fn [entry drag payload]
+                                                        (when on-drag-start
+                                                            (on-drag-start node entry drag payload)))
+                                      :on-drag-end (fn [entry drag]
+                                                       (when on-drag-end
+                                                           (on-drag-end node entry drag))
+                                                       (when (and persistence persistence.schedule-save)
+                                                           (persistence:schedule-save)))})
             target))
 
     (fn unregister [_self node]

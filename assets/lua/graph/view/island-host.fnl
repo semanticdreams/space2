@@ -4,6 +4,22 @@
             (.. "GraphViewIslandHost requires :" key))
     callback)
 
+(fn state-after-member-drag-end [self presenter-for-kind island request]
+    (assert island "GraphViewIslandHost.state-after-member-drag-end requires island")
+    (assert request "GraphViewIslandHost.state-after-member-drag-end requires request")
+    (assert request.member-key "GraphViewIslandHost.state-after-member-drag-end requires request.member-key")
+    (assert request.position "GraphViewIslandHost.state-after-member-drag-end requires request.position")
+    (local presenter (presenter-for-kind island.kind))
+    (when (not presenter)
+        (error (.. "GraphViewIslandHost missing presenter for island kind: " (tostring island.kind))))
+    (if presenter.member-drag-end-state
+        (do
+            (local state (presenter.member-drag-end-state island self request))
+            (when (and state (not (= (type state) "table")))
+                (error "GraphViewIslandHost presenter member-drag-end-state must return table or nil"))
+            state)
+        nil))
+
 (fn GraphViewIslandHost [opts]
     (local options (or opts {}))
     (local presenters (assert options.presenters "GraphViewIslandHost requires :presenters"))
@@ -86,6 +102,8 @@
                                  (when (not (. current key))
                                      (remove-member-pin-owner island.id key)))
                              (presenter.apply island self))
+         :state-after-member-drag-end (fn [self island request]
+                                        (state-after-member-drag-end self presenter-for-kind island request))
          :reconcile-all (fn [self islands]
                           (local seen {})
                           (each [_ island (ipairs (or islands []))]
