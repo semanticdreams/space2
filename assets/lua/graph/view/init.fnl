@@ -1005,7 +1005,7 @@
               (set (. expanded-nodes node) nil)
               (queue-label-refresh! node)
               (persistence:set-presentation node nil)
-              (graph-layout:rebuild))
+              (sync-island-layouts! options._island-layout-runtime graph-map island-host graph-layout))
             (do
               (local new-card (build-expanded-presentation node pos))
               (detach-presentation node current-point)

@@ -425,6 +425,8 @@
     (collapse-button:on-click {})
     (assert (not (. view.pinned replacement))
             "replacement member should be unpinned after collapse")
+    (assert (= (length (view.graph-layout.layout:get-positions)) 3)
+            "collapsed replacement island member should not be duplicated as an ordinary force node")
     (unrelated-entry.target:set-position (view:get-position (map:lookup fixture.second-item-key)))
     (local (updated? update-err) (pcall (fn []
                                           (for [_ 1 8]
