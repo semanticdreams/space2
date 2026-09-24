@@ -126,7 +126,21 @@ member position or the presenter's default origin, not a list/source-node anchor
 Removing an island removes only the map-local presentation record. It does not
 delete member nodes or any backing domain entities. Initial `ordered-list`
 islands provide snap-back vertical presentation in stored list order; they are
-not domain reorder controls.
+not domain reorder controls. Ordered-list island membership does not pin member
+nodes by default; only explicit node-pin reasons such as expanded cards should
+keep a member pinned.
+
+In `GraphView` force layout, ordered-list islands participate as one aggregate
+island body by default. Unpinned members remain normal rendered graph nodes, but
+their individual force-layout bodies are omitted while the aggregate body moves;
+the presenter then reapplies ordered-list member placements from the aggregate
+origin so the island moves as a unit and preserves spacing. Explicit node pins
+are still honored: a pinned member keeps its own pinned force participant and is
+not moved by aggregate island refresh until that explicit pin is released.
+Alt-dragging an ordered-list island member moves the aggregate island body during
+the drag and writes the final body position back to `state.position` on drag end.
+This change does not define a user-facing or persisted island-pin UI or API;
+island movement is governed by the aggregate body and existing explicit node pins.
 
 ### Graph View State
 

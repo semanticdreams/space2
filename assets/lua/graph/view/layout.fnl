@@ -41,7 +41,12 @@
     (local get-position (or options.get-position
                             (fn [_self _node]
                                 (error "GraphViewLayout requires get-position callback"))))
-    (local get-position-raw (or options.get-position-raw get-position))
+     (local get-position-raw (or options.get-position-raw get-position))
+     (local on-island-position (or options.on-island-position (fn [_id _position] nil)))
+     (local force-indices {})
+     (local force-participants-by-index [])
+     (local island-layouts {})
+     (local island-member-layouts {})
 
     (fn assert-valid-position [pos context node]
         (local key (and node node.key))
@@ -70,9 +75,67 @@
                                   context
                                   (or key "unknown node")))))
 
-    (fn position-changed? [current new-pos]
-        (or (not current)
-            (> (glm.length (- current new-pos)) position-epsilon)))
+     (fn position-changed? [current new-pos]
+         (or (not current)
+             (> (glm.length (- current new-pos)) position-epsilon)))
+
+     (fn vec3-like? [position]
+         (and position
+              (= (type position.x) :number)
+              (= (type position.y) :number)
+              (= (type position.z) :number)))
+
+     (fn validate-island-layout-record [record]
+         (assert (= (type record) :table) "GraphViewLayout.sync-island-layouts requires table records")
+         (assert (= (type record.id) :string) "GraphViewLayout island layout record requires string id")
+         (assert (= (type record.members) :table) "GraphViewLayout island layout record requires members table")
+         (assert (vec3-like? record.position) "GraphViewLayout island layout record requires vec3-like position")
+         (assert (= (type record.member-placements) :function)
+                 "GraphViewLayout island layout record requires member-placements function")
+         record)
+
+     (fn clear-force-tables []
+         (each [k _ (pairs force-indices)]
+             (set (. force-indices k) nil))
+         (each [k _ (pairs force-participants-by-index)]
+             (set (. force-participants-by-index k) nil)))
+
+     (fn clear-island-member-layouts []
+         (each [k _ (pairs island-member-layouts)]
+             (set (. island-member-layouts k) nil)))
+
+     (fn active-island-member? [node]
+         (and node (not (. pinned node)) (. island-member-layouts node)))
+
+     (fn force-index-for-node [node]
+         (local island-record (active-island-member? node))
+         (if island-record
+             (. force-indices island-record)
+             (. force-indices node)))
+
+     (fn add-force-node [participant position pinned?]
+         (local idx (layout:add-node position))
+         (assert (not (= idx nil)) "GraphViewLayout failed to allocate force layout index")
+         (set (. force-participants-by-index (+ idx 1)) participant)
+         (if (= participant.kind :island)
+             (set (. force-indices participant.record) idx)
+             (set (. force-indices participant.node) idx))
+         (when pinned?
+             (layout:pin-node idx true))
+         idx)
+
+     (fn add-force-edge [source-node target-node]
+         (local source-idx (force-index-for-node source-node))
+         (local target-idx (force-index-for-node target-node))
+         (when (and source-idx target-idx (not (= source-idx target-idx)))
+             (layout:add-edge source-idx target-idx true)))
+
+     (fn allocate-public-index []
+         (var max-index -1)
+         (each [_ idx (pairs indices)]
+             (when (and (= (type idx) :number) (> idx max-index))
+                 (set max-index idx)))
+         (+ max-index 1))
 
     (local self {:layout layout
                  :nodes-by-index nodes-by-index
@@ -82,24 +145,47 @@
                  :edges edges
                  :edge-map edge-map})
 
-    (fn refresh-layout []
-        (local positions (layout:get-positions))
-        (local count (length positions))
-        (local changed [])
-        (for [i 1 count]
-            (local node (. nodes-by-index i))
-            (when node
-                (local pos (. positions i))
-                (when pos
-                    (local new-pos (ensure-glm-vec3 pos))
-                    (assert-valid-position new-pos "GraphViewLayout.refresh-layout" node)
-                    (local point (. points node))
-                    (assert point (string.format "GraphViewLayout.refresh-layout missing point for node %s"
-                                                 (node-id node)))
-                    (when (position-changed? point.position new-pos)
-                        (set-point-position node new-pos "GraphViewLayout.refresh-layout")
-                        (table.insert changed node)))))
-        changed)
+     (fn refresh-layout []
+         (local positions (layout:get-positions))
+         (local count (length positions))
+         (local changed [])
+         (for [i 1 count]
+             (local participant (. force-participants-by-index i))
+             (when participant
+                 (local pos (. positions i))
+                 (when pos
+                     (local new-pos (ensure-glm-vec3 pos))
+                     (if (= participant.kind :island)
+                         (do
+                             (assert-valid-position new-pos "GraphViewLayout.refresh-layout:island" nil)
+                             (local record participant.record)
+                             (when (position-changed? record.position new-pos)
+                                 (set record.position new-pos)
+                                 (on-island-position record.id new-pos)
+                                 (local placements (record.member-placements new-pos))
+                                 (each [_ member (ipairs record.members)]
+                                     (when (not (. pinned member))
+                                         (local placement (or (. placements member.key) (. placements (node-id member))))
+                                         (assert placement
+                                                 (string.format "GraphViewLayout.refresh-layout missing island placement for node %s"
+                                                               (node-id member)))
+                                         (assert-valid-position placement "GraphViewLayout.refresh-layout:island" member)
+                                         (local point (. points member))
+                                         (assert point (string.format "GraphViewLayout.refresh-layout missing point for island member %s"
+                                                              (node-id member)))
+                                         (when (position-changed? point.position placement)
+                                             (set-point-position member placement "GraphViewLayout.refresh-layout:island")
+                                             (table.insert changed member))))))
+                         (do
+                             (local node participant.node)
+                             (assert-valid-position new-pos "GraphViewLayout.refresh-layout" node)
+                             (local point (. points node))
+                             (assert point (string.format "GraphViewLayout.refresh-layout missing point for node %s"
+                                                          (node-id node)))
+                             (when (position-changed? point.position new-pos)
+                                 (set-point-position node new-pos "GraphViewLayout.refresh-layout")
+                                 (table.insert changed node)))))))
+         changed)
 
     (fn flush-batch [batch]
         (when (and batch.vector (> (length batch.handles) 0))
@@ -199,24 +285,23 @@
         (update-lines)
         self)
 
-    (fn add-node [_self node position pinned?]
-        (assert-valid-position position "GraphViewLayout.add-node" node)
-        (local idx (layout:add-node position))
-        (assert (not (= idx nil)) "GraphViewLayout.add-node failed to allocate layout index")
-        (set (. nodes-by-index (+ idx 1)) node)
-        (set (. indices node) idx)
-        (when pinned?
-            (layout:pin-node idx true))
-        idx)
+      (fn add-node [_self node position pinned?]
+          (assert-valid-position position "GraphViewLayout.add-node" node)
+          (add-force-node {:kind :node :node node} position pinned?)
+          (local public-idx (allocate-public-index))
+          (set (. nodes-by-index (+ public-idx 1)) node)
+          (set (. indices node) public-idx)
+          public-idx)
 
     (fn add-edge [_self edge]
         (assert edge "GraphViewLayout.add-edge requires an edge")
         (assert make-line "GraphViewLayout.add-edge requires make-line callback")
-        (local source-idx (. indices edge.source))
-        (local target-idx (. indices edge.target))
-        (assert (and source-idx target-idx)
-                "GraphViewLayout.add-edge requires indexed source and target nodes")
-        (layout:add-edge source-idx target-idx true)
+         (local source-idx (force-index-for-node edge.source))
+         (local target-idx (force-index-for-node edge.target))
+         (assert (and source-idx target-idx)
+                 "GraphViewLayout.add-edge requires indexed source and target nodes")
+         (when (not (= source-idx target-idx))
+             (layout:add-edge source-idx target-idx true))
         (local source-size (or (and edge edge.source edge.source.size) 0))
         (local target-size (or (and edge edge.target edge.target.size) 0))
         (local min-node-size (math.min source-size target-size))
@@ -274,66 +359,65 @@
             (when record.label-span
                 (place-edge-label record.label-span start-pos end-pos))))
 
-    (fn set-node-position [_self node position opts]
-        (when position
-            (local idx (. indices node))
-            (assert idx (string.format "GraphViewLayout.set-node-position missing index for node %s"
-                                        (node-id node)))
-            (assert-valid-position position "GraphViewLayout.set-node-position" node)
-            (layout:set-position idx position)
-            (set-point-position node position "GraphViewLayout.set-node-position")
-            (update-lines)
+     (fn set-node-position [_self node position opts]
+         (when position
+             (assert-valid-position position "GraphViewLayout.set-node-position" node)
+             (local idx (. force-indices node))
+             (when idx
+                 (layout:set-position idx position))
+             (set-point-position node position "GraphViewLayout.set-node-position")
+             (update-lines)
             (local skip-labels? (and opts opts.skip-labels?))
             (when (not skip-labels?)
                 (update-labels [node] {:force? true})
                 (refresh-label-positions [node]))))
 
-    (fn set-node-pinned [_self node pinned?]
-        (local idx (. indices node))
-        (assert idx (string.format "GraphViewLayout.set-node-pinned missing index for node %s"
-                                   (node-id node)))
-        (layout:pin-node idx (if pinned? true false))
-        true)
+     (fn set-node-pinned [_self node pinned?]
+         (local idx (force-index-for-node node))
+         (when idx
+             (layout:pin-node idx (if pinned? true false)))
+         true)
 
-    (fn rebuild []
-        (local ordered [])
-        (for [i 1 (length nodes-by-index)]
-            (local node (. nodes-by-index i))
-            (when node
-                (table.insert ordered node)))
-        (layout:clear)
-        (each [k _ (pairs nodes-by-index)]
-            (set (. nodes-by-index k) nil))
-        (each [k _ (pairs indices)]
-            (set (. indices k) nil))
-        (each [_ node (pairs nodes)]
-            (var found? false)
-            (each [_ existing (ipairs ordered)]
-                (when (= existing node)
-                    (set found? true)))
-            (when (not found?)
-                (table.insert ordered node)))
-        (each [_ node (ipairs ordered)]
-            (local point (. points node))
-            (assert point (string.format "GraphViewLayout.rebuild missing point for node %s"
-                                         (node-id node)))
-            (local position (ensure-glm-vec3 point.position))
-            (assert-valid-position position "GraphViewLayout.rebuild" node)
-            (local idx (layout:add-node position))
-            (set (. nodes-by-index (+ idx 1)) node)
-            (set (. indices node) idx)
-            (when (. pinned node)
-                (layout:pin-node idx true)))
-        (each [_ record (ipairs edges)]
-            (local edge record.edge)
-            (when edge
-                (local source-idx (. indices edge.source))
-                (local target-idx (. indices edge.target))
-                (when (and source-idx target-idx)
-                    (layout:add-edge source-idx target-idx true))))
-        (start)
-        (update-labels nil {:force? true})
-        (refresh-label-positions))
+     (fn rebuild []
+         (layout:clear)
+         (clear-force-tables)
+         (each [_ node (pairs nodes)]
+             (local point (. points node))
+             (assert point (string.format "GraphViewLayout.rebuild missing point for node %s"
+                                          (node-id node)))
+             (local position (ensure-glm-vec3 point.position))
+             (assert-valid-position position "GraphViewLayout.rebuild" node)
+             (when (or (. pinned node) (not (. island-member-layouts node)))
+                 (add-force-node {:kind :node :node node} position (. pinned node))))
+         (each [_ record (pairs island-layouts)]
+             (add-force-node {:kind :island :record record}
+                             (ensure-glm-vec3 record.position)
+                             false))
+         (each [_ record (ipairs edges)]
+             (local edge record.edge)
+             (when edge
+                 (add-force-edge edge.source edge.target)))
+         (start)
+         (update-labels nil {:force? true})
+         (refresh-label-positions))
+
+      (fn sync-island-layouts [_self records]
+          (local should-rebuild? (do (assert (= (type records) :table) "GraphViewLayout.sync-island-layouts requires records table") (or (next island-layouts) (next island-member-layouts) (> (length records) 0))))
+          (each [k _ (pairs island-layouts)]
+              (set (. island-layouts k) nil))
+          (clear-island-member-layouts)
+          (each [_ record (ipairs records)]
+              (validate-island-layout-record record)
+              (local position (ensure-glm-vec3 record.position))
+              (assert-valid-position position "GraphViewLayout.sync-island-layouts" nil)
+             (set record.position position)
+             (set (. island-layouts record.id) record))
+          (each [_ record (pairs island-layouts)]
+              (each [_ member (ipairs record.members)]
+                  (when (not (. pinned member))
+                      (set (. island-member-layouts member) record))))
+          (when should-rebuild? (rebuild))
+          true)
 
     (fn update [_self _delta]
         (layout:update 40)
@@ -345,9 +429,10 @@
     (set self.add-edge add-edge)
     (set self.update update)
     (set self.set-node-position set-node-position)
-    (set self.set-node-pinned set-node-pinned)
-    (set self.rebuild rebuild)
-    (set self.start start)
+     (set self.set-node-pinned set-node-pinned)
+     (set self.rebuild rebuild)
+     (set self.sync-island-layouts sync-island-layouts)
+     (set self.start start)
     (set self.update-lines update-lines)
     (set self.drop-edge-label drop-edge-label)
     (set self.refresh-edge-line refresh-edge-line)

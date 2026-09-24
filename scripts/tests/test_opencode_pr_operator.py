@@ -851,6 +851,206 @@ def test_poll_merge_queue_rejects_completed_terminal_failed_check_conclusions(
     assert result["message"] == "Required merge queue check failed"
 
 
+def test_poll_merge_queue_failed_check_includes_metadata_and_bounded_log_excerpt(
+    monkeypatch,
+    trusted_repo: Path,
+) -> None:
+    details_url = "https://github.com/semanticdreams/space2/actions/runs/35993871852/job/107614091892"
+    runner = GhRunner(
+        {
+            (
+                "gh",
+                "pr",
+                "view",
+                "feature/opencode-capabilities",
+                "--json",
+                pr_operator.PR_VIEW_FIELDS,
+            ): json.dumps(
+                {
+                    "mergedAt": None,
+                    "state": "OPEN",
+                    "mergeStateStatus": "pending",
+                    "statusCheckRollup": [
+                        {
+                            "__typename": "CheckRun",
+                            "name": "test",
+                            "workflowName": "test",
+                            "status": "COMPLETED",
+                            "conclusion": "FAILURE",
+                            "detailsUrl": details_url,
+                            "startedAt": "2026-09-24T11:35:11Z",
+                            "completedAt": "2026-09-24T11:50:53Z",
+                        }
+                    ],
+                }
+            ),
+            (
+                "gh",
+                "run",
+                "view",
+                "35993871852",
+                "--job",
+                "107614091892",
+                "--log",
+            ): "setup\npytest failed\nsummary\n",
+        }
+    )
+    monkeypatch.setattr(pr_operator, "run_command", runner)
+
+    result = pr_operator.poll_merge_queue(trusted_repo, "feature/opencode-capabilities", 0, 1)
+
+    failed_check = result["evidence"]["failed_checks"][0]
+    assert result["status"] == "human_decision_required"
+    assert result["message"] == "Required merge queue check failed"
+    assert failed_check["name"] == "test"
+    assert failed_check["workflowName"] == "test"
+    assert failed_check["status"] == "COMPLETED"
+    assert failed_check["conclusion"] == "FAILURE"
+    assert failed_check["detailsUrl"] == details_url
+    assert failed_check["startedAt"] == "2026-09-24T11:35:11Z"
+    assert failed_check["completedAt"] == "2026-09-24T11:50:53Z"
+    assert failed_check["run_id"] == "35993871852"
+    assert failed_check["job_id"] == "107614091892"
+    assert failed_check["log_excerpt"] == "setup\npytest failed\nsummary"
+    assert "log_unavailable" not in failed_check
+    assert runner.calls == [
+        ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS],
+        ["gh", "run", "view", "35993871852", "--job", "107614091892", "--log"],
+    ]
+
+
+def test_poll_merge_queue_continues_when_failed_check_log_waits_for_in_progress_workflow_run(
+    monkeypatch,
+    trusted_repo: Path,
+) -> None:
+    details_url = "https://github.com/semanticdreams/space2/actions/runs/35997448859/job/107625178432"
+    states = iter(
+        [
+            {
+                "mergedAt": None,
+                "state": "OPEN",
+                "mergeStateStatus": "pending",
+                "statusCheckRollup": [
+                    {
+                        "__typename": "CheckRun",
+                        "name": "test",
+                        "workflowName": "test",
+                        "status": "COMPLETED",
+                        "conclusion": "FAILURE",
+                        "detailsUrl": details_url,
+                    },
+                    {
+                        "__typename": "CheckRun",
+                        "name": "build-windows",
+                        "workflowName": "test",
+                        "status": "IN_PROGRESS",
+                        "conclusion": None,
+                    },
+                ],
+            },
+            {
+                "mergedAt": None,
+                "state": "OPEN",
+                "mergeStateStatus": "pending",
+                "statusCheckRollup": [
+                    {
+                        "__typename": "CheckRun",
+                        "name": "test",
+                        "workflowName": "test",
+                        "status": "COMPLETED",
+                        "conclusion": "FAILURE",
+                        "detailsUrl": details_url,
+                        "completedAt": "2026-09-24T18:12:00Z",
+                    }
+                ],
+            },
+        ]
+    )
+    calls = []
+
+    def fake_run(args, cwd: Path, check: bool = True):
+        del cwd, check
+        args = list(args)
+        calls.append(args)
+        if args == ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS]:
+            return command_result(args, json.dumps(next(states)))
+        if args == ["gh", "run", "view", "35997448859", "--job", "107625178432", "--log"]:
+            log_attempts = sum(1 for call in calls if call == args)
+            if log_attempts == 1:
+                return command_result(
+                    args,
+                    returncode=1,
+                    stderr="run 35997448859 is still in progress; logs will be available when it is complete",
+                )
+            return command_result(args, "collect logs\npytest failed\n")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(pr_operator, "run_command", fake_run)
+    monkeypatch.setattr(pr_operator.time, "sleep", lambda seconds: None)
+
+    result = pr_operator.poll_merge_queue(trusted_repo, "feature/opencode-capabilities", 60, 1)
+
+    failed_check = result["evidence"]["failed_checks"][0]
+    assert result["status"] == "human_decision_required"
+    assert result["message"] == "Required merge queue check failed"
+    assert failed_check["name"] == "test"
+    assert failed_check["workflowName"] == "test"
+    assert failed_check["run_id"] == "35997448859"
+    assert failed_check["job_id"] == "107625178432"
+    assert failed_check["log_excerpt"] == "collect logs\npytest failed"
+    assert calls == [
+        ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS],
+        ["gh", "run", "view", "35997448859", "--job", "107625178432", "--log"],
+        ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS],
+        ["gh", "run", "view", "35997448859", "--job", "107625178432", "--log"],
+    ]
+
+
+def test_poll_merge_queue_failed_check_reports_unavailable_log_without_parseable_details_url(
+    monkeypatch,
+    trusted_repo: Path,
+) -> None:
+    runner = GhRunner(
+        {
+            (
+                "gh",
+                "pr",
+                "view",
+                "feature/opencode-capabilities",
+                "--json",
+                pr_operator.PR_VIEW_FIELDS,
+            ): json.dumps(
+                {
+                    "mergedAt": None,
+                    "state": "OPEN",
+                    "mergeStateStatus": "pending",
+                    "statusCheckRollup": [
+                        {
+                            "__typename": "CheckRun",
+                            "name": "test",
+                            "workflowName": "test",
+                            "status": "COMPLETED",
+                            "conclusion": "FAILURE",
+                            "detailsUrl": "https://example.invalid/not-a-github-actions-job",
+                        }
+                    ],
+                }
+            )
+        }
+    )
+    monkeypatch.setattr(pr_operator, "run_command", runner)
+
+    result = pr_operator.poll_merge_queue(trusted_repo, "feature/opencode-capabilities", 0, 1)
+
+    failed_check = result["evidence"]["failed_checks"][0]
+    assert result["status"] == "human_decision_required"
+    assert failed_check["name"] == "test"
+    assert failed_check["detailsUrl"] == "https://example.invalid/not-a-github-actions-job"
+    assert failed_check["log_unavailable"] == "detailsUrl did not contain a parseable GitHub Actions run/job id"
+    assert "log_excerpt" not in failed_check
+    assert runner.calls == [["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS]]
+
+
 def test_poll_merge_queue_requires_merged_at_for_success(monkeypatch, trusted_repo: Path) -> None:
     runner = GhRunner(
         {
