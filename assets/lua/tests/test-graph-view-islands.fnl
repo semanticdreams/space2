@@ -303,6 +303,36 @@
                       (= reconciled-position.z list-position.z)))
             "first list island member should not be recomputed from current list node position"))
 
+(fn check-list-created-island-moves-as-force-layout-unit [fixture]
+    (local map fixture.map)
+    (local view fixture.view)
+    (local movables fixture.movables)
+    (local list-node (map:lookup fixture.list-key))
+    (local item-node (map:lookup fixture.item-key))
+    (local second-node (map:lookup fixture.second-item-key))
+    (local list-entry (. movables.by-node list-node))
+    (assert list-entry "list node should be movable")
+    (list-entry.target:set-position (glm.vec3 48 0 0))
+    (list-node:expand-items-as-island)
+    (assert (not (. view.pinned item-node))
+            "first list island member should be unpinned by default")
+    (assert (not (. view.pinned second-node))
+            "second list island member should be unpinned by default")
+    (local before-a (view:get-position item-node))
+    (local before-b (view:get-position second-node))
+    (for [_ 1 8]
+        (view:update 0.016))
+    (local after-a (view:get-position item-node))
+    (local after-b (view:get-position second-node))
+    (local delta-a (- after-a before-a))
+    (local delta-b (- after-b before-b))
+    (assert (> (glm.length delta-a) 0.001)
+            "ordered-list island body should move during force layout")
+    (assert-vec3 delta-b delta-a
+                 "ordered-list island members should move by the same aggregate delta")
+    (assert-close (- after-a.y after-b.y) 24
+                  "ordered-list island spacing should be preserved after force layout"))
+
 (fn check-restored-old-format-list-island-uses-member-fallback-after-drag-end [fixture]
     (local map fixture.map)
     (local view fixture.view)
@@ -521,6 +551,10 @@
     (with-list-fixture
         check-list-created-island-preserves-body-position-after-unrelated-drag-end))
 
+(fn graph-view-list-created-island-moves-as-force-layout-unit []
+    (with-list-fixture
+        check-list-created-island-moves-as-force-layout-unit))
+
 (fn graph-view-restored-old-format-list-island-uses-member-fallback-after-drag-end []
     (with-list-fixture
         {:restore-state {:nodes ["list-entity:list" "string-entity:item-a" "string-entity:unrelated"]
@@ -565,6 +599,8 @@
                      :fn graph-view-snaps-island-member-back-after-drag-end})
 (table.insert tests {:name "GraphView list-created island preserves body position after unrelated drag end"
                      :fn graph-view-list-created-island-preserves-body-position-after-unrelated-drag-end})
+(table.insert tests {:name "GraphView list-created island moves as force-layout unit"
+                     :fn graph-view-list-created-island-moves-as-force-layout-unit})
 (table.insert tests {:name "GraphView restored old-format list island uses member fallback after unrelated drag end"
                      :fn graph-view-restored-old-format-list-island-uses-member-fallback-after-drag-end})
 (table.insert tests {:name "GraphView alt-dragging second island member moves whole island on drag end"

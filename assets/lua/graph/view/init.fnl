@@ -55,6 +55,54 @@
     (when (and pinned.__before_island (not (. pinned-before-expand node)))
         (set (. pinned.__before_island node) nil))) (var update-islands-after-member-drag-end! nil)
 
+(fn record-island-layout-position! [runtime island-id position]
+    (assert island-id "GraphView island layout position requires island id")
+    (local value (ensure-glm-vec3 position))
+    (set (. runtime.positions island-id) (glm.vec3 value.x value.y value.z)))
+
+(fn cache-island-state-position! [runtime island]
+    (local position (and island island.state island.state.position))
+    (when position
+        (record-island-layout-position! runtime island.id position)))
+
+(fn island-with-runtime-position [runtime island]
+    (local runtime-position (. runtime.positions island.id))
+    (if runtime-position
+        (do
+            (local clone {})
+            (each [k v (pairs island)]
+                (set (. clone k) v))
+            (local state {})
+            (local source-state (if island.state island.state {}))
+            (each [k v (pairs source-state)]
+                (set (. state k) v))
+            (set state.position runtime-position)
+            (set clone.state state)
+            clone)
+        island))
+
+(fn sync-island-layouts! [runtime graph-map island-host graph-layout]
+    (local records [])
+    (each [_ island (ipairs (graph-map:list-islands))]
+        (local record (island-host:aggregate-layout-record (island-with-runtime-position runtime island)))
+        (when record
+            (table.insert records record)))
+    (graph-layout:sync-island-layouts records))
+
+(fn flush-island-layout-positions! [runtime graph-map]
+    (when (= (type graph-map.update-island) :function)
+        (each [island-id position (pairs runtime.positions)]
+            (local island (graph-map:get-island island-id))
+            (if island
+                (do
+                    (local next-state {})
+                    (local source-state (if island.state island.state {}))
+                    (each [k v (pairs source-state)]
+                        (set (. next-state k) v))
+                    (set next-state.position [position.x position.y position.z])
+                    (graph-map:update-island island-id {:state next-state}))
+                (set (. runtime.positions island-id) nil)))))
+
 (fn GraphView [opts]
     (local options (or opts {}))
     (local graph-map options.graph-map)
@@ -139,7 +187,6 @@
     (local point-base-depth-offset 2)
     (local focus-layer-index 1)
     (local selection-layer-index 2)
-    (local base-layer-index 3)
     (local lod-surface-provider
            (or options.lod-surface-provider
                (fn []
@@ -427,8 +474,8 @@
                         (table.insert filtered node)))
                 (labels:update registry.points filtered opts))))
 
-    (fn refresh-label-positions [nodes]
-        (if nodes
+     (fn refresh-label-positions [nodes]
+         (if nodes
             (do
                 (local filtered (compact-label-targets nodes))
                 (when (> (length filtered) 0)
@@ -438,10 +485,12 @@
                 (each [node _ (pairs registry.points)]
                     (when (not (. expanded-nodes node))
                         (table.insert filtered node)))
-                (labels:refresh-positions registry.points filtered))))
+                 (labels:refresh-positions registry.points filtered))))
 
-    (local graph-layout
-          (GraphViewLayout {:layout layout
+     (set options._island-layout-runtime {:positions {}})
+
+     (local graph-layout
+           (GraphViewLayout {:layout layout
                         :nodes-by-index nodes-by-index
                         :indices indices
                         :nodes nodes
@@ -458,8 +507,10 @@
                         :set-point-position set-point-position
                         :update-labels update-labels
                         :refresh-label-positions refresh-label-positions
-                         :get-position get-position
-                         :get-position-raw get-position-raw}))
+                          :get-position get-position
+                          :get-position-raw get-position-raw
+                          :on-island-position (fn [island-id position]
+                                                (record-island-layout-position! options._island-layout-runtime island-id position))}))
 
     (local island-label-nodes {})
     (var island-reconcile-depth 0)
@@ -535,17 +586,19 @@
                                                       (and pinned.__before_island (. pinned.__before_island node)))
                                                   true
                                                   nil))
-                                         (graph-layout:set-node-pinned node (. pinned node)))))}))
+                                          (graph-layout:set-node-pinned node (. pinned node)))))}))
 
-    (fn reconcile-graph-islands! []
-        (with-island-label-refresh
-            (fn []
-                (island-host:reconcile-all (graph-map:list-islands)))))
+     (fn reconcile-graph-islands! []
+         (with-island-label-refresh
+             (fn []
+                 (island-host:reconcile-all (graph-map:list-islands))
+                 (sync-island-layouts! options._island-layout-runtime graph-map island-host graph-layout))))
 
-    (fn reconcile-graph-island! [island]
-        (with-island-label-refresh
-            (fn []
-                (island-host:reconcile-island island))))
+     (fn reconcile-graph-island! [island]
+         (with-island-label-refresh
+             (fn []
+                 (island-host:reconcile-island (island-with-runtime-position options._island-layout-runtime island))
+                 (sync-island-layouts! options._island-layout-runtime graph-map island-host graph-layout))))
 
     (var batch-depth 0)
     (var batched-layout-dirty? false)
@@ -638,7 +691,7 @@
                                  (and ctx ctx.pointer-target))
              :depth-offset-step point-depth-offset-step
              :base-depth-offset-index point-base-depth-offset
-             :base-layer-index base-layer-index
+             :base-layer-index 3
              :layers [{:size 0
                        :color resolved-focus-outline-color}
                       {:size 0
@@ -869,7 +922,7 @@
                                                                 (and ctx ctx.pointer-target))
                                             :depth-offset-step point-depth-offset-step
                                             :base-depth-offset-index point-base-depth-offset
-                                            :base-layer-index base-layer-index
+                                             :base-layer-index 3
                                             :layers [{:size 0
                                                       :color resolved-focus-outline-color}
                                                      {:size 0
@@ -1110,17 +1163,20 @@
     (var island-removed-handler nil)
     (var stabilized-handler nil)
 
-    (fn handle-island-added-or-updated [payload]
-        (assert-not-dropped "handle-island-added-or-updated")
-        (local island (and payload payload.island))
-        (when island
-            (reconcile-graph-island! island)))
+     (fn handle-island-added-or-updated [payload]
+         (assert-not-dropped "handle-island-added-or-updated")
+         (local island (and payload payload.island))
+         (when island
+             (cache-island-state-position! options._island-layout-runtime island)
+             (reconcile-graph-island! island)))
 
     (fn handle-island-removed [payload]
         (assert-not-dropped "handle-island-removed")
-        (local island (and payload payload.island))
-        (when island
-            (island-host:drop-island island.id)))
+         (local island (and payload payload.island))
+         (when island
+             (set (. options._island-layout-runtime.positions island.id) nil)
+             (island-host:drop-island island.id)
+             (sync-island-layouts! options._island-layout-runtime graph-map island-host graph-layout)))
 
     (fn attach-graph []
         (when (and graph-map.node-added (not node-added-handler))
@@ -1529,9 +1585,10 @@
                      "GraphView.with-batched-updates requires callback")
              (with-batched-graph-updates cb)))
      (set view.capture-state
-          (fn [_self]
-              (assert-not-dropped "capture-state")
-              (local keys (icollect [_ node (ipairs selected-nodes)]
+           (fn [_self]
+               (assert-not-dropped "capture-state")
+               (flush-island-layout-positions! options._island-layout-runtime graph-map)
+               (local keys (icollect [_ node (ipairs selected-nodes)]
                                (and node node.key)))
               (set graph-map.selected_node_keys keys)
               (set graph-map.focused_node_key (and focused-node focused-node.key))
@@ -1677,10 +1734,11 @@
                                     " requires restorer-module")))
                       restored?))
              true))
-    (set view.drop
-         (fn [_self]
-             (assert-not-dropped "drop")
-              (set dropped? true)
+     (set view.drop
+          (fn [_self]
+              (assert-not-dropped "drop")
+              (flush-island-layout-positions! options._island-layout-runtime graph-map)
+               (set dropped? true)
               (detach-graph)
               (island-host:drop)
               (selection:drop)

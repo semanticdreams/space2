@@ -76,6 +76,30 @@
                                          base.z)))
     placements)
 
+(fn placements-from-origin [island origin]
+    (local state (if island.state island.state {}))
+    (local spacing (if state.spacing state.spacing default-spacing))
+    (local placements {})
+    (local members (if island.members island.members []))
+    (each [index key (ipairs members)]
+        (set (. placements key) (glm.vec3 origin.x
+                                         (- origin.y (* spacing (- index 1)))
+                                         origin.z)))
+    placements)
+
+(fn aggregate-layout-record [island host]
+    (assert island "OrderedListPresenter.aggregate-layout-record requires island")
+    (assert host "OrderedListPresenter.aggregate-layout-record requires host")
+    (local base (base-position island host))
+    (local member-nodes [])
+    (each [_ key (ipairs (or island.members []))]
+        (table.insert member-nodes (host:node-for-key key)))
+    {:id island.id
+     :members member-nodes
+     :position base
+     :member-placements (fn [origin]
+                          (placements-from-origin island origin))})
+
 (fn apply [island host]
     (local placements (layout-island island host))
     (local members (if island.members island.members []))
@@ -107,5 +131,6 @@
 
 {:kind kind
   :layout-island layout-island
+  :aggregate-layout-record aggregate-layout-record
   :member-drag-end-state member-drag-end-state
   :apply apply}

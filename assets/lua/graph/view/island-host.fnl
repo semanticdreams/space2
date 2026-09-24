@@ -20,6 +20,23 @@
             state)
         nil))
 
+(fn aggregate-layout-record [self presenter-for-kind island]
+    (assert island "GraphViewIslandHost.aggregate-layout-record requires island")
+    (local presenter (presenter-for-kind island.kind))
+    (when (not presenter)
+        (error (.. "GraphViewIslandHost missing presenter for island kind: " (tostring island.kind))))
+    (if presenter.aggregate-layout-record
+        (do
+            (local record (presenter.aggregate-layout-record island self))
+            (when record
+                (assert record.id "GraphViewIslandHost aggregate layout record requires id")
+                (assert record.members "GraphViewIslandHost aggregate layout record requires members")
+                (assert record.position "GraphViewIslandHost aggregate layout record requires position")
+                (assert (= (type record.member-placements) :function)
+                        "GraphViewIslandHost aggregate layout record requires member-placements function"))
+            record)
+        nil))
+
 (fn GraphViewIslandHost [opts]
     (local options (or opts {}))
     (local presenters (assert options.presenters "GraphViewIslandHost requires :presenters"))
@@ -35,9 +52,11 @@
                 "GraphViewIslandHost presenters must provide presenter-for-kind")
         (presenters.presenter-for-kind kind))
 
-    (fn resolve-node [key]
-        (assert (node-for-key options key)
-                (.. "GraphViewIslandHost missing node for island member: " (tostring key))))
+     (fn resolve-node [key]
+         (local node (node-for-key options key))
+         (assert node
+                 (.. "GraphViewIslandHost missing node for island member: " (tostring key)))
+         node)
 
     (fn member-pin-count [key]
         (if (. member-pin-counts key) (. member-pin-counts key) 0))
@@ -72,8 +91,10 @@
             (set (. pinned-by-island island-id) nil)))
 
     (local self
-        {:position-for-key (fn [_self key]
-                             (position-for-key options key))
+        {:node-for-key (fn [_self key]
+                         (resolve-node key))
+         :position-for-key (fn [_self key]
+                              (position-for-key options key))
          :set-member-position (fn [_self island-id key position]
                                  (assert island-id "set-member-position requires island id")
                                  (assert key "set-member-position requires member key")
@@ -102,9 +123,11 @@
                                  (when (not (. current key))
                                      (remove-member-pin-owner island.id key)))
                              (presenter.apply island self))
-         :state-after-member-drag-end (fn [self island request]
-                                        (state-after-member-drag-end self presenter-for-kind island request))
-         :reconcile-all (fn [self islands]
+          :state-after-member-drag-end (fn [self island request]
+                                         (state-after-member-drag-end self presenter-for-kind island request))
+          :aggregate-layout-record (fn [self island]
+                                     (aggregate-layout-record self presenter-for-kind island))
+          :reconcile-all (fn [self islands]
                           (local seen {})
                           (each [_ island (ipairs (or islands []))]
                               (set (. seen island.id) true)
