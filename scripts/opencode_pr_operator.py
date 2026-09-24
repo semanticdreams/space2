@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -21,6 +22,9 @@ FAILED_ROLLUP_CONCLUSIONS = {"failure", "failed", "cancelled", "timed-out", "act
 DEFAULT_POLL_TIMEOUT_SECONDS = 7200
 DEFAULT_POLL_INTERVAL_SECONDS = 100
 MAX_RULESET_DETAIL_FETCHES = 5
+MAX_FAILED_CHECK_LOG_LINES = 80
+MAX_FAILED_CHECK_LOG_CHARS = 12000
+GITHUB_ACTIONS_JOB_URL = re.compile(r"^https://github\.com/[^/]+/[^/]+/actions/runs/(\d+)/job/(\d+)(?:[/?#].*)?$")
 
 
 def _exit_code_for(result: dict[str, object]) -> int:
@@ -380,12 +384,64 @@ def view_current_pr(repo_root: Path) -> dict[str, object]:
         return failure(action, error.message, {"code": error.code, "details": error.details})
 
 
-def _failed_rollup(data: dict[str, Any]) -> bool:
+def _failed_rollup_checks(data: dict[str, Any]) -> list[dict[str, Any]]:
+    failed_checks = []
     for check in data.get("statusCheckRollup") or []:
-        conclusion = _normalized_rollup_value(check.get("conclusion")) if isinstance(check, dict) else None
+        if not isinstance(check, dict):
+            continue
+        conclusion = _normalized_rollup_value(check.get("conclusion"))
         if conclusion in FAILED_ROLLUP_CONCLUSIONS:
-            return True
-    return False
+            failed_checks.append(check)
+    return failed_checks
+
+
+def _bounded_log_excerpt(log_text: str) -> str:
+    lines = log_text.replace("\x00", "").splitlines()
+    excerpt = "\n".join(lines[-MAX_FAILED_CHECK_LOG_LINES:])
+    if len(excerpt) > MAX_FAILED_CHECK_LOG_CHARS:
+        return excerpt[-MAX_FAILED_CHECK_LOG_CHARS:]
+    return excerpt
+
+
+def _failed_check_metadata(check: dict[str, Any]) -> dict[str, object]:
+    fields = ("name", "workflowName", "status", "conclusion", "detailsUrl", "startedAt", "completedAt")
+    return {field: check[field] for field in fields if field in check}
+
+
+def _actions_run_job_ids(details_url: Any) -> tuple[str, str] | None:
+    if not isinstance(details_url, str):
+        return None
+    match = GITHUB_ACTIONS_JOB_URL.fullmatch(details_url)
+    if match is None:
+        return None
+    return match.group(1), match.group(2)
+
+
+def _failed_check_evidence(check: dict[str, Any], repo: Path) -> dict[str, object]:
+    evidence = _failed_check_metadata(check)
+    details_url = check.get("detailsUrl")
+    run_job_ids = _actions_run_job_ids(details_url)
+    if run_job_ids is None:
+        if details_url:
+            evidence["log_unavailable"] = "detailsUrl did not contain a parseable GitHub Actions run/job id"
+        else:
+            evidence["log_unavailable"] = "detailsUrl was missing"
+        return evidence
+
+    run_id, job_id = run_job_ids
+    evidence["run_id"] = run_id
+    evidence["job_id"] = job_id
+    log_result = run_command(["gh", "run", "view", run_id, "--job", job_id, "--log"], repo, check=False)
+    if log_result.returncode == 0:
+        evidence["log_excerpt"] = _bounded_log_excerpt(log_result.stdout)
+        return evidence
+    evidence["log_unavailable"] = "gh run view --job failed"
+    evidence["log_command"] = {"args": log_result.args, "returncode": log_result.returncode, "stderr": log_result.stderr.strip()}
+    return evidence
+
+
+def _failed_rollup_evidence(data: dict[str, Any], repo: Path) -> list[dict[str, object]]:
+    return [_failed_check_evidence(check, repo) for check in _failed_rollup_checks(data)]
 
 
 def _normalized_rollup_value(value: Any) -> Any:
@@ -447,8 +503,9 @@ def poll_merge_queue(repo_root: Path, branch: str, timeout_seconds: int, interva
                 return success(action, "Pull request has merged", {"branch": safe, "merged_at": data.get("mergedAt"), "attempts": attempts})
             if data.get("state") == "CLOSED":
                 return human_decision(action, "Pull request closed without mergedAt", {"branch": safe, "attempts": attempts})
-            if _failed_rollup(data):
-                return human_decision(action, "Required merge queue check failed", {"branch": safe, "attempts": attempts})
+            failed_checks = _failed_rollup_evidence(data, repo)
+            if failed_checks:
+                return human_decision(action, "Required merge queue check failed", {"branch": safe, "attempts": attempts, "failed_checks": failed_checks})
             merge_state = data.get("mergeStateStatus")
             normalized_merge_state = merge_state.lower() if isinstance(merge_state, str) else merge_state
             mergeable = data.get("mergeable")
