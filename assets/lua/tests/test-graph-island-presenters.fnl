@@ -191,7 +191,7 @@
     (assert (string.find (tostring err) "missing graph island presenter kind: missing-kind" 1 true)
             "missing presenter error should include island kind"))
 
-(fn island-host-pins-and-unpins-island-members-through-host-callbacks []
+(fn island-host-positions-ordered-list-members-without-default-pins []
     (local backing-host (make-host {:positions {"item:a" (glm.vec3 1 2 3)}}))
     (local host (IslandHost.GraphViewIslandHost backing-host))
     (host:reconcile-island {:id "island-1"
@@ -200,37 +200,40 @@
                             :state {:spacing 5}})
     (assert (= (length backing-host.set-positions) 2)
             "reconcile should set positions for island members")
-    (assert (= (length backing-host.pinned) 2)
-            "reconcile should pin island members")
-    (assert (= (. backing-host.pinned 1 :key) "item:a") "first pin should be first member")
-    (assert (= (. backing-host.pinned 1 :pinned?) true) "pin callback should set true")
+    (assert (= (length backing-host.pinned) 0)
+            "ordered-list reconcile should not pin island members by default")
     (host:reconcile-island {:id "island-1"
                             :kind "ordered-list"
                             :members ["item:b"]
                             :state {:spacing 5}})
-    (assert (= (length backing-host.pinned) 4)
-            "second reconcile should unpin removed member and keep remaining pinned")
-    (assert (= (. backing-host.pinned 3 :key) "item:a") "removed member should be unpinned")
-    (assert (= (. backing-host.pinned 3 :pinned?) false) "removed member should be unpinned with false")
-    (assert (= (. backing-host.pinned 4 :key) "item:b") "remaining member should be re-pinned")
-    (assert (= (. backing-host.pinned 4 :pinned?) true) "remaining member should stay pinned")
+    (assert (= (length backing-host.pinned) 0)
+            "ordered-list membership changes should not create default pin events")
     (host:drop-island "island-1")
-    (assert (= (. backing-host.pinned 5 :key) "item:b") "drop-island should unpin tracked member")
-    (assert (= (. backing-host.pinned 5 :pinned?) false) "drop-island should unpin with false"))
+    (assert (= (length backing-host.pinned) 0)
+            "dropping an unpinned ordered-list island should not unpin members"))
+
+(fn explicit-pin-presenter []
+    {:kind "explicit-pin"
+     :apply (fn [island host]
+              (assert island.members "explicit-pin presenter requires members")
+              (each [_ key (ipairs island.members)]
+                  (host:set-member-pinned island.id key true)))})
 
 (fn island-host-keeps-shared-members-pinned-until-last-island-drops []
-    (local backing-host (make-host {:positions {"shared" (glm.vec3 1 2 3)}}))
+    (local presenter (explicit-pin-presenter))
+    (local backing-host (make-host {:presenters (presenters-for-fixture presenter)
+                                    :positions {"shared" (glm.vec3 1 2 3)}}))
     (local host (IslandHost.GraphViewIslandHost backing-host))
     (host:reconcile-island {:id "island-1"
-                            :kind "ordered-list"
+                            :kind "explicit-pin"
                             :members ["shared" "only:a"]
                             :state {:spacing 5}})
     (host:reconcile-island {:id "island-2"
-                            :kind "ordered-list"
+                            :kind "explicit-pin"
                             :members ["shared" "only:b"]
                             :state {:spacing 5}})
     (host:reconcile-island {:id "island-1"
-                            :kind "ordered-list"
+                            :kind "explicit-pin"
                             :members ["only:a"]
                             :state {:spacing 5}})
     (assert (= (count-pin-events backing-host.pinned "shared" false) 0)
@@ -259,8 +262,8 @@
                      :fn island-host-returns-nil-when-presenter-has-no-member-drag-hook})
 (table.insert tests {:name "IslandHost errors on missing presenter kind"
                       :fn island-host-errors-on-missing-presenter-kind})
-(table.insert tests {:name "IslandHost pins and unpins island members through host callbacks"
-                     :fn island-host-pins-and-unpins-island-members-through-host-callbacks})
+(table.insert tests {:name "IslandHost positions ordered-list members without default pins"
+                     :fn island-host-positions-ordered-list-members-without-default-pins})
 (table.insert tests {:name "IslandHost keeps shared members pinned until last island drops"
                      :fn island-host-keeps-shared-members-pinned-until-last-island-drops})
 
