@@ -39,9 +39,9 @@ Running, adding, or debugging Space tests, E2E snapshots, remote-control debuggi
 
 ## Windows CI Local Reproduction
 
-For non-infrastructure Windows CI failures, use the guarded wrapper or dispatch
-`windows-ci-reproducer`; do not run ad-hoc setup commands. The wrapper commands
-are:
+For non-infrastructure Windows CI failures, agents must dispatch `windows-ci-reproducer`;
+do not run ad-hoc setup commands or invoke the wrapper
+directly. The capability's underlying/manual wrapper command sequence is:
 
 ```bash
 python3 scripts/opencode_windows_ci_repro.py preflight --repo-root .

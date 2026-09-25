@@ -118,7 +118,7 @@ The throwaway-branch trigger change is temporary and must not survive the final 
       guarded `setup-host` once through `windows-ci-reproducer`, then rerun
       reproduction; do not use raw setup commands
     - identify the first real blocker
-    - dispatch the **implementer** subagent with a focused fix instruction for any required file change, including workflow files, source, tests, config, package/build files, or scripts. After implementer commits, verify (`git log --oneline -1`), then push and go to step 4
+    - dispatch the **implementer** subagent with a focused fix instruction for any required file change, including workflow files, source, tests, config, package/build files, or scripts. After implementer commits, verify (`git log --oneline -1`). For Windows non-infrastructure failures, rerun `windows-ci-reproducer` before pushing so the fixed commit has local Linux cross-build + Wine evidence. Only push when reproduction passes; if reproduction cannot run safely, report HUMAN_DECISION_REQUIRED with wrapper evidence. For other failures, push and go to step 4.
 6. If it passes:
    - proceed to the simplification pass (below)
 

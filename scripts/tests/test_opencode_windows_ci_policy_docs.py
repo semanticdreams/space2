@@ -40,3 +40,17 @@ def test_runtime_and_dev_docs_name_wrapper_commands():
         assert "preflight --repo-root ." in text
         assert "setup-host --repo-root ." in text
         assert "reproduce --repo-root ." in text
+
+
+def test_runtime_skill_requires_capability_for_agent_windows_ci_failures():
+    text = read(".opencode/skills/space-testing-runtime/SKILL.md")
+    assert "dispatch `windows-ci-reproducer`" in text
+    assert "use the guarded wrapper or dispatch" not in text
+
+
+def test_github_workflow_debug_reruns_reproducer_after_fix_before_push():
+    text = read(".opencode/skills/github-workflow-debug/SKILL.md")
+    assert "After implementer commits" in text
+    assert "rerun `windows-ci-reproducer` before pushing" in text
+    assert "Only push when reproduction passes" in text
+    assert "HUMAN_DECISION_REQUIRED with wrapper evidence" in text
