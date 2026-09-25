@@ -92,6 +92,10 @@ SPACE_ASSETS_PATH=/path/to/mygame/assets space -m main
 
 No runtime lookup redesign is part of app distribution. These commands use the existing Space module and asset lookup behavior.
 
+## Hostable runtime apps
+
+Independent Space apps can expose the same `create(host) -> runtime` composition used by Space IDE hosts. See [Hosted Runtime Apps](hosted-runtime-apps.md) for host capabilities, runtime facets, and ownership rules.
+
 ## Per-format assembly
 
 - **DEB/RPM:** app-only packages. They install app assets under `/usr/share/<app-id>/assets`, install a wrapper in `/usr/bin/<app-id>`, launch the system `/usr/bin/space -m <entrypoint>`, and declare a dependency on the `space` package.
