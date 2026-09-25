@@ -33,7 +33,12 @@
                 (assert record.members "GraphViewIslandHost aggregate layout record requires members")
                 (assert record.position "GraphViewIslandHost aggregate layout record requires position")
                 (assert (= (type record.member-placements) :function)
-                        "GraphViewIslandHost aggregate layout record requires member-placements function"))
+                        "GraphViewIslandHost aggregate layout record requires member-placements function")
+                (when record.force-position
+                    (assert (= (type record.body-position-for-force-position) :function)
+                            "GraphViewIslandHost aggregate layout record with force-position requires body-position-for-force-position function"))
+                (when (and record.body-position-for-force-position (not record.force-position))
+                    (error "GraphViewIslandHost aggregate layout record with body-position-for-force-position requires force-position")))
             record)
         nil))
 
