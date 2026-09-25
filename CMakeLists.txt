@@ -160,6 +160,7 @@ function(space_suppress_target_warnings target_name)
 endfunction()
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libraries")
+add_subdirectory(external/date)
 add_subdirectory(external/lua)
 
 add_subdirectory(external/sqlite)
@@ -395,6 +396,7 @@ if(UNIX AND NOT APPLE AND SPACE_REQUIRE_NATIVE_LINUX_INPUT)
     endif()
 endif()
 if(SPACE_SUPPRESS_THIRD_PARTY_WARNINGS)
+    space_suppress_target_warnings(date_tz)
     space_suppress_target_warnings(lua)
     space_suppress_target_warnings(lua-header)
     space_suppress_target_warnings(sqlite3)
@@ -536,6 +538,7 @@ target_link_libraries(${PROJECT_NAME}_lib
     efsw
     Boost::headers
     space_yojimbo
+    date::date-tz
 )
 if(TARGET sentry::sentry)
     target_link_libraries(${PROJECT_NAME}_lib sentry::sentry)
