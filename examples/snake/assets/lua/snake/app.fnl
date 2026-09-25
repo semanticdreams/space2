@@ -118,11 +118,20 @@
   out)
 
 (fn register-with [service facet]
-  (local register service.register)
-  (when (not (= (type register) :function))
-    (error "[snake] host capability missing register method"))
-  (register service facet)
+  (service:register facet)
   facet)
+
+(fn require-method [service capability method]
+  (local value (. service method))
+  (when (not (= (type value) :function))
+    (error (.. "[snake] host capability " (tostring capability)
+               " missing method: " (tostring method))))
+  value)
+
+(fn validate-registry [service capability]
+  (require-method service capability :register)
+  (require-method service capability :unregister)
+  service)
 
 (fn unregister-from [service facet]
   (when (and service (= (type service.unregister) :function))
@@ -132,8 +141,15 @@
   (local scheduler (Capabilities.require host :scheduler))
   (local input (Capabilities.require host :input))
   (local inspectors (Capabilities.require host :inspectors))
+  (local lifecycle (Capabilities.require host :lifecycle))
   (local viewport (if (and host host.viewport) host.viewport startup-viewport))
   (local surfaces (and host host.surfaces))
+  (validate-registry scheduler :scheduler)
+  (validate-registry input :input)
+  (validate-registry inspectors :inspectors)
+  (require-method lifecycle :lifecycle :quit)
+  (when surfaces
+    (validate-registry surfaces :surfaces))
   (local game (Snake.create {}))
   (local surface (OrthographicUiSurface.create {:viewport viewport}))
   (local screen (surface:build (SnakeView.SnakeScreen {:game game})))
@@ -152,8 +168,7 @@
     (local direction (direction-for-key key))
     (if (quit-key? key)
         (do
-          (when (and host.lifecycle (= (type host.lifecycle.quit) :function))
-            (host.lifecycle:quit))
+          (lifecycle:quit)
           true)
         (and game.game-over? (restart-key? key))
         (do

@@ -179,6 +179,11 @@
     (when (and options.renderers options.renderers.on-viewport-changed)
       (options.renderers:on-viewport-changed viewport)))
 
+  (fn quit [_self]
+    (if (and engine (= (type engine.quit) :function))
+        (engine:quit)
+        (host-error "lifecycle:quit requires engine quit method")))
+
   (when (and engine engine.events)
     (connect-signal connections engine.events.updated
                     (fn [delta-ms]
@@ -209,7 +214,8 @@
    :commands commands
    :assets (make-assets options)
    :logging (make-logging)
-   :lifecycle {:disconnect (fn [_self]
+   :lifecycle {:quit quit
+               :disconnect (fn [_self]
                              (disconnect-all connections))}})
 
 (fn load-module [opts]

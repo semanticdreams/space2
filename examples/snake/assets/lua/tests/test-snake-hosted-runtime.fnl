@@ -1,5 +1,6 @@
 (local Runner (require :tests/runner))
 (local RuntimeController (require :app-host.runtime-controller))
+(local StandaloneRuntime (require :standalone-app-runtime))
 (local SnakeMain (require :main))
 (local tests [])
 
@@ -12,10 +13,13 @@
     (table.insert out item))
   out)
 
-(fn make-registry []
+(fn make-registry [opts]
+  (local options (if opts opts {}))
   (local items [])
   {:items items
    :register (fn [_self item]
+               (when options.on-register
+                 (options.on-register item))
                (table.insert items item)
                item)
    :unregister (fn [_self item]
@@ -77,13 +81,41 @@
                    (cb handler payload)))
                true)})
 
-(fn fake-host []
+(fn fake-host [opts]
+  (local options (if opts opts {}))
   {:viewport {:x 0 :y 0 :width 800 :height 600}
    :scheduler (make-scheduler)
    :input (make-input)
    :inspectors (make-registry)
    :commands (make-registry)
-   :surfaces (make-registry)})
+   :surfaces (make-registry {:on-register options.on-surface-register})
+   :lifecycle {:quit (fn [_self]
+                       (set options.quit-count (+ (or options.quit-count 0) 1)))}})
+
+(fn fake-signal []
+  (local signal {:handlers []})
+  (set signal.connect
+       (fn [self handler]
+         (table.insert self.handlers handler)
+         handler))
+  (set signal.disconnect
+       (fn [self handler _quiet]
+         (for [i (# self.handlers) 1 -1]
+           (when (= (. self.handlers i) handler)
+             (table.remove self.handlers i)))
+         true))
+  (set signal.emit
+       (fn [self payload]
+         (each [_ handler (ipairs self.handlers)]
+           (handler payload))))
+  signal)
+
+(fn make-quit-engine []
+  (local state {:quit-count 0})
+  (local engine {:events {:key-down (fake-signal)}})
+  (set engine.quit (fn [_self]
+                     (set state.quit-count (+ state.quit-count 1))))
+  (values engine state))
 
 (fn assert-one-target [controller label]
   (local targets (controller:render-targets))
@@ -135,18 +167,61 @@
   (assert (> after.head.x before.head.x) "unpaused scheduler should advance Snake movement")
   (controller:drop))
 
-(fn test-drop-is-idempotent-and-removes-targets []
-  (local host (fake-host))
+(fn test-quit-key-uses-standalone-host-lifecycle []
+  (local (engine state) (make-quit-engine))
+  (local host (StandaloneRuntime.create-host {:engine engine
+                                             :viewport {:x 0 :y 0 :width 800 :height 600}}))
+  (local controller (RuntimeController.create {:module SnakeMain :host host}))
+  (host.input:dispatch :key-down {:key 113})
+  (assert (= state.quit-count 1) "Q key should quit through standalone host lifecycle")
+  (host.input:dispatch :key-down {:key 27})
+  (assert (= state.quit-count 2) "Escape key should quit through standalone host lifecycle")
+  (controller:drop)
+  (host.lifecycle:disconnect))
+
+(fn test-invalid-host-leaves-no-partial-registrations []
+  (local host {:viewport {:x 0 :y 0 :width 800 :height 600}
+               :scheduler (make-scheduler)
+               :input {}
+               :inspectors (make-registry)
+               :surfaces (make-registry)
+               :lifecycle {:quit (fn [_self] nil)}})
+  (local (ok err) (pcall SnakeMain.create host))
+  (assert (not ok) "invalid host should fail composition")
+  (assert (string.find (tostring err) "input" 1 true) "invalid host error should name input capability")
+  (assert (= (# host.scheduler.registrations) 0) "invalid host should not retain scheduler registration"))
+
+(fn test-drop-is-idempotent-and-drops-owned-surface-once []
+  (var registered-surface nil)
+  (local host (fake-host {:on-surface-register (fn [surface]
+                                                (set registered-surface surface))}))
   (local controller (RuntimeController.create {:module SnakeMain :host host}))
   (assert-one-target controller "Snake runtime before drop")
+  (assert (= (# host.surfaces.items) 1) "Snake surface should register with host surfaces")
+  (local screen registered-surface.entity)
+  (var surface-drop-count 0)
+  (var screen-drop-count 0)
+  (local original-surface-drop registered-surface.drop)
+  (local original-screen-drop screen.drop)
+  (set registered-surface.drop (fn [self]
+                                 (set surface-drop-count (+ surface-drop-count 1))
+                                 (original-surface-drop self)))
+  (set screen.drop (fn [self]
+                     (set screen-drop-count (+ screen-drop-count 1))
+                     (original-screen-drop self)))
   (controller:drop)
   (controller:drop)
-  (assert (= (# (controller:render-targets)) 0) "dropped Snake runtime should not expose stale render targets"))
+  (assert (= (# (controller:render-targets)) 0) "dropped Snake runtime should not expose stale render targets")
+  (assert (= (# host.surfaces.items) 0) "drop should unregister Snake surface from host surfaces")
+  (assert (= surface-drop-count 1) "drop should drop Snake-owned surface once")
+  (assert (= screen-drop-count 1) "drop should drop Snake-owned screen widget once"))
 
 (add-test "snake create returns runtime facets" test-snake-create-returns-runtime-facets)
 (add-test "controller mounts snake runtime" test-controller-mounts-snake-runtime)
 (add-test "pause blocks simulation but keeps presentation" test-pause-blocks-simulation-keeps-presentation)
-(add-test "drop is idempotent and removes targets" test-drop-is-idempotent-and-removes-targets)
+(add-test "quit key uses standalone host lifecycle" test-quit-key-uses-standalone-host-lifecycle)
+(add-test "invalid host leaves no partial registrations" test-invalid-host-leaves-no-partial-registrations)
+(add-test "drop is idempotent and drops owned surface once" test-drop-is-idempotent-and-drops-owned-surface-once)
 
 (fn main []
   (Runner.run-tests {:name "snake-hosted-runtime" :tests tests}))
