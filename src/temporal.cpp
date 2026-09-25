@@ -23,6 +23,12 @@ constexpr std::int64_t nanos_per_microsecond = 1000LL;
 constexpr std::int64_t seconds_per_day = 86400LL;
 constexpr std::int64_t nanos_per_day = seconds_per_day * nanos_per_second;
 
+struct CivilNanoseconds
+{
+    std::int64_t days_since_epoch;
+    std::int64_t time_nanoseconds;
+};
+
 std::int64_t checked_add(std::int64_t left, std::int64_t right)
 {
     if ((right > 0 && left > std::numeric_limits<std::int64_t>::max() - right) ||
@@ -99,17 +105,6 @@ date::year_month_day validate_date_fields(int year, int month, int day)
     return ymd;
 }
 
-std::int64_t checked_i128_to_i64(__int128 value, const char* message)
-{
-    if (value > static_cast<__int128>(std::numeric_limits<std::int64_t>::max()) ||
-        value < static_cast<__int128>(std::numeric_limits<std::int64_t>::min()))
-    {
-        throw std::invalid_argument(message);
-    }
-
-    return static_cast<std::int64_t>(value);
-}
-
 int parse_int(const std::string& text)
 {
     return std::stoi(text);
@@ -131,29 +126,60 @@ int parse_fraction(const std::string& fraction)
     return parse_int(padded);
 }
 
-__int128 nanos_from_fields(int year,
-                           int month,
-                           int day,
-                           int hour,
-                           int minute,
-                           int second,
-                           int nanosecond)
+std::int64_t nanos_from_day_time(std::int64_t days_since_epoch,
+                                 std::int64_t time_nanoseconds,
+                                 const char* message)
+{
+    const std::int64_t max = std::numeric_limits<std::int64_t>::max();
+    const std::int64_t min = std::numeric_limits<std::int64_t>::min();
+    const std::int64_t max_days = max / nanos_per_day;
+    const std::int64_t max_time = max % nanos_per_day;
+    std::int64_t min_days = min / nanos_per_day;
+    std::int64_t min_time = min % nanos_per_day;
+    if (min_time < 0)
+    {
+        --min_days;
+        min_time = checked_add(min_time, nanos_per_day);
+    }
+
+    if (days_since_epoch > max_days ||
+        (days_since_epoch == max_days && time_nanoseconds > max_time) ||
+        days_since_epoch < min_days ||
+        (days_since_epoch == min_days && time_nanoseconds < min_time))
+    {
+        throw std::invalid_argument(message);
+    }
+
+    if (days_since_epoch == min_days)
+    {
+        return checked_add(min, checked_subtract(time_nanoseconds, min_time));
+    }
+
+    return checked_add(checked_multiply(days_since_epoch, nanos_per_day), time_nanoseconds);
+}
+
+CivilNanoseconds nanos_from_fields(int year,
+                                   int month,
+                                   int day,
+                                   int hour,
+                                   int minute,
+                                   int second,
+                                   int nanosecond)
 {
     const auto ymd = validate_date_fields(year, month, day);
     validate_time_fields(hour, minute, second, nanosecond);
     const auto days_since_epoch = date::local_days{ymd}.time_since_epoch().count();
-    const __int128 day_nanos = static_cast<__int128>(days_since_epoch) * nanos_per_day;
-    const __int128 time_nanos = static_cast<__int128>(hour) * 3600 * nanos_per_second +
-                                static_cast<__int128>(minute) * 60 * nanos_per_second +
-                                static_cast<__int128>(second) * nanos_per_second +
-                                nanosecond;
-    return day_nanos + time_nanos;
+    const std::int64_t hour_nanos = checked_multiply(hour, 3600LL * nanos_per_second);
+    const std::int64_t minute_nanos = checked_multiply(minute, 60LL * nanos_per_second);
+    const std::int64_t second_nanos = checked_multiply(second, nanos_per_second);
+    const std::int64_t time_nanos = checked_add(
+        checked_add(hour_nanos, minute_nanos), checked_add(second_nanos, nanosecond));
+    return CivilNanoseconds{days_since_epoch, time_nanos};
 }
 
-LocalTime checked_local_from_nanos(__int128 nanoseconds)
+LocalTime checked_local_from_nanos(std::int64_t nanoseconds)
 {
-    return LocalTime{Nanoseconds{checked_i128_to_i64(
-        nanoseconds, "temporal local date-time outside nanosecond range")}};
+    return LocalTime{Nanoseconds{nanoseconds}};
 }
 
 LocalTime local_from_fields(int year,
@@ -164,8 +190,36 @@ LocalTime local_from_fields(int year,
                             int second,
                             int nanosecond)
 {
-    return checked_local_from_nanos(
-        nanos_from_fields(year, month, day, hour, minute, second, nanosecond));
+    const auto civil = nanos_from_fields(year, month, day, hour, minute, second, nanosecond);
+    return checked_local_from_nanos(nanos_from_day_time(
+        civil.days_since_epoch, civil.time_nanoseconds, "temporal local date-time outside nanosecond range"));
+}
+
+SysTime checked_sys_from_civil_with_offset(const CivilNanoseconds& civil,
+                                           std::int64_t offset_seconds)
+{
+    const std::int64_t offset_nanoseconds = checked_multiply(offset_seconds, nanos_per_second);
+    const std::int64_t adjusted_time = checked_subtract(civil.time_nanoseconds, offset_nanoseconds);
+    std::int64_t day_delta = adjusted_time / nanos_per_day;
+    std::int64_t time_nanoseconds = adjusted_time % nanos_per_day;
+    if (time_nanoseconds < 0)
+    {
+        --day_delta;
+        time_nanoseconds = checked_add(time_nanoseconds, nanos_per_day);
+    }
+
+    std::int64_t days_since_epoch = 0;
+    try
+    {
+        days_since_epoch = checked_add(civil.days_since_epoch, day_delta);
+    }
+    catch (const std::overflow_error&)
+    {
+        throw std::invalid_argument("temporal instant outside nanosecond range");
+    }
+
+    return SysTime{Nanoseconds{nanos_from_day_time(
+        days_since_epoch, time_nanoseconds, "temporal instant outside nanosecond range")}};
 }
 
 CivilFields fields_from_local(LocalTime value)
@@ -215,12 +269,6 @@ std::string format_civil(const CivilFields& fields)
 SysTime checked_sys_from_nanos(std::int64_t nanos)
 {
     return SysTime{Nanoseconds{nanos}};
-}
-
-SysTime checked_sys_from_nanos(__int128 nanos)
-{
-    return SysTime{Nanoseconds{checked_i128_to_i64(
-        nanos, "temporal instant outside nanosecond range")}};
 }
 
 SysTime checked_sys_from_seconds(std::int64_t seconds)
@@ -371,8 +419,7 @@ Instant Instant::parse(const std::string& text)
         offset_seconds = sign * ((hours * 60 + minutes) * 60);
     }
 
-    return Instant{checked_sys_from_nanos(
-        local_nanos - static_cast<__int128>(offset_seconds) * nanos_per_second)};
+    return Instant{checked_sys_from_civil_with_offset(local_nanos, offset_seconds)};
 }
 
 Instant Instant::from_unix(std::int64_t epoch_seconds, std::int32_t nanosecond)
