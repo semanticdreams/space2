@@ -22,6 +22,27 @@
                          (for [i (# children) 1 -1]
                            (when (= (. children i) child)
                              (table.remove children i)))
+                          true)})
+
+(fn make-builder-hud []
+  (local children [])
+  {:children children
+   :add-panel-child (fn [self child]
+                      (local widget (child.builder {} {}))
+                      (assert widget.layout "HUD builder should return a widget with layout")
+                      (set self.descriptor child)
+                      (table.insert children widget)
+                      widget)
+   :remove-panel-child (fn [_self child]
+                         (for [i (# children) 1 -1]
+                           (when (= (. children i) child)
+                             (table.remove children i)))
+                         true)})
+
+(fn make-throwing-hud []
+  {:add-panel-child (fn [_self _child]
+                      (error "hud add failed"))
+   :remove-panel-child (fn [_self _child]
                          true)})
 
 (fn make-fake-mount []
@@ -71,6 +92,18 @@
   (assert (= (. hud.children 1 :mount) fake-mount) "HUD child should describe mounted app")
   (fixture:restore))
 
+(fn test-builder_path_returns_hud_widget_with_layout []
+  (local hud (make-builder-hud))
+  (local fake-mount (make-fake-mount))
+  (local fixture (install-panel-module fake-mount))
+  (local session (fixture.WorkspacePanel.open (panel-opts hud)))
+  (assert (= (# hud.children) 1) "HUD builder path should add one built child")
+  (assert (= session.mount fake-mount) "session should expose workspace mount")
+  (assert (= (. hud.descriptor :mount) fake-mount) "descriptor should retain mount metadata")
+  (assert (. hud.children 1 :layout) "built HUD child should include layout")
+  (session:close)
+  (fixture:restore))
+
 (fn test-controls_delegate_to_controller []
   (local hud (make-fake-hud))
   (local fake-mount (make-fake-mount))
@@ -96,6 +129,16 @@
   (assert (= fake-mount.drop-count 1) "close should drop mount exactly once")
   (fixture:restore))
 
+(fn test-hud_add_failure_drops_mount_once []
+  (local hud (make-throwing-hud))
+  (local fake-mount (make-fake-mount))
+  (local fixture (install-panel-module fake-mount))
+  (fn attempt-open []
+    (fixture.WorkspacePanel.open (panel-opts hud)))
+  (assert-error-contains attempt-open "hud add failed")
+  (assert (= fake-mount.drop-count 1) "HUD add failure should drop mount exactly once")
+  (fixture:restore))
+
 (fn open-without-hud [WorkspacePanel]
   (WorkspacePanel.open {:runtime {} :app {} :module {:create create-empty-runtime}}))
 
@@ -114,8 +157,10 @@
     (set app.hud saved-hud)))
 
 (add-test "open adds exactly one HUD panel child" test-open-adds-one-hud-child)
+(add-test "builder path returns HUD widget with layout" test-builder_path_returns_hud_widget_with_layout)
 (add-test "controls delegate to controller" test-controls_delegate_to_controller)
 (add-test "close removes child and drops mount once" test-close_removes_child_and_drops_mount_once)
+(add-test "HUD add failure drops mount once" test-hud_add_failure_drops_mount_once)
 (add-test "missing HUD fails loudly" test-missing_hud_fails_loudly)
 
 (fn main []

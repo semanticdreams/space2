@@ -1,4 +1,6 @@
 (local WorkspaceMount (require :app-host.workspace-mount))
+(local glm (require :glm))
+(local {: Layout} (require :layout))
 
 (fn panel-error [message]
   (error (.. "[app-host.workspace-panel] " message)))
@@ -15,6 +17,22 @@
   (when (not (= (type hud.remove-panel-child) :function))
     (panel-error "HUD requires remove-panel-child"))
   hud)
+
+(fn measure-zero [self]
+  (set self.measure (glm.vec3 0 0 0)))
+
+(fn layout-noop [_self]
+  nil)
+
+(fn make-panel-widget [descriptor]
+  (local layout
+    (Layout {:name "hosted-app-workspace-panel"
+             :measurer measure-zero
+             :layouter layout-noop}))
+  {:layout layout
+   :drop (fn [self]
+           (self.layout:drop))
+   :hosted-app-workspace-panel descriptor})
 
 (fn open [opts]
   (when (= opts nil)
@@ -46,7 +64,13 @@
     nil)
 
   (fn build-panel [_ctx _builder-options]
-    descriptor)
+    (make-panel-widget descriptor))
+
+  (fn add-panel-descriptor []
+    (hud:add-panel-child descriptor))
+
+  (fn drop-mounted-app []
+    (mount:drop))
 
   (set session {:mount mount
                 :pause pause
@@ -58,7 +82,12 @@
                    :controller controller
                    :session session
                    :builder build-panel})
-  (set hud-child (hud:add-panel-child descriptor))
+  (local (child-ok? child-or-err) (pcall add-panel-descriptor))
+  (if child-ok?
+      (set hud-child child-or-err)
+      (do
+        (pcall drop-mounted-app)
+        (error child-or-err)))
   session)
 
 {:open open}
