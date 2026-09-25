@@ -478,6 +478,28 @@
     (assert-vec3 (view:get-position second-node) runtime-b
                  "unrelated drag-end reconciliation should keep second member at runtime island body"))
 
+(fn check-force-moved-island-flushes-body-origin-not-force-center [fixture]
+    (local map fixture.map) (local view fixture.view) (local movables fixture.movables)
+    (local list-node (map:lookup fixture.list-key))
+    (local item-node (map:lookup fixture.item-key))
+    (local second-node (map:lookup fixture.second-item-key))
+    (local list-entry (. movables.by-node list-node))
+    (assert list-entry "list node should be movable")
+    (list-entry.target:set-position (glm.vec3 48 0 0))
+    (list-node:expand-items-as-island)
+    (for [_ 1 8] (view:update 0.016))
+    (local first-runtime (view:get-position item-node))
+    (local second-runtime (view:get-position second-node))
+    (view:capture-state)
+    (local island (map:get-island "ordered-list:list"))
+    (assert island "captured map should still contain ordered-list island")
+    (assert-close (. island.state.position 1) first-runtime.x "flushed island state x should be first-member/body origin x")
+    (assert-close (. island.state.position 2) first-runtime.y "flushed island state y should be first-member/body origin y")
+    (assert-close (. island.state.position 3) first-runtime.z "flushed island state z should be first-member/body origin z")
+    (local visual-center-y (* (+ first-runtime.y second-runtime.y) 0.5))
+    (assert (> (math.abs (- (. island.state.position 2) visual-center-y)) 0.001)
+            "flushed island state should not store ordered-list visual center"))
+
 (fn check-membership-refresh-preserves-runtime-island-body [fixture]
     (local map fixture.map)
     (local view fixture.view)
@@ -1105,40 +1127,27 @@
     (check-ordered-list-aggregate-record-exposes-center-force-anchor))
 
 (fn graph-view-list-created-island-moves-as-force-layout-unit []
-    (with-list-fixture
-        check-list-created-island-moves-as-force-layout-unit))
+    (with-list-fixture check-list-created-island-moves-as-force-layout-unit))
 
 (fn graph-view-force-moved-island-keeps-runtime-position-after-unrelated-drag-end []
-    (with-list-fixture
-        check-force-moved-island-keeps-runtime-position-after-unrelated-drag-end))
-
+    (with-list-fixture check-force-moved-island-keeps-runtime-position-after-unrelated-drag-end))
+(fn graph-view-force-moved-island-flushes-body-origin-not-force-center []
+    (with-list-fixture check-force-moved-island-flushes-body-origin-not-force-center))
 (fn graph-view-membership-refresh-preserves-runtime-island-body []
-    (with-list-fixture
-        check-membership-refresh-preserves-runtime-island-body))
-
+    (with-list-fixture check-membership-refresh-preserves-runtime-island-body))
 (fn graph-view-expanded-member-stays-pinned-through-island-position-flush []
-    (with-list-fixture
-        check-expanded-member-stays-pinned-through-island-position-flush))
-
+    (with-list-fixture check-expanded-member-stays-pinned-through-island-position-flush))
 (fn graph-view-collapsed-expanded-member-rejoins-aggregate-placement []
-    (with-list-fixture
-        check-collapsed-expanded-member-rejoins-aggregate-placement))
-
+    (with-list-fixture check-collapsed-expanded-member-rejoins-aggregate-placement))
 (fn graph-view-replacing-expanded-island-member-resyncs-aggregate-record []
-    (with-list-fixture
-        check-replacing-expanded-island-member-resyncs-aggregate-record))
-
+    (with-list-fixture check-replacing-expanded-island-member-resyncs-aggregate-record))
 (fn graph-view-adding-node-after-island-sync-keeps-public-indices-unique []
-    (with-list-fixture
-        check-adding-node-after-island-sync-keeps-public-indices-unique))
-
+    (with-list-fixture check-adding-node-after-island-sync-keeps-public-indices-unique))
 (fn graph-view-replacing-node-after-island-sync-refreshes-layout-participant []
-    (with-list-fixture
-        check-replacing-node-after-island-sync-refreshes-layout-participant))
+    (with-list-fixture check-replacing-node-after-island-sync-refreshes-layout-participant))
 
 (fn graph-view-capture-fails-visibly-when-moved-island-cannot-flush-position []
-    (with-list-fixture
-        check-capture-fails-visibly-when-moved-island-cannot-flush-position))
+    (with-list-fixture check-capture-fails-visibly-when-moved-island-cannot-flush-position))
 
 (fn graph-view-restored-old-format-list-island-uses-member-fallback-after-drag-end []
     (with-list-fixture
@@ -1155,12 +1164,10 @@
         check-restored-old-format-list-island-uses-member-fallback-after-drag-end))
 
 (fn graph-view-alt-dragging-second-island-member-moves-whole-island-on-drag-end []
-    (with-list-fixture
-        check-alt-dragging-second-island-member-moves-whole-island-on-drag-end))
+    (with-list-fixture check-alt-dragging-second-island-member-moves-whole-island-on-drag-end))
 
 (fn graph-view-alt-drag-end-clears-state-before-visible-update-failure []
-    (with-list-fixture
-        check-alt-drag-end-clears-state-before-visible-update-failure))
+    (with-list-fixture check-alt-drag-end-clears-state-before-visible-update-failure))
 
 (fn graph-view-layout-converts-force-center-to-island-body-position []
     (check-graph-view-layout-converts-force-center-to-island-body-position))
@@ -1199,22 +1206,15 @@
                       :fn graph-view-list-created-island-preserves-body-position-after-unrelated-drag-end})
 (table.insert tests {:name "GraphView ordered-list aggregate record exposes center force anchor"
                      :fn graph-view-ordered-list-aggregate-record-exposes-center-force-anchor})
-(table.insert tests {:name "GraphView list-created island moves as force-layout unit"
-                       :fn graph-view-list-created-island-moves-as-force-layout-unit})
-(table.insert tests {:name "GraphView force-moved island keeps runtime position after unrelated drag end"
-                     :fn graph-view-force-moved-island-keeps-runtime-position-after-unrelated-drag-end})
-(table.insert tests {:name "GraphView membership refresh preserves runtime island body"
-                     :fn graph-view-membership-refresh-preserves-runtime-island-body})
-(table.insert tests {:name "GraphView expanded member stays pinned through island position flush"
-                      :fn graph-view-expanded-member-stays-pinned-through-island-position-flush})
-(table.insert tests {:name "GraphView collapsed expanded member rejoins aggregate placement"
-                     :fn graph-view-collapsed-expanded-member-rejoins-aggregate-placement})
-(table.insert tests {:name "GraphView replacing expanded island member resyncs aggregate record"
-                     :fn graph-view-replacing-expanded-island-member-resyncs-aggregate-record})
-(table.insert tests {:name "GraphView adding node after island sync keeps public indices unique"
-                      :fn graph-view-adding-node-after-island-sync-keeps-public-indices-unique})
-(table.insert tests {:name "GraphView replacing node after island sync refreshes layout participant"
-                     :fn graph-view-replacing-node-after-island-sync-refreshes-layout-participant})
+(table.insert tests {:name "GraphView list-created island moves as force-layout unit" :fn graph-view-list-created-island-moves-as-force-layout-unit})
+(table.insert tests {:name "GraphView force-moved island keeps runtime position after unrelated drag end" :fn graph-view-force-moved-island-keeps-runtime-position-after-unrelated-drag-end})
+(table.insert tests {:name "GraphView force-moved island flushes body origin not force center" :fn graph-view-force-moved-island-flushes-body-origin-not-force-center})
+(table.insert tests {:name "GraphView membership refresh preserves runtime island body" :fn graph-view-membership-refresh-preserves-runtime-island-body})
+(table.insert tests {:name "GraphView expanded member stays pinned through island position flush" :fn graph-view-expanded-member-stays-pinned-through-island-position-flush})
+(table.insert tests {:name "GraphView collapsed expanded member rejoins aggregate placement" :fn graph-view-collapsed-expanded-member-rejoins-aggregate-placement})
+(table.insert tests {:name "GraphView replacing expanded island member resyncs aggregate record" :fn graph-view-replacing-expanded-island-member-resyncs-aggregate-record})
+(table.insert tests {:name "GraphView adding node after island sync keeps public indices unique" :fn graph-view-adding-node-after-island-sync-keeps-public-indices-unique})
+(table.insert tests {:name "GraphView replacing node after island sync refreshes layout participant" :fn graph-view-replacing-node-after-island-sync-refreshes-layout-participant})
 (table.insert tests {:name "GraphView capture fails visibly when moved island cannot flush position"
                      :fn graph-view-capture-fails-visibly-when-moved-island-cannot-flush-position})
 (table.insert tests {:name "GraphView restored old-format list island uses member fallback after unrelated drag end"
