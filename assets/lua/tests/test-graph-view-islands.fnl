@@ -3,6 +3,7 @@
 (local Graph (require :graph/init))
 (local GraphMap (require :graph/map))
 (local GraphView (require :graph/view/init))
+(local GraphViewLayout (require :graph/view/layout))
 (local BuildContext (require :build-context))
 (local JsonUtils (require :json-utils))
 (local StringEntityStore (require :entities/string))
@@ -115,8 +116,84 @@
      :register (fn [_self _point entry]
                  (table.insert entries entry)
                  (set (. by-node entry.key) entry))
-     :unregister (fn [_self node]
-                   (set (. by-node node) nil))})
+      :unregister (fn [_self node]
+                    (set (. by-node node) nil))})
+
+(fn copy-vec3 [position]
+    (glm.vec3 position.x position.y position.z))
+
+(fn force-layout-stub-add-node [self position]
+    (table.insert self.positions (copy-vec3 position))
+    (- (length self.positions) 1))
+
+(fn force-layout-stub-add-edge [self source target _bidirectional?]
+    (table.insert self.edges {:source source :target target}))
+
+(fn force-layout-stub-pin-node [self idx pinned?]
+    (set (. self.pins idx) pinned?))
+
+(fn force-layout-stub-set-position [self idx position]
+    (set (. self.positions (+ idx 1)) (copy-vec3 position)))
+
+(fn force-layout-stub-get-positions [self]
+    (if self.next-positions
+        self.next-positions
+        self.positions))
+
+(fn force-layout-stub-update [_self _iterations]
+    nil)
+
+(fn force-layout-stub-start [self]
+    (set self.starts (+ self.starts 1)))
+
+(fn force-layout-stub-clear [self]
+    (set self.clears (+ self.clears 1))
+    (set self.positions [])
+    (set self.next-positions nil)
+    (set self.edges [])
+    (set self.pins {}))
+
+(fn make-force-layout-stub []
+    {:positions []
+     :next-positions nil
+     :edges []
+     :pins {}
+     :starts 0
+     :clears 0
+     :add-node force-layout-stub-add-node
+     :add-edge force-layout-stub-add-edge
+     :pin-node force-layout-stub-pin-node
+     :set-position force-layout-stub-set-position
+     :get-positions force-layout-stub-get-positions
+     :update force-layout-stub-update
+     :start force-layout-stub-start
+     :clear force-layout-stub-clear})
+
+(fn line-stub-update [_self _start _end]
+    nil)
+
+(fn line-stub-drop [_self]
+    nil)
+
+(fn make-line-stub [_ctx _opts]
+    {:update line-stub-update
+     :drop line-stub-drop})
+
+(fn layout-stub-set-point-position [node position _context]
+    (local point node._test-point)
+    (set point.position position))
+
+(fn layout-stub-get-position [_self node]
+    node._test-point.position)
+
+(fn layout-stub-body-position-for-force-position [force-position]
+    (+ force-position (glm.vec3 0 12 0)))
+
+(fn layout-stub-member-placements [body-position]
+    (local placements {})
+    (set (. placements "test:a") body-position)
+    (set (. placements "test:b") (- body-position (glm.vec3 0 24 0)))
+    placements)
 
 (fn option-value [options key default]
     (if (not (= (. options key) nil))
@@ -690,6 +767,98 @@
     (set map.update-island original-update-island)
     (assert cleared? (.. "drag state should clear before visible update failure: " (tostring second-err))))
 
+(fn check-graph-view-layout-converts-force-center-to-island-body-position []
+    (local force-layout (make-force-layout-stub))
+    (local normal {:key "test:normal" :size 10})
+    (local member-a {:key "test:a" :size 10})
+    (local member-b {:key "test:b" :size 10})
+    (local center (glm.vec3 10 88 0))
+    (local origin (glm.vec3 10 100 0))
+    (local delta (glm.vec3 5 -7 0))
+    (local nodes {})
+    (set (. nodes normal) normal)
+    (set (. nodes member-a) member-a)
+    (set (. nodes member-b) member-b)
+    (local points {})
+    (set (. points normal) {:position center})
+    (set (. points member-a) {:position origin})
+    (set (. points member-b) {:position (glm.vec3 10 76 0)})
+    (set normal._test-point (. points normal))
+    (set member-a._test-point (. points member-a))
+    (set member-b._test-point (. points member-b))
+    (var captured-body-position nil)
+    (local graph-layout
+        (GraphViewLayout {:layout force-layout
+                          :nodes nodes
+                          :points points
+                          :make-line make-line-stub
+                          :set-point-position layout-stub-set-point-position
+                          :get-position layout-stub-get-position
+                          :get-position-raw layout-stub-get-position
+                          :on-island-position (fn [_island-id position]
+                                                (set captured-body-position position))}))
+    (graph-layout:add-node normal center false)
+    (local record
+        {:id "island-1"
+         :members [member-a member-b]
+         :position origin
+         :force-position center
+         :body-position-for-force-position layout-stub-body-position-for-force-position
+         :member-placements layout-stub-member-placements})
+    (graph-layout:sync-island-layouts [record])
+    (set force-layout.next-positions [(+ center delta) (+ center delta)])
+    (graph-layout:update 0.016)
+    (assert-vec3 (. (. points normal) :position) (+ center delta)
+                 "normal node should move by injected force delta")
+    (assert-vec3 captured-body-position (+ origin delta)
+                 "island runtime callback should receive body/origin position")
+    (assert-vec3 (. (. points member-a) :position) (+ origin delta)
+                 "first island member should use converted body origin")
+    (assert-vec3 (. (. points member-b) :position) (- (+ origin delta) (glm.vec3 0 24 0))
+                 "second island member should preserve ordered-list spacing"))
+
+(fn check-graph-view-layout-routes-member-edge-through-island-force-anchor []
+    (local force-layout (make-force-layout-stub))
+    (local member-a {:key "test:a" :size 10})
+    (local member-b {:key "test:b" :size 10})
+    (local outside {:key "test:outside" :size 10})
+    (local island-force-position (glm.vec3 0 -12 0))
+    (local outside-position (glm.vec3 100 0 0))
+    (local nodes {})
+    (set (. nodes member-a) member-a)
+    (set (. nodes member-b) member-b)
+    (set (. nodes outside) outside)
+    (local points {})
+    (set (. points member-a) {:position (glm.vec3 0 0 0)})
+    (set (. points member-b) {:position (glm.vec3 0 -24 0)})
+    (set (. points outside) {:position outside-position})
+    (set member-a._test-point (. points member-a))
+    (set member-b._test-point (. points member-b))
+    (set outside._test-point (. points outside))
+    (local graph-layout
+        (GraphViewLayout {:layout force-layout
+                          :nodes nodes
+                          :points points
+                          :make-line make-line-stub
+                          :set-point-position layout-stub-set-point-position
+                          :get-position layout-stub-get-position
+                          :get-position-raw layout-stub-get-position}))
+    (graph-layout:add-node outside outside-position false)
+    (graph-layout:sync-island-layouts
+        [{:id "island-1"
+          :members [member-a member-b]
+          :position (glm.vec3 0 0 0)
+          :force-position island-force-position
+          :body-position-for-force-position layout-stub-body-position-for-force-position
+          :member-placements layout-stub-member-placements}])
+    (graph-layout:add-edge {:source member-b :target outside})
+    (local edge (. force-layout.edges 1))
+    (assert edge "member edge should be added to force layout")
+    (assert-vec3 (. force-layout.positions (+ edge.source 1)) island-force-position
+                 "edge from unpinned island member should use aggregate force anchor")
+    (assert-vec3 (. force-layout.positions (+ edge.target 1)) outside-position
+                 "edge target should use outside node force body"))
+
 (fn check-empty-island-sync-does-not-start-force-layout [fixture]
     (local map fixture.map)
     (local view fixture.view)
@@ -940,6 +1109,12 @@
     (with-list-fixture
         check-alt-drag-end-clears-state-before-visible-update-failure))
 
+(fn graph-view-layout-converts-force-center-to-island-body-position []
+    (check-graph-view-layout-converts-force-center-to-island-body-position))
+
+(fn graph-view-layout-routes-member-edge-through-island-force-anchor []
+    (check-graph-view-layout-routes-member-edge-through-island-force-anchor))
+
 (fn graph-view-empty-island-sync-does-not-start-force-layout []
     (with-fixture {:keys []}
         check-empty-island-sync-does-not-start-force-layout))
@@ -991,9 +1166,13 @@
 (table.insert tests {:name "GraphView alt-dragging second island member moves whole island on drag end"
                      :fn graph-view-alt-dragging-second-island-member-moves-whole-island-on-drag-end})
 (table.insert tests {:name "GraphView alt drag end clears state before visible update failure"
-                      :fn graph-view-alt-drag-end-clears-state-before-visible-update-failure})
+                       :fn graph-view-alt-drag-end-clears-state-before-visible-update-failure})
+(table.insert tests {:name "GraphViewLayout converts island force center to body position"
+                     :fn graph-view-layout-converts-force-center-to-island-body-position})
+(table.insert tests {:name "GraphViewLayout routes island member edge through force anchor"
+                     :fn graph-view-layout-routes-member-edge-through-island-force-anchor})
 (table.insert tests {:name "GraphView empty island sync does not start force layout"
-                     :fn graph-view-empty-island-sync-does-not-start-force-layout})
+                      :fn graph-view-empty-island-sync-does-not-start-force-layout})
 
 (local main
     (fn []

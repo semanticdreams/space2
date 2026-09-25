@@ -88,11 +88,18 @@
      (fn validate-island-layout-record [record]
          (assert (= (type record) :table) "GraphViewLayout.sync-island-layouts requires table records")
          (assert (= (type record.id) :string) "GraphViewLayout island layout record requires string id")
-         (assert (= (type record.members) :table) "GraphViewLayout island layout record requires members table")
-         (assert (vec3-like? record.position) "GraphViewLayout island layout record requires vec3-like position")
-         (assert (= (type record.member-placements) :function)
-                 "GraphViewLayout island layout record requires member-placements function")
-         record)
+          (assert (= (type record.members) :table) "GraphViewLayout island layout record requires members table")
+          (assert (vec3-like? record.position) "GraphViewLayout island layout record requires vec3-like position")
+          (assert (= (type record.member-placements) :function)
+                  "GraphViewLayout island layout record requires member-placements function")
+          (when record.force-position
+              (assert (vec3-like? record.force-position)
+                      "GraphViewLayout island layout record force-position must be vec3-like")
+              (assert (= (type record.body-position-for-force-position) :function)
+                      "GraphViewLayout island layout record with force-position requires body-position-for-force-position function"))
+          (when (and record.body-position-for-force-position (not record.force-position))
+              (error "GraphViewLayout island layout record with body-position-for-force-position requires force-position"))
+          record)
 
      (fn clear-force-tables []
          (each [k _ (pairs force-indices)]
@@ -157,12 +164,19 @@
                      (local new-pos (ensure-glm-vec3 pos))
                      (if (= participant.kind :island)
                          (do
-                             (assert-valid-position new-pos "GraphViewLayout.refresh-layout:island" nil)
-                             (local record participant.record)
-                             (when (position-changed? record.position new-pos)
-                                 (set record.position new-pos)
-                                 (on-island-position record.id new-pos)
-                                 (local placements (record.member-placements new-pos))
+                              (local record participant.record)
+                              (local previous-force-position (or record.force-position record.position))
+                              (assert-valid-position new-pos "GraphViewLayout.refresh-layout:island" nil)
+                              (when (position-changed? previous-force-position new-pos)
+                                  (local body-position
+                                      (if record.body-position-for-force-position
+                                          (record.body-position-for-force-position new-pos)
+                                          new-pos))
+                                  (assert-valid-position body-position "GraphViewLayout.refresh-layout:island-body" nil)
+                                  (set record.force-position new-pos)
+                                  (set record.position body-position)
+                                  (on-island-position record.id body-position)
+                                  (local placements (record.member-placements body-position))
                                  (each [_ member (ipairs record.members)]
                                      (when (not (. pinned member))
                                          (local placement (or (. placements member.key) (. placements (node-id member))))
@@ -389,10 +403,10 @@
              (assert-valid-position position "GraphViewLayout.rebuild" node)
              (when (or (. pinned node) (not (. island-member-layouts node)))
                  (add-force-node {:kind :node :node node} position (. pinned node))))
-         (each [_ record (pairs island-layouts)]
-             (add-force-node {:kind :island :record record}
-                             (ensure-glm-vec3 record.position)
-                             false))
+          (each [_ record (pairs island-layouts)]
+              (add-force-node {:kind :island :record record}
+                              (ensure-glm-vec3 (or record.force-position record.position))
+                              false))
          (each [_ record (ipairs edges)]
              (local edge record.edge)
              (when edge
@@ -410,8 +424,12 @@
               (validate-island-layout-record record)
               (local position (ensure-glm-vec3 record.position))
               (assert-valid-position position "GraphViewLayout.sync-island-layouts" nil)
-             (set record.position position)
-             (set (. island-layouts record.id) record))
+              (set record.position position)
+              (when record.force-position
+                  (local force-position (ensure-glm-vec3 record.force-position))
+                  (assert-valid-position force-position "GraphViewLayout.sync-island-layouts:force-position" nil)
+                  (set record.force-position force-position))
+              (set (. island-layouts record.id) record))
           (each [_ record (pairs island-layouts)]
               (each [_ member (ipairs record.members)]
                   (when (not (. pinned member))
