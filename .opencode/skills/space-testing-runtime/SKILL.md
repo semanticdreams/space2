@@ -37,6 +37,23 @@ Running, adding, or debugging Space tests, E2E snapshots, remote-control debuggi
 - Remote-control debugging uses the running app endpoint and `tools.remote-control-client`.
 - Profilers run through `make prof target=<name>`.
 
+## Windows CI Local Reproduction
+
+For non-infrastructure Windows CI failures, agents must dispatch `windows-ci-reproducer`;
+do not run ad-hoc setup commands or invoke the wrapper
+directly. The capability's underlying/manual wrapper command sequence is:
+
+```bash
+python3 scripts/opencode_windows_ci_repro.py preflight --repo-root .
+python3 scripts/opencode_windows_ci_repro.py setup-host --repo-root .
+python3 scripts/opencode_windows_ci_repro.py reproduce --repo-root .
+```
+
+See `docs/dev/notes/windows-wine-build-and-test.md` for the Windows-from-Linux
+build and Wine validation flow. Wine evidence helps reproduce CI failures, but
+Wine is not native Windows CI; native Windows CI remains authoritative for
+Windows-host-only behavior and final integration.
+
 ## Canonical References
 
 - `AGENTS.md`

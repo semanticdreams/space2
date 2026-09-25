@@ -278,6 +278,7 @@ blocking check, and available evidence.
 | **github-operator** | Guarded GitHub auth/protection checks, PR creation, auto-merge, and merge-queue polling wrappers | gpt-5.5 |
 | **pr-recovery-operator** | Guarded stale merged PR recovery wrapper that creates/pushes a deterministic follow-up branch and opens a fresh PR | gpt-5.5 |
 | **config-auditor** | Guarded OpenCode home config verification for project-supplied non-secret support links | gpt-5.5 |
+| **windows-ci-reproducer** | Guarded local Windows CI preflight, setup-host, and Linux cross-build + Wine reproduction | gpt-5.5 |
 
 Dispatch with the `task` tool and the appropriate `subagent_type`. Provide each
 subagent exactly what it needs — never paste your full session history.
@@ -313,6 +314,18 @@ direct broad permission:
   merged PR belongs to the current branch name but points at an old head.
 - Dispatch `config-auditor` for OpenCode home config verification through
   `scripts/verify_opencode_home_config.py`.
+- Dispatch `windows-ci-reproducer` for guarded local Windows CI preflight,
+  setup-host, and Linux cross-build + Wine reproduction through
+  `scripts/opencode_windows_ci_repro.py`.
+
+When `build-windows`, `test-windows`, or `build-windows-installer` fails and
+the failure is not obviously CI infrastructure-only, dispatch
+`windows-ci-reproducer` for Linux cross-build + Wine reproduction before pushing
+another fix. If prerequisite evidence says the host is not ready, run guarded
+`setup-host` once through the same capability, then rerun reproduction. If setup
+or reproduction cannot run safely, report `HUMAN_DECISION_REQUIRED` with wrapper
+evidence. Native Windows CI remains authoritative for Windows-host-only behavior,
+installer behavior, and final integration.
 
 If `github-operator` reports an existing merged PR whose `pr_head` differs from
 current `HEAD`, dispatch `pr-recovery-operator` to run the guarded

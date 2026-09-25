@@ -107,11 +107,18 @@ The throwaway-branch trigger change is temporary and must not survive the final 
         - if the trigger itself is wrong, dispatch **implementer** to correct
           it, verify the commit, then push and restart polling
 5. If it fails:
-   - inspect the failing job log
-   - prefer selecting the first failed job deterministically:
-     - `.opencode/skills/github-workflow-debug/scripts/gh-workflow-debug.sh first-failed-job-id --run-id <run-id>`
-   - identify the first real blocker
-   - dispatch the **implementer** subagent with a focused fix instruction for any required file change, including workflow files, source, tests, config, package/build files, or scripts. After implementer commits, verify (`git log --oneline -1`), then push and go to step 4
+    - inspect the failing job log
+    - prefer selecting the first failed job deterministically:
+      - `.opencode/skills/github-workflow-debug/scripts/gh-workflow-debug.sh first-failed-job-id --run-id <run-id>`
+    - if the failed job is `build-windows`, `test-windows`, or
+      `build-windows-installer` and is not obviously CI infrastructure-only,
+      dispatch `windows-ci-reproducer` before the next push; obtain local Linux
+      cross-build + Wine reproduction evidence before pushing another fix
+    - if `windows-ci-reproducer` evidence says prerequisites are missing, run
+      guarded `setup-host` once through `windows-ci-reproducer`, then rerun
+      reproduction; do not use raw setup commands
+    - identify the first real blocker
+    - dispatch the **implementer** subagent with a focused fix instruction for any required file change, including workflow files, source, tests, config, package/build files, or scripts. After implementer commits, verify (`git log --oneline -1`). For Windows non-infrastructure failures, rerun `windows-ci-reproducer` before pushing so the fixed commit has local Linux cross-build + Wine evidence. Only push when reproduction passes; if reproduction cannot run safely, report HUMAN_DECISION_REQUIRED with wrapper evidence. For other failures, push and go to step 4.
 6. If it passes:
    - proceed to the simplification pass (below)
 

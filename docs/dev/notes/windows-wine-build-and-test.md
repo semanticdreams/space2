@@ -278,6 +278,21 @@ Windows binary under Wine:
 
 ## Reproducible Workflow (Current)
 
+For OpenCode Windows CI failure reproduction, use the guarded wrapper sequence:
+
+```bash
+python3 scripts/opencode_windows_ci_repro.py preflight --repo-root .
+python3 scripts/opencode_windows_ci_repro.py setup-host --repo-root .
+python3 scripts/opencode_windows_ci_repro.py reproduce --repo-root .
+```
+
+Run `setup-host` only when prerequisite evidence says the host needs it. The
+wrapper is intended to reproduce `build-windows`, `test-windows`, and
+`build-windows-installer` failures locally with a Linux cross-build + Wine loop
+before another push. Wine validation is not a substitute for native Windows CI;
+native Windows CI remains authoritative for Windows-host-only behavior,
+installer behavior, and final integration.
+
 Host setup:
 
 ```bash

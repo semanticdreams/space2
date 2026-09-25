@@ -250,6 +250,32 @@ explicit wrapper and capability agent. Preserve wrapper evidence such as
 OpenCode must be restarted after `.opencode/**` changes before relying on
 updated routing or capability instructions.
 
+### Windows CI local reproduction capability
+
+When PR CI reports `build-windows`, `test-windows`, or
+`build-windows-installer` failures that are not obviously CI
+infrastructure-only, supervisors route the failure through the
+`windows-ci-reproducer` capability before pushing another fix. This capability
+runs the guarded wrapper instead of granting broad shell, package-manager, or
+sudo permissions.
+
+The wrapper command sequence is:
+
+```bash
+python3 scripts/opencode_windows_ci_repro.py preflight --repo-root .
+python3 scripts/opencode_windows_ci_repro.py setup-host --repo-root .
+python3 scripts/opencode_windows_ci_repro.py reproduce --repo-root .
+```
+
+Use `preflight` first to collect prerequisite evidence. On first-time machines,
+if preflight or reproduce evidence reports missing host prerequisites, run
+`setup-host` once through `windows-ci-reproducer`, then rerun reproduction. The
+expected handoff before pushing another fix is structured wrapper evidence with
+`status`, `action`, `message`, and `evidence` covering either a successful local
+Linux cross-build + Wine reproduction or a bounded `HUMAN_DECISION_REQUIRED`
+reason. Native Windows CI remains authoritative for Windows-host-only behavior,
+installer behavior, and final integration.
+
 ### Capability preflight
 
 Privileged Git, GitHub, and OpenCode configuration operations route through
