@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -69,11 +70,24 @@ def _script_exists(repo: Path, relative: str) -> bool:
 
 
 def _wine_available() -> bool:
-    return shutil.which("wine") is not None
+    configured_wine = os.environ.get("WINE_CMD")
+    if configured_wine and shutil.which(configured_wine) is not None:
+        return True
+    return shutil.which("wine64") is not None or shutil.which("wine") is not None
 
 
 def _vcpkg_binary(repo: Path) -> Path:
-    return repo / "external" / "vcpkg" / "vcpkg"
+    vcpkg_root = os.environ.get("VCPKG_ROOT")
+    if vcpkg_root:
+        return Path(vcpkg_root) / "vcpkg"
+    return repo / "vcpkg" / "vcpkg"
+
+
+def _display_path(repo: Path, path: Path) -> str:
+    try:
+        return str(path.relative_to(repo))
+    except ValueError:
+        return str(path)
 
 
 def _rust_target_installed(repo: Path) -> bool:
@@ -110,8 +124,9 @@ def preflight(repo_root: Path) -> dict[str, object]:
 
     missing.extend(tool for tool in REQUIRED_TOOLS if shutil.which(tool) is None)
     missing.extend(script for script in REQUIRED_SCRIPTS if not _script_exists(repo, script))
-    if not _vcpkg_binary(repo).is_file():
-        missing.append("external/vcpkg/vcpkg")
+    vcpkg_binary = _vcpkg_binary(repo)
+    if not vcpkg_binary.is_file():
+        missing.append(_display_path(repo, vcpkg_binary))
     if not _wine_available():
         missing.append("wine")
     if not _rust_target_installed(repo):

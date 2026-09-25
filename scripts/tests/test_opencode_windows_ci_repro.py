@@ -30,7 +30,7 @@ def install_required_scripts(repo: Path) -> None:
 
 
 def install_fake_vcpkg(repo: Path) -> None:
-    path = repo / "external" / "vcpkg" / "vcpkg"
+    path = repo / "vcpkg" / "vcpkg"
     path.parent.mkdir(parents=True)
     path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
 
@@ -109,6 +109,8 @@ def test_preflight_passes_when_windows_ci_repro_prerequisites_exist(tmp_path, mo
     repo = make_space_repo(tmp_path)
     install_required_scripts(repo)
     install_fake_vcpkg(repo)
+    monkeypatch.delenv("VCPKG_ROOT", raising=False)
+    monkeypatch.delenv("WINE_CMD", raising=False)
     monkeypatch_required_tools_present(monkeypatch)
     monkeypatch_rust_target(monkeypatch, installed=True)
 
@@ -119,9 +121,71 @@ def test_preflight_passes_when_windows_ci_repro_prerequisites_exist(tmp_path, mo
     assert result["evidence"]["missing"] == []
 
 
+def test_preflight_honors_vcpkg_root_override(tmp_path, monkeypatch):
+    repo = make_space_repo(tmp_path)
+    install_required_scripts(repo)
+    override_root = tmp_path / "custom-vcpkg"
+    override_binary = override_root / "vcpkg"
+    override_root.mkdir()
+    override_binary.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    monkeypatch.setenv("VCPKG_ROOT", str(override_root))
+    monkeypatch.delenv("WINE_CMD", raising=False)
+    monkeypatch_required_tools_present(monkeypatch)
+    monkeypatch_rust_target(monkeypatch, installed=True)
+
+    result = windows_ci_repro.preflight(repo)
+
+    assert result["status"] == "pass"
+    assert result["evidence"]["missing"] == []
+
+
+def test_preflight_accepts_wine64_when_wine_is_unavailable(tmp_path, monkeypatch):
+    repo = make_space_repo(tmp_path)
+    install_required_scripts(repo)
+    install_fake_vcpkg(repo)
+    monkeypatch.delenv("VCPKG_ROOT", raising=False)
+    monkeypatch.delenv("WINE_CMD", raising=False)
+
+    def fake_which(name: str):
+        if name == "wine":
+            return None
+        return f"/usr/bin/{name}"
+
+    monkeypatch.setattr(windows_ci_repro.shutil, "which", fake_which)
+    monkeypatch_rust_target(monkeypatch, installed=True)
+
+    result = windows_ci_repro.preflight(repo)
+
+    assert result["status"] == "pass"
+    assert result["evidence"]["missing"] == []
+
+
+def test_preflight_accepts_executable_wine_cmd_override(tmp_path, monkeypatch):
+    repo = make_space_repo(tmp_path)
+    install_required_scripts(repo)
+    install_fake_vcpkg(repo)
+    monkeypatch.delenv("VCPKG_ROOT", raising=False)
+    monkeypatch.setenv("WINE_CMD", "custom-wine")
+
+    def fake_which(name: str):
+        if name in {"wine", "wine64"}:
+            return None
+        return f"/usr/bin/{name}"
+
+    monkeypatch.setattr(windows_ci_repro.shutil, "which", fake_which)
+    monkeypatch_rust_target(monkeypatch, installed=True)
+
+    result = windows_ci_repro.preflight(repo)
+
+    assert result["status"] == "pass"
+    assert result["evidence"]["missing"] == []
+
+
 def test_preflight_fails_with_setup_command_when_prerequisites_missing(tmp_path, monkeypatch):
     repo = make_space_repo(tmp_path)
     install_required_scripts(repo)
+    monkeypatch.delenv("VCPKG_ROOT", raising=False)
+    monkeypatch.delenv("WINE_CMD", raising=False)
     monkeypatch_required_tools_missing(monkeypatch, missing={"wine", "x86_64-w64-mingw32-gcc-posix"})
     monkeypatch_rust_target(monkeypatch, installed=False)
 
