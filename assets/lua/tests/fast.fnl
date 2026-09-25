@@ -101,6 +101,7 @@
     :tests.test-fennel-validation-mcp
     :tests.test-launchables
     :tests.test-random
+    :tests.test-temporal
     :tests.test-tempfile
     :tests.test-graph-loaders
     :tests.test-sysinfo

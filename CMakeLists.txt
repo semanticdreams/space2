@@ -160,6 +160,7 @@ function(space_suppress_target_warnings target_name)
 endfunction()
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libraries")
+add_subdirectory(external/date)
 add_subdirectory(external/lua)
 
 add_subdirectory(external/sqlite)
@@ -395,6 +396,7 @@ if(UNIX AND NOT APPLE AND SPACE_REQUIRE_NATIVE_LINUX_INPUT)
     endif()
 endif()
 if(SPACE_SUPPRESS_THIRD_PARTY_WARNINGS)
+    space_suppress_target_warnings(date_tz)
     space_suppress_target_warnings(lua)
     space_suppress_target_warnings(lua-header)
     space_suppress_target_warnings(sqlite3)
@@ -536,6 +538,7 @@ target_link_libraries(${PROJECT_NAME}_lib
     efsw
     Boost::headers
     space_yojimbo
+    date::date-tz
 )
 if(TARGET sentry::sentry)
     target_link_libraries(${PROJECT_NAME}_lib sentry::sentry)
@@ -822,6 +825,17 @@ set_tests_properties(test_vector_buffer PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
+add_executable(test_temporal_core
+    tests/test_temporal_core.cpp
+    src/temporal.cpp
+)
+target_include_directories(test_temporal_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(test_temporal_core date::date-tz)
+add_test(NAME test_temporal_core COMMAND test_temporal_core)
+set_tests_properties(test_temporal_core PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
 add_executable(test_window_title
     tests/test_window_title.cpp
 )
@@ -933,6 +947,20 @@ if(UNIX AND NOT APPLE)
 endif()
 add_test(NAME test_lua_gccjit_binding COMMAND test_lua_gccjit_binding)
 set_tests_properties(test_lua_gccjit_binding PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+add_executable(test_lua_temporal_core_binding
+    tests/test_lua_temporal_core_binding.cpp
+    src/temporal.cpp
+    src/lua_temporal_core.cpp
+)
+target_include_directories(test_lua_temporal_core_binding PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(test_lua_temporal_core_binding lua date::date-tz)
+add_test(NAME test_lua_temporal_core_binding COMMAND test_lua_temporal_core_binding)
+set_tests_properties(test_lua_temporal_core_binding PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
@@ -1172,6 +1200,16 @@ add_custom_command(
         $<TARGET_FILE_DIR:${PROJECT_NAME}>/assets
         COMMENT "---- Copy Assets"
 )
+
+if(WIN32)
+    add_custom_command(
+            TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_LIST_DIR}/external/date/tzdata
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>/tzdata
+            COMMENT "---- Copy Windows temporal tzdata"
+    )
+endif()
 
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})
 set(CPACK_PROJECT_VERSION ${SPACE_PACKAGE_VERSION})

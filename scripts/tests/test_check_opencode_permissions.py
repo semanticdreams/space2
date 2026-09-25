@@ -91,11 +91,19 @@ def write_capability_files(root: Path) -> None:
             '  edit: deny\n  task: deny\n  external_directory: deny\n  webfetch: deny\n  websearch: deny\n  question: deny\n  bash:\n    "python3 scripts/opencode_pr_recovery.py create-current-with-followup-recovery --repo-root .": allow\n',
         ),
     )
+    write_file(
+        root / ".opencode" / "agents" / "windows-ci-reproducer.md",
+        agent(
+            "windows-ci-reproducer",
+            '  edit: deny\n  task: deny\n  external_directory: deny\n  webfetch: deny\n  websearch: deny\n  question: deny\n  bash:\n    "python3 scripts/opencode_windows_ci_repro.py preflight --repo-root .": allow\n    "python3 scripts/opencode_windows_ci_repro.py setup-host --repo-root .": allow\n    "python3 scripts/opencode_windows_ci_repro.py reproduce --repo-root .": allow\n',
+        ),
+    )
     for script in [
         "opencode_capabilities.py",
         "opencode_git_integrate.py",
         "opencode_pr_operator.py",
         "opencode_pr_recovery.py",
+        "opencode_windows_ci_repro.py",
         "verify_opencode_home_config.py",
     ]:
         write_file(root / "scripts" / script, "#!/usr/bin/env python3\n")
@@ -148,6 +156,69 @@ def test_pr_recovery_operator_allows_only_exact_guarded_recovery_command():
     assert allowed_entries == {
         "python3 scripts/opencode_pr_recovery.py create-current-with-followup-recovery --repo-root ."
     }
+
+
+def test_windows_ci_reproducer_allows_exact_guarded_wrapper_commands():
+    bash_entries = permission_entries(REPO_ROOT, "windows-ci-reproducer", "bash")
+
+    allowed_entries = {pattern for pattern, action in bash_entries.items() if action == "allow"}
+    assert allowed_entries == {
+        "python3 scripts/opencode_windows_ci_repro.py preflight --repo-root .",
+        "python3 scripts/opencode_windows_ci_repro.py setup-host --repo-root .",
+        "python3 scripts/opencode_windows_ci_repro.py reproduce --repo-root .",
+    }
+
+
+def test_windows_ci_reproducer_agent_is_required(tmp_path: Path):
+    repo = make_repo(tmp_path)
+    (repo / ".opencode" / "agents" / "windows-ci-reproducer.md").unlink(missing_ok=True)
+
+    checker = load_checker()
+    issues = checker.check_repo(repo)
+
+    assert any(
+        violation.code == "capability-dependency"
+        and ".opencode/agents/windows-ci-reproducer.md" in violation.message
+        for violation in issues
+    )
+
+
+def test_windows_ci_reproducer_allows_only_wrapper_commands(tmp_path: Path):
+    repo = make_repo(tmp_path)
+    write_file(repo / "scripts" / "opencode_windows_ci_repro.py", "#!/usr/bin/env python3\n")
+    windows_permissions = (
+        '  edit: deny\n'
+        '  task: deny\n'
+        '  external_directory: deny\n'
+        '  webfetch: deny\n'
+        '  websearch: deny\n'
+        '  question: deny\n'
+        '  bash:\n'
+        '    "python3 scripts/opencode_windows_ci_repro.py preflight --repo-root .": allow\n'
+        '    "python3 scripts/opencode_windows_ci_repro.py setup-host --repo-root .": allow\n'
+        '    "python3 scripts/opencode_windows_ci_repro.py reproduce --repo-root .": allow\n'
+        '    "gh *": allow\n'
+    )
+    write_file(
+        repo / ".opencode" / "agents" / "windows-ci-reproducer.md",
+        agent("windows-ci-reproducer", windows_permissions),
+    )
+
+    assert "capability-boundary" in violation_codes(repo)
+
+
+def test_windows_ci_reproducer_requires_wrapper_script(tmp_path: Path):
+    repo = make_repo(tmp_path)
+    (repo / "scripts" / "opencode_windows_ci_repro.py").unlink(missing_ok=True)
+
+    checker = load_checker()
+    issues = checker.check_repo(repo)
+
+    assert any(
+        violation.code == "capability-dependency"
+        and "scripts/opencode_windows_ci_repro.py" in violation.message
+        for violation in issues
+    )
 
 
 @pytest.mark.parametrize(

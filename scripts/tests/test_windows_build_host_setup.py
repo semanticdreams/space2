@@ -142,3 +142,46 @@ def test_build_windows_passes_masm_settings_to_cmake_when_env_is_set() -> None:
     assert 'cmake_args+=(-DCMAKE_ASM_MASM_COMPILER="${CMAKE_ASM_MASM_COMPILER}")' in build_script
     assert 'if [ -n "${CMAKE_ASM_MASM_FLAGS:-}" ]; then' in build_script
     assert 'cmake_args+=(-DCMAKE_ASM_MASM_FLAGS="${CMAKE_ASM_MASM_FLAGS}")' in build_script
+
+
+def test_windows_temporal_tzdata_is_bundled_and_packaged() -> None:
+    date_cmake = read_repo_text("external/date/CMakeLists.txt")
+    package_script = read_repo_text("scripts/package-windows-runtime.sh")
+    temporal_core = read_repo_text("src/temporal.cpp")
+    tzdata_dir = REPO_ROOT / "external/date/tzdata"
+
+    assert "USE_OS_TZDB=0" in date_cmake
+    assert "HAS_REMOTE_API=0" in date_cmake
+    assert "AUTO_DOWNLOAD=0" in date_cmake
+    assert "SPACE_WINDOWS_TZDATA_DIR" in date_cmake
+    assert "Required Windows temporal tzdata file missing" in date_cmake
+
+    assert 'TZDATA_SOURCE="${ROOT_DIR}/external/date/tzdata"' in package_script
+    assert 'cp -r "${TZDATA_SOURCE}" "${DIST_DIR}/tzdata"' in package_script
+
+    assert "SPACE_TZDATA_PATH" in temporal_core
+    assert "bundled Windows tzdata not found" in temporal_core
+    assert "required Windows tzdata file missing" in temporal_core
+
+    required_tzdata_files = [
+        "africa",
+        "antarctica",
+        "asia",
+        "australasia",
+        "backward",
+        "etcetera",
+        "europe",
+        "northamerica",
+        "southamerica",
+        "leapseconds",
+        "version",
+        "windowsZones.xml",
+        "LICENSE",
+        "CLDR-LICENSE.txt",
+    ]
+    for required_file in required_tzdata_files:
+        assert (tzdata_dir / required_file).is_file()
+        assert required_file in date_cmake
+        assert required_file in package_script
+        assert required_file in temporal_core
+    assert (tzdata_dir / "version").read_text(encoding="utf-8").strip() == "2025b"
