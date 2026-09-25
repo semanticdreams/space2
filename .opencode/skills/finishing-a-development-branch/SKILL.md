@@ -23,6 +23,13 @@ returns `human_decision_required`, the supervisor reports
 `HUMAN_DECISION_REQUIRED` with wrapper evidence and does not ask for a one-off
 broad command permission.
 
+For Windows CI failures in `build-windows`, `test-windows`, or
+`build-windows-installer` that are not obviously CI infrastructure-only,
+dispatch `windows-ci-reproducer` and obtain local Linux cross-build + Wine
+reproduction evidence before pushing another fix or requeueing. If prerequisites
+are missing, run guarded `setup-host` once through `windows-ci-reproducer`, then
+rerun reproduction. Native Windows PR CI remains authoritative.
+
 ## Step 0: Verify Clean Working Tree
 
 ```bash
