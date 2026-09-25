@@ -105,12 +105,46 @@
   (controller:drop)
   (assert (= state.drop-calls 1)))
 
+(fn module-with-runtime [runtime]
+  {:metadata {:id "malformed" :title "Malformed" :host-api 1}
+   :create (fn [_host] runtime)})
+
+(fn assert-create-errors [runtime expected]
+  (local (ok err)
+    (pcall #(RuntimeController.create {:module (module-with-runtime runtime)
+                                       :host (fake-host)})))
+  (assert (= ok false) "malformed runtime should fail during controller creation")
+  (assert (string.find (tostring err) "[app-host]" 1 true))
+  (assert (string.find (tostring err) expected 1 true)))
+
+(fn rejects-malformed-presentation-facet []
+  (assert-create-errors {:presentation {:render-targets true}}
+                        "presentation"))
+
+(fn rejects-keyed-inspector-and-command-facets []
+  (assert-create-errors {:inspectors {:state {:id :state
+                                              :read fake-inspector-read}}}
+                        "inspectors")
+  (assert-create-errors {:commands {:reset {:id :reset
+                                            :run fake-command-run}}}
+                        "commands"))
+
+(fn rejects-scheduler-facet-without-update []
+  (assert-create-errors {:scheduler {:enabled? true}}
+                        "scheduler"))
+
 (table.insert tests {:name "required capability errors loudly"
                      :fn required-capability-errors-loudly})
 (table.insert tests {:name "required capability returns service"
                      :fn required-capability-returns-service})
 (table.insert tests {:name "controller mounts runtime facets"
                      :fn test-controller-mounts-runtime-facets})
+(table.insert tests {:name "controller rejects malformed presentation facet"
+                     :fn rejects-malformed-presentation-facet})
+(table.insert tests {:name "controller rejects keyed inspector and command facets"
+                     :fn rejects-keyed-inspector-and-command-facets})
+(table.insert tests {:name "controller rejects scheduler facet without update"
+                     :fn rejects-scheduler-facet-without-update})
 
 (local main
   (fn []

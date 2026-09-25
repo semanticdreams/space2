@@ -24,6 +24,48 @@
       []
       facets))
 
+(fn integer? [value]
+  (and (= (type value) :number)
+       (= value (math.floor value))))
+
+(fn sequential-list? [value]
+  (if (not (= (type value) :table))
+      false
+      (do
+        (local count (# value))
+        (var valid? true)
+        (each [key _item (pairs value)]
+          (if (not (integer? key))
+              (set valid? false)
+              (< key 1)
+              (set valid? false)
+              (> key count)
+              (set valid? false)))
+        valid?)))
+
+(fn validate-presentation [runtime]
+  (local presentation runtime.presentation)
+  (when presentation
+    (when (not (= (type presentation) :table))
+      (host-error "runtime presentation facet must be a table"))
+    (when (not (= (type presentation.render-targets) :function))
+      (host-error "runtime presentation facet requires render-targets function"))))
+
+(fn validate-facet-list [runtime name]
+  (local facets (facet-list runtime name))
+  (when (not (sequential-list? facets))
+    (host-error (.. "runtime " (tostring name) " facet must be a sequential list")))
+  facets)
+
+(fn validate-scheduler [runtime]
+  (local scheduler runtime.scheduler)
+  (when scheduler
+    (when (not (= (type scheduler) :table))
+      (host-error "runtime scheduler facet must be a table"))
+    (when (not (= (type scheduler.update) :function))
+      (host-error "runtime scheduler facet requires update function")))
+  scheduler)
+
 (fn register-facet-list [host capability facets]
   (when (> (# facets) 0)
     (local service (Capabilities.require host capability))
@@ -46,9 +88,10 @@
   (local runtime (module.create host))
   (when (not (= (type runtime) :table))
     (host-error "hostable module create(host) must return a runtime table"))
-  (local inspectors (facet-list runtime :inspectors))
-  (local commands (facet-list runtime :commands))
-  (local scheduler runtime.scheduler)
+  (validate-presentation runtime)
+  (local inspectors (validate-facet-list runtime :inspectors))
+  (local commands (validate-facet-list runtime :commands))
+  (local scheduler (validate-scheduler runtime))
   (var dropped? false)
 
   (when scheduler
