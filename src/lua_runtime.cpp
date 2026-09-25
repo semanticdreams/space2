@@ -31,6 +31,14 @@ extern "C" int luaopen_lsqlite3(lua_State* L);
 
 namespace
 {
+int quiet_exception_handler(lua_State* state,
+                            sol::optional<const std::exception&>,
+                            sol::string_view what)
+{
+    lua_pushlstring(state, what.data(), what.size());
+    return 1;
+}
+
 std::string join_semicolon_paths(const std::vector<std::string>& paths)
 {
     std::ostringstream out;
@@ -110,6 +118,7 @@ LuaRuntime::LuaRuntime() = default;
 
 void LuaRuntime::init()
 {
+    lua.set_exception_handler(quiet_exception_handler);
     install_fatal_traceback();
     lua.open_libraries(sol::lib::base, sol::lib::package, sol::lib::table,
                        sol::lib::math, sol::lib::string, sol::lib::debug,
