@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from opencode_capabilities import CommandResult, ensure_space_repo, failure, human_decision, run_command, success
+from opencode_capabilities import CapabilityError, CommandResult, ensure_space_repo, failure, human_decision, run_command, success
 
 
 REQUIRED_TOOLS = (
@@ -206,14 +206,27 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _failure_for_exception(action: str, error: Exception) -> dict[str, object]:
+    if isinstance(error, CapabilityError):
+        return failure(action, error.message, {"code": error.code, "details": error.details})
+    return failure(
+        action,
+        "Windows CI reproduction wrapper failed unexpectedly",
+        {"code": "unexpected_windows_ci_repro_error", "error_type": type(error).__name__, "error": str(error)},
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
-    if args.command == "preflight":
-        result = preflight(args.repo_root)
-    elif args.command == "setup-host":
-        result = setup_host(args.repo_root)
-    else:
-        result = reproduce(args.repo_root)
+    try:
+        if args.command == "preflight":
+            result = preflight(args.repo_root)
+        elif args.command == "setup-host":
+            result = setup_host(args.repo_root)
+        else:
+            result = reproduce(args.repo_root)
+    except Exception as error:
+        result = _failure_for_exception(args.command, error)
     print(json.dumps(result, sort_keys=True))
     return _exit_code_for(str(result["status"]))
 

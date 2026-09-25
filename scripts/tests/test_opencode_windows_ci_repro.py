@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -184,3 +185,30 @@ def test_reproduce_reports_first_failing_step_with_bounded_output(tmp_path, monk
     assert result["evidence"]["args"] == ["scripts/package-windows-runtime.sh"]
     assert "stdout_tail" in result["evidence"]
     assert "stderr_tail" in result["evidence"]
+
+
+def test_cli_invalid_repo_returns_structured_fail_json_without_traceback(tmp_path):
+    not_space_repo = tmp_path / "not-space"
+    not_space_repo.mkdir()
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT_ROOT / "opencode_windows_ci_repro.py"),
+            "preflight",
+            "--repo-root",
+            str(not_space_repo),
+        ],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    result = json.loads(completed.stdout)
+    assert completed.returncode == 3
+    assert result["status"] == "fail"
+    assert result["action"] == "preflight"
+    assert set(result) == {"status", "action", "message", "evidence"}
+    assert result["evidence"]["code"] in {"command_failed", "invalid_repo"}
+    assert "Traceback" not in completed.stderr
