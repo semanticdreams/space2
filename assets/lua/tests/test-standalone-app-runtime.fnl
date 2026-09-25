@@ -93,6 +93,10 @@
 (fn run-with-invalid-module [StandaloneRuntime deps]
   (run-with-deps StandaloneRuntime deps {}))
 
+(fn run-and-observe-renderers [StandaloneRuntime deps]
+  (local (ok err) (pcall run-with-deps StandaloneRuntime deps (runtime-module)))
+  {:ok ok :err err :restored-renderers app.renderers})
+
 (fn test-hosted-mount-returns-runtime-controller []
   (local HostedRuntime (load-module :hosted-app-runtime))
   (var create-host nil)
@@ -200,22 +204,29 @@
   (local StandaloneRuntime (load-module :standalone-app-runtime))
   (local events [])
   (local deps (make-run-deps events))
-  (local snap app.renderers)
+  (local original-renderers app.renderers)
+  (local previous-renderers {:id :previous-renderers})
   (local renderer-field :renderers)
   (fn init-renderers [_render-options]
     (table.insert events :renderer-init)
     (tset app renderer-field deps.renderer)
     (error "renderer init failed"))
   (set deps.bootstrap-module {:init-renderers init-renderers})
-  (local (ok err)
-    (pcall (fn []
-             (run-with-deps StandaloneRuntime deps (runtime-module)))))
-  (set app.renderers snap)
+  (set app.renderers previous-renderers)
+  (local (protected-ok result)
+    (pcall run-and-observe-renderers StandaloneRuntime deps))
+  (set app.renderers original-renderers)
+  (when (not protected-ok)
+    (error result))
+  (local ok result.ok)
+  (local err result.err)
   (assert (not ok) "run must surface renderer setup failure")
   (assert (string.find (tostring err) "renderer init failed" 1 true)
           "run setup failure must include renderer init error")
   (assert (index-of events :renderer-drop)
-          "run must drop renderer assigned to app.renderers before init failure"))
+          "run must drop renderer assigned to app.renderers before init failure")
+  (assert (= result.restored-renderers previous-renderers)
+          "run must restore previous app.renderers after partial renderer init failure"))
 
 (table.insert tests {:name "hosted mount returns runtime controller"
                      :fn test-hosted-mount-returns-runtime-controller})
