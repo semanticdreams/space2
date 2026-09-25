@@ -84,6 +84,29 @@ an embedded host calls the same mount drop path. If app creation fails after the
 embedded host has been created, workspace mounting cleans up the host before
 rethrowing the original mount error.
 
+## Minimal workspace controls
+
+`app-host.workspace-panel` provides the first Space-hosted control surface:
+
+```fennel
+(local WorkspacePanel (require :app-host.workspace-panel))
+(local session (WorkspacePanel.open {:runtime runtime
+                                     :app app-shell
+                                     :module app-module}))
+```
+
+`WorkspacePanel.open(opts)` requires `opts.app.hud` or global `app.hud`, mounts
+the app through `WorkspaceMount.mount(opts)`, and adds one HUD panel child that
+describes the hosted app session. The returned session exposes `session.mount`
+plus `session:pause()`, `session:resume()`, `session:step(delta-ms)`, and
+idempotent `session:close()` controls. Pause, resume, and step delegate to the
+generic runtime controller; close removes the HUD child and drops the workspace
+mount exactly once.
+
+This panel is intentionally only a minimal control/session descriptor. Richer
+inspector/editor rendering and persistent app discovery or launcher UX are
+follow-up subprojects, not part of the workspace mount contract.
+
 ## Deferred alternatives
 
 Process-isolated hosting and compositor embedding are future work. wlroots/Xwayland embedding remains deferred because the previous attempt was unstable in headless rendering, DMA-BUF import, readback, socket lifecycle, and teardown.
