@@ -14,6 +14,11 @@
 (fn fake-scheduler-register [self registration]
   (set self.registration registration))
 
+(fn fake-scheduler-unregister [self registration]
+  (when (= self.registration registration)
+    (set self.registration nil)
+    true))
+
 (fn fake-scheduler-update [self delta]
   (when (and self.registration (not self.paused?))
     (set self.updates (+ self.updates 1))
@@ -36,16 +41,27 @@
 (fn fake-host []
   {:scheduler {:paused? false
                :updates 0
-               :steps 0
-               :register fake-scheduler-register
-               :update fake-scheduler-update
-               :set-paused fake-scheduler-set-paused
-               :step fake-scheduler-step}
-   :inspectors {:items []
-                :register fake-register-item}
-   :commands {:items []
-              :register fake-register-item}
-   :lifecycle {:drops 0}})
+                :steps 0
+                :register fake-scheduler-register
+                :unregister fake-scheduler-unregister
+                :update fake-scheduler-update
+                :set-paused fake-scheduler-set-paused
+                :step fake-scheduler-step}
+    :inspectors {:items []
+                 :register fake-register-item
+                 :unregister (fn [self item]
+                               (for [i (# self.items) 1 -1]
+                                 (when (= (. self.items i) item)
+                                   (table.remove self.items i)))
+                               true)}
+    :commands {:items []
+               :register fake-register-item
+               :unregister (fn [self item]
+                             (for [i (# self.items) 1 -1]
+                               (when (= (. self.items i) item)
+                                 (table.remove self.items i)))
+                             true)}
+    :lifecycle {:drops 0}})
 
 (fn fake-render-targets [self]
   self.targets)
@@ -105,6 +121,26 @@
   (controller:drop)
   (assert (= state.drop-calls 1)))
 
+(fn test-controller-drop-unregisters-runtime-facets-once []
+  (local host (fake-host))
+  (local target {:kind :hud})
+  (local state {:update-deltas []
+                :drop-calls 0})
+  (local module {:metadata {:id "fake" :title "Fake" :host-api 1}
+                 :create (make-hostable-create host target state)})
+  (local controller (RuntimeController.create {:module module :host host}))
+  (assert host.scheduler.registration "scheduler facet should be registered before drop")
+  (assert (= (# host.inspectors.items) 1) "inspector facet should be registered before drop")
+  (assert (= (# host.commands.items) 1) "command facet should be registered before drop")
+  (controller:drop)
+  (controller:drop)
+  (assert (= host.scheduler.registration nil) "drop must unregister scheduler facet")
+  (assert (= (# host.inspectors.items) 0) "drop must unregister inspector facets")
+  (assert (= (# host.commands.items) 0) "drop must unregister command facets")
+  (controller:update 16)
+  (assert (= (# state.update-deltas) 0) "unregistered scheduler facet must not update after drop")
+  (assert (= state.drop-calls 1) "runtime lifecycle drop must run exactly once"))
+
 (fn module-with-runtime [runtime]
   {:metadata {:id "malformed" :title "Malformed" :host-api 1}
    :create (fn [_host] runtime)})
@@ -138,7 +174,9 @@
 (table.insert tests {:name "required capability returns service"
                      :fn required-capability-returns-service})
 (table.insert tests {:name "controller mounts runtime facets"
-                     :fn test-controller-mounts-runtime-facets})
+                      :fn test-controller-mounts-runtime-facets})
+(table.insert tests {:name "controller drop unregisters runtime facets once"
+                      :fn test-controller-drop-unregisters-runtime-facets-once})
 (table.insert tests {:name "controller rejects malformed presentation facet"
                      :fn rejects-malformed-presentation-facet})
 (table.insert tests {:name "controller rejects keyed inspector and command facets"

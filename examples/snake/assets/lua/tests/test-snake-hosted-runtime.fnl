@@ -191,6 +191,13 @@
   (assert (string.find (tostring err) "input" 1 true) "invalid host error should name input capability")
   (assert (= (# host.scheduler.registrations) 0) "invalid host should not retain scheduler registration"))
 
+(fn test-missing-viewport-errors-loudly []
+  (local host (fake-host))
+  (set host.viewport nil)
+  (local (ok err) (pcall #(SnakeMain.create host)))
+  (assert (not ok) "Snake create must fail when required viewport capability is missing")
+  (assert (string.find (tostring err) "viewport" 1 true) "missing viewport error should name viewport capability"))
+
 (fn test-drop-is-idempotent-and-drops-owned-surface-once []
   (var registered-surface nil)
   (local host (fake-host {:on-surface-register (fn [surface]
@@ -221,6 +228,7 @@
 (add-test "pause blocks simulation but keeps presentation" test-pause-blocks-simulation-keeps-presentation)
 (add-test "quit key uses standalone host lifecycle" test-quit-key-uses-standalone-host-lifecycle)
 (add-test "invalid host leaves no partial registrations" test-invalid-host-leaves-no-partial-registrations)
+(add-test "missing viewport errors loudly" test-missing-viewport-errors-loudly)
 (add-test "drop is idempotent and drops owned surface once" test-drop-is-idempotent-and-drops-owned-surface-once)
 
 (fn main []

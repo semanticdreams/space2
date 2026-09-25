@@ -22,7 +22,6 @@
 (local KEY_W_UPPER (string.byte "W"))
 
 (local tick-interval 0.15)
-(local startup-viewport {:x 0 :y 0 :width 800 :height 600})
 (local metadata {:id "examples.snake" :title "Snake" :host-api 1})
 
 (fn restart-key? [key]
@@ -133,6 +132,14 @@
   (require-method service capability :unregister)
   service)
 
+(fn validate-viewport [viewport]
+  (when (not (= (type viewport) :table))
+    (error "[snake] host capability viewport must be a table"))
+  (each [_ field (ipairs [:x :y :width :height])]
+    (when (not (= (type (. viewport field)) :number))
+      (error (.. "[snake] host capability viewport missing numeric field: " (tostring field)))))
+  viewport)
+
 (fn unregister-from [service facet]
   (when (and service (= (type service.unregister) :function))
     (service:unregister facet)))
@@ -142,7 +149,7 @@
   (local input (Capabilities.require host :input))
   (local inspectors (Capabilities.require host :inspectors))
   (local lifecycle (Capabilities.require host :lifecycle))
-  (local viewport (if (and host host.viewport) host.viewport startup-viewport))
+  (local viewport (validate-viewport (Capabilities.require host :viewport)))
   (local surfaces (and host host.surfaces))
   (validate-registry scheduler :scheduler)
   (validate-registry input :input)

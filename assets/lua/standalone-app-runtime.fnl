@@ -177,7 +177,9 @@
       (when (not (= payload.height nil))
         (set viewport.height payload.height)))
     (when (and options.renderers options.renderers.on-viewport-changed)
-      (options.renderers:on-viewport-changed viewport)))
+      (options.renderers:on-viewport-changed viewport))
+    (when app
+      (set app.viewport viewport)))
 
   (fn quit [_self]
     (if (and engine (= (type engine.quit) :function))
@@ -240,6 +242,7 @@
   (global app (if app app {}))
   (local previous-engine app.engine)
   (local previous-renderers app.renderers)
+  (local previous-viewport app.viewport)
   (local previous-runtime app.active-world-runtime)
   (local engine-options (if options.engine-options options.engine-options {}))
   (local engine (EngineModule.Engine engine-options))
@@ -269,15 +272,25 @@
 
   (fn drop-renderers []
     (local dropped-renderers renderers)
+    (var drop-error nil)
     (when renderers
-      (renderers:drop)
+      (local (ok err) (pcall #(renderers:drop)))
+      (when (not ok)
+        (set drop-error err))
       (set renderers nil))
-    (when (and (not renderers)
-               app.renderers
+    (when (and app.renderers
                (not (= app.renderers previous-renderers))
                (not (= app.renderers dropped-renderers)))
-      (app.renderers:drop))
-    (set app.renderers previous-renderers))
+      (local (ok err) (pcall #(app.renderers:drop)))
+      (when (and (not ok) (not drop-error))
+        (set drop-error err)))
+    (set app.renderers previous-renderers)
+
+    (when drop-error
+      (error drop-error)))
+
+  (fn clear-viewport []
+    (set app.viewport previous-viewport))
 
   (fn clear-runtime []
     (set app.active-world-runtime previous-runtime))
@@ -293,6 +306,7 @@
     (cleanup-step drop-controller)
     (cleanup-step disconnect-host)
     (cleanup-step drop-renderers)
+    (cleanup-step clear-viewport)
     (cleanup-step clear-runtime)
     (cleanup-step shutdown-engine)
     (cleanup-step clear-engine)
@@ -304,6 +318,7 @@
       (fn []
         (when (not (engine:start))
           (host-error "engine failed to start"))
+        (set app.viewport viewport)
         (set renderers (AppBootstrap.init-renderers {:viewport viewport}))
         (set host (create-host {:engine engine
                                 :renderers renderers

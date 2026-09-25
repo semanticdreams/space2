@@ -51,6 +51,8 @@
     (not (= options.start-result false)))
   (fn engine-run [_self]
     (table.insert events :engine-run)
+    (when options.on-run
+      (options.on-run engine))
     (when options.run-error
       (error options.run-error)))
   (fn engine-shutdown [_self]
@@ -96,6 +98,21 @@
 (fn run-and-observe-renderers [StandaloneRuntime deps]
   (local (ok err) (pcall run-with-deps StandaloneRuntime deps (runtime-module)))
   {:ok ok :err err :restored-renderers app.renderers})
+
+(fn run-with-viewport [StandaloneRuntime deps viewport]
+  (StandaloneRuntime.run {:module (runtime-module)
+                          :engine-module deps.engine-module
+                          :bootstrap-module deps.bootstrap-module
+                          :viewport viewport}))
+
+(fn run-and-observe-viewport [StandaloneRuntime deps viewport]
+  (local previous-viewport {:id :previous-viewport})
+  (local original-viewport app.viewport)
+  (set app.viewport previous-viewport)
+  (local (ok err) (pcall run-with-viewport StandaloneRuntime deps viewport))
+  (local result {:ok ok :err err :restored-viewport app.viewport})
+  (set app.viewport original-viewport)
+  result)
 
 (fn test-hosted-mount-returns-runtime-controller []
   (local HostedRuntime (load-module :hosted-app-runtime))
@@ -228,6 +245,48 @@
   (assert (= result.restored-renderers previous-renderers)
           "run must restore previous app.renderers after partial renderer init failure"))
 
+(fn test-run-sets-resizes-and-restores-app-viewport []
+  (local StandaloneRuntime (load-module :standalone-app-runtime))
+  (local events [])
+  (local resized-signal (fake-signal))
+  (local seen {:during nil :resized nil})
+  (local viewport {:x 1 :y 2 :width 300 :height 200})
+  (fn observe-viewport-during-run [_engine]
+    (set seen.during app.viewport)
+    (resized-signal:emit {:x 3 :y 4 :width 640 :height 480})
+    (set seen.resized {:x app.viewport.x
+                       :y app.viewport.y
+                       :width app.viewport.width
+                       :height app.viewport.height}))
+  (local deps (make-run-deps events {:on-run observe-viewport-during-run}))
+  (set deps.engine.events {:window-resized resized-signal})
+  (local result (run-and-observe-viewport StandaloneRuntime deps viewport))
+  (assert result.ok "standalone run should succeed with fake runtime")
+  (assert (= seen.during viewport) "run must publish standalone viewport on app.viewport before event loop")
+  (assert (= seen.resized.width 640) "resize must update canonical app.viewport width")
+  (assert (= seen.resized.height 480) "resize must update canonical app.viewport height")
+  (assert (= seen.resized.x 3) "resize must update canonical app.viewport x")
+  (assert (= seen.resized.y 4) "resize must update canonical app.viewport y")
+  (assert (= result.restored-viewport.id :previous-viewport) "cleanup must restore previous app.viewport"))
+
+(fn test-renderer-drop-failure-restores-app-renderers []
+  (local StandaloneRuntime (load-module :standalone-app-runtime))
+  (local events [])
+  (local deps (make-run-deps events {:renderer-drop-error "renderer cleanup failed"}))
+  (local original-renderers app.renderers)
+  (local previous-renderers {:id :previous-renderers})
+  (set app.renderers previous-renderers)
+  (local (protected-ok result)
+    (pcall run-and-observe-renderers StandaloneRuntime deps))
+  (set app.renderers original-renderers)
+  (when (not protected-ok)
+    (error result))
+  (assert (not result.ok) "renderer drop failure must be reported")
+  (assert (string.find (tostring result.err) "renderer cleanup failed" 1 true)
+          "renderer drop failure must surface explicitly")
+  (assert (= result.restored-renderers previous-renderers)
+          "app.renderers must be restored even when renderers:drop fails"))
+
 (table.insert tests {:name "hosted mount returns runtime controller"
                      :fn test-hosted-mount-returns-runtime-controller})
 (table.insert tests {:name "standalone create-host exposes required capabilities"
@@ -245,7 +304,11 @@
 (table.insert tests {:name "standalone run reports cleanup failure explicitly"
                      :fn test-run_reports_cleanup_failure_explicitly})
 (table.insert tests {:name "standalone run drops partial renderer after init failure"
-                     :fn test-run-drops-partial-renderer-after_init_failure})
+                      :fn test-run-drops-partial-renderer-after_init_failure})
+(table.insert tests {:name "standalone run sets resizes and restores app viewport"
+                      :fn test-run-sets-resizes-and-restores-app-viewport})
+(table.insert tests {:name "standalone renderer drop failure restores app renderers"
+                      :fn test-renderer-drop-failure-restores-app-renderers})
 
 ;; StandaloneRuntime.run real window/GL behavior remains covered by standalone
 ;; launch commands; this suite uses fakes for startup ordering and cleanup

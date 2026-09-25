@@ -66,12 +66,30 @@
       (host-error "runtime scheduler facet requires update function")))
   scheduler)
 
-(fn register-facet-list [host capability facets]
+(fn register-facet-list [host capability facets registered]
   (when (> (# facets) 0)
     (local service (Capabilities.require host capability))
     (local register (require-function service capability :register))
     (each [_ facet (ipairs facets)]
-      (register service facet))))
+      (register service facet)
+      (table.insert registered {:capability capability :service service :facet facet}))))
+
+(fn unregister-facet [registration]
+  (local service registration.service)
+  (local unregister service.unregister)
+  (when unregister
+    (when (not (= (type unregister) :function))
+      (host-error (.. "capability " (tostring registration.capability) " invalid method: unregister")))
+    (unregister service registration.facet)))
+
+(fn note-error [state err]
+  (when (not state.err)
+    (set state.err err)))
+
+(fn teardown-step [state cb]
+  (local (ok err) (pcall cb))
+  (when (not ok)
+    (note-error state err)))
 
 (fn create [opts]
   (when (= opts nil)
@@ -92,13 +110,15 @@
   (local inspectors (validate-facet-list runtime :inspectors))
   (local commands (validate-facet-list runtime :commands))
   (local scheduler (validate-scheduler runtime))
+  (local registered [])
   (var dropped? false)
 
   (when scheduler
     (local register (require-function scheduler-service :scheduler :register))
-    (register scheduler-service scheduler))
-  (register-facet-list host :inspectors inspectors)
-  (register-facet-list host :commands commands)
+    (register scheduler-service scheduler)
+    (table.insert registered {:capability :scheduler :service scheduler-service :facet scheduler}))
+  (register-facet-list host :inspectors inspectors registered)
+  (register-facet-list host :commands commands registered)
 
   (fn controller-runtime [_self]
     runtime)
@@ -130,9 +150,16 @@
   (fn drop [_self]
     (when (not dropped?)
       (set dropped? true)
+      (local teardown-state {})
+      (for [i (# registered) 1 -1]
+        (local registration (. registered i))
+        (teardown-step teardown-state #(unregister-facet registration))
+        (table.remove registered i))
       (local lifecycle runtime.lifecycle)
       (when (and lifecycle (= (type lifecycle.drop) :function))
-        (lifecycle:drop))))
+        (teardown-step teardown-state #(lifecycle:drop)))
+      (when teardown-state.err
+        (error teardown-state.err))))
 
   {:runtime controller-runtime
    :render-targets render-targets
