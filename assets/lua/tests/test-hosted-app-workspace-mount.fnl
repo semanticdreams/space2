@@ -45,6 +45,30 @@
   (host.hud:add-panel-child {:id :owned-child})
   {:presentation {}})
 
+(var quit-during-create-state nil)
+
+(fn note-quit-during-create-drop [self]
+  (set self.state.dropped-count (+ self.state.dropped-count 1)))
+
+(fn create-runtime-that-quits-during-create [host]
+  (host.lifecycle:quit)
+  {:presentation {:render-targets hosted-render-targets}
+   :lifecycle {:state quit-during-create-state
+               :drop note-quit-during-create-drop}})
+
+(fn test-embedded-quit-during-create-closes-workspace-mount []
+  (local runtime {})
+  (local state {:dropped-count 0})
+  (set quit-during-create-state state)
+  (local module {:create create-runtime-that-quits-during-create})
+  (local mount (WorkspaceMount.mount {:runtime runtime :app {} :module module}))
+  (assert (= (# runtime.hosted-app-mounts) 0)
+          "quit during create should close and unregister the workspace mount")
+  (assert (= state.dropped-count 1)
+          "quit during create should drop the hosted controller once")
+  (assert (= (# (mount:render-targets)) 0)
+          "closed mount should not expose render targets"))
+
 (fn test-mount-registers-without-replacing-runtime []
   (local runtime {:presentation {:render-targets base-render-targets}})
   (local module {:create create-hosted-runtime})
@@ -109,6 +133,7 @@
 (add-test "mount registers without replacing runtime" test-mount-registers-without-replacing-runtime)
 (add-test "activity presentation composes hosted targets before HUD" test-activity-presentation-composes-hosted-targets-before-hud)
 (add-test "failed mount drops host-owned children" test-failed-mount-drops-host-owned-children)
+(add-test "embedded quit during create closes workspace mount" test-embedded-quit-during-create-closes-workspace-mount)
 
 (fn main []
   (Runner.run-tests {:name "hosted-app-workspace-mount" :tests tests}))

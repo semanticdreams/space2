@@ -41,9 +41,11 @@
   (local mounts (ensure-mount-list runtime))
   (var dropped? false)
   (var mount nil)
+  (var pending-close? false)
   (fn quit-host [_host]
-    (when mount
-      (mount:drop)))
+    (if mount
+        (mount:drop)
+        (set pending-close? true)))
   (local host (SpaceHost.create {:runtime runtime
                                  :app options.app
                                  :viewport options.viewport
@@ -84,6 +86,8 @@
               :render-targets render-targets
               :drop drop})
   (table.insert mounts mount)
+  (when pending-close?
+    (mount:drop))
   mount)
 
 {:mount mount}
