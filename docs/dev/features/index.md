@@ -24,6 +24,7 @@ Detailed design and implementation notes for major feature systems.
 - [Layout Widget Engine](./layout-widget-engine)
 - [Panel Transfer System](./panel-transfer-system)
 - [Stylus Drawing Input](./stylus-drawing-input)
+- [Temporal Core](./temporal)
 - [Terrain Heightfield System](./terrain-heightfield-system)
 - [Wallet System](./wallet-system)
 - [World Building](./world-building)

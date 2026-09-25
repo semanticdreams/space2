@@ -14,6 +14,7 @@
 #include "lua_engine.h"
 #include "lua_http.h"
 #include "lua_http_server.h"
+#include "lua_temporal_core.h"
 #include "lua_ray_box.h"
 #include "lua_notify.h"
 #include "lua_tray.h"
@@ -30,6 +31,14 @@ extern "C" int luaopen_lsqlite3(lua_State* L);
 
 namespace
 {
+int quiet_exception_handler(lua_State* state,
+                            sol::optional<const std::exception&>,
+                            sol::string_view what)
+{
+    lua_pushlstring(state, what.data(), what.size());
+    return 1;
+}
+
 std::string join_semicolon_paths(const std::vector<std::string>& paths)
 {
     std::ostringstream out;
@@ -109,6 +118,7 @@ LuaRuntime::LuaRuntime() = default;
 
 void LuaRuntime::init()
 {
+    lua.set_exception_handler(quiet_exception_handler);
     install_fatal_traceback();
     lua.open_libraries(sol::lib::base, sol::lib::package, sol::lib::table,
                        sol::lib::math, sol::lib::string, sol::lib::debug,
@@ -317,6 +327,7 @@ void LuaRuntime::install_base_bindings()
     }
 #endif
     lua_bind_libtorrent(lua);
+    lua_bind_temporal_core(lua);
     lua_bind_engine(lua);
     lua_bind_ray_box(lua);
     lua_bind_tray(lua);
