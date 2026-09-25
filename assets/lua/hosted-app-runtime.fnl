@@ -5,4 +5,9 @@
     (error "HostedAppRuntime.mount requires options"))
   (RuntimeController.create opts))
 
-{:mount mount}
+(fn mount-in-workspace [opts]
+  (local WorkspaceMount (require :app-host.workspace-mount))
+  (WorkspaceMount.mount opts))
+
+{:mount mount
+ :mount-in-workspace mount-in-workspace}

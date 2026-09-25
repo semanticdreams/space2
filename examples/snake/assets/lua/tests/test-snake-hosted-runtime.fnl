@@ -1,5 +1,6 @@
 (local Runner (require :tests/runner))
 (local RuntimeController (require :app-host.runtime-controller))
+(local HostedRuntime (require :hosted-app-runtime))
 (local StandaloneRuntime (require :standalone-app-runtime))
 (local SnakeMain (require :main))
 (local tests [])
@@ -223,6 +224,19 @@
   (assert (= surface-drop-count 1) "drop should drop Snake-owned surface once")
   (assert (= screen-drop-count 1) "drop should drop Snake-owned screen widget once"))
 
+(fn test-snake-mounts-in-workspace-and-removes-targets-on-drop []
+  (local runtime {})
+  (local shell {})
+  (local mount (HostedRuntime.mount-in-workspace {:runtime runtime
+                                                  :app shell
+                                                  :module SnakeMain}))
+  (assert (= (. runtime :hosted-app-mounts 1) mount)
+          "Snake workspace mount should register on runtime")
+  (assert-one-target mount "Snake workspace mount")
+  (mount:drop)
+  (assert (= (# runtime.hosted-app-mounts) 0)
+          "Snake workspace mount should be removed after drop"))
+
 (add-test "snake create returns runtime facets" test-snake-create-returns-runtime-facets)
 (add-test "controller mounts snake runtime" test-controller-mounts-snake-runtime)
 (add-test "pause blocks simulation but keeps presentation" test-pause-blocks-simulation-keeps-presentation)
@@ -230,6 +244,7 @@
 (add-test "invalid host leaves no partial registrations" test-invalid-host-leaves-no-partial-registrations)
 (add-test "missing viewport errors loudly" test-missing-viewport-errors-loudly)
 (add-test "drop is idempotent and drops owned surface once" test-drop-is-idempotent-and-drops-owned-surface-once)
+(add-test "snake mounts in workspace and removes targets on drop" test-snake-mounts-in-workspace-and-removes-targets-on-drop)
 
 (fn main []
   (Runner.run-tests {:name "snake-hosted-runtime" :tests tests}))
