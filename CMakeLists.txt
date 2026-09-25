@@ -825,6 +825,17 @@ set_tests_properties(test_vector_buffer PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
+add_executable(test_temporal_core
+    tests/test_temporal_core.cpp
+    src/temporal.cpp
+)
+target_include_directories(test_temporal_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(test_temporal_core date::date-tz)
+add_test(NAME test_temporal_core COMMAND test_temporal_core)
+set_tests_properties(test_temporal_core PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
 add_executable(test_window_title
     tests/test_window_title.cpp
 )
