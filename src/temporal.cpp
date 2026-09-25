@@ -166,6 +166,36 @@ std::int64_t nanos_from_day_time(std::int64_t days_since_epoch,
     return checked_add(checked_multiply(days_since_epoch, nanos_per_day), time_nanoseconds);
 }
 
+std::int64_t nanos_from_unix_parts(std::int64_t epoch_seconds, std::int32_t nanosecond)
+{
+    const std::int64_t max = std::numeric_limits<std::int64_t>::max();
+    const std::int64_t min = std::numeric_limits<std::int64_t>::min();
+    const std::int64_t max_seconds = max / nanos_per_second;
+    const std::int64_t max_nanosecond = max % nanos_per_second;
+    std::int64_t min_seconds = min / nanos_per_second;
+    std::int64_t min_nanosecond = min % nanos_per_second;
+    if (min_nanosecond < 0)
+    {
+        --min_seconds;
+        min_nanosecond = checked_add(min_nanosecond, nanos_per_second);
+    }
+
+    if (epoch_seconds > max_seconds ||
+        (epoch_seconds == max_seconds && nanosecond > max_nanosecond) ||
+        epoch_seconds < min_seconds ||
+        (epoch_seconds == min_seconds && nanosecond < min_nanosecond))
+    {
+        throw std::overflow_error("temporal duration arithmetic overflow");
+    }
+
+    if (epoch_seconds == min_seconds)
+    {
+        return checked_add(min, checked_subtract(nanosecond, min_nanosecond));
+    }
+
+    return checked_add(checked_multiply(epoch_seconds, nanos_per_second), nanosecond);
+}
+
 CivilNanoseconds nanos_from_fields(int year,
                                    int month,
                                    int day,
@@ -512,8 +542,7 @@ Instant Instant::from_unix(std::int64_t epoch_seconds, std::int32_t nanosecond)
     {
         throw std::invalid_argument("invalid instant nanosecond");
     }
-    return Instant{checked_sys_from_nanos(
-        checked_add(checked_multiply(epoch_seconds, nanos_per_second), nanosecond))};
+    return Instant{checked_sys_from_nanos(nanos_from_unix_parts(epoch_seconds, nanosecond))};
 }
 
 std::int64_t Instant::epoch_seconds() const

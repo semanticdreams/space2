@@ -92,6 +92,13 @@ void test_nanosecond_time_point_range_boundaries()
     expect_throws([] { PlainDateTime::from_fields(-67562, 9, 25, 12, 34, 56, 0); });
 }
 
+void test_from_unix_accepts_lower_boundary_parts()
+{
+    expect_eq(Instant::from_unix(-9223372037LL, 145224192).to_string(),
+              std::string("1677-09-21T00:12:43.145224192Z"));
+    expect_throws([] { Instant::from_unix(-9223372037LL, 145224191); });
+}
+
 void test_plain_date_time_field_validation()
 {
     expect_throws([] { PlainDateTime::parse("2026-02-29T00:00:00"); });
@@ -176,6 +183,7 @@ int main()
         run("test_instant_rejects_leap_second", test_instant_rejects_leap_second);
         run("test_duration_arithmetic_and_overflow", test_duration_arithmetic_and_overflow);
         run("test_nanosecond_time_point_range_boundaries", test_nanosecond_time_point_range_boundaries);
+        run("test_from_unix_accepts_lower_boundary_parts", test_from_unix_accepts_lower_boundary_parts);
         run("test_plain_date_time_field_validation", test_plain_date_time_field_validation);
         run("test_zoned_from_plain_requires_valid_zone", test_zoned_from_plain_requires_valid_zone);
         run("test_new_york_spring_gap_disambiguation", test_new_york_spring_gap_disambiguation);
