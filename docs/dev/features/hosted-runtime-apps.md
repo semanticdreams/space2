@@ -14,6 +14,17 @@ Space-runtime apps are hostable when their entry module exports a runtime compos
 
 The host provides services such as `viewport`, `surfaces`, `presentation`, `scheduler`, `input`, `inspectors`, `commands`, `assets`, `logging`, and `lifecycle`. Apps require capabilities by name and fail loudly when required services are absent. Apps do not receive or branch on a hosted-vs-standalone mode flag.
 
+Embedded Space workspace hosts provide the same generic services plus optional
+Space surface adapters when the shell exposes them:
+
+- `host.hud` proxies `app.hud` panel insertion/removal.
+- `host.canvas` proxies `app.canvas` panel insertion/removal.
+- `host.scene` proxies `app.scene` panel insertion/removal.
+
+Adapters own children added through them. Dropping the embedded host removes
+those owned HUD/canvas/scene panel children exactly once; children removed
+through the adapter are no longer removed again during host teardown.
+
 ## Runtime composition facets
 
 A runtime may expose:
@@ -34,6 +45,13 @@ Hosts pause and step scheduler lanes. Apps register pausable work with `host.sch
 ## Standalone and embedded hosts
 
 Standalone launch and embedded mounting construct different generic hosts, then call the same `create(host)` app factory. App logic is shared.
+
+In standalone mode `host.lifecycle:quit()` exits through the standalone engine.
+In embedded workspace mode `host.lifecycle:quit()` closes the workspace mount via
+the host's close callback; it does not quit the Space process and does not
+replace `app.active-world-runtime`, `app.renderers`, or global renderer state.
+Apps should request capabilities from the host rather than checking a
+hosted-vs-standalone flag.
 
 ## Deferred alternatives
 
