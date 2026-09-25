@@ -2,328 +2,322 @@
 
 ## Context
 
-Space recently gained an independent Snake example under `examples/snake/`. The
-example demonstrates that a Fennel app can be packaged and launched as its own
-desktop program while reusing the Space runtime. The current Snake entrypoint is
-already safe to import in a limited sense: `examples/snake/assets/lua/main.fnl`
-exports `:main` and only starts the game when `app-config.run-main` is true.
+Space can already run independent Fennel applications such as the Snake example
+under `examples/snake/`. Snake proves the packaging and launch path, but it is a
+very small game. Real games will use more Space features: multiple presentation
+surfaces, input contexts, audio, assets, storage, tool panels, debug inspectors,
+commands, and app-specific editor views.
 
-The remaining boundary is deeper. `snake/app.fnl` currently owns standalone
-runtime responsibilities: it creates `Engine`, initializes `app.renderers`,
-builds an `OrthographicUiSurface`, installs `app.active-world-runtime`, connects
-engine events, runs the engine loop, drops renderers, and shuts the engine down.
-That is correct for an independently published game, but it cannot be imported
-directly into the default Space app without colliding with Space's already active
-engine, renderer, input routing, presentation graph, and debugging tools.
+The important design constraint is therefore not “make Snake embeddable.” It is:
+an independently publishable Space-runtime app should be the same program whether
+it is launched as its own desktop app or mounted inside Space for live
+development. If every new game requires new mandatory host methods, or if app
+code branches on “hosted vs standalone,” the feature has failed.
 
-The product goal is broader than embedding a toy example. Space should be usable
-as an IDE for Space-runtime games: a developer can play a game inside Space,
-pause on an arbitrary frame, inspect plain game state, attach moldable views and
-live controls, then publish the same game independently with the standalone
-harness. Arbitrary native Linux application embedding is not the primary goal;
-it is only relevant as a comparison point or future fallback strategy.
+The right boundary is a stable runtime-composition contract. App code builds a
+runtime out of host-provided capabilities. Standalone launch and in-Space hosting
+are different generic host implementations, not different app implementations.
 
 ## Goals
 
-- Determine whether Space-runtime apps can share one entry module that is both
-  independently runnable and importable/hostable by Space.
-- Define a minimal host interface that avoids app-owned engine and renderer
-  ownership in embedded mode.
+- Define a hostable app contract that does not grow a new required method for
+  every game feature.
+- Ensure standalone and embedded paths call the same app factory and execute the
+  same app logic.
+- Move hosted-vs-standalone conditional behavior into generic hosts/harnesses,
+  not game code.
+- Support real games that use multiple Space surfaces and services.
 - Preserve independent publishing for apps such as Snake.
-- Enable the Space IDE use case: play, pause, step, inspect state, route input,
-  render inside Space, and attach developer views.
-- Keep the MVP focused on trusted in-process Space/Fennel apps, while documenting
-  alternatives and known risks.
+- Enable Space IDE workflows: play, pause, step, inspect state, attach moldable
+  views, route input, and render inside Space.
 
 ## Non-goals
 
 - Do not host arbitrary native executables as part of the MVP.
 - Do not revive wlroots/Xwayland compositor embedding for this feature.
-- Do not sandbox untrusted apps in-process.
+- Do not sandbox untrusted in-process apps.
 - Do not design a full app marketplace, launcher, or persistent discovery UI.
-- Do not promise long-term public API stability before the Snake MVP proves the
-  contract.
+- Do not promise long-term public API stability before the runtime-composition
+  MVP proves the contract.
 - Do not require independent apps to depend on Space's default HUD, graph,
   wallet, LLM, or default `main` app modules.
 
-## Existing architecture fit
+## Design principle
 
-Several current pieces make an in-process host interface feasible:
-
-- App distribution already supports an app-owned `assets/lua/main.fnl` entrypoint
-  launched with `space -m main` and app asset roots before the repository/runtime
-  asset root.
-- The Snake game model is already separated from runtime boot code in
-  `snake/game.fnl`.
-- Snake's view already renders through `OrthographicUiSurface`, which produces a
-  presentation target similar to HUD/canvas targets.
-- Space rendering already consumes presentation targets from
-  `app.active-world-runtime.presentation:render-targets()`.
-- Space UI has plausible host surfaces: HUD panels/dialogs, canvas activity
-  slots, activity presentation, and lower-level renderer sub-app hooks.
-
-The main missing piece is a lifecycle split: standalone mode may own the engine;
-embedded mode must return a host-owned session object.
-
-## Considered approaches
-
-### Approach A: trusted in-process lifecycle interface
-
-Apps export a `create(host)` function. Standalone `main` still creates and owns
-`Engine`, renderers, event connections, and shutdown. Embedded `create(host)`
-returns a session object that never starts an engine and never replaces
-Space-owned globals. Space owns timing, pause, input routing, viewport changes,
-render collection, inspection surfaces, and teardown.
-
-Benefits:
-
-- Best fit for Space-runtime games and internal live-development tools.
-- No texture streaming, compositor, IPC, or multi-process input protocol needed.
-- Pause/step/state inspection can operate on real Fennel objects in the same
-  runtime, while snapshots expose plain data to tools.
-- Snake can prove the pattern with small, focused changes because its game logic
-  and orthographic UI surface are already separable.
-
-Costs and risks:
-
-- Hosted apps are trusted code and can still mutate global `app` unless the
-  contract and tests make that boundary explicit.
-- Module namespace and asset-root collisions remain possible when multiple apps
-  are loaded into one runtime.
-- Teardown must be disciplined: no leaking widgets, surfaces, event handlers, or
-  references into Space's renderer.
-- The host API needs versioning later if external game repositories depend on it.
-
-### Approach B: separate Space process with a runtime bridge
-
-The game remains a separately running Space process. It exposes a live protocol
-for state snapshots, pause/step controls, input injection, and possibly a render
-stream that Space consumes. Space IDE tools talk to the child process rather than
-importing the game into the default app process.
-
-Benefits:
-
-- Better isolation and crash containment.
-- Avoids global `app` sharing and module-cache collisions.
-- Closer to how independently published games actually run.
-
-Costs and risks:
-
-- Requires a protocol for input, timing, state serialization, lifecycle, and
-  errors.
-- Rendering is the hard part: Space would need texture streaming, frame capture,
-  or another shared presentation mechanism.
-- Pause/step/debug semantics become asynchronous and harder to make exact.
-- More infrastructure than needed to validate the Snake/Space-runtime IDE use
-  case.
-
-This is a credible later path when isolation matters, especially if built on
-Space's existing remote-control ideas, but it should not be the MVP.
-
-### Approach C: external compositor or wlroots-style embedding
-
-Space runs the game as an external window/application and embeds that surface in
-Space through compositor integration.
-
-Benefits:
-
-- In theory, it could host many graphical programs without app-specific changes.
-- It preserves process boundaries and standalone behavior.
-
-Costs and risks:
-
-- This repository's previous wlroots attempt is paused and removed. The status
-  note documents DMA-BUF import failures, unreliable readback/black textures,
-  fragile headless output commits, Xwayland socket collisions, and teardown
-  crashes.
-- It solves display embedding but not Space-specific IDE needs such as structured
-  game snapshots, moldable controls, semantic pause/step, or in-runtime tools.
-- It is overpowered for trusted Space-runtime apps and underpowered for semantic
-  live development.
-
-This approach is not recommended for the MVP.
-
-## Decision
-
-Use Approach A for the MVP: define a trusted in-process host lifecycle interface
-for Space-runtime apps. Keep Approach B as a future isolation strategy and defer
-Approach C until compositor integration has a separate, stable reason to exist.
-
-The interface should be proven by Snake first. Snake should be refactored so its
-standalone harness and hostable session share the same game/view code, while only
-the standalone harness owns `Engine` and global renderer lifecycle.
-
-## Hostable entry module contract
-
-A hostable app entry module should export:
+The app API should be small and stable:
 
 ```fennel
 {:metadata {:id "examples.snake"
-            :title "Snake"}
- :main main
- :create create}
+            :title "Snake"
+            :host-api 1}
+ :create create
+ :main main}
 ```
 
-- `metadata` is plain data suitable for launchers, debug tools, and docs.
-- `main` runs the app independently through the standalone harness.
-- `create(host)` returns a hosted session and must not create, start, run, shut
-  down, or drop an `Engine`.
+`create(host)` returns a **runtime composition object**, not a bespoke game
+session API. The host interacts with protocol facets on that runtime when they
+exist. New capabilities appear as host services or optional runtime facets; they
+do not become new required app entrypoint methods.
 
-The host table is intentionally small for the MVP:
+Standalone launch is just:
 
 ```fennel
-{:mode :embedded
- :viewport viewport
- :metadata host-metadata
- :request-quit request-quit-fn}
+(fn main []
+  (StandaloneRuntime.run {:module AppModule}))
 ```
 
-The host may grow later with explicit services such as logging, file access,
-debug registry, or tool panels. Missing required host fields must fail loudly.
+In-Space hosting is just:
 
-## Hosted session contract
+```fennel
+(HostedRuntime.mount {:module AppModule :host space-host})
+```
 
-`create(host)` returns a session table with these methods:
+Both paths call the same `AppModule.create(host)`. App code does not receive a
+`:mode :embedded` flag and should not branch on hosted-vs-standalone state.
 
-- `render-targets(self) -> table[]`: return presentation targets for Space's
-  renderer to draw.
-- `update(self, delta-ms:number) -> boolean`: advance app simulation when not
-  paused and return whether visible state changed.
-- `handle-input(self, event-name:string|keyword, payload:table) -> boolean`:
-  process host-routed input and return whether it was handled.
-- `on-viewport-changed(self, viewport:table) -> nil`: update surfaces when the
-  host embedding rectangle changes.
-- `set-paused(self, paused?:boolean) -> boolean`: set or toggle pause state and
-  return the new pause state.
-- `step-once(self) -> boolean`: advance exactly one simulation step while
-  retaining paused mode.
-- `snapshot(self) -> table`: return plain data for inspectors and moldable views.
-- `drop(self) -> nil`: release widgets/surfaces/session-owned resources exactly
-  once.
+## Host capabilities
 
-The MVP session does not expose live widget objects through `snapshot`. Debug
-tools that need richer access can add explicit inspected views later, but the
-base contract should stay serializable and safe to display.
+The host is a capability table. It represents the services available to an app in
+either standalone or embedded mode:
+
+```fennel
+{:api-version 1
+ :metadata host-metadata
+ :viewport viewport-service
+ :surfaces surface-factory-service
+ :presentation presentation-composition-service
+ :scheduler scheduler-service
+ :input input-routing-service
+ :inspectors inspector-registry-service
+ :commands command-registry-service
+ :assets asset-service
+ :logging logging-service
+ :lifecycle lifecycle-service}
+```
+
+The list can grow without changing the app factory signature. Apps request the
+capabilities they need and fail loudly when a required service is absent. Optional
+features are detected by capability presence, not by hosted-vs-standalone mode.
+
+Examples:
+
+- A simple Snake game may require `viewport`, `surfaces`, `scheduler`, `input`,
+  and `presentation`.
+- A larger game may also require `assets`, `commands`, `inspectors`, audio, save
+  data, or multiple surface factories.
+- Space IDE hosts can add extra capabilities for moldable tools while standalone
+  hosts can provide no-op-free, real equivalents or fail explicitly when a game
+  requires an unsupported capability.
+
+## Runtime composition object
+
+`create(host)` returns a table composed of protocol facets. The minimum useful
+runtime shape is:
+
+```fennel
+{:metadata metadata
+ :presentation presentation-provider
+ :lifecycle lifecycle-provider
+ :scheduler scheduler-registrations
+ :inspectors inspector-provider
+ :commands command-provider}
+```
+
+Only `metadata`, `presentation`, and `lifecycle` are expected for the Snake MVP.
+Other facets are optional and become useful as games mature. The host should
+query and mount known facets, not require a game-specific interface.
+
+The `presentation` facet should reuse existing Space protocols where possible,
+especially:
+
+```fennel
+:render-targets(self) -> table[]
+:input-controls(self) -> table|nil
+:screen-pos-ray(self, pos, opts) -> ray|nil
+:camera(self, opts) -> camera|nil
+```
+
+This fits current renderer behavior, which already consumes
+`runtime.presentation:render-targets()`.
+
+The `lifecycle` facet should expose deterministic teardown, such as:
+
+```fennel
+:drop(self) -> nil
+```
+
+Scheduler, inspector, and command facets should be generic registries rather than
+per-game methods.
+
+## Pause, step, and inspection
+
+Pause, step, and inspection are IDE host behavior, not bespoke app entrypoint
+methods.
+
+- Apps register simulation work with `host.scheduler` as pausable work.
+- The host pauses scheduler lanes; rendering remains active.
+- The host steps pausable scheduler lanes by one frame or one registered tick.
+- Apps register inspectors through `host.inspectors` or return an `inspectors`
+  facet.
+- Inspectors expose plain data or moldable views through a registry; the core app
+  API does not require every game to implement `snapshot`, `set-paused`, or
+  `step-once` methods.
+
+Snake may expose a simple game-state inspector as the first example, but that is
+an inspector registration, not a special required method on every app.
 
 ## Ownership and lifecycle rules
 
-- Space owns the process engine, renderer, main update loop, input routing,
-  top-level presentation composition, and final shutdown in embedded mode.
-- A hosted app owns its model, view widgets, surfaces, and app-local subscriptions
-  created inside the session.
-- A hosted app must not replace `app.engine`, `app.renderers`, or
+- App logic constructs a runtime composition from host capabilities.
+- Standalone hosts own a process engine, renderer, main update loop, and shutdown.
+- Embedded Space hosts reuse the existing process engine, renderer, update loop,
+  input routing, and shutdown.
+- App code must not create/start/run/shut down `Engine` directly.
+- App code must not replace `app.engine`, `app.renderers`, or
   `app.active-world-runtime` directly.
-- A hosted app must not subscribe directly to engine event signals in embedded
-  mode. The host adapter routes updates and input into the session.
-- Paused hosted apps remain drawable; pause only stops simulation advancement.
-- Teardown must be deterministic and idempotent or fail with a documented explicit
-  error. Silent no-op failure paths are not acceptable.
+- App code must not connect directly to engine signals. It registers through host
+  scheduler/input/lifecycle services.
+- Runtime teardown drops app-owned widgets, surfaces, registrations, and local
+  resources exactly once.
+- Missing required capabilities, invalid payloads, failed module loads, and
+  teardown failures surface explicit errors.
 
-## Space host adapter
+## Considered approaches
 
-Space should provide a small adapter module that consumes a hostable module and
-returns a controller suitable for IDE surfaces and tests.
+### Approach A: runtime composition over host capabilities
 
-The controller should expose:
+Apps export `create(host) -> runtime`. Hosts provide capabilities; apps return
+known protocol facets. Standalone and embedded hosts differ internally but expose
+the same capability surface.
 
-- `runtime(self) -> table`: returns a runtime shape whose
-  `presentation.render-targets` delegates to the hosted session.
-- `update(self, delta-ms:number) -> boolean`.
-- `dispatch-input(self, event-name, payload) -> boolean`.
-- `set-paused(self, paused?) -> boolean`.
-- `step(self, delta-ms?) -> boolean`.
-- `snapshot(self) -> table`.
-- `drop(self) -> nil`.
+Benefits:
 
-This adapter is the seam between Space's IDE tools and a game session. It also
-keeps tests independent from a full HUD/canvas product UI.
+- Stable public app entry shape.
+- No hosted-vs-standalone branch in app logic.
+- Real games can use more surfaces and services without expanding required app
+  methods.
+- Fits current Space presentation patterns.
+- Keeps pause/step/inspection as host services that can improve over time.
+
+Costs and risks:
+
+- Requires designing a good initial host capability table.
+- Existing Snake must move engine ownership out of app composition and into a
+  standalone host/harness.
+- Service boundaries must fail loudly; silent missing services would make apps
+  behave differently across hosts.
+
+### Approach B: bespoke hosted session methods
+
+Apps export `create(host) -> session` with fixed methods such as `update`,
+`handle-input`, `set-paused`, `step-once`, `snapshot`, and `drop`.
+
+Benefits:
+
+- Easy to prove with Snake.
+- Small initial implementation.
+
+Costs and risks:
+
+- Too Snake-shaped and likely to grow for every real game feature.
+- Encourages the app API to become a grab bag of host requests.
+- Makes pause/step/inspection app-specific rather than host-level IDE behavior.
+
+This approach is rejected as the long-term contract.
+
+### Approach C: separate process or compositor embedding
+
+The game stays in a separate process and Space consumes pixels or a runtime
+bridge.
+
+Benefits:
+
+- Better isolation and closer to published app execution.
+
+Costs and risks:
+
+- Requires input, timing, state, lifecycle, and rendering protocols.
+- Pixel embedding does not provide semantic IDE tools by itself.
+- The previous wlroots path is paused due DMA-BUF/readback/headless/Xwayland
+  lifecycle failures.
+
+This remains future work for isolation, not the MVP.
+
+## Decision
+
+Use Approach A. The public contract is:
+
+```text
+entry module exports metadata, create(host), and optional main
+create(host) returns a runtime composition object
+hosts provide capabilities and mount known runtime facets
+```
+
+Standalone and embedded behavior differ only in generic host implementations.
+Game/app code builds one runtime composition and does not branch on host mode.
 
 ## Snake MVP design
 
-Snake should gain an engine-free session module that owns only game/session
-state:
+Snake should prove the contract without becoming the contract:
 
-- Create `snake/session.fnl` for game state, elapsed tick accumulation, surface,
-  screen widget, input mapping, pause/step, snapshot, viewport updates, and drop.
-- Keep `snake/app.fnl` as the standalone harness: create engine, initialize
-  renderers, create a session, connect engine events, run the engine loop,
-  disconnect events, drop the session, drop standalone renderers, and shut down
-  the engine.
-- Update `examples/snake/assets/lua/main.fnl` to export `:create` and
-  `:metadata` while preserving the existing `app-config.run-main` guard.
-- Add focused tests proving that hosted Snake does not own an engine, still
-  returns a presentation target, can pause/step, handles input, snapshots plain
-  state, updates viewport, and drops cleanly.
-
-This gives Space a concrete app that can run independently today and also be
-hosted by a generic adapter tomorrow.
+- `snake/app.fnl` becomes the app composition module. Its `create(host)` builds
+  game state, an orthographic surface, presentation facet, scheduler
+  registration, input registration, lifecycle facet, and a simple inspector.
+- `main.fnl` remains a small entry bridge that delegates standalone launch to a
+  reusable standalone host/harness.
+- A generic hosted runtime adapter mounts any `create(host) -> runtime` app by
+  providing Space capabilities and attaching known runtime facets.
+- Snake-specific tests prove standalone launch still works and hosted mounting
+  uses the same `create(host)` path.
 
 ## IDE integration path
 
-The first product surface should be deliberately modest: a test-proven controller
-and a simple host smoke path are more important than choosing the final UI shell.
-Once the lifecycle contract is proven, Space can mount the controller in one or
-more surfaces:
+The first product surface should mount a runtime composition through the generic
+host adapter. Later UI choices can be independent of the app contract:
 
-- HUD/dialog panel for quick live-development tools.
-- Canvas activity slot for an IDE-style embedded play surface.
-- Sandbox/world activity later if the hosted app should coexist with spatial
-  objects.
-- Graph/debug nodes later for state snapshots, controls, and moldable views.
-
-The host contract should not bake in one surface. It should expose presentation,
-input, timing, and snapshot seams that any Space surface can consume.
-
-## Error handling
-
-- Requiring a hostable module without `create` must raise an explicit error.
-- `create(host)` must validate required host fields and fail loudly on invalid
-  input.
-- The adapter must report failed `require` calls rather than falling back to an
-  empty session.
-- Hosted sessions must surface invalid viewport or input payload problems when
-  they cannot be handled safely.
-- Teardown errors should be explicit; hidden partial cleanup is worse than a
-  visible failure during IDE development.
+- Canvas activity slot for an embedded play surface.
+- HUD/dialog panel for quick tools.
+- Graph/debug nodes for inspectors, commands, and moldable views.
+- Sandbox/world activity if the app should coexist spatially with other objects.
 
 ## Testing and validation
 
 Implementation should use Space-native Fennel validation:
 
 1. Build first if `./build/space` is missing or stale.
-2. Compile-check touched `.fnl` files with `tools.fennel-check` using asset paths
-   that include `examples/snake/assets` before repository `assets` when validating
-   Snake files.
+2. Compile-check touched `.fnl` files with `tools.fennel-check`.
 3. Run `make constraints` after compile checks.
-4. Run existing Snake focused tests.
-5. Add and run hosted-session and hosted-runtime focused tests.
-6. Run broader `make test` only if implementation touches Space startup, global
+4. Run focused tests for host capabilities, runtime mounting, scheduler pause and
+   step, inspector registration, Snake hosted mounting, and existing Snake logic
+   and view behavior.
+5. Run broader `make test` only if implementation touches Space startup, global
    input routing, renderers, C++ bindings, or other high-risk shared runtime
    surfaces.
 
 ## Acceptance criteria
 
-- The feasibility decision is documented as: in-process hosting is feasible and
-  recommended for trusted Space-runtime apps; process-boundary hosting is future
-  work; wlroots/compositor embedding is deferred.
-- A hostable app entry module can be both independently runnable and importable.
-- The minimal hosted session contract supports render targets, update, pause,
-  single-step, input, viewport changes, snapshots, and teardown.
-- Snake can be refactored to implement the contract without losing its standalone
-  launch behavior.
-- The design explicitly protects Space-owned engine, renderer, input loop, and
-  top-level runtime ownership in embedded mode.
-- The first implementation can be validated with focused Fennel compile checks,
-  constraints, and focused Snake/host adapter tests.
+- Public app contract has only stable entry shape: `metadata`, `create(host)`,
+  and optional `main`.
+- `create(host)` returns a runtime composition with known protocol facets, not a
+  bespoke game session method list.
+- App code does not check hosted-vs-standalone mode.
+- Standalone and embedded paths construct different generic hosts and call the
+  same app factory.
+- Multiple surfaces/features are accessed through host capabilities and runtime
+  facets, not new required app methods.
+- Pause/step/inspection are implemented by scheduler, inspector, and command
+  services.
+- Snake remains independently runnable and becomes hostable without app-owned
+  engine/renderers in embedded mode.
 
 ## Open questions for later productization
 
-- What is the trust and security model for third-party in-process hosted apps?
-- How should Space discover external app asset roots and avoid module-name
-  collisions across multiple loaded apps?
+- Which host capabilities are mandatory for API version 1, and which are optional
+  extensions?
+- How should external app asset roots and module namespaces be isolated when
+  multiple apps are mounted in one Space process?
 - Which IDE surface should become the default: canvas activity, HUD/dialog,
   graph node, sandbox, or a dedicated app workspace?
-- How should the host lifecycle API be versioned once external repositories use
-  it?
-- Which state-inspection conventions should moldable views use beyond the plain
-  `snapshot` table?
+- How should capability and runtime facet versions be negotiated once external
+  repositories depend on the API?
+- What inspector registry shape best supports moldable views beyond plain data?
