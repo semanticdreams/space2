@@ -42,6 +42,11 @@
       (set found i)))
   found)
 
+(fn assert-error-contains [f expected]
+  (local (ok err) (pcall f))
+  (assert (= ok false))
+  (assert (string.find (tostring err) expected 1 true)))
+
 (fn make-run-deps [events opts]
   (local options (if opts opts {}))
   (local engine {})
@@ -159,6 +164,12 @@
                                       (scheduled-update self delta-ms state))})
   (host.scheduler:update 16)
   (assert (= state.updated-delta 16) "scheduler must update registered runtime facets"))
+
+(fn test-create-host-uses-shared-service-errors []
+  (local StandaloneRuntime (load-module :standalone-app-runtime))
+  (local host (StandaloneRuntime.create-host {:viewport {:x 0 :y 0 :width 100 :height 100}}))
+  (assert-error-contains #(host.scheduler:register nil)
+                         "[app-host.services] scheduler:register requires a facet table"))
 
 (fn test-create-host-engine-update-drives-scheduler-and-renderers []
   (local StandaloneRuntime (load-module :standalone-app-runtime))
@@ -295,6 +306,8 @@
                      :fn test-create-host-registries-store-inspectors-and-commands})
 (table.insert tests {:name "standalone scheduler runs registered updates"
                      :fn test-create-host-scheduler-runs-registered-updates})
+(table.insert tests {:name "standalone create-host uses shared service errors"
+                     :fn test-create-host-uses-shared-service-errors})
 (table.insert tests {:name "standalone engine update drives scheduler and renderers"
                       :fn test-create-host-engine-update-drives-scheduler-and-renderers})
 (table.insert tests {:name "standalone run starts engine before renderer init"
