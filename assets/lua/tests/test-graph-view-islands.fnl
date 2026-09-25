@@ -817,6 +817,59 @@
     (assert-vec3 (. (. points member-b) :position) (- (+ origin delta) (glm.vec3 0 24 0))
                  "second island member should preserve ordered-list spacing"))
 
+(fn check-graph-view-layout-compares-force-anchor-against-snapshot []
+    (local force-layout (make-force-layout-stub))
+    (local member-a {:key "test:a" :size 10})
+    (local member-b {:key "test:b" :size 10})
+    (local center (glm.vec3 10 88 0))
+    (local origin (glm.vec3 10 100 0))
+    (local first-force-position (glm.vec3 15 81 0))
+    (local second-force-position (glm.vec3 22 85 0))
+    (local nodes {})
+    (set (. nodes member-a) member-a)
+    (set (. nodes member-b) member-b)
+    (local points {})
+    (set (. points member-a) {:position origin})
+    (set (. points member-b) {:position (glm.vec3 10 76 0)})
+    (set member-a._test-point (. points member-a))
+    (set member-b._test-point (. points member-b))
+    (local captured-body-positions [])
+    (local graph-layout
+        (GraphViewLayout {:layout force-layout
+                          :nodes nodes
+                          :points points
+                          :make-line make-line-stub
+                          :set-point-position layout-stub-set-point-position
+                          :get-position layout-stub-get-position
+                          :get-position-raw layout-stub-get-position
+                          :on-island-position (fn [_island-id position]
+                                                (table.insert captured-body-positions position))}))
+    (local record
+        {:id "island-1"
+         :members [member-a member-b]
+         :position origin
+         :force-position center
+         :body-position-for-force-position layout-stub-body-position-for-force-position
+         :member-placements layout-stub-member-placements})
+    (graph-layout:sync-island-layouts [record])
+    (set force-layout.next-positions [first-force-position])
+    (graph-layout:update 0.016)
+    (set first-force-position.x second-force-position.x)
+    (set first-force-position.y second-force-position.y)
+    (set first-force-position.z second-force-position.z)
+    (graph-layout:update 0.016)
+    (assert (= (length captured-body-positions) 2)
+            "island body callback should run for each in-place force anchor mutation")
+    (assert-vec3 (. captured-body-positions 1) (layout-stub-body-position-for-force-position (glm.vec3 15 81 0))
+                 "first in-place force anchor position should convert to body")
+    (assert-vec3 (. captured-body-positions 2) (layout-stub-body-position-for-force-position second-force-position)
+                 "second in-place force anchor position should convert to body")
+    (assert-vec3 (. (. points member-a) :position) (layout-stub-body-position-for-force-position second-force-position)
+                 "first island member should follow the second converted body origin")
+    (assert-vec3 (. (. points member-b) :position)
+                 (- (layout-stub-body-position-for-force-position second-force-position) (glm.vec3 0 24 0))
+                 "second island member should follow the second converted body origin"))
+
 (fn check-graph-view-layout-routes-member-edge-through-island-force-anchor []
     (local force-layout (make-force-layout-stub))
     (local member-a {:key "test:a" :size 10})
@@ -1112,6 +1165,9 @@
 (fn graph-view-layout-converts-force-center-to-island-body-position []
     (check-graph-view-layout-converts-force-center-to-island-body-position))
 
+(fn graph-view-layout-compares-force-anchor-against-snapshot []
+    (check-graph-view-layout-compares-force-anchor-against-snapshot))
+
 (fn graph-view-layout-routes-member-edge-through-island-force-anchor []
     (check-graph-view-layout-routes-member-edge-through-island-force-anchor))
 
@@ -1169,6 +1225,8 @@
                        :fn graph-view-alt-drag-end-clears-state-before-visible-update-failure})
 (table.insert tests {:name "GraphViewLayout converts island force center to body position"
                      :fn graph-view-layout-converts-force-center-to-island-body-position})
+(table.insert tests {:name "GraphViewLayout compares island force anchor against snapshot"
+                     :fn graph-view-layout-compares-force-anchor-against-snapshot})
 (table.insert tests {:name "GraphViewLayout routes island member edge through force anchor"
                      :fn graph-view-layout-routes-member-edge-through-island-force-anchor})
 (table.insert tests {:name "GraphView empty island sync does not start force layout"

@@ -79,13 +79,16 @@
          (or (not current)
              (> (glm.length (- current new-pos)) position-epsilon)))
 
-     (fn vec3-like? [position]
-         (and position
-              (= (type position.x) :number)
-              (= (type position.y) :number)
-              (= (type position.z) :number)))
+      (fn vec3-like? [position]
+          (and position
+               (= (type position.x) :number)
+               (= (type position.y) :number)
+               (= (type position.z) :number)))
 
-     (fn validate-island-layout-record [record]
+      (fn copy-vec3 [position]
+          (glm.vec3 position.x position.y position.z))
+
+      (fn validate-island-layout-record [record]
          (assert (= (type record) :table) "GraphViewLayout.sync-island-layouts requires table records")
          (assert (= (type record.id) :string) "GraphViewLayout island layout record requires string id")
           (assert (= (type record.members) :table) "GraphViewLayout island layout record requires members table")
@@ -173,7 +176,7 @@
                                           (record.body-position-for-force-position new-pos)
                                           new-pos))
                                   (assert-valid-position body-position "GraphViewLayout.refresh-layout:island-body" nil)
-                                  (set record.force-position new-pos)
+                                  (set record.force-position (copy-vec3 new-pos))
                                   (set record.position body-position)
                                   (on-island-position record.id body-position)
                                   (local placements (record.member-placements body-position))
