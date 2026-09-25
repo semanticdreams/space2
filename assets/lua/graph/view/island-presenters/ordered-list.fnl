@@ -87,6 +87,19 @@
                                          origin.z)))
     placements)
 
+(fn ordered-list-center-offset [island]
+    (local state (if island.state island.state {}))
+    (local spacing (if state.spacing state.spacing default-spacing))
+    (local members (if island.members island.members []))
+    (local count (length members))
+    (glm.vec3 0 (- (/ (* spacing (- count 1)) 2.0)) 0))
+
+(fn force-position-from-origin [island origin]
+    (+ origin (ordered-list-center-offset island)))
+
+(fn origin-from-force-position [island force-position]
+    (- force-position (ordered-list-center-offset island)))
+
 (fn aggregate-layout-record [island host]
     (assert island "OrderedListPresenter.aggregate-layout-record requires island")
     (assert host "OrderedListPresenter.aggregate-layout-record requires host")
@@ -97,8 +110,11 @@
     {:id island.id
      :members member-nodes
      :position base
+     :force-position (force-position-from-origin island base)
+     :body-position-for-force-position (fn [force-position]
+                                         (origin-from-force-position island force-position))
      :member-placements (fn [origin]
-                          (placements-from-origin island origin))})
+                           (placements-from-origin island origin))})
 
 (fn apply [island host]
     (local placements (layout-island island host))

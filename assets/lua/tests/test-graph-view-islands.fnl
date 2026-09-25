@@ -12,6 +12,7 @@
 (local {:register-loader register-list-loader} (require :graph/nodes/list-entity))
 (local {:FocusManager FocusManager} (require :focus))
 (local {:Layout Layout :LayoutRoot LayoutRoot} (require :layout))
+(local OrderedListPresenter (require :graph/view/island-presenters/ordered-list))
 
 (local tests [])
 (var temp-counter 0)
@@ -302,6 +303,45 @@
                       (= reconciled-position.y list-position.y)
                       (= reconciled-position.z list-position.z)))
             "first list island member should not be recomputed from current list node position"))
+
+(fn check-ordered-list-aggregate-record-exposes-center-force-anchor []
+    (local node-a {:key "test:a" :size 10})
+    (local node-b {:key "test:b" :size 10})
+    (local node-c {:key "test:c" :size 10})
+    (local nodes {})
+    (set (. nodes "test:a") node-a)
+    (set (. nodes "test:b") node-b)
+    (set (. nodes "test:c") node-c)
+    (local positions {})
+    (set (. positions "test:a") (glm.vec3 0 0 0))
+    (set (. positions "test:b") (glm.vec3 0 -20 0))
+    (set (. positions "test:c") (glm.vec3 0 -40 0))
+    (local host
+        {:node-for-key (fn [_self key] (. nodes key))
+         :position-for-key (fn [_self key] (. positions key))})
+    (local island
+        {:id "island-1"
+         :kind "ordered-list"
+         :members ["test:a" "test:b" "test:c"]
+         :state {:position (glm.vec3 100 200 0)
+                 :spacing 20}})
+    (local record (OrderedListPresenter.aggregate-layout-record island host))
+    (assert-vec3 record.position (glm.vec3 100 200 0)
+                 "aggregate record body position should remain ordered-list origin")
+    (assert-vec3 record.force-position (glm.vec3 100 180 0)
+                 "aggregate force position should be the ordered-list visual center")
+    (assert (= (type record.body-position-for-force-position) :function)
+            "aggregate record should expose center-to-origin conversion")
+    (local moved-origin (record.body-position-for-force-position (glm.vec3 130 230 0)))
+    (assert-vec3 moved-origin (glm.vec3 130 250 0)
+                 "moved force center should convert back to ordered-list origin")
+    (local placements (record.member-placements moved-origin))
+    (assert-vec3 (. placements "test:a") (glm.vec3 130 250 0)
+                 "first member placement should use converted origin")
+    (assert-vec3 (. placements "test:b") (glm.vec3 130 230 0)
+                 "second member placement should preserve spacing")
+    (assert-vec3 (. placements "test:c") (glm.vec3 130 210 0)
+                 "third member placement should preserve spacing"))
 
 (fn check-list-created-island-moves-as-force-layout-unit [fixture]
     (local map fixture.map)
@@ -839,6 +879,9 @@
     (with-list-fixture
         check-list-created-island-preserves-body-position-after-unrelated-drag-end))
 
+(fn graph-view-ordered-list-aggregate-record-exposes-center-force-anchor []
+    (check-ordered-list-aggregate-record-exposes-center-force-anchor))
+
 (fn graph-view-list-created-island-moves-as-force-layout-unit []
     (with-list-fixture
         check-list-created-island-moves-as-force-layout-unit))
@@ -922,9 +965,11 @@
 (table.insert tests {:name "GraphView snaps island member back after drag end"
                      :fn graph-view-snaps-island-member-back-after-drag-end})
 (table.insert tests {:name "GraphView list-created island preserves body position after unrelated drag end"
-                     :fn graph-view-list-created-island-preserves-body-position-after-unrelated-drag-end})
+                      :fn graph-view-list-created-island-preserves-body-position-after-unrelated-drag-end})
+(table.insert tests {:name "GraphView ordered-list aggregate record exposes center force anchor"
+                     :fn graph-view-ordered-list-aggregate-record-exposes-center-force-anchor})
 (table.insert tests {:name "GraphView list-created island moves as force-layout unit"
-                      :fn graph-view-list-created-island-moves-as-force-layout-unit})
+                       :fn graph-view-list-created-island-moves-as-force-layout-unit})
 (table.insert tests {:name "GraphView force-moved island keeps runtime position after unrelated drag end"
                      :fn graph-view-force-moved-island-keeps-runtime-position-after-unrelated-drag-end})
 (table.insert tests {:name "GraphView membership refresh preserves runtime island body"
