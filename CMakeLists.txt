@@ -950,6 +950,20 @@ set_tests_properties(test_lua_gccjit_binding PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
+add_executable(test_lua_temporal_core_binding
+    tests/test_lua_temporal_core_binding.cpp
+    src/temporal.cpp
+    src/lua_temporal_core.cpp
+)
+target_include_directories(test_lua_temporal_core_binding PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(test_lua_temporal_core_binding lua date::date-tz)
+add_test(NAME test_lua_temporal_core_binding COMMAND test_lua_temporal_core_binding)
+set_tests_properties(test_lua_temporal_core_binding PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
 add_executable(test_lua_module_error_integration
     tests/test_lua_module_error_integration.cpp
 )

@@ -14,6 +14,7 @@
 #include "lua_engine.h"
 #include "lua_http.h"
 #include "lua_http_server.h"
+#include "lua_temporal_core.h"
 #include "lua_ray_box.h"
 #include "lua_notify.h"
 #include "lua_tray.h"
@@ -317,6 +318,7 @@ void LuaRuntime::install_base_bindings()
     }
 #endif
     lua_bind_libtorrent(lua);
+    lua_bind_temporal_core(lua);
     lua_bind_engine(lua);
     lua_bind_ray_box(lua);
     lua_bind_tray(lua);
