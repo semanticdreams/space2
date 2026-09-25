@@ -22,7 +22,7 @@ All invalid fields, invalid parses, overflow, invalid zones, missing tzdb data, 
 
 Timezone conversion requires an explicit IANA zone id. The API does not silently use host-local timezone defaults, because replay, tests, distributed sessions, and persisted state must not depend on the machine running Space.
 
-The native core uses the operating-system timezone database through `date/tz`. `temporal.tzdb.version()` exposes the tzdb version reported by the runtime environment.
+The native core uses `date/tz` with deterministic timezone data and remote tzdb download/update disabled. Unix-like builds use the operating-system timezone database. Windows builds bundle the IANA tzdata snapshot plus pinned CLDR `windowsZones.xml` mapping recorded in `external/date/VENDORED_VERSION.md`; packaging copies them beside the executables as `tzdata/`, and `SPACE_TZDATA_PATH` may point tests or custom distributions at an equivalent provided snapshot. If Windows tzdata is missing or incomplete, temporal APIs throw an explicit `temporal timezone database unavailable:` error instead of falling back to host-local assumptions. `temporal.tzdb.version()` exposes the tzdb version reported by the selected runtime database.
 
 ## Disambiguation
 

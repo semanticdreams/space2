@@ -1201,6 +1201,16 @@ add_custom_command(
         COMMENT "---- Copy Assets"
 )
 
+if(WIN32)
+    add_custom_command(
+            TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_LIST_DIR}/external/date/tzdata
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>/tzdata
+            COMMENT "---- Copy Windows temporal tzdata"
+    )
+endif()
+
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})
 set(CPACK_PROJECT_VERSION ${SPACE_PACKAGE_VERSION})
 set(CPACK_PACKAGE_VERSION ${SPACE_PACKAGE_VERSION})

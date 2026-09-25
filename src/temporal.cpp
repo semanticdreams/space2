@@ -2,12 +2,20 @@
 
 #include <date/tz.h>
 
+#include <array>
+#include <cstdlib>
+#include <filesystem>
 #include <iomanip>
 #include <limits>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
+#include <vector>
+
+#if defined(_WIN32) && !USE_OS_TZDB
+#include <windows.h>
+#endif
 
 namespace space::temporal
 {
@@ -276,11 +284,87 @@ SysTime checked_sys_from_seconds(std::int64_t seconds)
     return checked_sys_from_nanos(checked_multiply(seconds, nanos_per_second));
 }
 
+#if defined(_WIN32) && !USE_OS_TZDB
+constexpr std::array<const char*, 14> windows_tzdata_required_files = {
+    "africa",
+    "antarctica",
+    "asia",
+    "australasia",
+    "backward",
+    "etcetera",
+    "europe",
+    "northamerica",
+    "southamerica",
+    "leapseconds",
+    "version",
+    "windowsZones.xml",
+    "LICENSE",
+    "CLDR-LICENSE.txt",
+};
+
+std::filesystem::path windows_executable_directory()
+{
+    std::vector<char> buffer(MAX_PATH);
+    while (true)
+    {
+        DWORD size = GetModuleFileNameA(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (size == 0)
+        {
+            throw std::runtime_error("temporal timezone database unavailable: cannot resolve executable path");
+        }
+        if (size < buffer.size())
+        {
+            buffer[size] = '\0';
+            return std::filesystem::path(buffer.data()).parent_path();
+        }
+        buffer.resize(buffer.size() * 2);
+    }
+}
+
+void configure_windows_tzdata()
+{
+    static const bool configured = [] {
+        const char* override_path = std::getenv("SPACE_TZDATA_PATH");
+        std::filesystem::path tzdata_path =
+            (override_path && override_path[0] != '\0')
+                ? std::filesystem::path(override_path)
+                : (windows_executable_directory() / "tzdata");
+
+        std::error_code ec;
+        if (!std::filesystem::is_directory(tzdata_path, ec))
+        {
+            throw std::runtime_error(
+                "temporal timezone database unavailable: bundled Windows tzdata not found at " +
+                tzdata_path.string());
+        }
+        for (const char* required_file : windows_tzdata_required_files)
+        {
+            const std::filesystem::path required_path = tzdata_path / required_file;
+            if (!std::filesystem::is_regular_file(required_path, ec))
+            {
+                throw std::runtime_error(
+                    "temporal timezone database unavailable: required Windows tzdata file missing: " +
+                    required_path.string());
+            }
+        }
+
+        date::set_install(tzdata_path.string());
+        return true;
+    }();
+    (void)configured;
+}
+#else
+void configure_windows_tzdata()
+{
+}
+#endif
+
 const date::time_zone* locate_zone_or_throw(const std::string& zone_id)
 {
     const date::tzdb* database = nullptr;
     try
     {
+        configure_windows_tzdata();
         database = &date::get_tzdb();
     }
     catch (const std::runtime_error& ex)
@@ -628,6 +712,7 @@ std::string tzdb_version()
 {
     try
     {
+        configure_windows_tzdata();
         return date::get_tzdb().version;
     }
     catch (const std::runtime_error& ex)
