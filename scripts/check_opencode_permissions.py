@@ -20,7 +20,7 @@ class PolicyViolation:
 
 REQUIRED_AGENT_KEYS = {"description", "mode", "model", "permission"}
 REQUIRED_SKILL_KEYS = {"name", "description"}
-CAPABILITY_AGENTS = {"git-integrator", "github-operator", "config-auditor", "pr-recovery-operator"}
+CAPABILITY_AGENTS = {"git-integrator", "github-operator", "config-auditor", "pr-recovery-operator", "windows-ci-reproducer"}
 GIT_INTEGRATOR_ALLOWED_WRAPPER_COMMANDS = {
     "python3 scripts/opencode_git_integrate.py status --repo-root .",
     "python3 scripts/opencode_git_integrate.py fetch-origin --repo-root .",
@@ -29,15 +29,22 @@ GIT_INTEGRATOR_ALLOWED_WRAPPER_COMMANDS = {
     "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .",
 }
 PR_RECOVERY_ALLOWED_WRAPPER_COMMAND = "python3 scripts/opencode_pr_recovery.py create-current-with-followup-recovery --repo-root ."
+WINDOWS_CI_REPRODUCER_ALLOWED_WRAPPER_COMMANDS = {
+    "python3 scripts/opencode_windows_ci_repro.py preflight --repo-root .",
+    "python3 scripts/opencode_windows_ci_repro.py setup-host --repo-root .",
+    "python3 scripts/opencode_windows_ci_repro.py reproduce --repo-root .",
+}
 REQUIRED_CAPABILITY_FILES = (
     ".opencode/agents/git-integrator.md",
     ".opencode/agents/github-operator.md",
     ".opencode/agents/config-auditor.md",
     ".opencode/agents/pr-recovery-operator.md",
+    ".opencode/agents/windows-ci-reproducer.md",
     "scripts/opencode_capabilities.py",
     "scripts/opencode_git_integrate.py",
     "scripts/opencode_pr_operator.py",
     "scripts/opencode_pr_recovery.py",
+    "scripts/opencode_windows_ci_repro.py",
     "scripts/verify_opencode_home_config.py",
 )
 SECRET_EXTERNAL_PATTERNS = ("auth.json", "auth.jsonc", "secret", "token")
@@ -323,6 +330,29 @@ def _check_capability_boundary(path: Path, repo_root: Path, name: str, raw: str)
                         repo_root,
                         "capability-boundary",
                         f"pr-recovery-operator bash permission must be limited to approved wrapper command: {pattern}: {action}",
+                    )
+                )
+    if name == "windows-ci-reproducer":
+        bash_entries = _mapping_entries(raw, "bash")
+        bash_actions = dict(bash_entries)
+        for command in sorted(WINDOWS_CI_REPRODUCER_ALLOWED_WRAPPER_COMMANDS):
+            if bash_actions.get(command) != "allow":
+                violations.append(
+                    _violation(
+                        path,
+                        repo_root,
+                        "capability-boundary",
+                        f"windows-ci-reproducer must allow guarded wrapper command exactly: {command}",
+                    )
+                )
+        for pattern, action in bash_entries:
+            if action in BLOCKED_ACTIONS and pattern not in WINDOWS_CI_REPRODUCER_ALLOWED_WRAPPER_COMMANDS:
+                violations.append(
+                    _violation(
+                        path,
+                        repo_root,
+                        "capability-boundary",
+                        f"windows-ci-reproducer bash permission must be limited to approved wrapper commands: {pattern}: {action}",
                     )
                 )
     return violations
