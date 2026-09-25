@@ -221,23 +221,27 @@
             (require module-name)
             (host-error "run requires :module or :module-name")))))
 
+(fn failure-message [phase primary-error cleanup-error]
+  (if cleanup-error
+      (.. "[standalone-app-runtime] " phase " failed: " (tostring primary-error)
+          "; cleanup failed: " (tostring cleanup-error))
+      (tostring primary-error)))
+
 (fn run [opts]
   (local options (if opts opts {}))
-  (local EngineModule (require :engine))
-  (local AppBootstrap (require :app-bootstrap))
+  (local EngineModule (if options.engine-module options.engine-module (require :engine)))
+  (local AppBootstrap (if options.bootstrap-module options.bootstrap-module (require :app-bootstrap)))
   (global app (if app app {}))
+  (local previous-engine app.engine)
+  (local previous-renderers app.renderers)
+  (local previous-runtime app.active-world-runtime)
   (local engine-options (if options.engine-options options.engine-options {}))
   (local engine (EngineModule.Engine engine-options))
   (set app.engine engine)
   (local viewport (if options.viewport options.viewport (default-viewport)))
-  (local renderers (AppBootstrap.init-renderers {:viewport viewport}))
-  (local host (create-host {:engine engine
-                            :renderers renderers
-                            :viewport viewport
-                            :asset-path-resolver options.asset-path-resolver}))
-  (local controller (HostedRuntime.mount {:module (load-module options)
-                                          :host host}))
-  (set app.active-world-runtime (controller:runtime))
+  (var renderers nil)
+  (var host nil)
+  (var controller nil)
 
   (var cleanup-error nil)
   (fn note-cleanup-error [err]
@@ -250,18 +254,25 @@
       (note-cleanup-error err)))
 
   (fn drop-controller []
-    (controller:drop))
+    (when controller
+      (controller:drop)))
 
   (fn disconnect-host []
-    (host.lifecycle:disconnect))
+    (when (and host host.lifecycle host.lifecycle.disconnect)
+      (host.lifecycle:disconnect)))
 
   (fn drop-renderers []
-    (when app.renderers
-      (app.renderers:drop)
-      (set app.renderers nil)))
+    (when renderers
+      (renderers:drop)
+      (set renderers nil))
+    (set app.renderers previous-renderers))
 
   (fn clear-runtime []
-    (set app.active-world-runtime nil))
+    (set app.active-world-runtime previous-runtime))
+
+  (fn clear-engine []
+    (when (= app.engine engine)
+      (set app.engine previous-engine)))
 
   (fn shutdown-engine []
     (engine:shutdown))
@@ -272,16 +283,30 @@
     (cleanup-step drop-renderers)
     (cleanup-step clear-runtime)
     (cleanup-step shutdown-engine)
+    (cleanup-step clear-engine)
     (when cleanup-error
       (error cleanup-error)))
 
-  (when (not (engine:start))
-    (local (_cleanup-ok _cleanup-err) (pcall cleanup))
-    (host-error "engine failed to start"))
+  (local (setup-ok setup-err)
+    (pcall
+      (fn []
+        (when (not (engine:start))
+          (host-error "engine failed to start"))
+        (set renderers (AppBootstrap.init-renderers {:viewport viewport}))
+        (set host (create-host {:engine engine
+                                :renderers renderers
+                                :viewport viewport
+                                :asset-path-resolver options.asset-path-resolver}))
+        (set controller (HostedRuntime.mount {:module (load-module options)
+                                              :host host}))
+        (set app.active-world-runtime (controller:runtime)))))
+  (when (not setup-ok)
+    (local (cleanup-ok cleanup-err) (pcall cleanup))
+    (error (failure-message "setup" setup-err (and (not cleanup-ok) cleanup-err))))
   (local (run-ok run-err) (pcall engine.run engine))
   (local (cleanup-ok cleanup-err) (pcall cleanup))
   (when (not run-ok)
-    (error run-err))
+    (error (failure-message "run" run-err (and (not cleanup-ok) cleanup-err))))
   (when (not cleanup-ok)
     (error cleanup-err))
   nil)

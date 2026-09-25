@@ -32,8 +32,66 @@
   (set signal.emit
        (fn [self payload]
          (each [_ handler (ipairs self.handlers)]
-           (handler payload))))
+            (handler payload))))
   signal)
+
+(fn index-of [items needle]
+  (var found nil)
+  (each [i item (ipairs items) &until found]
+    (when (= item needle)
+      (set found i)))
+  found)
+
+(fn make-run-deps [events opts]
+  (local options (if opts opts {}))
+  (local engine {})
+  (set engine.events {})
+  (fn engine-start [_self]
+    (table.insert events :engine-start)
+    (not (= options.start-result false)))
+  (fn engine-run [_self]
+    (table.insert events :engine-run)
+    (when options.run-error
+      (error options.run-error)))
+  (fn engine-shutdown [_self]
+    (table.insert events :engine-shutdown)
+    (when options.shutdown-error
+      (error options.shutdown-error)))
+  (set engine.start engine-start)
+  (set engine.run engine-run)
+  (set engine.shutdown engine-shutdown)
+  (local renderer {})
+  (fn renderer-update [_self]
+    (table.insert events :renderer-update))
+  (fn renderer-drop [_self]
+    (table.insert events :renderer-drop)
+    (when options.renderer-drop-error
+      (error options.renderer-drop-error)))
+  (set renderer.update renderer-update)
+  (set renderer.drop renderer-drop)
+  (fn engine-factory [_engine-options]
+    (table.insert events :engine-create)
+    engine)
+  (fn init-renderers [_render-options]
+    (table.insert events :renderer-init)
+    renderer)
+  {:engine engine
+   :renderer renderer
+   :engine-module {:Engine engine-factory}
+   :bootstrap-module {:init-renderers init-renderers}})
+
+(fn runtime-module []
+  (fn create-runtime [_host]
+    {:presentation {:render-targets fake-render-targets}})
+  {:create create-runtime})
+
+(fn run-with-deps [StandaloneRuntime deps module]
+  (StandaloneRuntime.run {:module module
+                          :engine-module deps.engine-module
+                          :bootstrap-module deps.bootstrap-module}))
+
+(fn run-with-invalid-module [StandaloneRuntime deps]
+  (run-with-deps StandaloneRuntime deps {}))
 
 (fn test-hosted-mount-returns-runtime-controller []
   (local HostedRuntime (load-module :hosted-app-runtime))
@@ -100,6 +158,44 @@
   (assert render-state.updated?
           "engine updated signal must drive standalone-owned renderers"))
 
+(fn test-run-starts-engine-before-renderer-init []
+  (local StandaloneRuntime (load-module :standalone-app-runtime))
+  (local events [])
+  (local deps (make-run-deps events))
+  (run-with-deps StandaloneRuntime deps (runtime-module))
+  (local start-index (index-of events :engine-start))
+  (local renderer-index (index-of events :renderer-init))
+  (assert start-index "run must start engine")
+  (assert renderer-index "run must initialize renderers")
+  (assert (< start-index renderer-index)
+          "run must start engine before initializing GL-backed renderers"))
+
+(fn test-run-cleans-up-after_controller_mount_failure []
+  (local StandaloneRuntime (load-module :standalone-app-runtime))
+  (local events [])
+  (local deps (make-run-deps events))
+  (local (ok err)
+    (pcall run-with-invalid-module StandaloneRuntime deps))
+  (assert (not ok) "run must surface setup failure")
+  (assert (string.find (tostring err) "hostable module must export create" 1 true)
+          "run setup failure must include original controller error")
+  (assert (index-of events :renderer-drop)
+          "run must drop renderers after setup failure")
+  (assert (index-of events :engine-shutdown)
+          "run must shut down engine after setup failure"))
+
+(fn test-run_reports_cleanup_failure_explicitly []
+  (local StandaloneRuntime (load-module :standalone-app-runtime))
+  (local events [])
+  (local deps (make-run-deps events {:renderer-drop-error "renderer cleanup failed"}))
+  (local (ok err)
+    (pcall run-with-invalid-module StandaloneRuntime deps))
+  (assert (not ok) "run must fail when setup and cleanup fail")
+  (assert (string.find (tostring err) "renderer cleanup failed" 1 true)
+          "run must explicitly surface cleanup failure")
+  (assert (string.find (tostring err) "hostable module must export create" 1 true)
+          "run cleanup failure report must retain original setup failure"))
+
 (table.insert tests {:name "hosted mount returns runtime controller"
                      :fn test-hosted-mount-returns-runtime-controller})
 (table.insert tests {:name "standalone create-host exposes required capabilities"
@@ -109,12 +205,17 @@
 (table.insert tests {:name "standalone scheduler runs registered updates"
                      :fn test-create-host-scheduler-runs-registered-updates})
 (table.insert tests {:name "standalone engine update drives scheduler and renderers"
-                     :fn test-create-host-engine-update-drives-scheduler-and-renderers})
+                      :fn test-create-host-engine-update-drives-scheduler-and-renderers})
+(table.insert tests {:name "standalone run starts engine before renderer init"
+                     :fn test-run-starts-engine-before-renderer-init})
+(table.insert tests {:name "standalone run cleans up after controller mount failure"
+                     :fn test-run-cleans-up-after_controller_mount_failure})
+(table.insert tests {:name "standalone run reports cleanup failure explicitly"
+                     :fn test-run_reports_cleanup_failure_explicitly})
 
-;; StandaloneRuntime.run owns real Engine construction, window start, event loop,
-;; renderer drop, and engine shutdown. Those boundaries require a real engine and
-;; remain covered by standalone launch commands rather than this headless host
-;; construction suite.
+;; StandaloneRuntime.run real window/GL behavior remains covered by standalone
+;; launch commands; this suite uses fakes for startup ordering and cleanup
+;; boundary behavior that can be verified headlessly.
 
 (local main
   (fn []
