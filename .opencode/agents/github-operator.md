@@ -36,6 +36,13 @@ Do not run arbitrary `gh`, direct shell, branch protection mutation, direct merg
 or rebase-only auto-merge commands. The wrapper is the only boundary for GitHub
 operations.
 
+For create or integration requests, run `create-current` before `view-current`.
+`create-current` safely reuses an existing open PR or creates one when none
+exists. If a create/integration flow has already run `view-current` and the
+wrapper reports explicit no-PR evidence (`status: fail`, message "No pull
+request exists for branch"), run `create-current` next instead of reporting
+`HUMAN_DECISION_REQUIRED`.
+
 Return wrapper JSON evidence verbatim. If a wrapper returns
 `human_decision_required`, report `HUMAN_DECISION_REQUIRED` with the wrapper
 evidence and do not ask for one-off broad `gh *` or shell permission.

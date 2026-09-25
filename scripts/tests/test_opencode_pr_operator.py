@@ -353,6 +353,68 @@ def test_create_current_create_failure_preserves_command_details(monkeypatch, tr
     ]
 
 
+def test_view_pr_no_existing_pr_returns_explicit_non_human_evidence(monkeypatch, trusted_repo: Path) -> None:
+    calls: list[tuple[list[str], bool]] = []
+
+    def fake_run(args, cwd: Path, check: bool = True):
+        del cwd
+        args = list(args)
+        calls.append((args, check))
+        result = command_result(args, returncode=1, stderr="no pull requests found for branch juicyrebel/no-pr-repro-branch")
+        if check and result.returncode != 0:
+            raise capabilities.CapabilityError(
+                "command_failed",
+                "Command failed while evaluating capability guard",
+                {"args": result.args, "returncode": result.returncode, "stderr": result.stderr.strip()},
+            )
+        return result
+
+    monkeypatch.setattr(pr_operator, "run_command", fake_run)
+
+    result = pr_operator.view_pr(trusted_repo, "juicyrebel/no-pr-repro-branch")
+
+    assert result["status"] == "fail"
+    assert result["message"] == "No pull request exists for branch"
+    assert result["evidence"] == {
+        "branch": "juicyrebel/no-pr-repro-branch",
+        "args": ["gh", "pr", "view", "juicyrebel/no-pr-repro-branch", "--json", pr_operator.PR_VIEW_FIELDS],
+        "returncode": 1,
+        "stderr": "no pull requests found for branch juicyrebel/no-pr-repro-branch",
+    }
+    assert calls == [(["gh", "pr", "view", "juicyrebel/no-pr-repro-branch", "--json", pr_operator.PR_VIEW_FIELDS], False)]
+
+
+def test_view_pr_nonzero_failure_preserves_command_evidence(monkeypatch, trusted_repo: Path) -> None:
+    calls: list[tuple[list[str], bool]] = []
+
+    def fake_run(args, cwd: Path, check: bool = True):
+        del cwd
+        args = list(args)
+        calls.append((args, check))
+        result = command_result(args, returncode=2, stderr="HTTP 401: credential expired\nauth detail from gh")
+        if check and result.returncode != 0:
+            raise capabilities.CapabilityError(
+                "command_failed",
+                "Command failed while evaluating capability guard",
+                {"args": result.args, "returncode": result.returncode, "stderr": result.stderr.strip()},
+            )
+        return result
+
+    monkeypatch.setattr(pr_operator, "run_command", fake_run)
+
+    result = pr_operator.view_pr(trusted_repo, "feature/opencode-capabilities")
+
+    assert result["status"] == "human_decision_required"
+    assert result["message"] == "Could not load pull request status safely"
+    assert result["evidence"] == {
+        "branch": "feature/opencode-capabilities",
+        "args": ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS],
+        "returncode": 2,
+        "stderr": "HTTP 401: credential expired\nauth detail from gh",
+    }
+    assert calls == [(["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS], False)]
+
+
 def test_enable_auto_merge_checks_main_protection_before_auto_merge(monkeypatch, trusted_repo: Path) -> None:
     protection = json.dumps({"required_status_checks": {"contexts": ["test"]}})
     rulesets = json.dumps(

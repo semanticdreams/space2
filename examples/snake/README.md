@@ -1,6 +1,6 @@
 # Snake Space App Template
 
-This example is a copyable independent Space/Fennel app template. It demonstrates the app-distribution repository layout, a default `main` entrypoint, pure game logic with focused Fennel tests, a small graphical widget-based runtime, and the release workflow a downstream app repository can call.
+This example is a copyable independent Space/Fennel app template. It demonstrates the app-distribution repository layout, a default `main` entrypoint, pure game logic with focused Fennel tests, a small graphical widget-based runtime composition, and the release workflow a downstream app repository can call.
 
 The runtime display is a simple 2D graphical Snake board rendered with Space widgets and rendering systems. The pure game rules stay separate from the view/runtime code so the example remains easy to copy and test.
 
@@ -17,13 +17,20 @@ snake/
 │       │   └── view.fnl
 │       └── tests/
 │           ├── test-snake-game.fnl
+│           ├── test-snake-hosted-runtime.fnl
+│           ├── test-snake-standalone-entry.fnl
 │           └── test-snake-view.fnl
 └── .github/
     └── workflows/
         └── release.yml
 ```
 
-`assets/lua/main.fnl` is the default `entrypoint: main` bridge. `snake/game.fnl` is pure Snake logic; `snake/view.fnl` provides the graphical widget-based board; `snake/app.fnl` owns the Space engine runtime glue. The graphical presentation uses Space's shared orthographic-ui-surface module from assets/lua for retained HUD-style rendering.
+`assets/lua/main.fnl` is the default `entrypoint: main` bridge. `snake/game.fnl` is pure Snake logic; `snake/view.fnl` provides the graphical widget-based board; `snake/app.fnl` exposes one hostable app composition path: `create(host) -> runtime`. The runtime composition uses host capabilities for scheduling, input, inspectors, and presentation; Snake does not own the Space engine or renderers directly. The graphical presentation uses Space's shared orthographic-ui-surface module from assets/lua for retained HUD-style rendering.
+
+Snake can run through two generic hosts without branching in Snake app logic:
+
+- Standalone launch: `assets/lua/main.fnl` calls `standalone-app-runtime` with the Snake module.
+- Hosted development/smoke tests: `hosted-app-runtime` / `app-host.runtime-controller` mount the same `create(host)` runtime in a supplied host.
 
 ## Local development
 
@@ -49,6 +56,16 @@ SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO
 
 ```sh
 SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/examples/snake/assets:$(pwd)/assets ./build/space -m tests.test-snake-view:main
+```
+
+Run the hostability smoke tests for the generic hosted and standalone entry paths:
+
+```sh
+SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/examples/snake/assets:$(pwd)/assets ./build/space -m tests.test-snake-hosted-runtime:main
+```
+
+```sh
+SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/examples/snake/assets:$(pwd)/assets ./build/space -m tests.test-snake-standalone-entry:main
 ```
 
 ## Copying into a new app repository

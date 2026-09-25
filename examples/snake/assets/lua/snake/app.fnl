@@ -1,9 +1,4 @@
-(global app (or app {}))
-
-(local AppBootstrap (require :app-bootstrap))
-(local AppViewport (require :app-viewport))
-(local EngineModule (require :engine))
-(local Renderers (require :renderers))
+(local Capabilities (require :app-host.capabilities))
 (local Snake (require :snake/game))
 (local OrthographicUiSurface (require :orthographic-ui-surface))
 (local SnakeView (require :snake/view))
@@ -27,7 +22,7 @@
 (local KEY_W_UPPER (string.byte "W"))
 
 (local tick-interval 0.15)
-(local startup-viewport {:x 0 :y 0 :width 800 :height 600})
+(local metadata {:id "examples.snake" :title "Snake" :host-api 1})
 
 (fn restart-key? [key]
   (if (= key SDLK_SPACE)
@@ -110,49 +105,78 @@
   (when surface
     (surface:update-viewport viewport)))
 
-(fn run []
-  (local engine (EngineModule.Engine {:width 800 :height 600
-                                      :title "Snake"}))
-  (set app.engine engine)
-  (when (not (engine:start))
-    (error "[snake] engine failed to start"))
+(fn copy-point [point]
+  (if point
+      {:x point.x :y point.y}
+      nil))
 
-  (set app.set-viewport AppViewport.set-viewport)
-  (local viewport (app.set-viewport startup-viewport))
-  (AppBootstrap.init-themes)
-  (set app.renderers (AppBootstrap.init-renderers {:viewport viewport}))
-  (when (not app.renderers)
-    (set app.renderers (Renderers)))
+(fn copy-snake [snake]
+  (local out [])
+  (each [_ segment (ipairs snake)]
+    (table.insert out (copy-point segment)))
+  out)
 
+(fn register-with [service facet]
+  (service:register facet)
+  facet)
+
+(fn require-method [service capability method]
+  (local value (. service method))
+  (when (not (= (type value) :function))
+    (error (.. "[snake] host capability " (tostring capability)
+               " missing method: " (tostring method))))
+  value)
+
+(fn validate-registry [service capability]
+  (require-method service capability :register)
+  (require-method service capability :unregister)
+  service)
+
+(fn validate-viewport [viewport]
+  (when (not (= (type viewport) :table))
+    (error "[snake] host capability viewport must be a table"))
+  (each [_ field (ipairs [:x :y :width :height])]
+    (when (not (= (type (. viewport field)) :number))
+      (error (.. "[snake] host capability viewport missing numeric field: " (tostring field)))))
+  viewport)
+
+(fn unregister-from [service facet]
+  (when (and service (= (type service.unregister) :function))
+    (service:unregister facet)))
+
+(fn create [host]
+  (local scheduler (Capabilities.require host :scheduler))
+  (local input (Capabilities.require host :input))
+  (local inspectors (Capabilities.require host :inspectors))
+  (local lifecycle (Capabilities.require host :lifecycle))
+  (local viewport (validate-viewport (Capabilities.require host :viewport)))
+  (local surfaces (and host host.surfaces))
+  (validate-registry scheduler :scheduler)
+  (validate-registry input :input)
+  (validate-registry inspectors :inspectors)
+  (require-method lifecycle :lifecycle :quit)
+  (when surfaces
+    (validate-registry surfaces :surfaces))
   (local game (Snake.create {}))
   (local surface (OrthographicUiSurface.create {:viewport viewport}))
   (local screen (surface:build (SnakeView.SnakeScreen {:game game})))
   (var elapsed 0)
-
-  (fn presentation-render-targets [_self]
-    [(surface:presentation-target)])
-
-  (set app.active-world-runtime
-       {:presentation {:render-targets presentation-render-targets}})
+  (var dropped? false)
 
   (fn sync-screen []
     (screen:sync)
-    (surface:update)
-    (app.renderers:update))
+    (surface:update))
 
   (fn refresh-screen []
-    (surface:update)
-    (app.renderers:update))
-
-  (fn quit []
-    (when (and engine engine.quit)
-      (engine.quit)))
+    (surface:update))
 
   (fn handle-key-down [payload]
     (local key (and payload payload.key))
     (local direction (direction-for-key key))
     (if (quit-key? key)
-        (quit)
+        (do
+          (lifecycle:quit)
+          true)
         (and game.game-over? (restart-key? key))
         (do
           (game:restart)
@@ -164,6 +188,8 @@
     true)
 
   (fn handle-update [delta]
+    (when host.viewport
+      (update-surface-viewport surface host.viewport))
     (local (next-elapsed stepped?) (advance-game game delta elapsed nil))
     (set elapsed next-elapsed)
     (if stepped?
@@ -171,61 +197,66 @@
         (refresh-screen)))
 
   (fn handle-viewport [payload]
-    (local next-viewport (app.set-viewport {:x 0
-                                             :y 0
-                                             :width (viewport-width payload)
-                                             :height (viewport-height payload)}))
+    (local next-viewport {:x 0
+                          :y 0
+                          :width (viewport-width payload)
+                          :height (viewport-height payload)})
     (update-surface-viewport surface next-viewport)
     (refresh-screen))
 
-  (fn handle-engine-tick [_payload]
-    (handle-update (* tick-interval 1000)))
+  (fn read-inspector [_self]
+    {:score game.score
+     :head (copy-point (. game.snake 1))
+     :snake (copy-snake game.snake)
+     :food (copy-point game.food)
+     :game-over? game.game-over?})
 
-  (var key-down-connected? false)
-  (var updated-connected? false)
-  (var engine-tick-connected? false)
-  (var window-resized-connected? false)
+  (local scheduler-facet {:id :snake-simulation
+                          :update (fn [_self delta-ms]
+                                    (when (not dropped?)
+                                      (handle-update delta-ms)))})
+  (local input-facet {:id :snake-input
+                      :key-down (fn [_self payload]
+                                  (when (not dropped?)
+                                    (handle-key-down payload)))
+                      :window-resized (fn [_self payload]
+                                        (when (not dropped?)
+                                          (handle-viewport payload)))})
+  (local inspector-facet {:id :snake-state
+                          :title "Snake State"
+                          :read read-inspector})
 
-  (fn cleanup-engine-events []
-    (when (and key-down-connected? engine.events engine.events.key-down)
-      (engine.events.key-down:disconnect handle-key-down true))
-    (when (and updated-connected? engine.events engine.events.updated)
-      (engine.events.updated:disconnect handle-update true))
-    (when (and engine-tick-connected? engine.events engine.events.engine-tick)
-      (engine.events.engine-tick:disconnect handle-engine-tick true))
-    (when (and window-resized-connected? engine.events engine.events.window-resized)
-      (engine.events.window-resized:disconnect handle-viewport true)))
-
-  (when (and engine.events engine.events.key-down)
-    (engine.events.key-down:connect handle-key-down)
-    (set key-down-connected? true))
-  (if (and engine.events engine.events.updated)
-      (do
-        (engine.events.updated:connect handle-update)
-        (set updated-connected? true))
-      (and engine.events engine.events.engine-tick)
-      (do
-        (engine.events.engine-tick:connect handle-engine-tick)
-        (set engine-tick-connected? true)))
-  (when (and engine.events engine.events.window-resized)
-    (engine.events.window-resized:connect handle-viewport)
-    (set window-resized-connected? true))
+  (register-with scheduler scheduler-facet)
+  (register-with input input-facet)
+  (register-with inspectors inspector-facet)
+  (when surfaces
+    (register-with surfaces surface))
 
   (sync-screen)
-  (engine:run)
 
-  (cleanup-engine-events)
-  (when screen
-    (screen:drop)
-    (set surface.entity nil))
-  (when surface
-    (surface:drop))
-  (when (and app.renderers app.renderers.drop)
-    (app.renderers:drop))
-  (when engine.shutdown
-    (engine:shutdown))
-  nil)
+  (fn render-targets [_self]
+    (if dropped?
+        []
+        [(surface:presentation-target)]))
 
-{:run run
+  (fn drop [_self]
+    (when (not dropped?)
+      (set dropped? true)
+      (unregister-from scheduler scheduler-facet)
+      (unregister-from input input-facet)
+      (unregister-from inspectors inspector-facet)
+      (unregister-from surfaces surface)
+      (when screen
+        (screen:drop)
+        (set surface.entity nil))
+      (surface:drop))
+    nil)
+
+  {:metadata metadata
+   :presentation {:render-targets render-targets}
+   :lifecycle {:drop drop}})
+
+{:metadata metadata
+ :create create
  :test-utils {:advance-game advance-game
-              :delta-ms->seconds delta-ms->seconds}}
+               :delta-ms->seconds delta-ms->seconds}}

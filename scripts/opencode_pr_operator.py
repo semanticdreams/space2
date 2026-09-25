@@ -363,10 +363,14 @@ def view_pr(repo_root: Path, branch: str) -> dict[str, object]:
     if unsafe is not None:
         return unsafe
     try:
-        result = run_command(["gh", "pr", "view", safe, "--json", PR_VIEW_FIELDS], repo)
+        result = run_command(["gh", "pr", "view", safe, "--json", PR_VIEW_FIELDS], repo, check=False)
+        if result.returncode != 0:
+            if _is_no_pr_view_result(result):
+                return failure(action, "No pull request exists for branch", _command_result_evidence(result, safe))
+            return human_decision(action, "Could not load pull request status safely", _command_result_evidence(result, safe))
         data = _json_loads(result.stdout)
         if not isinstance(data, dict):
-            return human_decision(action, "GitHub PR view response was ambiguous", {"branch": safe})
+            return human_decision(action, "GitHub PR view response was ambiguous", _command_result_evidence(result, safe))
         return success(action, "Loaded pull request status", {"branch": safe, "pr": data})
     except (CapabilityError, json.JSONDecodeError) as error:
         return human_decision(action, "Could not load pull request status safely", {"error_type": type(error).__name__, "error": str(error), "branch": safe})
