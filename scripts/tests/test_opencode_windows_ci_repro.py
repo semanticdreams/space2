@@ -181,6 +181,27 @@ def test_preflight_accepts_executable_wine_cmd_override(tmp_path, monkeypatch):
     assert result["evidence"]["missing"] == []
 
 
+def test_preflight_rejects_invalid_wine_cmd_without_fallback(tmp_path, monkeypatch):
+    repo = make_space_repo(tmp_path)
+    install_required_scripts(repo)
+    install_fake_vcpkg(repo)
+    monkeypatch.delenv("VCPKG_ROOT", raising=False)
+    monkeypatch.setenv("WINE_CMD", "missing-custom-wine")
+
+    def fake_which(name: str):
+        if name == "missing-custom-wine":
+            return None
+        return f"/usr/bin/{name}"
+
+    monkeypatch.setattr(windows_ci_repro.shutil, "which", fake_which)
+    monkeypatch_rust_target(monkeypatch, installed=True)
+
+    result = windows_ci_repro.preflight(repo)
+
+    assert result["status"] == "fail"
+    assert result["evidence"]["missing"] == ["wine"]
+
+
 def test_preflight_fails_with_setup_command_when_prerequisites_missing(tmp_path, monkeypatch):
     repo = make_space_repo(tmp_path)
     install_required_scripts(repo)

@@ -71,8 +71,8 @@ def _script_exists(repo: Path, relative: str) -> bool:
 
 def _wine_available() -> bool:
     configured_wine = os.environ.get("WINE_CMD")
-    if configured_wine and shutil.which(configured_wine) is not None:
-        return True
+    if configured_wine:
+        return shutil.which(configured_wine) is not None
     return shutil.which("wine64") is not None or shutil.which("wine") is not None
 
 
