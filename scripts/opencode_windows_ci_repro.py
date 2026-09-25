@@ -102,7 +102,10 @@ def _is_ubuntu_host() -> bool:
 
 
 def preflight(repo_root: Path) -> dict[str, object]:
-    repo = ensure_space_repo(repo_root)
+    try:
+        repo = ensure_space_repo(repo_root)
+    except CapabilityError as error:
+        return _failure_for_exception("preflight", error)
     missing: list[str] = []
 
     missing.extend(tool for tool in REQUIRED_TOOLS if shutil.which(tool) is None)
@@ -124,7 +127,10 @@ def preflight(repo_root: Path) -> dict[str, object]:
 
 
 def setup_host(repo_root: Path) -> dict[str, object]:
-    repo = ensure_space_repo(repo_root)
+    try:
+        repo = ensure_space_repo(repo_root)
+    except CapabilityError as error:
+        return _failure_for_exception("setup-host", error)
     if sys.platform != "linux" or not _is_ubuntu_host() or shutil.which("sudo") is None:
         return human_decision(
             "setup-host",
@@ -160,7 +166,10 @@ def reproduce(repo_root: Path) -> dict[str, object]:
     if preflight_result["status"] != "pass":
         return _response("reproduce", preflight_result)
 
-    repo = ensure_space_repo(repo_root)
+    try:
+        repo = ensure_space_repo(repo_root)
+    except CapabilityError as error:
+        return _failure_for_exception("reproduce", error)
     steps: tuple[tuple[str, list[str]], ...] = (
         ("build-windows-from-linux", ["scripts/build-windows-from-linux.sh"]),
         ("package-windows-runtime", ["scripts/package-windows-runtime.sh"]),

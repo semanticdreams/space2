@@ -212,3 +212,25 @@ def test_cli_invalid_repo_returns_structured_fail_json_without_traceback(tmp_pat
     assert set(result) == {"status", "action", "message", "evidence"}
     assert result["evidence"]["code"] in {"command_failed", "invalid_repo"}
     assert "Traceback" not in completed.stderr
+
+
+def test_direct_operations_return_structured_failures_for_invalid_repo(monkeypatch, tmp_path):
+    invalid_repo = tmp_path / "not-space"
+    invalid_repo.mkdir()
+
+    def reject_repo(repo_root: Path) -> Path:
+        raise capabilities.CapabilityError("invalid_repo", "Repository is not trusted", {"repo_root": str(repo_root)})
+
+    monkeypatch.setattr(windows_ci_repro, "ensure_space_repo", reject_repo)
+
+    for action, operation in (
+        ("preflight", windows_ci_repro.preflight),
+        ("setup-host", windows_ci_repro.setup_host),
+        ("reproduce", windows_ci_repro.reproduce),
+    ):
+        result = operation(invalid_repo)
+
+        assert result["status"] == "fail"
+        assert result["action"] == action
+        assert set(result) == {"status", "action", "message", "evidence"}
+        assert result["evidence"]["code"] == "invalid_repo"
