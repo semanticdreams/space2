@@ -30,6 +30,9 @@
   (when (not ok)
     (note-error state err)))
 
+(fn drop-host [host]
+  (host:drop))
+
 (fn mount [opts]
   (when (= opts nil)
     (mount-error "mount requires options"))
@@ -47,9 +50,16 @@
                                  :engine options.engine
                                  :asset-path-resolver options.asset-path-resolver
                                  :on-quit quit-host}))
-  (local controller (HostedRuntime.mount {:module options.module
-                                          :module-name options.module-name
-                                          :host host}))
+  (fn create-controller []
+    (HostedRuntime.mount {:module options.module
+                          :module-name options.module-name
+                          :host host}))
+  (local (controller-ok? controller-or-err) (pcall create-controller))
+  (when (not controller-ok?)
+    (local cleanup-state {})
+    (teardown-step cleanup-state #(drop-host host))
+    (error controller-or-err))
+  (local controller controller-or-err)
 
   (fn render-targets [_self]
     (if dropped?
@@ -63,10 +73,8 @@
       (local teardown-state {})
       (fn drop-controller []
         (controller:drop))
-      (fn drop-host []
-        (host:drop))
       (teardown-step teardown-state drop-controller)
-      (teardown-step teardown-state drop-host)
+      (teardown-step teardown-state #(drop-host host))
       (when teardown-state.err
         (error teardown-state.err)))
     nil)

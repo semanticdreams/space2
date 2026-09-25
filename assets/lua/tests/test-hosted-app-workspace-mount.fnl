@@ -31,6 +31,20 @@
 (fn hud-presentation-target [self]
   self.target)
 
+(fn add-panel-child [self child]
+  (table.insert self.children child)
+  child)
+
+(fn remove-panel-child [self child]
+  (for [i (# self.children) 1 -1]
+    (when (= (. self.children i) child)
+      (table.remove self.children i)))
+  true)
+
+(fn create-invalid-runtime-with-hud-child [host]
+  (host.hud:add-panel-child {:id :owned-child})
+  {:presentation {}})
+
 (fn test-mount-registers-without-replacing-runtime []
   (local runtime {:presentation {:render-targets base-render-targets}})
   (local module {:create create-hosted-runtime})
@@ -77,8 +91,24 @@
   (when app
     (set app.hud saved-hud)))
 
+(fn test-failed-mount-drops-host-owned-children []
+  (local runtime {})
+  (local hud {:children []
+              :add-panel-child add-panel-child
+              :remove-panel-child remove-panel-child})
+  (local module {:create create-invalid-runtime-with-hud-child})
+  (local (ok err) (pcall #(WorkspaceMount.mount {:runtime runtime
+                                                 :app {:hud hud}
+                                                 :module module})))
+  (assert (not ok) "invalid runtime should fail workspace mount")
+  (assert (string.find (tostring err) "render-targets" 1 true)
+          "failure should preserve original runtime validation error")
+  (assert (= (# hud.children) 0)
+          "failed workspace mount should drop host-owned HUD children"))
+
 (add-test "mount registers without replacing runtime" test-mount-registers-without-replacing-runtime)
 (add-test "activity presentation composes hosted targets before HUD" test-activity-presentation-composes-hosted-targets-before-hud)
+(add-test "failed mount drops host-owned children" test-failed-mount-drops-host-owned-children)
 
 (fn main []
   (Runner.run-tests {:name "hosted-app-workspace-mount" :tests tests}))
