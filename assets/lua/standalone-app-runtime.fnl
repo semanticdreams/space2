@@ -262,9 +262,15 @@
       (host.lifecycle:disconnect)))
 
   (fn drop-renderers []
+    (local dropped-renderers renderers)
     (when renderers
       (renderers:drop)
       (set renderers nil))
+    (when (and (not renderers)
+               app.renderers
+               (not (= app.renderers previous-renderers))
+               (not (= app.renderers dropped-renderers)))
+      (app.renderers:drop))
     (set app.renderers previous-renderers))
 
   (fn clear-runtime []

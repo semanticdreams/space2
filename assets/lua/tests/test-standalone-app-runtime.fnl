@@ -196,6 +196,27 @@
   (assert (string.find (tostring err) "hostable module must export create" 1 true)
           "run cleanup failure report must retain original setup failure"))
 
+(fn test-run-drops-partial-renderer-after_init_failure []
+  (local StandaloneRuntime (load-module :standalone-app-runtime))
+  (local events [])
+  (local deps (make-run-deps events))
+  (local snap app.renderers)
+  (local renderer-field :renderers)
+  (fn init-renderers [_render-options]
+    (table.insert events :renderer-init)
+    (tset app renderer-field deps.renderer)
+    (error "renderer init failed"))
+  (set deps.bootstrap-module {:init-renderers init-renderers})
+  (local (ok err)
+    (pcall (fn []
+             (run-with-deps StandaloneRuntime deps (runtime-module)))))
+  (set app.renderers snap)
+  (assert (not ok) "run must surface renderer setup failure")
+  (assert (string.find (tostring err) "renderer init failed" 1 true)
+          "run setup failure must include renderer init error")
+  (assert (index-of events :renderer-drop)
+          "run must drop renderer assigned to app.renderers before init failure"))
+
 (table.insert tests {:name "hosted mount returns runtime controller"
                      :fn test-hosted-mount-returns-runtime-controller})
 (table.insert tests {:name "standalone create-host exposes required capabilities"
@@ -212,6 +233,8 @@
                      :fn test-run-cleans-up-after_controller_mount_failure})
 (table.insert tests {:name "standalone run reports cleanup failure explicitly"
                      :fn test-run_reports_cleanup_failure_explicitly})
+(table.insert tests {:name "standalone run drops partial renderer after init failure"
+                     :fn test-run-drops-partial-renderer-after_init_failure})
 
 ;; StandaloneRuntime.run real window/GL behavior remains covered by standalone
 ;; launch commands; this suite uses fakes for startup ordering and cleanup
