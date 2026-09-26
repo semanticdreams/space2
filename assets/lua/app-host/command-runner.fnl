@@ -9,7 +9,10 @@
     (command-error "host commands registry is required"))
   (when (not (= (type registry.list) :function))
     (command-error "host commands registry requires list"))
-  (registry:list))
+  (local commands (registry:list))
+  (when (not (= (type commands) :table))
+    (command-error "host commands registry list must return a table"))
+  commands)
 
 (fn find-command [commands command-id]
   (when (= command-id nil)
@@ -17,6 +20,8 @@
   (var found nil)
   (var count 0)
   (each [_ command (ipairs commands)]
+    (when (not (= (type command) :table))
+      (command-error "command facet must be a table"))
     (when (= command.id command-id)
       (set count (+ count 1))
       (set found command)))

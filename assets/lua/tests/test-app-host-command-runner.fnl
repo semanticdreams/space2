@@ -11,6 +11,15 @@
   (assert (string.find (tostring err) expected 1 true)
           (.. "expected error to contain " expected ", got " (tostring err))))
 
+(fn assert-command-runner-error-contains [f expected]
+  (local (ok err) (pcall f))
+  (local message (tostring err))
+  (assert (= ok false) "expected call to fail")
+  (assert (string.find message "[app-host.command-runner]" 1 true)
+          (.. "expected command runner error prefix, got " message))
+  (assert (string.find message expected 1 true)
+          (.. "expected error to contain " expected ", got " message)))
+
 (fn registry-list [self]
   (local out [])
   (each [_ item (ipairs self.items)]
@@ -59,6 +68,15 @@
 (fn run-host-with-command-missing-run []
   (CommandRunner.run-host (host-with-commands [{:id :bad}]) :bad {}))
 
+(fn list-returns-non-table [_self]
+  nil)
+
+(fn run-host-with-non-table-command-list []
+  (CommandRunner.run-host {:commands {:list list-returns-non-table}} :restart {}))
+
+(fn run-host-with-non-table-command-facet []
+  (CommandRunner.run-host (host-with-commands ["bad-command"]) :restart {}))
+
 (fn test-runs-matching-command-with-payload []
   (local state {:ran-restart? false :ran-other? false :received-payload nil})
   (local restart-command {:id :restart
@@ -96,7 +114,9 @@
   (assert-error-contains run-host-with-missing-command-id "command id")
   (assert-error-contains run-host-with-unknown-command "not found")
   (assert-error-contains run-host-with-duplicate-command "duplicate")
-  (assert-error-contains run-host-with-command-missing-run "run"))
+  (assert-error-contains run-host-with-command-missing-run "run")
+  (assert-command-runner-error-contains run-host-with-non-table-command-list "list")
+  (assert-command-runner-error-contains run-host-with-non-table-command-facet "command facet"))
 
 (add-test "structural command failures are loud" test-structural-command-failures-are-loud)
 
