@@ -108,7 +108,7 @@ Unsupported phrases throw. Natural-language recurrence is only a frontend that e
 - **ICU/CLDR localization:** Deferred. Localized parsing and formatting need an explicit ICU/CLDR/data-packaging strategy before implementation.
 - **Broad natural language:** Deferred. Wider language coverage, ambiguous phrases, locales, and product ambiguity UX need their own design.
 - **Full RFC5545:** Deferred. The current RRULE subset is intentionally small; full RFC5545 recurrence requires separate semantics and compatibility tests.
-- **ISO intervals/repeating intervals:** Deferred. Interval values and repeating interval syntax are not part of this slice.
+- **ISO intervals/repeating intervals:** Bounded `start/end` intervals and bounded repeating intervals are covered by [Temporal Intervals](./temporal-intervals). Full ISO interval forms, including `duration/start` and `duration/end`, plus calendar periods remain deferred.
 - **Calendar periods:** Deferred. Exact `Duration` remains separate from calendar periods such as months, years, and business days.
 - **Non-Gregorian calendars:** Deferred. The current foundation uses ISO proleptic Gregorian civil fields only.
 - **Parser providers/plugins:** Deferred. No parser provider registry or plugin system is introduced in this layer.

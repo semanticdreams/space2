@@ -314,6 +314,19 @@ SysTime checked_sys_from_seconds(std::int64_t seconds)
     return checked_sys_from_nanos(checked_multiply(seconds, nanos_per_second));
 }
 
+int compare_int64(std::int64_t left, std::int64_t right)
+{
+    if (left < right)
+    {
+        return -1;
+    }
+    if (left > right)
+    {
+        return 1;
+    }
+    return 0;
+}
+
 #if defined(_WIN32) && !USE_OS_TZDB
 constexpr std::array<const char*, 14> windows_tzdata_required_files = {
     "africa",
@@ -486,6 +499,11 @@ std::int64_t Duration::nanoseconds() const
     return value_.count();
 }
 
+int Duration::compare(const Duration& other) const
+{
+    return compare_int64(value_.count(), other.value_.count());
+}
+
 std::string Duration::to_string() const
 {
     return std::to_string(value_.count()) + "ns";
@@ -561,6 +579,11 @@ std::string Instant::to_string() const
     return format_civil(fields_from_local(LocalTime{value_.time_since_epoch()})) + "Z";
 }
 
+int Instant::compare(const Instant& other) const
+{
+    return compare_int64(value_.time_since_epoch().count(), other.value_.time_since_epoch().count());
+}
+
 Instant Instant::add(const Duration& duration) const
 {
     const auto total = checked_add(value_.time_since_epoch().count(), duration.value_.count());
@@ -632,6 +655,23 @@ CivilFields PlainDateTime::fields() const
 std::string PlainDateTime::to_string() const
 {
     return format_civil(fields());
+}
+
+int PlainDateTime::compare(const PlainDateTime& other) const
+{
+    return compare_int64(value_.time_since_epoch().count(), other.value_.time_since_epoch().count());
+}
+
+PlainDateTime PlainDateTime::add(const Duration& duration) const
+{
+    const auto total = checked_add(value_.time_since_epoch().count(), duration.value_.count());
+    return PlainDateTime{checked_local_from_nanos(total)};
+}
+
+Duration PlainDateTime::since(const PlainDateTime& earlier) const
+{
+    return Duration{Nanoseconds{checked_subtract(value_.time_since_epoch().count(),
+                                                earlier.value_.time_since_epoch().count())}};
 }
 
 PlainDateTime PlainDateTime::add_days(int days) const

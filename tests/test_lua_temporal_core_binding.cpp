@@ -21,8 +21,22 @@ int main()
         lua.script(R"(
             local core = require("temporal-core")
 
+            local one = core.duration["from-seconds"](1)
+            local two = core.duration["from-seconds"](2)
+            assert(one.compare(one, two) == -1)
+            assert(two.compare(two, one) == 1)
+            assert(one.compare(one, core.duration["from-seconds"](1)) == 0)
+            assert(one["to-string"](one) == "1000000000ns")
+            local negative_duration = core.duration["from-seconds"](-90)
+            assert(negative_duration["to-string"](negative_duration) == "-90000000000ns")
+
             local instant = core.instant.parse("2026-09-25T08:34:56-04:00")
             assert(instant["to-string"](instant) == "2026-09-25T12:34:56Z")
+
+            local instant_a = core.instant.parse("2026-09-25T12:00:00Z")
+            local instant_b = core.instant.parse("2026-09-25T12:00:01Z")
+            assert(instant_a.compare(instant_a, instant_b) == -1)
+            assert(instant_b.compare(instant_b, instant_a) == 1)
 
             local duration = core.duration["from-parts"]({
                 seconds = 90,
@@ -35,6 +49,13 @@ int main()
 
             local plain = core["plain-date-time"].parse("2026-11-01T01:30:00")
             assert(plain.fields(plain).year == 2026)
+
+            local plain_start = core["plain-date-time"].parse("2026-09-25T12:00:00")
+            local shifted = plain_start.add(plain_start, core.duration["from-seconds"](90))
+            assert(shifted["to-string"](shifted) == "2026-09-25T12:01:30")
+            local elapsed = shifted.since(shifted, plain_start)
+            assert(elapsed.compare(elapsed, core.duration["from-seconds"](90)) == 0)
+            assert(plain_start.compare(plain_start, shifted) == -1)
 
             local leap_plain = core["plain-date-time"].parse("2028-02-28T10:11:12")
             local leap_next = leap_plain["add-days"](leap_plain, 1)

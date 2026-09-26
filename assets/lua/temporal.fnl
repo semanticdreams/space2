@@ -1,5 +1,7 @@
 (local core (require :temporal-core))
 (local create-standard (require :temporal/standard))
+(local create-interval (require :temporal/interval))
+(local create-repeating-interval (require :temporal/repeating-interval))
 (local create-pattern (require :temporal/pattern))
 (local recurrence (require :temporal/recurrence))
 (local expression (require :temporal/expression))
@@ -65,14 +67,20 @@
            :fixed core.clock.fixed}
    :tzdb {:version core.tzdb.version}})
 
+(local standard (create-standard base))
+(local interval (create-interval {:standard standard}))
+(local temporal-with-intervals {:standard standard :interval interval})
+
 {:duration base.duration
  :instant base.instant
  :plain-date-time base.plain-date-time
  :zoned-date-time base.zoned-date-time
-  :clock base.clock
-  :tzdb base.tzdb
-   :standard (create-standard base)
-   :pattern (create-pattern base)
-   :recurrence recurrence
-   :expression expression
-   :natural natural}
+ :clock base.clock
+ :tzdb base.tzdb
+  :standard standard
+  :interval interval
+  :repeating-interval (create-repeating-interval temporal-with-intervals)
+  :pattern (create-pattern base)
+ :recurrence recurrence
+ :expression expression
+ :natural natural}

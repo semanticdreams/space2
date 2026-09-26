@@ -97,6 +97,7 @@ void register_temporal_types(sol::state& lua)
         "TemporalDuration",
         sol::no_constructor,
         "nanoseconds", &Duration::nanoseconds,
+        "compare", &Duration::compare,
         "to-string", &Duration::to_string);
 
     lua.new_usertype<Instant>(
@@ -105,6 +106,7 @@ void register_temporal_types(sol::state& lua)
         "epoch-seconds", &Instant::epoch_seconds,
         "nanosecond", &Instant::nanosecond,
         "to-string", &Instant::to_string,
+        "compare", &Instant::compare,
         "add", [](const Instant& self, const Duration& duration) {
             return self.add(duration);
         },
@@ -119,6 +121,13 @@ void register_temporal_types(sol::state& lua)
             return civil_fields_to_table(state, self.fields());
         },
         "to-string", &PlainDateTime::to_string,
+        "compare", &PlainDateTime::compare,
+        "add", [](const PlainDateTime& self, const Duration& duration) {
+            return self.add(duration);
+        },
+        "since", [](const PlainDateTime& self, const PlainDateTime& earlier) {
+            return self.since(earlier);
+        },
         "add-days", [](const PlainDateTime& self, int days) {
             return self.add_days(days);
         },
