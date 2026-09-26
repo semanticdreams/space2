@@ -2,6 +2,7 @@
 
 #include "temporal.h"
 
+#include <cmath>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -15,6 +16,8 @@ using space::temporal::Duration;
 using space::temporal::Instant;
 using space::temporal::PlainDateTime;
 using space::temporal::ZonedDateTime;
+
+constexpr double kMaxSafeCalendarPeriodField = 9007199254740991.0;
 
 sol::table civil_fields_to_table(sol::this_state state, const CivilFields& fields)
 {
@@ -91,6 +94,83 @@ Disambiguation optional_disambiguation(sol::object value)
     return space::temporal::parse_disambiguation(value.as<std::string>());
 }
 
+bool is_calendar_period_field(const std::string& key)
+{
+    return key == "years" || key == "months" || key == "weeks" || key == "days";
+}
+
+std::int64_t calendar_period_field(const sol::table& table, const char* key)
+{
+    sol::object value = table.get<sol::object>(key);
+    if (!value.valid() || value.is<sol::nil_t>())
+    {
+        return 0;
+    }
+
+    if (!value.is<double>())
+    {
+        throw std::invalid_argument(std::string("invalid temporal calendar field type: ") + key);
+    }
+
+    const double numeric = value.as<double>();
+    if (!std::isfinite(numeric) || std::trunc(numeric) != numeric ||
+        numeric < -kMaxSafeCalendarPeriodField ||
+        numeric > kMaxSafeCalendarPeriodField)
+    {
+        throw std::invalid_argument(std::string("invalid temporal calendar field value: ") + key);
+    }
+
+    return static_cast<std::int64_t>(numeric);
+}
+
+void require_consistent_calendar_signs(std::int64_t years,
+                                       std::int64_t months,
+                                       std::int64_t weeks,
+                                       std::int64_t days)
+{
+    int sign = 0;
+    for (const auto value : {years, months, weeks, days})
+    {
+        const int value_sign = (value > 0) ? 1 : ((value < 0) ? -1 : 0);
+        if (value_sign == 0)
+        {
+            continue;
+        }
+        if (sign == 0)
+        {
+            sign = value_sign;
+        }
+        else if (sign != value_sign)
+        {
+            throw std::invalid_argument("temporal calendar fields must not mix signs");
+        }
+    }
+}
+
+PlainDateTime add_calendar_period(const PlainDateTime& self, sol::table fields)
+{
+    for (const auto& entry : fields)
+    {
+        if (!entry.first.is<std::string>())
+        {
+            throw std::invalid_argument("invalid temporal calendar field key");
+        }
+        const auto key = entry.first.as<std::string>();
+        if (!is_calendar_period_field(key))
+        {
+            throw std::invalid_argument("invalid temporal calendar field: " + key);
+        }
+    }
+
+    const auto years = calendar_period_field(fields, "years");
+    const auto months = calendar_period_field(fields, "months");
+    const auto weeks = calendar_period_field(fields, "weeks");
+    const auto days = calendar_period_field(fields, "days");
+    require_consistent_calendar_signs(years, months, weeks, days);
+
+    return self.add_calendar(years, months, weeks, days);
+}
+
 void register_temporal_types(sol::state& lua)
 {
     lua.new_usertype<Duration>(
@@ -131,6 +211,7 @@ void register_temporal_types(sol::state& lua)
         "add-days", [](const PlainDateTime& self, int days) {
             return self.add_days(days);
         },
+        "add-calendar", &add_calendar_period,
         "iso-weekday", &PlainDateTime::iso_weekday);
 
     lua.new_usertype<ZonedDateTime>(

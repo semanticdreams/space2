@@ -1,5 +1,6 @@
 (local core (require :temporal-core))
 (local create-standard (require :temporal/standard))
+(local create-period (require :temporal/period))
 (local create-interval (require :temporal/interval))
 (local create-repeating-interval (require :temporal/repeating-interval))
 (local create-pattern (require :temporal/pattern))
@@ -76,7 +77,8 @@
  :plain-date-time base.plain-date-time
  :zoned-date-time base.zoned-date-time
  :clock base.clock
- :tzdb base.tzdb
+  :tzdb base.tzdb
+  :period (create-period base)
   :standard standard
   :interval interval
   :repeating-interval (create-repeating-interval temporal-with-intervals)
