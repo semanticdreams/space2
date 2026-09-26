@@ -51,6 +51,10 @@ This feature does not change existing `engine.now-ms`, `sysinfo.now-ms`, media c
 
 The temporal core intentionally excludes higher-level product features. Future layers include natural-language parsing, recurrence, localization, ICU formatting, CLDR data, non-Gregorian calendars, persisted timestamp migrations, and runtime timer redesign, and must be designed separately. Future timezone-related layers must preserve the invariant that zoned conversion never silently defaults to the host-local timezone.
 
+## Parsing, formatting, and recurrence layers
+
+Higher-level parsing, pattern formatting, natural expressions, and recurrence live above the core. See [Temporal Parsing and Recurrence](./temporal-parsing-recurrence). The core remains independent from natural language, recurrence, ICU, CLDR, and localization dependencies.
+
 ## Validation
 
 Use these commands when changing the temporal core, its Fennel wrapper, or its tests:

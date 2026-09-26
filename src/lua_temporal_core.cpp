@@ -118,7 +118,11 @@ void register_temporal_types(sol::state& lua)
         "fields", [](const PlainDateTime& self, sol::this_state state) {
             return civil_fields_to_table(state, self.fields());
         },
-        "to-string", &PlainDateTime::to_string);
+        "to-string", &PlainDateTime::to_string,
+        "add-days", [](const PlainDateTime& self, int days) {
+            return self.add_days(days);
+        },
+        "iso-weekday", &PlainDateTime::iso_weekday);
 
     lua.new_usertype<ZonedDateTime>(
         "TemporalZonedDateTime",

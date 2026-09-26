@@ -634,6 +634,21 @@ std::string PlainDateTime::to_string() const
     return format_civil(fields());
 }
 
+PlainDateTime PlainDateTime::add_days(int days) const
+{
+    const auto day = date::floor<date::days>(value_);
+    const auto time = value_ - day;
+    const auto next_day_count = checked_add(day.time_since_epoch().count(), days);
+    return PlainDateTime{checked_local_from_nanos(nanos_from_day_time(
+        next_day_count, time.count(), "temporal local date-time outside nanosecond range"))};
+}
+
+int PlainDateTime::iso_weekday() const
+{
+    const auto day = date::floor<date::days>(value_);
+    return static_cast<int>(date::weekday{day}.iso_encoding());
+}
+
 ZonedDateTime::ZonedDateTime(const Instant& instant, std::string zone_id)
     : instant_(instant)
     , zone_id_(std::move(zone_id))
