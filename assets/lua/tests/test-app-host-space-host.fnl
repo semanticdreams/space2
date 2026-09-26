@@ -36,9 +36,35 @@
 
 (fn fake-nil-panel-scene-target []
   {:add-panel-child (fn [_self _spec]
-                      nil)
+                       nil)
    :remove-panel-child (fn [_self _child]
-                         (error "remove-panel-child should not be called"))})
+                          (error "remove-panel-child should not be called"))})
+
+(fn fake-vector-validating-scene-target []
+  (local panels [])
+  {:panels panels
+   :add-panel-child (fn [_self spec]
+                      (local child {:spec spec})
+                      (table.insert panels child)
+                      (when (not (and spec.position spec.position.x))
+                        (error "position must be native vec3"))
+                      child)
+   :remove-panel-child (fn [_self child]
+                         (for [i (# panels) 1 -1]
+                           (when (= (. panels i) child)
+                             (table.remove panels i))))})
+
+(fn fake-object-scene-target []
+  (local objects [])
+  {:objects objects
+   :add-object (fn [_self object opts]
+                 (local child {:object object :opts opts})
+                 (table.insert objects child)
+                 child)
+   :remove-panel-child (fn [_self child]
+                         (for [i (# objects) 1 -1]
+                           (when (= (. objects i) child)
+                             (table.remove objects i))))})
 
 (fn test-space_host_exposes_required_services []
   (local runtime {})
@@ -112,6 +138,44 @@
   (assert (= (# (host.scene:list-owned)) 0))
   (host:drop))
 
+(fn test-scene_capability_panel_spawn_converts_position_before_raw_scene []
+  (local scene (fake-vector-validating-scene-target))
+  (local host (SpaceHost.create {:runtime {} :app {:scene scene}}))
+  (local handle (host.scene:spawn {:kind :panel
+                                   :id :positioned-panel
+                                   :position [1 2 3]}))
+  (assert (= handle.id :positioned-panel))
+  (assert (= (# scene.panels) 1))
+  (local child (. scene.panels 1))
+  (assert (= child.spec.position.x 1))
+  (host:drop)
+  (assert (= (# scene.panels) 0)))
+
+(fn test-scene_capability_rejects_unbacked_embedded_spawn_kinds []
+  (local scene (fake-scene-target))
+  (local host (SpaceHost.create {:runtime {} :app {:scene scene}}))
+  (assert-error-contains #(host.scene:spawn {:kind :cube :id :cube})
+                         "unsupported embedded scene spawn kind")
+  (assert (= (# (host.scene:list-owned)) 0))
+  (host:drop))
+
+(fn test-scene_capability_custom_spawn_uses_scene_add_object_when_available []
+  (local scene (fake-object-scene-target))
+  (local host (SpaceHost.create {:runtime {} :app {:scene scene}}))
+  (local object {:name :thing})
+  (local handle (host.scene:spawn {:kind :custom
+                                   :id :object
+                                   :object object
+                                   :position [4 5 6]}))
+  (assert (= handle.id :object))
+  (assert (= (# scene.objects) 1))
+  (local child (. scene.objects 1))
+  (assert (= child.object object))
+  (assert (= child.opts.position.x 4))
+  (host.scene:despawn handle)
+  (assert (= (# scene.objects) 0))
+  (host:drop))
+
 (fn test-host_exposes_only_present_space_adapters []
   (local hud (fake-target))
   (local host (SpaceHost.create {:runtime {} :app {:hud hud}}))
@@ -135,9 +199,15 @@
 (table.insert tests {:name "scene capability spawns queries and drops owned panel"
                       :fn test-scene_capability_spawns_queries_and_drops_owned_panel})
 (table.insert tests {:name "scene capability panel spawn nil child fails and rolls back"
-                     :fn test-scene_capability_panel_spawn_nil_child_fails_and_rolls_back})
+                      :fn test-scene_capability_panel_spawn_nil_child_fails_and_rolls_back})
+(table.insert tests {:name "scene capability panel spawn converts position before raw scene"
+                     :fn test-scene_capability_panel_spawn_converts_position_before_raw_scene})
+(table.insert tests {:name "scene capability rejects unbacked embedded spawn kinds"
+                     :fn test-scene_capability_rejects_unbacked_embedded_spawn_kinds})
+(table.insert tests {:name "scene capability custom spawn uses scene add-object when available"
+                     :fn test-scene_capability_custom_spawn_uses_scene_add_object_when_available})
 (table.insert tests {:name "host exposes only present space adapters"
-                      :fn test-host_exposes_only_present_space_adapters})
+                       :fn test-host_exposes_only_present_space_adapters})
 
 (local main
   (fn []
