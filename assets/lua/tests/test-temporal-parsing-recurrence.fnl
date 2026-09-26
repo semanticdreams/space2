@@ -38,10 +38,30 @@
   (assert (= (reparsed-instant:to-string) "2026-09-25T12:34:56.5Z"))
   (assert (= (Temporal.standard.format-zoned-date-time reparsed) formatted)))
 
+(fn pattern-plain-date-time-round-trip []
+  (local pattern (Temporal.pattern.compile "yyyy/MM/dd HH:mm:ss"))
+  (local plain (Temporal.pattern.parse pattern "2026/09/25 12:34:56"
+                                       {:type :plain-date-time}))
+  (assert (= (plain:to-string) "2026-09-25T12:34:56"))
+  (assert (= (Temporal.pattern.format pattern plain) "2026/09/25 12:34:56")))
+
+(fn pattern-literals-and-rejections []
+  (local pattern (Temporal.pattern.compile "yyyy-MM-dd'T'HH:mm:ss"))
+  (local plain (Temporal.pattern.parse pattern "2026-09-25T12:34:56"
+                                       {:type :plain-date-time}))
+  (assert (= (plain:to-string) "2026-09-25T12:34:56"))
+  (assert-error #(Temporal.pattern.compile "yyyy MMM dd")
+                "unsupported pattern token should throw")
+  (assert-error #(Temporal.pattern.parse pattern "2026-09-25X12:34:56"
+                                        {:type :plain-date-time})
+                "literal mismatch should throw"))
+
 (table.insert tests {:name "standard instant round trip" :fn standard-instant-round-trip})
 (table.insert tests {:name "standard plain round trip" :fn standard-plain-round-trip})
 (table.insert tests {:name "standard zoned round trip" :fn standard-zoned-round-trip})
 (table.insert tests {:name "standard zoned fractional round trip" :fn standard-zoned-fractional-round-trip})
+(table.insert tests {:name "pattern plain date time round trip" :fn pattern-plain-date-time-round-trip})
+(table.insert tests {:name "pattern literals and rejections" :fn pattern-literals-and-rejections})
 
 (local main
   (fn []

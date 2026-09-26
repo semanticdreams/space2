@@ -1,5 +1,6 @@
 (local core (require :temporal-core))
 (local create-standard (require :temporal/standard))
+(local create-pattern (require :temporal/pattern))
 
 (fn disambiguation-to-core [value]
   (if (= value :reject)
@@ -65,6 +66,7 @@
  :instant base.instant
  :plain-date-time base.plain-date-time
  :zoned-date-time base.zoned-date-time
- :clock base.clock
- :tzdb base.tzdb
- :standard (create-standard base)}
+  :clock base.clock
+  :tzdb base.tzdb
+  :standard (create-standard base)
+  :pattern (create-pattern base)}
