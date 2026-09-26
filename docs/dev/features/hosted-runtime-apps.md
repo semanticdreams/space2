@@ -14,6 +14,17 @@ Space-runtime apps are hostable when their entry module exports a runtime compos
 
 The host provides services such as `viewport`, `surfaces`, `presentation`, `scheduler`, `input`, `inspectors`, `commands`, `assets`, `logging`, and `lifecycle`. Apps require capabilities by name and fail loudly when required services are absent. Apps do not receive or branch on a hosted-vs-standalone mode flag.
 
+Embedded Space workspace hosts provide the same generic services plus optional
+Space surface adapters when the shell exposes them:
+
+- `host.hud` proxies `app.hud` panel insertion/removal.
+- `host.canvas` proxies `app.canvas` panel insertion/removal.
+- `host.scene` proxies `app.scene` panel insertion/removal.
+
+Adapters own children added through them. Dropping the embedded host removes
+those owned HUD/canvas/scene panel children exactly once; children removed
+through the adapter are no longer removed again during host teardown.
+
 ## Runtime composition facets
 
 A runtime may expose:
@@ -34,6 +45,67 @@ Hosts pause and step scheduler lanes. Apps register pausable work with `host.sch
 ## Standalone and embedded hosts
 
 Standalone launch and embedded mounting construct different generic hosts, then call the same `create(host)` app factory. App logic is shared.
+
+In standalone mode `host.lifecycle:quit()` exits through the standalone engine.
+In embedded workspace mode `host.lifecycle:quit()` closes the workspace mount via
+the host's close callback; it does not quit the Space process and does not
+replace `app.active-world-runtime`, `app.renderers`, or global renderer state.
+Apps should request capabilities from the host rather than checking a
+hosted-vs-standalone flag.
+
+## Workspace mounting
+
+Workspace embedding uses `HostedRuntime.mount-in-workspace(opts)`, which delegates
+to `app-host.workspace-mount` and returns a mount table:
+
+```fennel
+(local HostedRuntime (require :hosted-app-runtime))
+(local mount (HostedRuntime.mount-in-workspace {:runtime runtime
+                                                :app app-shell
+                                                :module app-module}))
+```
+
+`WorkspaceMount.mount(opts)` accepts the same app module options as
+`HostedRuntime.mount` plus a Space runtime and shell. It creates the embedded
+Space host, mounts the app through the shared runtime controller, and registers
+the resulting mount in `runtime.hosted-app-mounts`. The runtime owns that list:
+workspace code should treat it as the active mount registry and should not use it
+to replace `app.active-world-runtime` or global renderer state.
+
+Activity presentation composes targets from the active runtime in stable order:
+scene target, canvas target, each hosted workspace mount target, then the shell
+HUD target. Dropping a mount removes it from `runtime.hosted-app-mounts`, so its
+targets disappear from presentation composition without mutating renderers.
+
+Mount teardown is idempotent. `mount:drop()` removes the mount from the runtime
+registry, drops the app controller, and drops the embedded host so adapter-owned
+HUD/canvas/scene children are removed exactly once. `host.lifecycle:quit()` for
+an embedded host calls the same mount drop path. If app creation fails after the
+embedded host has been created, workspace mounting cleans up the host before
+rethrowing the original mount error.
+
+## Minimal workspace controls
+
+`app-host.workspace-panel` provides the first Space-hosted control surface:
+
+```fennel
+(local WorkspacePanel (require :app-host.workspace-panel))
+(local session (WorkspacePanel.open {:runtime runtime
+                                     :app app-shell
+                                     :module app-module}))
+```
+
+`WorkspacePanel.open(opts)` requires `opts.app.hud` or global `app.hud`, mounts
+the app through `WorkspaceMount.mount(opts)`, and adds one HUD panel child that
+describes the hosted app session. The returned session exposes `session.mount`
+plus `session:pause()`, `session:resume()`, `session:step(delta-ms)`, and
+idempotent `session:close()` controls. Pause, resume, and step delegate to the
+generic runtime controller; close removes the HUD child and drops the workspace
+mount exactly once.
+
+This panel is intentionally only a minimal control/session descriptor. Richer
+inspector/editor rendering and persistent app discovery or launcher UX are
+follow-up subprojects, not part of the workspace mount contract.
 
 ## Deferred alternatives
 

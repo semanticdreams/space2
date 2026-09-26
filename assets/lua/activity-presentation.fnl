@@ -13,6 +13,18 @@
     (table.insert targets target))
   targets)
 
+(fn insert-hosted-targets! [targets runtime]
+  (local mounts (and runtime runtime.hosted-app-mounts))
+  (when mounts
+    (each [_ mount (ipairs mounts)]
+      (when mount
+        (local render-targets mount.render-targets)
+        (when (not (= (type render-targets) :function))
+          (error "hosted app mount requires render-targets function"))
+        (each [_ target (ipairs (render-targets mount))]
+          (maybe-insert-target! targets target)))))
+  targets)
+
 (fn Presentation.for-runtime [runtime]
   (local provider {})
 
@@ -24,6 +36,8 @@
     ;; Canvas target
     (when (and runtime runtime.canvas runtime.canvas.presentation-target)
       (maybe-insert-target! targets (active-owned-target (runtime.canvas:presentation-target))))
+    ;; Hosted app workspace targets compose above scene/canvas and below HUD.
+    (insert-hosted-targets! targets runtime)
     ;; HUD target (retained surface via app.hud)
     (when (and app app.hud app.hud.presentation-target)
       (maybe-insert-target! targets (app.hud:presentation-target)))
