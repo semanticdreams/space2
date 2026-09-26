@@ -106,6 +106,28 @@ void test_plain_date_time_field_validation()
     expect_throws([] { PlainDateTime::from_fields(2026, 1, 1, 24, 0, 0, 0); });
 }
 
+void test_plain_date_time_add_days()
+{
+    expect_eq(PlainDateTime::parse("2028-02-28T10:11:12")
+                  .add_days(1)
+                  .to_string(),
+              std::string("2028-02-29T10:11:12"));
+    expect_eq(PlainDateTime::parse("2026-12-31T23:00:00")
+                  .add_days(1)
+                  .to_string(),
+              std::string("2027-01-01T23:00:00"));
+    expect_eq(PlainDateTime::parse("2026-01-01T00:00:00")
+                  .add_days(-1)
+                  .to_string(),
+              std::string("2025-12-31T00:00:00"));
+}
+
+void test_plain_date_time_iso_weekday()
+{
+    expect_eq(PlainDateTime::parse("2026-09-28T00:00:00").iso_weekday(), 1);
+    expect_eq(PlainDateTime::parse("2026-10-04T00:00:00").iso_weekday(), 7);
+}
+
 void test_zoned_from_plain_requires_valid_zone()
 {
     expect_throws([] {
@@ -185,6 +207,8 @@ int main()
         run("test_nanosecond_time_point_range_boundaries", test_nanosecond_time_point_range_boundaries);
         run("test_from_unix_accepts_lower_boundary_parts", test_from_unix_accepts_lower_boundary_parts);
         run("test_plain_date_time_field_validation", test_plain_date_time_field_validation);
+        run("test_plain_date_time_add_days", test_plain_date_time_add_days);
+        run("test_plain_date_time_iso_weekday", test_plain_date_time_iso_weekday);
         run("test_zoned_from_plain_requires_valid_zone", test_zoned_from_plain_requires_valid_zone);
         run("test_new_york_spring_gap_disambiguation", test_new_york_spring_gap_disambiguation);
         run("test_new_york_fall_overlap_disambiguation", test_new_york_fall_overlap_disambiguation);

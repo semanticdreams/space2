@@ -1,4 +1,9 @@
 (local core (require :temporal-core))
+(local create-standard (require :temporal/standard))
+(local create-pattern (require :temporal/pattern))
+(local recurrence (require :temporal/recurrence))
+(local expression (require :temporal/expression))
+(local natural (require :temporal/natural))
 
 (fn disambiguation-to-core [value]
   (if (= value :reject)
@@ -46,15 +51,28 @@
   (assert (= (type zone-id) :string) "temporal zone id must be a string")
   (core.zoned-date-time.from-instant instant zone-id))
 
-{:duration {:from duration-from
-            :from-nanoseconds core.duration.from-nanoseconds
-            :from-seconds core.duration.from-seconds}
- :instant {:parse core.instant.parse
-           :from-unix core.instant.from-unix}
- :plain-date-time {:parse core.plain-date-time.parse
-                   :from-fields core.plain-date-time.from-fields}
- :zoned-date-time {:from-plain from-zoned-plain
-                   :from-instant from-zoned-instant}
- :clock {:system core.clock.system
-         :fixed core.clock.fixed}
- :tzdb {:version core.tzdb.version}}
+(local base
+  {:duration {:from duration-from
+              :from-nanoseconds core.duration.from-nanoseconds
+              :from-seconds core.duration.from-seconds}
+   :instant {:parse core.instant.parse
+             :from-unix core.instant.from-unix}
+   :plain-date-time {:parse core.plain-date-time.parse
+                     :from-fields core.plain-date-time.from-fields}
+   :zoned-date-time {:from-plain from-zoned-plain
+                     :from-instant from-zoned-instant}
+   :clock {:system core.clock.system
+           :fixed core.clock.fixed}
+   :tzdb {:version core.tzdb.version}})
+
+{:duration base.duration
+ :instant base.instant
+ :plain-date-time base.plain-date-time
+ :zoned-date-time base.zoned-date-time
+  :clock base.clock
+  :tzdb base.tzdb
+   :standard (create-standard base)
+   :pattern (create-pattern base)
+   :recurrence recurrence
+   :expression expression
+   :natural natural}
