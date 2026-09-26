@@ -47,8 +47,7 @@ object model, so app logic tests can exercise scene spawning, transforms, owned
 object listing, volume queries, and optional terrain backend queries without
 branching on hosted-vs-standalone mode.
 
-3D Snake should use this capability in a follow-up subproject rather than adding
-Snake-specific scene entrypoints to hosted apps.
+The Snake example uses this capability as the first app-level scene consumer: its runtime mirrors grid gameplay into app-owned scene handles while keeping the same `create(host)` path for standalone and embedded hosts. Embedded custom objects provide concrete `spec.object` values because registry-only fake handles are not enough for real Space scene insertion.
 
 ## Runtime composition facets
 

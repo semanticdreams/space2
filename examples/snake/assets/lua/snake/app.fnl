@@ -1,6 +1,7 @@
 (local Capabilities (require :app-host.capabilities))
 (local Snake (require :snake/game))
 (local OrthographicUiSurface (require :orthographic-ui-surface))
+(local SceneView (require :snake/scene-view))
 (local SnakeView (require :snake/view))
 
 (local SDLK_ESCAPE 27)
@@ -150,6 +151,7 @@
   (local inspectors (Capabilities.require host :inspectors))
   (local lifecycle (Capabilities.require host :lifecycle))
   (local viewport (validate-viewport (Capabilities.require host :viewport)))
+  (local scene (Capabilities.require host :scene))
   (local surfaces (and host host.surfaces))
   (validate-registry scheduler :scheduler)
   (validate-registry input :input)
@@ -158,6 +160,7 @@
   (when surfaces
     (validate-registry surfaces :surfaces))
   (local game (Snake.create {}))
+  (local scene-view (SceneView.create {:scene scene :game game}))
   (local surface (OrthographicUiSurface.create {:viewport viewport}))
   (local screen (surface:build (SnakeView.SnakeScreen {:game game})))
   (var elapsed 0)
@@ -165,7 +168,8 @@
 
   (fn sync-screen []
     (screen:sync)
-    (surface:update))
+    (surface:update)
+    (scene-view:sync))
 
   (fn refresh-screen []
     (surface:update))
@@ -246,6 +250,7 @@
       (unregister-from input input-facet)
       (unregister-from inspectors inspector-facet)
       (unregister-from surfaces surface)
+      (scene-view:drop)
       (when screen
         (screen:drop)
         (set surface.entity nil))
