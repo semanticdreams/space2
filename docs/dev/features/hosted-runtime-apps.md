@@ -131,6 +131,13 @@ controls. Pause, resume, step, and command execution delegate to the generic
 runtime controller and command registries; close removes the HUD child and drops
 the workspace mount exactly once.
 
+`session:run-command(command-id, payload)` resolves a unique command by id from
+`host.commands:list()` and calls its `:run` handler with the command facet and
+optional payload. Handler success returns `{:id command-id :status :ok :value
+value}`; handler exceptions return `{:id command-id :status :error :error
+error-string}`. Structural host, registry, lookup, and command contract errors
+throw loudly with the command runner prefix.
+
 The workspace panel also exposes a read-only inspector snapshot from the
 embedded host registries. Snapshot rows include readable inspector data,
 explicit inspector read errors, unsupported inspector markers, and command
