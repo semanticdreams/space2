@@ -52,6 +52,34 @@
       (set found spec)))
   found)
 
+(fn find-owned-id [owned expected-id]
+  (var found nil)
+  (each [_ handle (ipairs owned)]
+    (when (and (not found) (= handle.id expected-id))
+      (set found handle)))
+  found)
+
+(fn assert-owned-id [owned expected-id]
+  (assert (find-owned-id owned expected-id)
+          (.. "expected scene handle " expected-id)))
+
+(fn assert-missing-owned-id [owned expected-id]
+  (assert (not (find-owned-id owned expected-id))
+          (.. "stale scene handle should be despawned: " expected-id)))
+
+(fn count-owned-with-tag [owned tag]
+  (var count 0)
+  (each [_ handle (ipairs owned)]
+    (when (has-tag? handle.tags tag)
+      (set count (+ count 1))))
+  count)
+
+(fn assert-owned-role-counts [owned]
+  (assert (= (# owned) 3) "owned visible cells should remain head body food")
+  (assert (= (count-owned-with-tag owned :head) 1) "owned cells should include one head")
+  (assert (= (count-owned-with-tag owned :body) 1) "owned cells should include one body segment")
+  (assert (= (count-owned-with-tag owned :food) 1) "owned cells should include one food"))
+
 (fn test-initial-sync-spawns-head-body-and-food []
   (local (scene state) (make-fake-scene))
   (local game (Snake.create {:width 8 :height 6
@@ -94,8 +122,30 @@
   (assert (= (# state.despawns) 3) "drop should despawn each scene cell once")
   (assert (= (# state.owned) 0) "drop should leave no Snake-owned scene handles"))
 
+(fn test-restart-sync-despawns-stale-handles-and-restores-start-cells []
+  (local (scene state) (make-fake-scene))
+  (local game (Snake.create {:width 8 :height 6
+                             :initial-snake [{:x 3 :y 3} {:x 2 :y 3}]
+                             :initial-food {:x 6 :y 3}}))
+  (local view (SceneView.create {:scene scene :game game}))
+  (view:sync)
+  (game:step)
+  (view:sync)
+  (assert-owned-id state.owned "head-4-3")
+  (assert-owned-id state.owned "body-2-3-3")
+  (game:restart)
+  (view:sync)
+  (assert-owned-role-counts state.owned)
+  (assert-owned-id state.owned "head-3-3")
+  (assert-owned-id state.owned "body-2-2-3")
+  (assert-owned-id state.owned "food-6-3")
+  (assert-missing-owned-id state.owned "head-4-3")
+  (assert-missing-owned-id state.owned "body-2-3-3")
+  (view:drop))
+
 (add-test "sync reuses and despawns cells" test-sync-reuses-existing-cell-handles-and-despawns-obsolete-cells)
 (add-test "drop despawns owned handles once" test-drop-is-idempotent-and-despawns-owned-handles-once)
+(add-test "restart sync despawns stale handles and restores start cells" test-restart-sync-despawns-stale-handles-and-restores-start-cells)
 
 (fn main []
   (Runner.run-tests {:name "snake-scene-view" :tests tests}))
