@@ -41,9 +41,19 @@
 
 (fn make-throwing-hud []
   {:add-panel-child (fn [_self _child]
-                      (error "hud add failed"))
+                       (error "hud add failed"))
    :remove-panel-child (fn [_self _child]
-                         true)})
+                          true)})
+
+(fn registry [items]
+  {:list (fn [_self]
+           (local out [])
+           (each [_ item (ipairs items)]
+             (table.insert out item))
+           out)})
+
+(fn read-fake-state [_self]
+  {:value 42})
 
 (fn make-fake-mount []
   (local controller {:paused-calls []
@@ -55,9 +65,13 @@
                              (table.insert self.step-calls delta-ms)
                              delta-ms)})
   {:controller controller
+   :host {:inspectors (registry [{:id :state
+                                  :title "State"
+                                  :read read-fake-state}])
+          :commands (registry [{:id :restart :title "Restart"}])}
    :drop-count 0
    :drop (fn [self]
-           (set self.drop-count (+ self.drop-count 1)))})
+            (set self.drop-count (+ self.drop-count 1)))})
 
 (fn create-empty-runtime [_host]
   {})
@@ -117,6 +131,30 @@
   (assert (= (. fake-mount.controller.step-calls 1) 33) "step should delegate delta to controller")
   (fixture:restore))
 
+(fn test-session_exposes_read_only_inspector_snapshot []
+  (local hud (make-fake-hud))
+  (local fake-mount (make-fake-mount))
+  (local fixture (install-panel-module fake-mount))
+  (local session (fixture.WorkspacePanel.open (panel-opts hud)))
+  (local snapshot (session:read-inspector-snapshot))
+  (assert (= (. snapshot.inspectors 1 :id) :state))
+  (assert (= (. snapshot.inspectors 1 :data :value) 42))
+  (assert (= (. snapshot.commands 1 :id) :restart))
+  (fixture:restore))
+
+(fn test_descriptor_and_built_widget_expose_snapshot_reader []
+  (local hud (make-builder-hud))
+  (local fake-mount (make-fake-mount))
+  (local fixture (install-panel-module fake-mount))
+  (local session (fixture.WorkspacePanel.open (panel-opts hud)))
+  (local descriptor-snapshot (hud.descriptor:read-inspector-snapshot))
+  (local widget-descriptor (. hud.children 1 :hosted-app-workspace-panel))
+  (local widget-snapshot (widget-descriptor:read-inspector-snapshot))
+  (assert (= (. descriptor-snapshot.inspectors 1 :id) :state))
+  (assert (= (. widget-snapshot.inspectors 1 :id) :state))
+  (session:close)
+  (fixture:restore))
+
 (fn test-close_removes_child_and_drops_mount_once []
   (local hud (make-fake-hud))
   (local fake-mount (make-fake-mount))
@@ -159,6 +197,8 @@
 (add-test "open adds exactly one HUD panel child" test-open-adds-one-hud-child)
 (add-test "builder path returns HUD widget with layout" test-builder_path_returns_hud_widget_with_layout)
 (add-test "controls delegate to controller" test-controls_delegate_to_controller)
+(add-test "session exposes read-only inspector snapshot" test-session_exposes_read_only_inspector_snapshot)
+(add-test "descriptor and built widget expose snapshot reader" test_descriptor_and_built_widget_expose_snapshot_reader)
 (add-test "close removes child and drops mount once" test-close_removes_child_and_drops_mount_once)
 (add-test "HUD add failure drops mount once" test-hud_add_failure_drops_mount_once)
 (add-test "missing HUD fails loudly" test-missing_hud_fails_loudly)
