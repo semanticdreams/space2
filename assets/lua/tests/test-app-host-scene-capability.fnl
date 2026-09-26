@@ -57,8 +57,32 @@
   (local scene (SceneCapability.create {:backend backend}))
   (assert (= (scene:height-at [2 0 3]) 5))
   (local hit (scene:raycast-terrain {:origin [0 1 0]
-                                    :direction [0 -1 0]}))
+                                     :direction [0 -1 0]}))
   (assert (= hit.hit? true)))
+
+(fn test-drop_failure_keeps_cleanup_recoverable []
+  (var fail-second? true)
+  (local despawned [])
+  (local backend {:despawn (fn [_self handle]
+                             (table.insert despawned handle.id)
+                             (when (and fail-second? (= handle.id :second))
+                               (error "transient despawn failure")))})
+  (local scene (SceneCapability.create {:backend backend}))
+  (scene:spawn {:kind :custom :id :first})
+  (scene:spawn {:kind :custom :id :second})
+
+  (assert-error-contains #(scene:drop) "transient despawn failure")
+  (local remaining (scene:list-owned))
+  (assert (= (# remaining) 1))
+  (assert (= (. (. remaining 1) :id) :second))
+
+  (set fail-second? false)
+  (scene:drop)
+  (assert (= (# (scene:list-owned)) 0))
+  (assert (= (# despawned) 3))
+  (assert (= (. despawned 1) :first))
+  (assert (= (. despawned 2) :second))
+  (assert (= (. despawned 3) :second)))
 
 (table.insert tests {:name "spawn transform list and drop"
                      :fn test-spawn_transform_list_and_drop})
@@ -67,7 +91,9 @@
 (table.insert tests {:name "invalid handles and unsupported kinds fail loudly"
                      :fn test-invalid_handles_and_unsupported_kinds_fail_loudly})
 (table.insert tests {:name "terrain queries delegate to backend"
-                     :fn test-terrain_queries_delegate_to_backend})
+                      :fn test-terrain_queries_delegate_to_backend})
+(table.insert tests {:name "drop failure keeps cleanup recoverable"
+                     :fn test-drop_failure_keeps_cleanup_recoverable})
 
 (local main
   (fn []

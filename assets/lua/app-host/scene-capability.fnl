@@ -196,10 +196,10 @@
 
   (fn drop [self]
     (when (not dropped?)
-      (set dropped? true)
       (local owned (self:list-owned))
       (each [_ handle (ipairs owned)]
-        (self:despawn handle)))
+        (self:despawn handle))
+      (set dropped? true))
     nil)
 
   {:spawn spawn
