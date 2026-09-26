@@ -36,6 +36,11 @@ int main()
             local plain = core["plain-date-time"].parse("2026-11-01T01:30:00")
             assert(plain.fields(plain).year == 2026)
 
+            local leap_plain = core["plain-date-time"].parse("2028-02-28T10:11:12")
+            local leap_next = leap_plain["add-days"](leap_plain, 1)
+            assert(leap_next["to-string"](leap_next) == "2028-02-29T10:11:12")
+            assert(leap_next["iso-weekday"](leap_next) == 2)
+
             local earliest = core["zoned-date-time"]["from-plain"](plain, "America/New_York", "earliest")
             local earliest_instant = earliest.instant(earliest)
             assert(earliest_instant["to-string"](earliest_instant) == "2026-11-01T05:30:00Z")

@@ -77,6 +77,8 @@ public:
                                      int nanosecond);
     CivilFields fields() const;
     std::string to_string() const;
+    PlainDateTime add_days(int days) const;
+    int iso_weekday() const;
 
 private:
     explicit PlainDateTime(date::local_time<std::chrono::nanoseconds> value);
