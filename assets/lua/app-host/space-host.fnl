@@ -1,4 +1,5 @@
 (local Services (require :app-host.services))
+(local SceneCapability (require :app-host.scene-capability))
 
 (fn space-host-error [message]
   (error (.. "[space-host] " message)))
@@ -58,6 +59,53 @@
                                 (local unregister (require-method :unregister-panel-restorer))
                                 (unregister target kind owner))})
 
+(fn make-space-scene-capability [target]
+  (fn require-method [method-name]
+    (local method (. target method-name))
+    (if (= (type method) :function)
+        method
+        (space-host-error (.. "scene capability requires target:" (tostring method-name)))))
+
+  (fn scene-height-at [_self point opts]
+    (if (= (type target.height-at) :function)
+        (target:height-at point opts)
+        (= (type target.height-at-world-point) :function)
+        (target:height-at-world-point point opts)
+        nil))
+
+  (fn scene-raycast-terrain [_self ray opts]
+    (if (= (type target.raycast-terrain) :function)
+        (target:raycast-terrain ray opts)
+        nil))
+
+  (fn scene-despawn [_self handle]
+    (local child handle._space-host-scene-child)
+    (when child
+      (local remove (require-method :remove-panel-child))
+      (remove target child)
+      (set handle._space-host-scene-child nil))
+    nil)
+
+  (local scene (SceneCapability.create {:backend {:despawn scene-despawn
+                                                  :height-at scene-height-at
+                                                  :raycast-terrain scene-raycast-terrain}}))
+  (local base-spawn scene.spawn)
+  (local base-despawn scene.despawn)
+
+  (fn spawn [self spec]
+    (local handle (base-spawn self spec))
+    (when (= spec.kind :panel)
+      (local add (require-method :add-panel-child))
+      (local (ok child-or-error) (pcall add target spec))
+      (when (not ok)
+        (base-despawn self handle)
+        (error child-or-error))
+      (set handle._space-host-scene-child child-or-error))
+    handle)
+
+  (set scene.spawn spawn)
+  scene)
+
 (fn resolve-shell [options]
   (if options.app
       options.app
@@ -97,6 +145,12 @@
       (set (. host name) adapter)
       (table.insert adapters adapter)))
 
+  (fn add-scene-capability [target]
+    (when target
+      (local scene (make-space-scene-capability target))
+      (set host.scene scene)
+      (table.insert adapters scene)))
+
   (fn quit [_self]
     (if options.on-quit
         (options.on-quit host)
@@ -129,7 +183,7 @@
              :drop drop})
   (add-adapter :hud shell.hud)
   (add-adapter :canvas shell.canvas)
-  (add-adapter :scene shell.scene)
+  (add-scene-capability shell.scene)
   host)
 
 {:create create}
