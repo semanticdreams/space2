@@ -19,11 +19,36 @@ Space surface adapters when the shell exposes them:
 
 - `host.hud` proxies `app.hud` panel insertion/removal.
 - `host.canvas` proxies `app.canvas` panel insertion/removal.
-- `host.scene` proxies `app.scene` panel insertion/removal.
+- `host.scene` provides the generic scene capability when a Space scene is
+  available.
 
 Adapters own children added through them. Dropping the embedded host removes
-those owned HUD/canvas/scene panel children exactly once; children removed
-through the adapter are no longer removed again during host teardown.
+those owned HUD/canvas panel children exactly once; children removed through the
+adapter are no longer removed again during host teardown. Scene objects are owned
+by the scene capability handles described below.
+
+## Scene capability
+
+Apps that need scene access should require `host.scene` through capabilities and
+then use its generic methods: `spawn`, `despawn`, `set-transform`,
+`get-transform`, `list-owned`, `query-volume`, `height-at`, `raycast-terrain`,
+and `drop`. `spawn` returns an app-owned handle; app code passes that handle
+back to scene methods instead of retaining raw Space scene entities or backend
+objects. Invalid handles and unsupported spawn kinds fail loudly.
+
+Embedded Space hosts expose `host.scene` when `app.scene` exists. The embedded
+adapter proxies panel spawns to the Space scene's panel APIs and terrain queries
+to Space scene methods such as `height-at`, `height-at-world-point`, and
+`raycast-terrain`. Dropping the host drops the capability, despawning owned
+objects and removing app-owned Space scene children exactly once.
+
+Standalone hosts expose the same capability shape with a registry-backed owned
+object model, so app logic tests can exercise scene spawning, transforms, owned
+object listing, volume queries, and optional terrain backend queries without
+branching on hosted-vs-standalone mode.
+
+3D Snake should use this capability in a follow-up subproject rather than adding
+Snake-specific scene entrypoints to hosted apps.
 
 ## Runtime composition facets
 
