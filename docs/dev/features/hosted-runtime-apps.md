@@ -58,7 +58,10 @@ A runtime may expose:
 - `lifecycle`: deterministic teardown such as `drop`.
 - `scheduler`: app simulation registrations.
 - `inspectors`: plain-data or moldable inspector registrations.
-- `commands`: command registrations for tools and live controls.
+- `commands`: sequential command facets such as `{:id id :title title
+  :description description :run fn}`. Commands are registered with
+  `host.commands`; command handlers receive the command facet and optional
+  payload.
 
 The core entry API does not add a new required method for every game feature.
 
@@ -122,19 +125,28 @@ rethrowing the original mount error.
 `WorkspacePanel.open(opts)` requires `opts.app.hud` or global `app.hud`, mounts
 the app through `WorkspaceMount.mount(opts)`, and adds one HUD panel child that
 describes the hosted app session. The returned session exposes `session.mount`
-plus `session:pause()`, `session:resume()`, `session:step(delta-ms)`, and
-idempotent `session:close()` controls. Pause, resume, and step delegate to the
-generic runtime controller; close removes the HUD child and drops the workspace
-mount exactly once.
+plus `session:pause()`, `session:resume()`, `session:step(delta-ms)`,
+`session:run-command(command-id, payload)`, and idempotent `session:close()`
+controls. Pause, resume, step, and command execution delegate to the generic
+runtime controller and command registries; close removes the HUD child and drops
+the workspace mount exactly once.
+
+`session:run-command(command-id, payload)` resolves a unique command by id from
+`host.commands:list()` and calls its `:run` handler with the command facet and
+optional payload. Handler success returns `{:id command-id :status :ok :value
+value}`; handler exceptions return `{:id command-id :status :error :error
+error-string}`. Structural host, registry, lookup, and command contract errors
+throw loudly with the command runner prefix.
 
 The workspace panel also exposes a read-only inspector snapshot from the
 embedded host registries. Snapshot rows include readable inspector data,
 explicit inspector read errors, unsupported inspector markers, and command
-metadata. The panel does not execute commands or mutate app state.
+metadata. Snapshot reads list command metadata without executing commands and do
+not mutate app state.
 
-Command execution, editable controls, custom moldable inspector renderers, graph
-integration, persistent app discovery, and launcher UX remain follow-up
-subprojects.
+Richer visual command controls, command schemas, async progress, permissions,
+editor integration, graph integration, persistent app discovery, and launcher UX
+remain follow-up subprojects.
 
 ## Deferred alternatives
 
