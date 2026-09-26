@@ -84,6 +84,7 @@ public:
     PlainDateTime add(const Duration& duration) const;
     Duration since(const PlainDateTime& earlier) const;
     PlainDateTime add_days(int days) const;
+    PlainDateTime add_calendar(std::int64_t years, std::int64_t months, std::int64_t weeks, std::int64_t days) const;
     int iso_weekday() const;
 
 private:

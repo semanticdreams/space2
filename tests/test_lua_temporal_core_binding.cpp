@@ -62,6 +62,38 @@ int main()
             assert(leap_next["to-string"](leap_next) == "2028-02-29T10:11:12")
             assert(leap_next["iso-weekday"](leap_next) == 2)
 
+            local jan31 = core["plain-date-time"].parse("2026-01-31T10:11:12")
+            local feb28 = jan31["add-calendar"](jan31, { months = 1 })
+            assert(feb28["to-string"](feb28) == "2026-02-28T10:11:12")
+            local calendar_start = core["plain-date-time"].parse("2026-01-30T10:11:12")
+            local combined = calendar_start["add-calendar"](calendar_start, { years = 1, months = 2, weeks = 1, days = 3 })
+            assert(combined["to-string"](combined) == "2027-04-09T10:11:12")
+
+            ok = pcall(function()
+                return jan31["add-calendar"](jan31, { monthz = 1 })
+            end)
+            assert(ok == false)
+
+            ok = pcall(function()
+                return jan31["add-calendar"](jan31, { months = 1.5 })
+            end)
+            assert(ok == false)
+
+            ok = pcall(function()
+                return jan31["add-calendar"](jan31, { months = false })
+            end)
+            assert(ok == false)
+
+            ok = pcall(function()
+                return jan31["add-calendar"](jan31, { months = 9223372036854775808 })
+            end)
+            assert(ok == false)
+
+            ok = pcall(function()
+                return jan31["add-calendar"](jan31, { months = 1, days = -1 })
+            end)
+            assert(ok == false)
+
             local earliest = core["zoned-date-time"]["from-plain"](plain, "America/New_York", "earliest")
             local earliest_instant = earliest.instant(earliest)
             assert(earliest_instant["to-string"](earliest_instant) == "2026-11-01T05:30:00Z")

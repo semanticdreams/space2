@@ -100,9 +100,10 @@
     :tests.test-fennel-check-cli
     :tests.test-fennel-validation-mcp
     :tests.test-launchables
-    :tests.test-random
-    :tests.test-temporal
-    :tests.test-temporal-intervals
+     :tests.test-random
+     :tests.test-temporal
+     :tests.test-temporal-period
+     :tests.test-temporal-intervals
     :tests.test-temporal-parsing-recurrence
     :tests.test-tempfile
     :tests.test-graph-loaders

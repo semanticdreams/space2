@@ -1,6 +1,6 @@
 # Temporal Intervals
 
-Temporal intervals add half-open bounded interval records and bounded repeating interval expansion above the native temporal core. They are public through `Temporal.interval` and `Temporal.repeating-interval` on `(require :temporal)`.
+Temporal intervals add half-open bounded interval records and bounded repeating interval expansion above the native temporal core. They are public through `Temporal.interval` and `Temporal.repeating-interval` on `(require :temporal)`. Calendar period records exist separately in `Temporal.period`, but ISO interval duration endpoint forms remain deferred.
 
 ## Layering model
 
@@ -91,11 +91,10 @@ The interval layer intentionally supports only bounded `start/end` intervals and
 
 - native interval userdata in the C++ temporal core.
 - full ISO interval grammar.
-- `duration/start` forms.
-- `duration/end` forms.
+- `duration/start`, `start/duration`, and `duration/end` forms, even though `Temporal.period` calendar period records now exist separately.
 - zoned intervals.
 - DST-aware interval expansion.
-- calendar periods containing years, months, business days, or locale calendars.
+- calendar-period-driven interval expansion, business days, or locale calendars.
 - Localization, ICU/CLDR formatting, and locale data.
 - Broad natural-language intervals.
 - interval algebra such as set operations, overlap merging, and gap queries.

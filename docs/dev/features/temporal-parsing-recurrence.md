@@ -62,7 +62,7 @@ Supported field tokens are `yyyy`, `MM`, `dd`, `HH`, `mm`, and `ss`; quoted lite
                                 {})
 ```
 
-The initial RRULE subset supports `FREQ` values `DAILY`, `WEEKLY`, `MONTHLY`, and `YEARLY`, plus `INTERVAL`, `COUNT`, `UNTIL`, and `BYDAY`. Occurrence expansion currently supports bounded daily and weekly rules. Expansion requires either `count` on the rule or `{:limit n}` in occurrence options; monthly and yearly expansion throw until their semantics are specified.
+The initial RRULE subset supports `FREQ` values `DAILY`, `WEEKLY`, `MONTHLY`, and `YEARLY`, plus `INTERVAL`, `COUNT`, `UNTIL`, and `BYDAY`. Occurrence expansion currently supports bounded daily and weekly rules. Calendar period arithmetic exists in `Temporal.period`, but monthly/yearly recurrence expansion remains deferred and throws until recurrence-specific semantics are specified.
 
 ## Structured expressions
 
@@ -108,8 +108,8 @@ Unsupported phrases throw. Natural-language recurrence is only a frontend that e
 - **ICU/CLDR localization:** Deferred. Localized parsing and formatting need an explicit ICU/CLDR/data-packaging strategy before implementation.
 - **Broad natural language:** Deferred. Wider language coverage, ambiguous phrases, locales, and product ambiguity UX need their own design.
 - **Full RFC5545:** Deferred. The current RRULE subset is intentionally small; full RFC5545 recurrence requires separate semantics and compatibility tests.
-- **ISO intervals/repeating intervals:** Bounded `start/end` intervals and bounded repeating intervals are covered by [Temporal Intervals](./temporal-intervals). Full ISO interval forms, including `duration/start` and `duration/end`, plus calendar periods remain deferred.
-- **Calendar periods:** Deferred. Exact `Duration` remains separate from calendar periods such as months, years, and business days.
+- **ISO intervals/repeating intervals:** Bounded `start/end` intervals and bounded repeating intervals are covered by [Temporal Intervals](./temporal-intervals). Full ISO interval forms, including `duration/start`, `start/duration`, and `duration/end`, remain deferred.
+- **Calendar periods:** Date-only calendar period records and `PlainDateTime` arithmetic are covered by [Temporal Calendar Periods](./temporal-calendar-periods). Monthly/yearly recurrence expansion, business days, and locale calendar policy remain deferred. Exact `Duration` remains separate from calendar periods such as months and years.
 - **Non-Gregorian calendars:** Deferred. The current foundation uses ISO proleptic Gregorian civil fields only.
 - **Parser providers/plugins:** Deferred. No parser provider registry or plugin system is introduced in this layer.
 
