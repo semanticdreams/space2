@@ -36,9 +36,26 @@
 
 (fn fake-nil-panel-scene-target []
   {:add-panel-child (fn [_self _spec]
-                       nil)
+                        nil)
    :remove-panel-child (fn [_self _child]
-                          (error "remove-panel-child should not be called"))})
+                           (error "remove-panel-child should not be called"))})
+
+(fn fake-partial-inserting-nil-panel-scene-target []
+  (local entity {})
+  {:entity entity
+   :add-panel-child (fn [self _spec]
+                      (when (not entity.children)
+                        (set entity.children []))
+                      (when (not entity.scene-children)
+                        (set entity.scene-children []))
+                      (when (not self.scene-children)
+                        (set self.scene-children entity.scene-children))
+                      (local metadata {:id :partial-child})
+                      (table.insert entity.children metadata)
+                      (table.insert self.scene-children metadata)
+                      nil)
+   :remove-panel-child (fn [_self _child]
+                         (error "remove-panel-child should not be called"))})
 
 (fn fake-vector-validating-scene-target []
   (local panels [])
@@ -134,7 +151,18 @@
   (local scene (fake-nil-panel-scene-target))
   (local host (SpaceHost.create {:runtime {} :app {:scene scene}}))
   (assert-error-contains #(host.scene:spawn {:kind :panel :id :missing-builder})
+                          "[space-host] scene:add-panel-child returned nil for panel spawn")
+  (assert (= (# (host.scene:list-owned)) 0))
+  (host:drop))
+
+(fn test-scene_capability_nil_panel_spawn_rolls_back_raw_partial_insertions []
+  (local scene (fake-partial-inserting-nil-panel-scene-target))
+  (local host (SpaceHost.create {:runtime {} :app {:scene scene}}))
+  (assert-error-contains #(host.scene:spawn {:kind :panel :id :partial-builder})
                          "[space-host] scene:add-panel-child returned nil for panel spawn")
+  (assert (= scene.entity.children nil))
+  (assert (= scene.entity.scene-children nil))
+  (assert (= scene.scene-children nil))
   (assert (= (# (host.scene:list-owned)) 0))
   (host:drop))
 
@@ -199,7 +227,9 @@
 (table.insert tests {:name "scene capability spawns queries and drops owned panel"
                       :fn test-scene_capability_spawns_queries_and_drops_owned_panel})
 (table.insert tests {:name "scene capability panel spawn nil child fails and rolls back"
-                      :fn test-scene_capability_panel_spawn_nil_child_fails_and_rolls_back})
+                       :fn test-scene_capability_panel_spawn_nil_child_fails_and_rolls_back})
+(table.insert tests {:name "scene capability nil panel spawn rolls back raw partial insertions"
+                      :fn test-scene_capability_nil_panel_spawn_rolls_back_raw_partial_insertions})
 (table.insert tests {:name "scene capability panel spawn converts position before raw scene"
                      :fn test-scene_capability_panel_spawn_converts_position_before_raw_scene})
 (table.insert tests {:name "scene capability rejects unbacked embedded spawn kinds"

@@ -65,14 +65,33 @@
 
 (fn capture-scene-arrays [target]
   (local entity target.entity)
-  {:scene-children target.scene-children
+  {:target target
+   :entity entity
+   :had-scene-children? (not (= target.scene-children nil))
+   :scene-children target.scene-children
    :scene-children-count (if target.scene-children (# target.scene-children) 0)
+   :had-entity-scene-children? (not (= (and entity entity.scene-children) nil))
+   :entity-scene-children (and entity entity.scene-children)
+   :entity-scene-children-count (if (and entity entity.scene-children) (# entity.scene-children) 0)
+   :had-entity-children? (not (= (and entity entity.children) nil))
    :entity-children (and entity entity.children)
    :entity-children-count (if (and entity entity.children) (# entity.children) 0)})
 
+(fn restore-array-field [owner key had-field? items target-length]
+  (when owner
+    (if had-field?
+        (do
+          (set (. owner key) items)
+          (trim-array-to items target-length))
+        (set (. owner key) nil))))
+
 (fn rollback-partial-scene-insertions [snapshot]
-  (trim-array-to snapshot.scene-children snapshot.scene-children-count)
-  (trim-array-to snapshot.entity-children snapshot.entity-children-count))
+  (restore-array-field snapshot.target :scene-children snapshot.had-scene-children?
+                       snapshot.scene-children snapshot.scene-children-count)
+  (restore-array-field snapshot.entity :scene-children snapshot.had-entity-scene-children?
+                       snapshot.entity-scene-children snapshot.entity-scene-children-count)
+  (restore-array-field snapshot.entity :children snapshot.had-entity-children?
+                       snapshot.entity-children snapshot.entity-children-count))
 
 (fn supported-embedded-kind? [target spec]
   (local kind spec.kind)
@@ -188,6 +207,7 @@
             (base-despawn self handle)
             (error child-or-error))
           (when (= child-or-error nil)
+            (rollback-partial-scene-insertions snapshot)
             (base-despawn self handle)
             (space-host-error "scene:add-panel-child returned nil for panel spawn"))
           (set (. raw-children-by-handle handle) child-or-error))
@@ -201,6 +221,7 @@
             (base-despawn self handle)
             (error child-or-error))
           (when (= child-or-error nil)
+            (rollback-partial-scene-insertions snapshot)
             (base-despawn self handle)
             (space-host-error "scene:add-object returned nil for object spawn"))
           (set (. raw-children-by-handle handle) child-or-error))
@@ -214,6 +235,7 @@
             (base-despawn self handle)
             (error child-or-error))
           (when (= child-or-error nil)
+            (rollback-partial-scene-insertions snapshot)
             (base-despawn self handle)
             (space-host-error "scene:add-object returned nil for object spawn"))
           (set (. raw-children-by-handle handle) child-or-error)))
