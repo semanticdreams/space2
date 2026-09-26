@@ -1,4 +1,5 @@
 (local Runner (require :tests/runner))
+(local SceneCapability (require :app-host.scene-capability))
 (local RuntimeController (require :app-host.runtime-controller))
 (local HostedRuntime (require :hosted-app-runtime))
 (local StandaloneRuntime (require :standalone-app-runtime))
@@ -77,10 +78,22 @@
                  removed?)
    :dispatch (fn [_self event-name payload]
                (each [_ handler (ipairs handlers)]
-                 (local cb (. handler event-name))
-                 (when (= (type cb) :function)
-                   (cb handler payload)))
-               true)})
+                  (local cb (. handler event-name))
+                  (when (= (type cb) :function)
+                    (cb handler payload)))
+                true)})
+
+(fn make-scene-target []
+  (local objects [])
+  {:objects objects
+   :add-object (fn [_self object opts]
+                 (local child {:object object :opts opts})
+                 (table.insert objects child)
+                 child)
+   :remove-panel-child (fn [_self child]
+                         (for [i (# objects) 1 -1]
+                           (when (= (. objects i) child)
+                             (table.remove objects i))))})
 
 (fn fake-host [opts]
   (local options (if opts opts {}))
@@ -89,6 +102,7 @@
    :input (make-input)
    :inspectors (make-registry)
    :commands (make-registry)
+   :scene (or options.scene (SceneCapability.create {}))
    :surfaces (make-registry {:on-register options.on-surface-register})
    :lifecycle {:quit (fn [_self]
                        (set options.quit-count (+ (or options.quit-count 0) 1)))}})
@@ -185,6 +199,7 @@
                :scheduler (make-scheduler)
                :input {}
                :inspectors (make-registry)
+               :scene (SceneCapability.create {})
                :surfaces (make-registry)
                :lifecycle {:quit (fn [_self] nil)}})
   (local (ok err) (pcall SnakeMain.create host))
@@ -198,6 +213,20 @@
   (local (ok err) (pcall #(SnakeMain.create host)))
   (assert (not ok) "Snake create must fail when required viewport capability is missing")
   (assert (string.find (tostring err) "viewport" 1 true) "missing viewport error should name viewport capability"))
+
+(fn test-snake-runtime-spawns-and-drops-scene-handles []
+  (local host (fake-host))
+  (local runtime (SnakeMain.create host))
+  (assert (> (# (host.scene:list-owned)) 0) "Snake runtime should spawn scene handles")
+  (runtime.lifecycle:drop)
+  (assert (= (# (host.scene:list-owned)) 0) "Snake runtime drop should despawn scene handles"))
+
+(fn test-missing-scene-errors-loudly []
+  (local host (fake-host))
+  (set host.scene nil)
+  (local (ok err) (pcall #(SnakeMain.create host)))
+  (assert (not ok) "Snake create must fail when required scene capability is missing")
+  (assert (string.find (tostring err) "scene" 1 true) "missing scene error should name scene capability"))
 
 (fn test-drop-is-idempotent-and-drops-owned-surface-once []
   (var registered-surface nil)
@@ -226,7 +255,7 @@
 
 (fn test-snake-mounts-in-workspace-and-removes-targets-on-drop []
   (local runtime {})
-  (local shell {})
+  (local shell {:scene (make-scene-target)})
   (local mount (HostedRuntime.mount-in-workspace {:runtime runtime
                                                   :app shell
                                                   :module SnakeMain}))
@@ -243,6 +272,8 @@
 (add-test "quit key uses standalone host lifecycle" test-quit-key-uses-standalone-host-lifecycle)
 (add-test "invalid host leaves no partial registrations" test-invalid-host-leaves-no-partial-registrations)
 (add-test "missing viewport errors loudly" test-missing-viewport-errors-loudly)
+(add-test "snake runtime spawns and drops scene handles" test-snake-runtime-spawns-and-drops-scene-handles)
+(add-test "missing scene errors loudly" test-missing-scene-errors-loudly)
 (add-test "drop is idempotent and drops owned surface once" test-drop-is-idempotent-and-drops-owned-surface-once)
 (add-test "snake mounts in workspace and removes targets on drop" test-snake-mounts-in-workspace-and-removes-targets-on-drop)
 
