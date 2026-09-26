@@ -31,8 +31,14 @@
                          (for [i (# panels) 1 -1]
                            (when (= (. panels i) child)
                              (table.remove panels i))))
-   :height-at (fn [_self point _opts]
-                (+ (. point 1) (. point 3)))})
+    :height-at (fn [_self point _opts]
+                 (+ (. point 1) (. point 3)))})
+
+(fn fake-nil-panel-scene-target []
+  {:add-panel-child (fn [_self _spec]
+                      nil)
+   :remove-panel-child (fn [_self _child]
+                         (error "remove-panel-child should not be called"))})
 
 (fn test-space_host_exposes_required_services []
   (local runtime {})
@@ -89,12 +95,22 @@
                                    :size [4 5 6]}))
   (assert (= handle.id :scene-panel))
   (assert (= handle.kind :panel))
+  (assert (= handle._space-host-scene-child nil))
   (assert (= (# scene.panels) 1))
   (local child (. scene.panels 1))
   (assert (= child.spec.kind :panel))
+  (set handle._space-host-scene-child {:not child})
   (assert (= (host.scene:height-at [2 0 5]) 7))
   (host:drop)
   (assert (= (# scene.panels) 0)))
+
+(fn test-scene_capability_panel_spawn_nil_child_fails_and_rolls_back []
+  (local scene (fake-nil-panel-scene-target))
+  (local host (SpaceHost.create {:runtime {} :app {:scene scene}}))
+  (assert-error-contains #(host.scene:spawn {:kind :panel :id :missing-builder})
+                         "[space-host] scene:add-panel-child returned nil for panel spawn")
+  (assert (= (# (host.scene:list-owned)) 0))
+  (host:drop))
 
 (fn test-host_exposes_only_present_space_adapters []
   (local hud (fake-target))
@@ -117,9 +133,11 @@
 (table.insert tests {:name "canvas adapter adds and drops owned panel"
                      :fn test-canvas_adapter_adds_and_drops_owned_panel})
 (table.insert tests {:name "scene capability spawns queries and drops owned panel"
-                     :fn test-scene_capability_spawns_queries_and_drops_owned_panel})
+                      :fn test-scene_capability_spawns_queries_and_drops_owned_panel})
+(table.insert tests {:name "scene capability panel spawn nil child fails and rolls back"
+                     :fn test-scene_capability_panel_spawn_nil_child_fails_and_rolls_back})
 (table.insert tests {:name "host exposes only present space adapters"
-                     :fn test-host_exposes_only_present_space_adapters})
+                      :fn test-host_exposes_only_present_space_adapters})
 
 (local main
   (fn []

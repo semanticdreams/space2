@@ -60,6 +60,8 @@
                                 (unregister target kind owner))})
 
 (fn make-space-scene-capability [target]
+  (local raw-children-by-handle {})
+
   (fn require-method [method-name]
     (local method (. target method-name))
     (if (= (type method) :function)
@@ -79,11 +81,11 @@
         nil))
 
   (fn scene-despawn [_self handle]
-    (local child handle._space-host-scene-child)
+    (local child (. raw-children-by-handle handle))
     (when child
       (local remove (require-method :remove-panel-child))
       (remove target child)
-      (set handle._space-host-scene-child nil))
+      (set (. raw-children-by-handle handle) nil))
     nil)
 
   (local scene (SceneCapability.create {:backend {:despawn scene-despawn
@@ -100,7 +102,10 @@
       (when (not ok)
         (base-despawn self handle)
         (error child-or-error))
-      (set handle._space-host-scene-child child-or-error))
+      (when (= child-or-error nil)
+        (base-despawn self handle)
+        (space-host-error "scene:add-panel-child returned nil for panel spawn"))
+      (set (. raw-children-by-handle handle) child-or-error))
     handle)
 
   (set scene.spawn spawn)
