@@ -2,6 +2,8 @@
 (local create-standard (require :temporal/standard))
 (local create-pattern (require :temporal/pattern))
 (local recurrence (require :temporal/recurrence))
+(local expression (require :temporal/expression))
+(local natural (require :temporal/natural))
 
 (fn disambiguation-to-core [value]
   (if (= value :reject)
@@ -69,6 +71,8 @@
  :zoned-date-time base.zoned-date-time
   :clock base.clock
   :tzdb base.tzdb
-  :standard (create-standard base)
-  :pattern (create-pattern base)
-  :recurrence recurrence}
+   :standard (create-standard base)
+   :pattern (create-pattern base)
+   :recurrence recurrence
+   :expression expression
+   :natural natural}
