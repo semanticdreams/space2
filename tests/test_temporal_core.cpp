@@ -164,6 +164,23 @@ void test_plain_date_time_add_days()
               std::string("2025-12-31T00:00:00"));
 }
 
+void test_plain_date_time_add_calendar_period()
+{
+    expect_eq(PlainDateTime::parse("2026-01-31T10:11:12").add_calendar(0, 1, 0, 0).to_string(),
+              std::string("2026-02-28T10:11:12"));
+    expect_eq(PlainDateTime::parse("2028-01-31T10:11:12").add_calendar(0, 1, 0, 0).to_string(),
+              std::string("2028-02-29T10:11:12"));
+    expect_eq(PlainDateTime::parse("2028-02-29T10:11:12").add_calendar(1, 0, 0, 0).to_string(),
+              std::string("2029-02-28T10:11:12"));
+    expect_eq(PlainDateTime::parse("2026-01-31T10:11:12").add_calendar(0, 2, 0, 0).to_string(),
+              std::string("2026-03-31T10:11:12"));
+    expect_eq(PlainDateTime::parse("2026-03-31T10:11:12").add_calendar(0, -1, 0, 0).to_string(),
+              std::string("2026-02-28T10:11:12"));
+    expect_eq(PlainDateTime::parse("2026-01-30T10:11:12").add_calendar(1, 2, 1, 3).to_string(),
+              std::string("2027-04-09T10:11:12"));
+    expect_throws([] { PlainDateTime::parse("2262-04-11T23:47:16.854775807").add_calendar(0, 0, 0, 1); });
+}
+
 void test_plain_date_time_iso_weekday()
 {
     expect_eq(PlainDateTime::parse("2026-09-28T00:00:00").iso_weekday(), 1);
@@ -252,6 +269,7 @@ int main()
         run("test_from_unix_accepts_lower_boundary_parts", test_from_unix_accepts_lower_boundary_parts);
         run("test_plain_date_time_field_validation", test_plain_date_time_field_validation);
         run("test_plain_date_time_add_days", test_plain_date_time_add_days);
+        run("test_plain_date_time_add_calendar_period", test_plain_date_time_add_calendar_period);
         run("test_plain_date_time_iso_weekday", test_plain_date_time_iso_weekday);
         run("test_zoned_from_plain_requires_valid_zone", test_zoned_from_plain_requires_valid_zone);
         run("test_new_york_spring_gap_disambiguation", test_new_york_spring_gap_disambiguation);

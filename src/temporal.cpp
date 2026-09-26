@@ -327,6 +327,48 @@ int compare_int64(std::int64_t left, std::int64_t right)
     return 0;
 }
 
+std::int64_t floor_divide(std::int64_t value, std::int64_t divisor)
+{
+    const std::int64_t quotient = value / divisor;
+    const std::int64_t remainder = value % divisor;
+    return remainder < 0 ? quotient - 1 : quotient;
+}
+
+date::year_month_day add_calendar_months(const CivilFields& fields,
+                                         std::int64_t years,
+                                         std::int64_t months)
+{
+    const std::int64_t month_shift = checked_add(checked_multiply(years, 12), months);
+    const std::int64_t current_month_index = checked_add(
+        checked_multiply(static_cast<std::int64_t>(fields.year), 12),
+        static_cast<std::int64_t>(fields.month - 1));
+    const std::int64_t target_month_index = checked_add(current_month_index, month_shift);
+
+    const std::int64_t target_year_value = floor_divide(target_month_index, 12);
+    const std::int64_t target_month_zero_based = checked_subtract(
+        target_month_index, checked_multiply(target_year_value, 12));
+    if (target_year_value < static_cast<int>(date::year::min()) ||
+        target_year_value > static_cast<int>(date::year::max()))
+    {
+        throw std::overflow_error("temporal calendar arithmetic overflow");
+    }
+
+    const date::year target_year{static_cast<int>(target_year_value)};
+    const date::month target_month{static_cast<unsigned>(target_month_zero_based + 1)};
+    const date::year_month_day_last target_month_last{target_year / target_month / date::last};
+    const unsigned max_day = static_cast<unsigned>(target_month_last.day());
+    const unsigned target_day = fields.day > static_cast<int>(max_day)
+                                    ? max_day
+                                    : static_cast<unsigned>(fields.day);
+
+    date::year_month_day result{target_year, target_month, date::day{target_day}};
+    if (!result.ok())
+    {
+        throw std::overflow_error("temporal calendar arithmetic overflow");
+    }
+    return result;
+}
+
 #if defined(_WIN32) && !USE_OS_TZDB
 constexpr std::array<const char*, 14> windows_tzdata_required_files = {
     "africa",
@@ -681,6 +723,25 @@ PlainDateTime PlainDateTime::add_days(int days) const
     const auto next_day_count = checked_add(day.time_since_epoch().count(), days);
     return PlainDateTime{checked_local_from_nanos(nanos_from_day_time(
         next_day_count, time.count(), "temporal local date-time outside nanosecond range"))};
+}
+
+PlainDateTime PlainDateTime::add_calendar(std::int64_t years,
+                                          std::int64_t months,
+                                          std::int64_t weeks,
+                                          std::int64_t days) const
+{
+    const auto fields = this->fields();
+    const auto calendar_date = add_calendar_months(fields, years, months);
+    const auto calendar_day = date::local_days{calendar_date}.time_since_epoch().count();
+    const std::int64_t day_shift = checked_add(checked_multiply(weeks, 7), days);
+    const std::int64_t final_day = checked_add(calendar_day, day_shift);
+    const std::int64_t time_nanoseconds = checked_add(
+        checked_add(checked_multiply(fields.hour, 3600LL * nanos_per_second),
+                    checked_multiply(fields.minute, 60LL * nanos_per_second)),
+        checked_add(checked_multiply(fields.second, nanos_per_second), fields.nanosecond));
+
+    return PlainDateTime{checked_local_from_nanos(nanos_from_day_time(
+        final_day, time_nanoseconds, "temporal local date-time outside nanosecond range"))};
 }
 
 int PlainDateTime::iso_weekday() const
