@@ -4,7 +4,7 @@ The temporal core is Space's first production date/time layer. Correctness-criti
 
 ## Public modules
 
-- `require :temporal` is the public Fennel/Lua API for application and feature code (written as `(require :temporal)` in Fennel). It exposes `duration`, `instant`, `plain-date-time`, `zoned-date-time`, `clock`, and `tzdb` namespaces.
+- `require :temporal` is the public Fennel/Lua API for application and feature code (written as `(require :temporal)` in Fennel). It exposes `duration`, `instant`, `plain-date-time`, `zoned-date-time`, `period`, `clock`, and `tzdb` namespaces.
 - `require "temporal-core"` is the lower-level native Lua binding. Use it when testing or extending the binding layer directly; prefer `:temporal` elsewhere.
 
 The public wrapper intentionally keeps timezone and calendar rules in C++ instead of reimplementing them in Fennel.
@@ -12,9 +12,10 @@ The public wrapper intentionally keeps timezone and calendar rules in C++ instea
 ## Values
 
 - **`Instant`** is an absolute Unix/POSIX timeline value with nanosecond precision. It can be parsed from timestamp text with an explicit offset or created from Unix epoch seconds plus an optional nanosecond field. Leap seconds are rejected instead of normalized.
-- **`Duration`** is exact elapsed time with nanosecond precision. It is not a calendar period: months, years, business days, and daylight-saving-aware calendar math are outside this layer.
+- **`Duration`** is exact elapsed time with nanosecond precision. Duration remains nanoseconds-only: months, years, business days, and daylight-saving-aware calendar math are not exact durations and are outside this layer.
 - **`PlainDateTime`** is an ISO proleptic Gregorian civil date-time without a zone or offset. It represents local fields only and cannot identify an instant until paired with a timezone and disambiguation policy.
 - **`ZonedDateTime`** pairs an `Instant` with an explicit IANA timezone id such as `America/New_York`. It can expose local fields, the active offset, the zone id, and the underlying instant.
+- **`Temporal.period`** is the Fennel-facing calendar period layer for bounded ISO proleptic Gregorian `:years`, `:months`, `:weeks`, and `:days` records applied only to `PlainDateTime`. See [Temporal Calendar Periods](./temporal-calendar-periods).
 
 All invalid fields, invalid parses, overflow, invalid zones, missing tzdb data, leap seconds, and rejected DST gaps/overlaps are loud errors.
 
@@ -54,6 +55,8 @@ The temporal core intentionally excludes higher-level product features. Future l
 ## Parsing, formatting, and recurrence layers
 
 Higher-level parsing, pattern formatting, natural expressions, and recurrence live above the core. See [Temporal Parsing and Recurrence](./temporal-parsing-recurrence). The core remains independent from natural language, recurrence, ICU, CLDR, and localization dependencies.
+
+Calendar period records live in `Temporal.period` above the exact `Duration` layer. See [Temporal Calendar Periods](./temporal-calendar-periods) for date-only period parsing, formatting, validation, and `PlainDateTime` arithmetic.
 
 Bounded half-open intervals and repeating intervals also live above the core. See [Temporal Intervals](./temporal-intervals) for `Temporal.interval` and `Temporal.repeating-interval`; interval parsing remains in that Fennel-facing layer so the native core does not take on interval grammar or product expansion policy.
 

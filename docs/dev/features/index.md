@@ -25,6 +25,7 @@ Detailed design and implementation notes for major feature systems.
 - [Panel Transfer System](./panel-transfer-system)
 - [Stylus Drawing Input](./stylus-drawing-input)
 - [Temporal Core](./temporal)
+- [Temporal Calendar Periods](./temporal-calendar-periods)
 - [Temporal Intervals](./temporal-intervals)
 - [Temporal Parsing and Recurrence](./temporal-parsing-recurrence)
 - [Terrain Heightfield System](./terrain-heightfield-system)
