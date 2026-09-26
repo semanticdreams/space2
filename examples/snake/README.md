@@ -2,7 +2,7 @@
 
 This example is a copyable independent Space/Fennel app template. It demonstrates the app-distribution repository layout, a default `main` entrypoint, pure game logic with focused Fennel tests, a small graphical widget-based runtime composition, and the release workflow a downstream app repository can call.
 
-The runtime display is a simple 2D graphical Snake board rendered with Space widgets and rendering systems. The pure game rules stay separate from the view/runtime code so the example remains easy to copy and test.
+The runtime display keeps the simple 2D graphical Snake board rendered with Space widgets and also mirrors the gameplay state into `host.scene` as app-owned 3D scene objects. The pure game rules stay separate from the view/runtime code so the example remains easy to copy and test.
 
 ## Directory layout
 
@@ -14,10 +14,12 @@ snake/
 │       ├── snake/
 │       │   ├── app.fnl
 │       │   ├── game.fnl
+│       │   ├── scene-view.fnl
 │       │   └── view.fnl
 │       └── tests/
 │           ├── test-snake-game.fnl
 │           ├── test-snake-hosted-runtime.fnl
+│           ├── test-snake-scene-view.fnl
 │           ├── test-snake-standalone-entry.fnl
 │           └── test-snake-view.fnl
 └── .github/
@@ -31,6 +33,8 @@ Snake can run through two generic hosts without branching in Snake app logic:
 
 - Standalone launch: `assets/lua/main.fnl` calls `standalone-app-runtime` with the Snake module.
 - Hosted development/smoke tests: `hosted-app-runtime` / `app-host.runtime-controller` mount the same `create(host)` runtime in a supplied host.
+
+Snake requires `host.scene` and uses it without checking whether the app is standalone or embedded. The scene view spawns concrete custom objects tagged as `:snake`, `:head`, `:body`, and `:food`, then despawns those handles during runtime teardown. The 2D surface remains the visible controls/status presentation for this first slice; 3D camera controls and terrain-aware gameplay are follow-up work.
 
 ## Local development
 
@@ -56,6 +60,10 @@ SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO
 
 ```sh
 SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/examples/snake/assets:$(pwd)/assets ./build/space -m tests.test-snake-view:main
+```
+
+```bash
+SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/examples/snake/assets:$(pwd)/assets FENNEL_PATH="$(pwd)/examples/snake/assets/lua/?.fnl;$(pwd)/examples/snake/assets/lua/?/init.fnl;$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" FENNEL_MACRO_PATH="$(pwd)/examples/snake/assets/lua/?.fnl;$(pwd)/examples/snake/assets/lua/?/init.fnl;$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" ./build/space -m tests.test-snake-scene-view:main
 ```
 
 Run the hostability smoke tests for the generic hosted and standalone entry paths:
