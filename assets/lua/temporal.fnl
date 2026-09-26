@@ -1,6 +1,7 @@
 (local core (require :temporal-core))
 (local create-standard (require :temporal/standard))
 (local create-pattern (require :temporal/pattern))
+(local recurrence (require :temporal/recurrence))
 
 (fn disambiguation-to-core [value]
   (if (= value :reject)
@@ -69,4 +70,5 @@
   :clock base.clock
   :tzdb base.tzdb
   :standard (create-standard base)
-  :pattern (create-pattern base)}
+  :pattern (create-pattern base)
+  :recurrence recurrence}
