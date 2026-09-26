@@ -69,6 +69,44 @@ void test_duration_arithmetic_and_overflow()
     });
 }
 
+void test_temporal_value_comparison()
+{
+    const auto one = Duration::from_seconds(1);
+    const auto two = Duration::from_seconds(2);
+    expect_eq(one.compare(two), -1);
+    expect_eq(two.compare(one), 1);
+    expect_eq(one.compare(Duration::from_seconds(1)), 0);
+
+    const auto first = Instant::parse("2026-09-25T12:00:00Z");
+    const auto second = Instant::parse("2026-09-25T12:00:01Z");
+    expect_eq(first.compare(second), -1);
+    expect_eq(second.compare(first), 1);
+    expect_eq(first.compare(Instant::parse("2026-09-25T12:00:00Z")), 0);
+
+    const auto plain = PlainDateTime::parse("2026-09-25T12:00:00");
+    const auto later = PlainDateTime::parse("2026-09-25T12:00:01");
+    expect_eq(plain.compare(later), -1);
+    expect_eq(later.compare(plain), 1);
+    expect_eq(plain.compare(PlainDateTime::parse("2026-09-25T12:00:00")), 0);
+}
+
+void test_plain_date_time_exact_duration_math()
+{
+    const auto start = PlainDateTime::parse("2026-09-25T12:00:00");
+    const auto shifted = start.add(Duration::from_seconds(90));
+    expect_eq(shifted.to_string(), std::string("2026-09-25T12:01:30"));
+    expect_eq(shifted.since(start).to_string(), std::string("PT1M30S"));
+    expect_eq(start.since(shifted).to_string(), std::string("-PT1M30S"));
+    expect_throws([] {
+        PlainDateTime::parse("2262-04-11T23:47:16.854775807")
+            .add(Duration::from_nanoseconds(1));
+    });
+    expect_throws([] {
+        PlainDateTime::parse("2262-04-11T23:47:16.854775807")
+            .since(PlainDateTime::parse("1677-09-21T00:12:43.145224192"));
+    });
+}
+
 void test_nanosecond_time_point_range_boundaries()
 {
     expect_eq(Instant::parse("2262-04-11T23:47:16.854775807Z").to_string(),
@@ -204,6 +242,8 @@ int main()
         run("test_instant_parse_format_requires_offset", test_instant_parse_format_requires_offset);
         run("test_instant_rejects_leap_second", test_instant_rejects_leap_second);
         run("test_duration_arithmetic_and_overflow", test_duration_arithmetic_and_overflow);
+        run("test_temporal_value_comparison", test_temporal_value_comparison);
+        run("test_plain_date_time_exact_duration_math", test_plain_date_time_exact_duration_math);
         run("test_nanosecond_time_point_range_boundaries", test_nanosecond_time_point_range_boundaries);
         run("test_from_unix_accepts_lower_boundary_parts", test_from_unix_accepts_lower_boundary_parts);
         run("test_plain_date_time_field_validation", test_plain_date_time_field_validation);

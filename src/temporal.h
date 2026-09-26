@@ -31,6 +31,7 @@ public:
                                std::int64_t milliseconds,
                                std::int64_t microseconds,
                                std::int64_t nanoseconds);
+    int compare(const Duration& other) const;
     std::int64_t nanoseconds() const;
     std::string to_string() const;
 
@@ -40,6 +41,7 @@ private:
     std::chrono::nanoseconds value_{};
 
     friend class Instant;
+    friend class PlainDateTime;
 };
 
 class Instant
@@ -50,6 +52,7 @@ public:
     std::int64_t epoch_seconds() const;
     std::int32_t nanosecond() const;
     std::string to_string() const;
+    int compare(const Instant& other) const;
     Instant add(const Duration& duration) const;
     Duration since(const Instant& earlier) const;
     bool operator==(const Instant& other) const;
@@ -77,6 +80,9 @@ public:
                                      int nanosecond);
     CivilFields fields() const;
     std::string to_string() const;
+    int compare(const PlainDateTime& other) const;
+    PlainDateTime add(const Duration& duration) const;
+    Duration since(const PlainDateTime& earlier) const;
     PlainDateTime add_days(int days) const;
     int iso_weekday() const;
 

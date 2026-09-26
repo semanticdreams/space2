@@ -314,6 +314,65 @@ SysTime checked_sys_from_seconds(std::int64_t seconds)
     return checked_sys_from_nanos(checked_multiply(seconds, nanos_per_second));
 }
 
+int compare_int64(std::int64_t left, std::int64_t right)
+{
+    if (left < right)
+    {
+        return -1;
+    }
+    if (left > right)
+    {
+        return 1;
+    }
+    return 0;
+}
+
+std::string format_duration(Duration duration)
+{
+    std::int64_t total_nanoseconds = duration.nanoseconds();
+    const bool negative = total_nanoseconds < 0;
+    std::uint64_t magnitude = negative
+        ? static_cast<std::uint64_t>(-(total_nanoseconds + 1)) + 1
+        : static_cast<std::uint64_t>(total_nanoseconds);
+
+    const std::uint64_t nanos_per_hour = 3600ULL * static_cast<std::uint64_t>(nanos_per_second);
+    const std::uint64_t nanos_per_minute = 60ULL * static_cast<std::uint64_t>(nanos_per_second);
+    const std::uint64_t hours = magnitude / nanos_per_hour;
+    magnitude %= nanos_per_hour;
+    const std::uint64_t minutes = magnitude / nanos_per_minute;
+    magnitude %= nanos_per_minute;
+    const std::uint64_t seconds = magnitude / static_cast<std::uint64_t>(nanos_per_second);
+    const std::uint64_t fractional = magnitude % static_cast<std::uint64_t>(nanos_per_second);
+
+    std::ostringstream out;
+    if (negative)
+    {
+        out << '-';
+    }
+    out << 'P' << 'T';
+    if (hours != 0)
+    {
+        out << hours << 'H';
+    }
+    if (minutes != 0)
+    {
+        out << minutes << 'M';
+    }
+    if (seconds != 0 || fractional != 0 || (hours == 0 && minutes == 0))
+    {
+        if (fractional == 0)
+        {
+            out << seconds;
+        }
+        else
+        {
+            out << seconds << format_fraction(static_cast<int>(fractional));
+        }
+        out << 'S';
+    }
+    return out.str();
+}
+
 #if defined(_WIN32) && !USE_OS_TZDB
 constexpr std::array<const char*, 14> windows_tzdata_required_files = {
     "africa",
@@ -486,9 +545,14 @@ std::int64_t Duration::nanoseconds() const
     return value_.count();
 }
 
+int Duration::compare(const Duration& other) const
+{
+    return compare_int64(value_.count(), other.value_.count());
+}
+
 std::string Duration::to_string() const
 {
-    return std::to_string(value_.count()) + "ns";
+    return format_duration(*this);
 }
 
 Instant::Instant(SysTime value)
@@ -559,6 +623,11 @@ std::int32_t Instant::nanosecond() const
 std::string Instant::to_string() const
 {
     return format_civil(fields_from_local(LocalTime{value_.time_since_epoch()})) + "Z";
+}
+
+int Instant::compare(const Instant& other) const
+{
+    return compare_int64(value_.time_since_epoch().count(), other.value_.time_since_epoch().count());
 }
 
 Instant Instant::add(const Duration& duration) const
@@ -632,6 +701,23 @@ CivilFields PlainDateTime::fields() const
 std::string PlainDateTime::to_string() const
 {
     return format_civil(fields());
+}
+
+int PlainDateTime::compare(const PlainDateTime& other) const
+{
+    return compare_int64(value_.time_since_epoch().count(), other.value_.time_since_epoch().count());
+}
+
+PlainDateTime PlainDateTime::add(const Duration& duration) const
+{
+    const auto total = checked_add(value_.time_since_epoch().count(), duration.value_.count());
+    return PlainDateTime{checked_local_from_nanos(total)};
+}
+
+Duration PlainDateTime::since(const PlainDateTime& earlier) const
+{
+    return Duration{Nanoseconds{checked_subtract(value_.time_since_epoch().count(),
+                                                earlier.value_.time_since_epoch().count())}};
 }
 
 PlainDateTime PlainDateTime::add_days(int days) const
