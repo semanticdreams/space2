@@ -1,4 +1,9 @@
 (local Services (require :app-host.services))
+(local SceneCapability (require :app-host.scene-capability))
+(local MathUtils (require :math-utils))
+
+(local array->vec3 (. MathUtils :array->vec3))
+(local array->quat (. MathUtils :array->quat))
 
 (fn space-host-error [message]
   (error (.. "[space-host] " message)))
@@ -10,6 +15,99 @@
       (table.remove owned i)
       (set removed? true)))
   removed?)
+
+(fn native-vec3 [value label]
+  (if (= value nil)
+      nil
+      (and (= (type value) :table) value.x value.y value.z)
+      value
+      (= (type value) :table)
+      (array->vec3 value)
+      (space-host-error (.. label " must be a vector table"))))
+
+(fn native-quat [value label]
+  (if (= value nil)
+      nil
+      (and (= (type value) :table) value.w value.x value.y value.z)
+      value
+      (= (type value) :table)
+      (array->quat value)
+      (space-host-error (.. label " must be a quaternion table"))))
+
+(fn clone-table [source]
+  (when (not (= (type source) :table))
+    (space-host-error "scene spawn spec must be a table"))
+  (local out {})
+  (each [key value (pairs source)]
+    (set (. out key) value))
+  out)
+
+(fn native-scene-opts [spec]
+  (local opts (clone-table spec))
+  (set opts.position (native-vec3 spec.position "scene spawn position"))
+  (set opts.rotation (native-quat spec.rotation "scene spawn rotation"))
+  (set opts.size (native-vec3 spec.size "scene spawn size"))
+  opts)
+
+(fn native-point [point]
+  (native-vec3 point "scene point"))
+
+(fn native-ray [ray]
+  (when (not (= (type ray) :table))
+    (space-host-error "scene ray must be a table"))
+  {:origin (native-vec3 ray.origin "scene ray origin")
+   :direction (native-vec3 ray.direction "scene ray direction")})
+
+(fn trim-array-to [items target-length]
+  (when items
+    (while (> (# items) target-length)
+      (table.remove items))))
+
+(fn capture-scene-arrays [target]
+  (local entity target.entity)
+  {:target target
+   :entity entity
+   :had-scene-children? (not (= target.scene-children nil))
+   :scene-children target.scene-children
+   :scene-children-count (if target.scene-children (# target.scene-children) 0)
+   :had-entity-scene-children? (not (= (and entity entity.scene-children) nil))
+   :entity-scene-children (and entity entity.scene-children)
+   :entity-scene-children-count (if (and entity entity.scene-children) (# entity.scene-children) 0)
+   :had-entity-children? (not (= (and entity entity.children) nil))
+   :entity-children (and entity entity.children)
+   :entity-children-count (if (and entity entity.children) (# entity.children) 0)})
+
+(fn restore-array-field [owner key had-field? items target-length]
+  (when owner
+    (if had-field?
+        (do
+          (set (. owner key) items)
+          (trim-array-to items target-length))
+        (set (. owner key) nil))))
+
+(fn rollback-partial-scene-insertions [snapshot]
+  (restore-array-field snapshot.target :scene-children snapshot.had-scene-children?
+                       snapshot.scene-children snapshot.scene-children-count)
+  (restore-array-field snapshot.entity :scene-children snapshot.had-entity-scene-children?
+                       snapshot.entity-scene-children snapshot.entity-scene-children-count)
+  (restore-array-field snapshot.entity :children snapshot.had-entity-children?
+                       snapshot.entity-children snapshot.entity-children-count))
+
+(fn supported-embedded-kind? [target spec]
+  (local kind spec.kind)
+  (if (= kind :panel)
+      (= (type target.add-panel-child) :function)
+      (= kind :custom)
+      (and spec.object (= (type target.add-object) :function))
+      (= kind :cube)
+      (and spec.object (= (type target.add-object) :function))
+      false))
+
+(fn assert-supported-embedded-kind [target spec]
+  (when (not (= (type spec) :table))
+    (space-host-error "scene spawn spec must be a table"))
+  (when (not (supported-embedded-kind? target spec))
+    (space-host-error (.. "unsupported embedded scene spawn kind: " (tostring spec.kind)))))
 
 (fn make-panel-adapter [label target]
   (local owned [])
@@ -58,6 +156,94 @@
                                 (local unregister (require-method :unregister-panel-restorer))
                                 (unregister target kind owner))})
 
+(fn make-space-scene-capability [target]
+  (local raw-children-by-handle {})
+
+  (fn require-method [method-name]
+    (local method (. target method-name))
+    (if (= (type method) :function)
+        method
+        (space-host-error (.. "scene capability requires target:" (tostring method-name)))))
+
+  (fn scene-height-at [_self point opts]
+    (local native (native-point point))
+    (if (= (type target.height-at) :function)
+        (target:height-at native opts)
+        (= (type target.height-at-world-point) :function)
+        (target:height-at-world-point native opts)
+        nil))
+
+  (fn scene-raycast-terrain [_self ray opts]
+    (local native (native-ray ray))
+    (if (= (type target.raycast-terrain) :function)
+        (target:raycast-terrain native opts)
+        nil))
+
+  (fn scene-despawn [_self handle]
+    (local child (. raw-children-by-handle handle))
+    (when child
+      (local remove (require-method :remove-panel-child))
+      (remove target child)
+      (set (. raw-children-by-handle handle) nil))
+    nil)
+
+  (local scene (SceneCapability.create {:backend {:despawn scene-despawn
+                                                  :height-at scene-height-at
+                                                  :raycast-terrain scene-raycast-terrain}}))
+  (local base-spawn scene.spawn)
+  (local base-despawn scene.despawn)
+
+  (fn spawn [self spec]
+    (assert-supported-embedded-kind target spec)
+    (local native-spec (native-scene-opts spec))
+    (local handle (base-spawn self spec))
+    (if (= spec.kind :panel)
+        (do
+          (local add (require-method :add-panel-child))
+          (local snapshot (capture-scene-arrays target))
+          (local (ok child-or-error) (pcall add target native-spec))
+          (when (not ok)
+            (rollback-partial-scene-insertions snapshot)
+            (base-despawn self handle)
+            (error child-or-error))
+          (when (= child-or-error nil)
+            (rollback-partial-scene-insertions snapshot)
+            (base-despawn self handle)
+            (space-host-error "scene:add-panel-child returned nil for panel spawn"))
+          (set (. raw-children-by-handle handle) child-or-error))
+        (= spec.kind :custom)
+        (do
+          (local add-object (require-method :add-object))
+          (local snapshot (capture-scene-arrays target))
+          (local (ok child-or-error) (pcall add-object target spec.object native-spec))
+          (when (not ok)
+            (rollback-partial-scene-insertions snapshot)
+            (base-despawn self handle)
+            (error child-or-error))
+          (when (= child-or-error nil)
+            (rollback-partial-scene-insertions snapshot)
+            (base-despawn self handle)
+            (space-host-error "scene:add-object returned nil for object spawn"))
+          (set (. raw-children-by-handle handle) child-or-error))
+        (= spec.kind :cube)
+        (do
+          (local add-object (require-method :add-object))
+          (local snapshot (capture-scene-arrays target))
+          (local (ok child-or-error) (pcall add-object target spec.object native-spec))
+          (when (not ok)
+            (rollback-partial-scene-insertions snapshot)
+            (base-despawn self handle)
+            (error child-or-error))
+          (when (= child-or-error nil)
+            (rollback-partial-scene-insertions snapshot)
+            (base-despawn self handle)
+            (space-host-error "scene:add-object returned nil for object spawn"))
+          (set (. raw-children-by-handle handle) child-or-error)))
+    handle)
+
+  (set scene.spawn spawn)
+  scene)
+
 (fn resolve-shell [options]
   (if options.app
       options.app
@@ -97,6 +283,12 @@
       (set (. host name) adapter)
       (table.insert adapters adapter)))
 
+  (fn add-scene-capability [target]
+    (when target
+      (local scene (make-space-scene-capability target))
+      (set host.scene scene)
+      (table.insert adapters scene)))
+
   (fn quit [_self]
     (if options.on-quit
         (options.on-quit host)
@@ -129,7 +321,7 @@
              :drop drop})
   (add-adapter :hud shell.hud)
   (add-adapter :canvas shell.canvas)
-  (add-adapter :scene shell.scene)
+  (add-scene-capability shell.scene)
   host)
 
 {:create create}

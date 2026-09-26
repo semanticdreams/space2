@@ -1,4 +1,5 @@
 (local HostedRuntime (require :hosted-app-runtime))
+(local SceneCapability (require :app-host.scene-capability))
 (local Services (require :app-host.services))
 
 (fn host-error [message]
@@ -78,12 +79,13 @@
    :scheduler scheduler
    :input input
    :inspectors inspectors
-    :commands commands
-    :assets (Services.make-assets options)
-    :logging (Services.make-logging)
+   :commands commands
+   :assets (Services.make-assets options)
+   :logging (Services.make-logging)
+   :scene (SceneCapability.create {:backend options.scene-backend})
    :lifecycle {:quit quit
                :disconnect (fn [_self]
-                             (disconnect-all connections))}})
+                              (disconnect-all connections))}})
 
 (fn load-module [opts]
   (if opts.module
@@ -185,10 +187,11 @@
           (host-error "engine failed to start"))
         (set app.viewport viewport)
         (set renderers (AppBootstrap.init-renderers {:viewport viewport}))
-        (set host (create-host {:engine engine
-                                :renderers renderers
-                                :viewport viewport
-                                :asset-path-resolver options.asset-path-resolver}))
+         (set host (create-host {:engine engine
+                                 :renderers renderers
+                                 :viewport viewport
+                                 :scene-backend options.scene-backend
+                                 :asset-path-resolver options.asset-path-resolver}))
         (set controller (HostedRuntime.mount {:module (load-module options)
                                               :host host}))
         (set app.active-world-runtime (controller:runtime)))))
