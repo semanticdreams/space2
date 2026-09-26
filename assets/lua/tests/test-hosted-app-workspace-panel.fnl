@@ -55,23 +55,39 @@
 (fn read-fake-state [_self]
   {:value 42})
 
+(fn run-fake-restart-command [self payload]
+  (set self.state.ran? true)
+  (set self.state.payload payload)
+  {:restarted? true :value payload.value})
+
+(fn run-fake-explode-command [_self _payload]
+  (error "command exploded"))
+
 (fn make-fake-mount []
+  (local command-state {:ran? false :payload nil})
   (local controller {:paused-calls []
-                     :step-calls []
-                     :set-paused (fn [self paused]
-                                   (table.insert self.paused-calls paused)
-                                   paused)
-                     :step (fn [self delta-ms]
-                             (table.insert self.step-calls delta-ms)
-                             delta-ms)})
+                      :step-calls []
+                      :set-paused (fn [self paused]
+                                    (table.insert self.paused-calls paused)
+                                    paused)
+                      :step (fn [self delta-ms]
+                              (table.insert self.step-calls delta-ms)
+                              delta-ms)})
   {:controller controller
    :host {:inspectors (registry [{:id :state
-                                  :title "State"
-                                  :read read-fake-state}])
-          :commands (registry [{:id :restart :title "Restart"}])}
-   :drop-count 0
-   :drop (fn [self]
-            (set self.drop-count (+ self.drop-count 1)))})
+                                   :title "State"
+                                   :read read-fake-state}])
+           :commands (registry [{:id :restart
+                                 :title "Restart"
+                                 :state command-state
+                                 :run run-fake-restart-command}
+                                {:id :explode
+                                 :title "Explode"
+                                 :run run-fake-explode-command}])}
+    :command-state command-state
+    :drop-count 0
+    :drop (fn [self]
+             (set self.drop-count (+ self.drop-count 1)))})
 
 (fn create-empty-runtime [_host]
   {})
@@ -140,6 +156,19 @@
   (assert (= (. snapshot.inspectors 1 :id) :state))
   (assert (= (. snapshot.inspectors 1 :data :value) 42))
   (assert (= (. snapshot.commands 1 :id) :restart))
+  (assert (= fake-mount.command-state.ran? false) "snapshot must not execute command")
+  (fixture:restore))
+
+(fn test-session_runs_hosted_command []
+  (local hud (make-fake-hud))
+  (local fake-mount (make-fake-mount))
+  (local fixture (install-panel-module fake-mount))
+  (local session (fixture.WorkspacePanel.open (panel-opts hud)))
+  (local result (session:run-command :restart {:value 7}))
+  (assert (= result.status :ok))
+  (assert (= result.value.value 7))
+  (assert (= fake-mount.command-state.ran? true))
+  (assert (= fake-mount.command-state.payload.value 7))
   (fixture:restore))
 
 (fn test_descriptor_and_built_widget_expose_snapshot_reader []
@@ -153,6 +182,30 @@
   (assert (= (. descriptor-snapshot.inspectors 1 :id) :state))
   (assert (= (. widget-snapshot.inspectors 1 :id) :state))
   (session:close)
+  (fixture:restore))
+
+(fn test_descriptor_and_widget_run_hosted_command []
+  (local hud (make-builder-hud))
+  (local fake-mount (make-fake-mount))
+  (local fixture (install-panel-module fake-mount))
+  (local session (fixture.WorkspacePanel.open (panel-opts hud)))
+  (local descriptor-result (hud.descriptor:run-command :restart {:value 9}))
+  (local widget-descriptor (. hud.children 1 :hosted-app-workspace-panel))
+  (local widget-result (widget-descriptor:run-command :restart {:value 11}))
+  (assert (= descriptor-result.status :ok))
+  (assert (= widget-result.status :ok))
+  (assert (= widget-result.value.value 11))
+  (session:close)
+  (fixture:restore))
+
+(fn test_command_errors_return_result_envelope []
+  (local hud (make-fake-hud))
+  (local fake-mount (make-fake-mount))
+  (local fixture (install-panel-module fake-mount))
+  (local session (fixture.WorkspacePanel.open (panel-opts hud)))
+  (local result (session:run-command :explode {}))
+  (assert (= result.status :error))
+  (assert (string.find result.error "command exploded" 1 true))
   (fixture:restore))
 
 (fn test-close_removes_child_and_drops_mount_once []
@@ -198,7 +251,10 @@
 (add-test "builder path returns HUD widget with layout" test-builder_path_returns_hud_widget_with_layout)
 (add-test "controls delegate to controller" test-controls_delegate_to_controller)
 (add-test "session exposes read-only inspector snapshot" test-session_exposes_read_only_inspector_snapshot)
+(add-test "session runs hosted command" test-session_runs_hosted_command)
 (add-test "descriptor and built widget expose snapshot reader" test_descriptor_and_built_widget_expose_snapshot_reader)
+(add-test "descriptor and widget run hosted command" test_descriptor_and_widget_run_hosted_command)
+(add-test "command errors return result envelope" test_command_errors_return_result_envelope)
 (add-test "close removes child and drops mount once" test-close_removes_child_and_drops_mount_once)
 (add-test "HUD add failure drops mount once" test-hud_add_failure_drops_mount_once)
 (add-test "missing HUD fails loudly" test-missing_hud_fails_loudly)

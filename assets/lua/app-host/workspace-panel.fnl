@@ -1,5 +1,6 @@
 (local WorkspaceMount (require :app-host.workspace-mount))
 (local Snapshot (require :app-host.workspace-inspector-snapshot))
+(local CommandRunner (require :app-host.command-runner))
 (local glm (require :glm))
 (local {: Layout} (require :layout))
 
@@ -59,6 +60,9 @@
   (fn read-inspector-snapshot [_self]
     (Snapshot.read-host mount.host))
 
+  (fn run-command [_self command-id payload]
+    (CommandRunner.run-host mount.host command-id payload))
+
   (fn close [_self]
     (when (not closed?)
       (set closed? true)
@@ -81,12 +85,14 @@
                  :resume resume
                  :step step
                  :read-inspector-snapshot read-inspector-snapshot
+                 :run-command run-command
                  :close close})
   (set descriptor {:kind :hosted-app-workspace-panel
                    :mount mount
                    :controller controller
                    :session session
                    :read-inspector-snapshot read-inspector-snapshot
+                   :run-command run-command
                    :builder build-panel})
   (local (child-ok? child-or-err) (pcall add-panel-descriptor))
   (if child-ok?
