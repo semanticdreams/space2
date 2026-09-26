@@ -127,9 +127,14 @@ idempotent `session:close()` controls. Pause, resume, and step delegate to the
 generic runtime controller; close removes the HUD child and drops the workspace
 mount exactly once.
 
-This panel is intentionally only a minimal control/session descriptor. Richer
-inspector/editor rendering and persistent app discovery or launcher UX are
-follow-up subprojects, not part of the workspace mount contract.
+The workspace panel also exposes a read-only inspector snapshot from the
+embedded host registries. Snapshot rows include readable inspector data,
+explicit inspector read errors, unsupported inspector markers, and command
+metadata. The panel does not execute commands or mutate app state.
+
+Command execution, editable controls, custom moldable inspector renderers, graph
+integration, persistent app discovery, and launcher UX remain follow-up
+subprojects.
 
 ## Deferred alternatives
 

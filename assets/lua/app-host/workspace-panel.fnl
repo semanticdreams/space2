@@ -1,4 +1,5 @@
 (local WorkspaceMount (require :app-host.workspace-mount))
+(local Snapshot (require :app-host.workspace-inspector-snapshot))
 (local glm (require :glm))
 (local {: Layout} (require :layout))
 
@@ -55,6 +56,9 @@
   (fn step [_self delta-ms]
     (controller:step delta-ms))
 
+  (fn read-inspector-snapshot [_self]
+    (Snapshot.read-host mount.host))
+
   (fn close [_self]
     (when (not closed?)
       (set closed? true)
@@ -73,14 +77,16 @@
     (mount:drop))
 
   (set session {:mount mount
-                :pause pause
-                :resume resume
-                :step step
-                :close close})
+                 :pause pause
+                 :resume resume
+                 :step step
+                 :read-inspector-snapshot read-inspector-snapshot
+                 :close close})
   (set descriptor {:kind :hosted-app-workspace-panel
                    :mount mount
                    :controller controller
                    :session session
+                   :read-inspector-snapshot read-inspector-snapshot
                    :builder build-panel})
   (local (child-ok? child-or-err) (pcall add-panel-descriptor))
   (if child-ok?
