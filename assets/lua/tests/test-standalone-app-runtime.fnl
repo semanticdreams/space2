@@ -146,6 +146,16 @@
   (each [_ name (ipairs [:viewport :surfaces :presentation :scheduler :input :inspectors :commands :assets :logging :lifecycle])]
     (assert (. host name) (.. "missing host capability " (tostring name)))))
 
+(fn test-create_host_exposes_scene_capability []
+  (local StandaloneRuntime (load-module :standalone-app-runtime))
+  (local host (StandaloneRuntime.create-host {:viewport {:x 0 :y 0 :width 100 :height 100}}))
+  (assert host.scene)
+  (local handle (host.scene:spawn {:kind :custom :id :standalone-object :position [0 0 0] :size [1 1 1]}))
+  (assert (= handle.id :standalone-object))
+  (assert (= (# (host.scene:list-owned)) 1))
+  (host.scene:drop)
+  (assert (= (# (host.scene:list-owned)) 0)))
+
 (fn test-create-host-registries-store-inspectors-and-commands []
   (local StandaloneRuntime (load-module :standalone-app-runtime))
   (local host (StandaloneRuntime.create-host {:viewport {:x 0 :y 0 :width 100 :height 100}}))
@@ -301,9 +311,11 @@
 (table.insert tests {:name "hosted mount returns runtime controller"
                      :fn test-hosted-mount-returns-runtime-controller})
 (table.insert tests {:name "standalone create-host exposes required capabilities"
-                     :fn test-create-host-exposes-required-capabilities})
+                      :fn test-create-host-exposes-required-capabilities})
+(table.insert tests {:name "standalone create-host exposes scene capability"
+                      :fn test-create_host_exposes_scene_capability})
 (table.insert tests {:name "standalone registries store inspectors and commands"
-                     :fn test-create-host-registries-store-inspectors-and-commands})
+                      :fn test-create-host-registries-store-inspectors-and-commands})
 (table.insert tests {:name "standalone scheduler runs registered updates"
                      :fn test-create-host-scheduler-runs-registered-updates})
 (table.insert tests {:name "standalone create-host uses shared service errors"
