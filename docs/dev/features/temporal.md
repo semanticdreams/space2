@@ -55,6 +55,8 @@ The temporal core intentionally excludes higher-level product features. Future l
 
 Higher-level parsing, pattern formatting, natural expressions, and recurrence live above the core. See [Temporal Parsing and Recurrence](./temporal-parsing-recurrence). The core remains independent from natural language, recurrence, ICU, CLDR, and localization dependencies.
 
+Bounded half-open intervals and repeating intervals also live above the core. See [Temporal Intervals](./temporal-intervals) for `Temporal.interval` and `Temporal.repeating-interval`; interval parsing remains in that Fennel-facing layer so the native core does not take on interval grammar or product expansion policy.
+
 ## Validation
 
 Use these commands when changing the temporal core, its Fennel wrapper, or its tests:
