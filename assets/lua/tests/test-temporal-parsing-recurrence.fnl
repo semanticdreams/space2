@@ -112,6 +112,23 @@
   (assert-error #(Temporal.recurrence.occurrences {:freq :monthly :count 1} dtstart {})
                 "monthly expansion should be unsupported"))
 
+(fn recurrence-daily-by-day-filters-nonmatching-dtstart []
+  (local dtstart (Temporal.plain-date-time.parse "2026-09-21T09:00:00"))
+  (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=DAILY;COUNT=2;BYDAY=TU"))
+  (local occ (Temporal.recurrence.occurrences rule dtstart {}))
+  (assert (= (# occ) 2))
+  (local first (. occ 1))
+  (local second (. occ 2))
+  (assert (= (first:to-string) "2026-09-22T09:00:00"))
+  (assert (= (second:to-string) "2026-09-29T09:00:00")))
+
+(fn recurrence-daily-by-day-unsatisfiable-interval-throws []
+  (local dtstart (Temporal.plain-date-time.parse "2026-09-21T09:00:00"))
+  (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=DAILY;INTERVAL=7;COUNT=1;BYDAY=TU"))
+  (local err (assert-error #(Temporal.recurrence.occurrences rule dtstart {})
+                           "unsatisfiable daily BYDAY recurrence should throw instead of hanging"))
+  (assert (tostring err):find "unsupported temporal recurrence expansion" 1 true))
+
 (fn natural-relative-resolution []
   (local reference (Temporal.plain-date-time.parse "2026-09-25T15:30:00"))
   (local ctx (Temporal.expression.context {:reference-plain-date-time reference
@@ -146,6 +163,8 @@
 (table.insert tests {:name "recurrence weekly occurrences" :fn recurrence-weekly-occurrences})
 (table.insert tests {:name "recurrence weekly without BYDAY uses DTSTART weekday" :fn recurrence-weekly-without-by-day-uses-dtstart-weekday})
 (table.insert tests {:name "recurrence daily limits and rejections" :fn recurrence-daily-limits-and-rejections})
+(table.insert tests {:name "recurrence daily BYDAY filters nonmatching DTSTART" :fn recurrence-daily-by-day-filters-nonmatching-dtstart})
+(table.insert tests {:name "recurrence daily BYDAY unsatisfiable interval throws" :fn recurrence-daily-by-day-unsatisfiable-interval-throws})
 (table.insert tests {:name "natural relative resolution" :fn natural-relative-resolution})
 (table.insert tests {:name "natural next weekday and recurrence" :fn natural-next-weekday-and-recurrence})
 

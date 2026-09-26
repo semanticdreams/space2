@@ -199,6 +199,18 @@
         allowed)
       (= weekday default-weekday)))
 
+(fn by-day-allowed? [days weekday]
+  (var allowed false)
+  (each [_ day (ipairs days)]
+    (when (= (. day-to-number day) weekday)
+      (set allowed true)))
+  allowed)
+
+(fn assert-daily-by-day-satisfiable [rule dtstart]
+  (when (and rule.by-day (= (% rule.interval 7) 0)
+             (not (by-day-allowed? rule.by-day (dtstart:iso-weekday))))
+    (error "unsupported temporal recurrence expansion")))
+
 (fn occurrences [input-rule dtstart options]
   (local rule (from input-rule))
   (when (or (= rule.freq :monthly) (= rule.freq :yearly))
@@ -209,9 +221,19 @@
   (if (= rule.freq :daily)
       (do
         (var current dtstart)
-        (while (< (# results) limit)
-          (table.insert results current)
-          (set current (current:add-days rule.interval))))
+        (if rule.by-day
+            (do
+              (assert-daily-by-day-satisfiable rule dtstart)
+              (var day-offset 0)
+              (while (< (# results) limit)
+                (when (and (= (% day-offset rule.interval) 0)
+                           (by-day-allowed? rule.by-day (current:iso-weekday)))
+                  (table.insert results current))
+                (set current (current:add-days 1))
+                (set day-offset (+ day-offset 1))))
+            (while (< (# results) limit)
+              (table.insert results current)
+              (set current (current:add-days rule.interval)))))
       (= rule.freq :weekly)
       (do
         (var current dtstart)
