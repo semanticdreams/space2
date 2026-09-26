@@ -46,7 +46,8 @@ Endpoints must have the same declared type. The initial slice supports only `:in
   (Temporal.interval.parse "2026-09-25T12:00:00/2026-09-25T13:00:00"
                            {:type :plain-date-time}))
 
-((Temporal.interval.duration meeting):to-string) ; => "PT1H"
+(local elapsed (Temporal.interval.duration meeting))
+(elapsed:compare (Temporal.duration.from {:seconds 3600})) ; => 0
 
 (local later
   (Temporal.interval.shift meeting (Temporal.duration.from {:seconds 7200})))

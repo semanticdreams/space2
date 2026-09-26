@@ -327,52 +327,6 @@ int compare_int64(std::int64_t left, std::int64_t right)
     return 0;
 }
 
-std::string format_duration(Duration duration)
-{
-    std::int64_t total_nanoseconds = duration.nanoseconds();
-    const bool negative = total_nanoseconds < 0;
-    std::uint64_t magnitude = negative
-        ? static_cast<std::uint64_t>(-(total_nanoseconds + 1)) + 1
-        : static_cast<std::uint64_t>(total_nanoseconds);
-
-    const std::uint64_t nanos_per_hour = 3600ULL * static_cast<std::uint64_t>(nanos_per_second);
-    const std::uint64_t nanos_per_minute = 60ULL * static_cast<std::uint64_t>(nanos_per_second);
-    const std::uint64_t hours = magnitude / nanos_per_hour;
-    magnitude %= nanos_per_hour;
-    const std::uint64_t minutes = magnitude / nanos_per_minute;
-    magnitude %= nanos_per_minute;
-    const std::uint64_t seconds = magnitude / static_cast<std::uint64_t>(nanos_per_second);
-    const std::uint64_t fractional = magnitude % static_cast<std::uint64_t>(nanos_per_second);
-
-    std::ostringstream out;
-    if (negative)
-    {
-        out << '-';
-    }
-    out << 'P' << 'T';
-    if (hours != 0)
-    {
-        out << hours << 'H';
-    }
-    if (minutes != 0)
-    {
-        out << minutes << 'M';
-    }
-    if (seconds != 0 || fractional != 0 || (hours == 0 && minutes == 0))
-    {
-        if (fractional == 0)
-        {
-            out << seconds;
-        }
-        else
-        {
-            out << seconds << format_fraction(static_cast<int>(fractional));
-        }
-        out << 'S';
-    }
-    return out.str();
-}
-
 #if defined(_WIN32) && !USE_OS_TZDB
 constexpr std::array<const char*, 14> windows_tzdata_required_files = {
     "africa",
@@ -552,7 +506,7 @@ int Duration::compare(const Duration& other) const
 
 std::string Duration::to_string() const
 {
-    return format_duration(*this);
+    return std::to_string(value_.count()) + "ns";
 }
 
 Instant::Instant(SysTime value)

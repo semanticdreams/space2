@@ -59,6 +59,10 @@ void test_instant_rejects_leap_second()
 
 void test_duration_arithmetic_and_overflow()
 {
+    expect_eq(Duration::from_nanoseconds(1).to_string(), std::string("1ns"));
+    expect_eq(Duration::from_seconds(90).to_string(), std::string("90000000000ns"));
+    expect_eq(Duration::from_seconds(-90).to_string(), std::string("-90000000000ns"));
+
     expect_eq(Instant::parse("2026-09-25T12:34:56Z")
                   .add(Duration::from_parts(90, 500, 0, 0))
                   .to_string(),
@@ -95,8 +99,8 @@ void test_plain_date_time_exact_duration_math()
     const auto start = PlainDateTime::parse("2026-09-25T12:00:00");
     const auto shifted = start.add(Duration::from_seconds(90));
     expect_eq(shifted.to_string(), std::string("2026-09-25T12:01:30"));
-    expect_eq(shifted.since(start).to_string(), std::string("PT1M30S"));
-    expect_eq(start.since(shifted).to_string(), std::string("-PT1M30S"));
+    expect_eq(shifted.since(start).compare(Duration::from_seconds(90)), 0);
+    expect_eq(start.since(shifted).compare(Duration::from_seconds(-90)), 0);
     expect_throws([] {
         PlainDateTime::parse("2262-04-11T23:47:16.854775807")
             .add(Duration::from_nanoseconds(1));

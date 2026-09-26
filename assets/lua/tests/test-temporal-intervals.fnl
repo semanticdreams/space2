@@ -16,7 +16,7 @@
   (assert (Temporal.interval.contains interval start))
   (assert (not (Temporal.interval.contains interval end)))
   (local elapsed (Temporal.interval.duration interval))
-  (assert (= (elapsed:to-string) "PT1H"))
+  (assert (= (elapsed:compare (Temporal.duration.from {:seconds 3600})) 0))
   (assert (= (Temporal.interval.format interval)
              "2026-09-25T12:00:00Z/2026-09-25T13:00:00Z")))
 
@@ -27,7 +27,7 @@
   (local elapsed (Temporal.interval.duration interval))
   (assert (= (Temporal.interval.format shifted)
              "2026-09-25T14:00:00/2026-09-25T15:00:00"))
-  (assert (= (elapsed:to-string) "PT1H")))
+  (assert (= (elapsed:compare (Temporal.duration.from {:seconds 3600})) 0)))
 
 (fn invalid-intervals-throw []
   (local start (Temporal.standard.parse-instant "2026-09-25T12:00:00Z"))
