@@ -5,6 +5,7 @@
 (local {: Flex : FlexChild} (require :flex))
 (local PayloadForm (require :app-host.workspace-command-payload-form))
 (local Metadata (require :app-host.command-metadata))
+(local ResultModel (require :app-host.command-result-model))
 
 (fn controls-error [message]
   (error (.. "[app-host.workspace-command-controls] " message)))
@@ -15,14 +16,6 @@
       command.id
       (tostring command.id)
       "command"))
-
-(fn result-message [command result]
-  (local label (label-for-command command))
-  (if (= result.status :ok)
-      (.. label " succeeded")
-      (= result.status :error)
-      (.. label " failed: " (tostring result.error))
-      (.. label " returned status " (tostring result.status))))
 
 (fn command-description [command]
   (local title (label-for-command command))
@@ -61,6 +54,14 @@
   (each [command-id button (pairs state.buttons-by-id)]
     (set-button-label button "Run")
     (tset state.button-labels-by-id command-id "Run")))
+
+(fn set-command-buttons-enabled [state enabled?]
+  (each [_ button (pairs state.buttons-by-id)]
+    (when button.set-enabled
+      (button:set-enabled enabled?))))
+
+(fn set-active-command [state command-id]
+  (set state.active-command-id command-id))
 
 (fn build-command-header-row [command state ctx]
   (local text ((WrappedText {:text (command-description command)}) ctx))
@@ -121,6 +122,29 @@
   (fn build [ctx]
     (build-command-row command state ctx)))
 
+(fn restore-after-structural-error [state previous-summary apply-result-summary]
+  (apply-result-summary previous-summary)
+  (set state.busy? false)
+  (set-active-command state nil)
+  (set-command-buttons-enabled state true)
+  (restore-button-labels state))
+
+(fn make-initial-state [snapshot commands initial-summary]
+  {:snapshot snapshot
+   :commands commands
+   :buttons-by-id {}
+   :button-labels-by-id {}
+   :danger-levels-by-id {}
+   :danger-badges-by-id {}
+   :forms-by-id {}
+   :confirming-command-id nil
+   :last-result nil
+   :busy? false
+   :active-command-id nil
+   :result-summary initial-summary
+   :result-message initial-summary.message
+   :result-badge nil})
+
 (fn WorkspaceCommandControls [opts]
   (when (not (= (type opts) :table))
     (controls-error "opts table is required"))
@@ -131,51 +155,87 @@
     (local snapshot (descriptor:read-inspector-snapshot))
     (local commands (if snapshot.commands snapshot.commands []))
     (validate-commands commands)
+    (local initial-summary (ResultModel.initial-summary))
     (var result-text nil)
     (var dropped? false)
-    (local state {:snapshot snapshot
-                    :commands commands
-                    :buttons-by-id {}
-                    :button-labels-by-id {}
-                    :danger-levels-by-id {}
-                    :danger-badges-by-id {}
-                    :forms-by-id {}
-                    :confirming-command-id nil
-                    :last-result nil
-                    :result-message "No command run yet"})
+    (local state (make-initial-state snapshot commands initial-summary))
+
+    (fn apply-result-summary [summary]
+      (set state.result-summary summary)
+      (set state.result-message summary.message)
+      (when state.result-badge
+        (state.result-badge:set-text summary.badge-text)
+        (state.result-badge:set-tone summary.tone)
+        (set state.result-badge.text summary.badge-text)
+        (set state.result-badge.tone summary.tone))
+      (when result-text
+        (result-text:set-text summary.message))
+      summary)
 
     (fn run-command [command]
-      (local confirmation (Metadata.confirmation command))
-      (local requires-confirmation? (Metadata.confirmation-required? command))
-      (local already-confirming? (= state.confirming-command-id command.id))
-      (if (and requires-confirmation? (not already-confirming?))
+      (if state.busy?
+          nil
           (do
-            (restore-button-labels state)
-            (set state.confirming-command-id command.id)
-            (local message (confirmation-message command confirmation))
-            (set state.result-message message)
-            (when result-text
-              (result-text:set-text message))
-            (local button (. state.buttons-by-id command.id))
-            (set-button-label button "Confirm")
-            (tset state.button-labels-by-id command.id "Confirm")
-            nil)
-          (do
-            (set state.confirming-command-id nil)
-            (restore-button-labels state)
-            (local form (. state.forms-by-id command.id))
-            (local payload (if form (form:build-payload) nil))
-            (local result (descriptor:run-command command.id payload))
-            (local message (result-message command result))
-            (set state.last-result result)
-            (set state.result-message message)
-            (result-text:set-text message)
-            result)))
+            (local confirmation (Metadata.confirmation command))
+            (local requires-confirmation? (Metadata.confirmation-required? command))
+            (local already-confirming? (= state.confirming-command-id command.id))
+            (if (and requires-confirmation? (not already-confirming?))
+                (do
+                  (restore-button-labels state)
+                  (set state.confirming-command-id command.id)
+                  (local message (confirmation-message command confirmation))
+                  (apply-result-summary (ResultModel.confirmation-summary command message))
+                  (local button (. state.buttons-by-id command.id))
+                  (set-button-label button "Confirm")
+                  (tset state.button-labels-by-id command.id "Confirm")
+                  nil)
+                (do
+                  (local previous-summary state.result-summary)
+                  (local form (. state.forms-by-id command.id))
+                  (set state.confirming-command-id nil)
+                  (restore-button-labels state)
+                  (local (payload-ok payload-or-error) (pcall #(if form (form:build-payload) nil)))
+                  (when (not payload-ok)
+                    (restore-after-structural-error state previous-summary apply-result-summary)
+                    (error payload-or-error))
+                  (local payload payload-or-error)
+                  (set state.busy? true)
+                  (set-active-command state command.id)
+                  (set-command-buttons-enabled state false)
+                  (apply-result-summary (ResultModel.running-summary command))
+                  (local (ok result-or-error) (pcall #(descriptor:run-command command.id payload)))
+                  (set-command-buttons-enabled state true)
+                  (set state.busy? false)
+                  (set-active-command state nil)
+                  (restore-button-labels state)
+                  (if ok
+                      (do
+                        (set state.last-result result-or-error)
+                        (apply-result-summary (ResultModel.result-summary command result-or-error))
+                        result-or-error)
+                      (do
+                        (restore-after-structural-error state previous-summary apply-result-summary)
+                        (error result-or-error))))))))
 
     (set state.run-command run-command)
     (fn result-builder [child-ctx]
+      (local badge ((StatusBadge {:text state.result-summary.badge-text
+                                  :tone state.result-summary.tone})
+                     child-ctx))
+      (set badge.text state.result-summary.badge-text)
+      (set badge.tone state.result-summary.tone)
+      (set state.result-badge badge)
       (set result-text ((WrappedText {:text state.result-message}) child-ctx))
-      result-text)
+      (fn build-badge [_ctx]
+        badge)
+      (fn build-text [_ctx]
+        result-text)
+      ((Flex {:axis 1
+              :xspacing 0.5
+              :yalign :center
+              :children [(FlexChild build-badge 0)
+                         (FlexChild build-text 1)]})
+       child-ctx))
     (local children [])
     (each [_ command (ipairs commands)]
       (table.insert children (FlexChild (command-row command state) 0)))

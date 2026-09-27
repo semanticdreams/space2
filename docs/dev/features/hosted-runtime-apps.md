@@ -171,17 +171,28 @@ inspector snapshot. Warning and danger commands render matching badge tones and
 button variants. Each row includes a Run button that executes through
 `descriptor/session:run-command(command-id, payload)`. For commands with required
 confirmation, the first click arms an inline confirmation state and changes the
-button label to `Confirm`; the second click runs the command. Confirmations are
-inline controls, not modal dialogs, and do not change the command execution path.
-The panel displays the latest success or error result from the command result
-envelope, handler exceptions remain error result envelopes, and snapshot reads
-remain metadata-only and never execute commands.
+button label to `Confirm`; the second click runs the command. The first
+confirmation click only arms confirmation: it does not build payloads or call the
+handler. Confirmations are inline controls, not modal dialogs, and do not change
+the command execution path.
+
+Command controls display the latest result with a status badge plus wrapped text.
+Success envelopes render a success tone and, when `:value` is non-nil, include a
+deterministic bounded textual value. Handler error envelopes render a danger
+tone and include the envelope `:error` text. Unknown envelope statuses render as
+a warning/unknown display state instead of crashing the controls. Command buttons
+are synchronously disabled and guarded while a command run is in progress, so a
+reentrant click cannot launch the same synchronous command twice.
+
+Handler exceptions remain error result envelopes, and snapshot reads remain
+metadata-only and never execute commands.
 
 Payload schema expansion, permissions/auth policy, async progress and
-cancellation, app-specific controls, editor integration, graph integration,
-persistent approvals, persistent app discovery, and launcher UX remain follow-up
-subprojects. Hosted command confirmations do not add permissions, authorization,
-or persistent approval behavior.
+cancellation, command queues, polling, pending command APIs, app-specific
+controls, editor integration, graph integration, persistent approvals, persistent
+app discovery, and launcher UX remain follow-up subprojects. Hosted command
+confirmations do not add permissions, authorization, or persistent approval
+behavior.
 
 ## Deferred alternatives
 

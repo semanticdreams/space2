@@ -170,8 +170,10 @@
       :tests.test-agent-workflow-template
       :tests.test-agent-workflow-runner
       :tests.test-agent-session-migration
-      :tests.test-disclosure-row
+    :tests.test-disclosure-row
     :tests.test-status-badge
+    :tests.test-app-host-command-result-model
+    :tests.test-app-host-workspace-command-controls
     :tests.test-cgltf
     :tests.test-graph-kind-badge
     :tests.test-graph-core
