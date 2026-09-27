@@ -77,10 +77,13 @@ Command facets may include metadata-only danger and confirmation hints:
 `:danger-level` values are exactly `:normal`, `:warning`, and `:danger`;
 omitting the key normalizes to `:normal`. `:confirmation`, when present,
 supports only `:message` and `:required?`; omitting `:confirmation.required?`
-normalizes to true. Danger level does not imply confirmation: confirmation is
-controlled only by `:confirmation.required?`. Malformed command metadata fails
-loudly with the `[app-host.command-metadata]` prefix during snapshot reads,
-widget builds, and command runner dispatch.
+normalizes to true. `:confirmation`, when present, must be a table;
+`:confirmation.message`, when present, must be a string; and
+`:confirmation.required?`, when present, must be a boolean. Danger level does
+not imply confirmation: confirmation is controlled only by
+`:confirmation.required?`. Malformed command metadata fails loudly with the
+`[app-host.command-metadata]` prefix during snapshot reads, widget builds, and
+command runner dispatch.
 
 The core entry API does not add a new required method for every game feature.
 
