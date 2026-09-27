@@ -221,6 +221,7 @@
 (fn expand-calendar [period rule dtstart limit]
   (when rule.by-day
     (error "unsupported temporal recurrence expansion"))
+  (period.add-to-plain-date-time dtstart (calendar-step-period rule.freq 0))
   (local results [])
   (var index 0)
   (while (< index limit)

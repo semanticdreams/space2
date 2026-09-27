@@ -167,6 +167,18 @@
                    {})
                 "yearly BYDAY expansion should throw"))
 
+(fn recurrence-monthly-yearly-validate-first-dtstart []
+  (assert-error #(Temporal.recurrence.occurrences
+                   (Temporal.recurrence.from {:freq :monthly :count 1})
+                   {}
+                   {})
+                "monthly count=1 should validate invalid DTSTART")
+  (assert-error #(Temporal.recurrence.occurrences
+                   (Temporal.recurrence.from {:freq :yearly})
+                   "not a plain date time"
+                   {:limit 1})
+                "yearly limit=1 should validate invalid DTSTART"))
+
 (fn recurrence-daily-limits-and-rejections []
   (local dtstart (Temporal.plain-date-time.parse "2026-09-22T09:00:00"))
   (local rule (Temporal.recurrence.from {:freq :daily :interval 2}))
@@ -252,6 +264,7 @@
 (table.insert tests {:name "recurrence monthly anchor clamps without drift" :fn recurrence-monthly-anchor-clamps-without-drift})
 (table.insert tests {:name "recurrence yearly leap day anchor clamps without drift" :fn recurrence-yearly-leap-day-anchor-clamps-without-drift})
 (table.insert tests {:name "recurrence monthly yearly bounds and rejections" :fn recurrence-monthly-yearly-bounds-and-rejections})
+(table.insert tests {:name "recurrence monthly yearly validate first DTSTART" :fn recurrence-monthly-yearly-validate-first-dtstart})
 (table.insert tests {:name "recurrence daily limits and rejections" :fn recurrence-daily-limits-and-rejections})
 (table.insert tests {:name "recurrence daily BYDAY filters nonmatching DTSTART" :fn recurrence-daily-by-day-filters-nonmatching-dtstart})
 (table.insert tests {:name "recurrence daily BYDAY unsatisfiable interval throws" :fn recurrence-daily-by-day-unsatisfiable-interval-throws})
