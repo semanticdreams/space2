@@ -215,10 +215,37 @@
   (assert-error-contains validate-keyed-schema "fields must be an ordered list")
   (assert-error-contains validate-sparse-schema "fields must be an ordered list"))
 
+(fn test-payload_schema_rejects_nested_and_extra_shapes []
+  (local top-extra-schema {:fields [{:id :title :type :string}]
+                           :computed true})
+  (local field-extra-schema {:fields [{:id :title
+                                       :type :string
+                                       :fields [{:id :nested :type :string}]}]})
+  (local option-extra-schema {:fields [{:id :mode
+                                        :type :select
+                                        :options [{:value :fast :metadata {}}]}]})
+  (local nested-label-schema {:fields [{:id :title
+                                        :type :string
+                                        :label {:text "Title"}}]})
+  (fn validate-top-extra-schema []
+    (Schema.validate-schema top-extra-schema {:command-id :configure}))
+  (fn validate-field-extra-schema []
+    (Schema.validate-schema field-extra-schema {:command-id :configure}))
+  (fn validate-option-extra-schema []
+    (Schema.validate-schema option-extra-schema {:command-id :configure}))
+  (fn validate-nested-label-schema []
+    (Schema.validate-schema nested-label-schema {:command-id :configure}))
+  (assert-error-contains validate-top-extra-schema "[app-host.command-payload-schema]")
+  (assert-error-contains validate-top-extra-schema "unsupported schema key")
+  (assert-error-contains validate-field-extra-schema "unsupported field key")
+  (assert-error-contains validate-option-extra-schema "unsupported option key")
+  (assert-error-contains validate-nested-label-schema "label for field title must be scalar"))
+
 (add-test "payload schema defaults and display values" test-payload_schema_defaults_and_display_values)
 (add-test "payload schema builds flat payload from values" test-payload_schema_builds_flat_payload_from_values)
 (add-test "payload schema rejects invalid payload values" test-payload_schema_rejects_invalid_payload_values)
 (add-test "payload schema rejects non-list fields" test-payload_schema_rejects_non_list_fields)
+(add-test "payload schema rejects nested and extra shapes" test-payload_schema_rejects_nested_and_extra_shapes)
 
 (fn main []
   (Runner.run-tests {:name "app-host-command-runner" :tests tests}))

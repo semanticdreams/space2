@@ -1,4 +1,8 @@
 (local supported-types {:string true :number true :boolean true :select true})
+(local schema-keys {:fields true})
+(local field-keys {:id true :type true :label true :default true})
+(local select-field-keys {:id true :type true :label true :default true :options true})
+(local option-keys {:value true :label true})
 
 (fn schema-error [message]
   (error (.. "[app-host.command-payload-schema] " message)))
@@ -34,6 +38,15 @@
     (when (and (= field.type :boolean) (not (= default-type :boolean)))
       (schema-error (.. "default for field " (field-name field) " must be boolean")))))
 
+(fn validate-allowed-keys [value allowed kind]
+  (each [key _item (pairs value)]
+    (when (not (. allowed key))
+      (schema-error (.. "unsupported " kind " key: " (tostring key))))))
+
+(fn validate-label [field]
+  (when (and (not (= field.label nil)) (not (scalar? field.label)))
+    (schema-error (.. "label for field " (field-name field) " must be scalar"))))
+
 (fn validate-select-options [field]
   (when (not (= (type field.options) :table))
     (schema-error (.. "select field " (field-name field) " requires options")))
@@ -42,10 +55,13 @@
   (each [_ option (ipairs field.options)]
     (when (not (= (type option) :table))
       (schema-error (.. "select field " (field-name field) " option must be a table")))
+    (validate-allowed-keys option option-keys "option")
     (when (= option.value nil)
       (schema-error (.. "select field " (field-name field) " option requires value")))
     (when (not (scalar? option.value))
-      (schema-error (.. "select field " (field-name field) " option value must be scalar"))))
+      (schema-error (.. "select field " (field-name field) " option value must be scalar")))
+    (when (and (not (= option.label nil)) (not (scalar? option.label)))
+      (schema-error (.. "select field " (field-name field) " option label must be scalar"))))
   (when (and (not (= field.default nil)) (not (select-has-value? field field.default)))
     (schema-error (.. "select field " (field-name field) " default must match an option"))))
 
@@ -59,6 +75,8 @@
   (set (. seen-ids field.id) true)
   (when (not (. supported-types field.type))
     (schema-error (.. "unsupported field type: " (tostring field.type))))
+  (validate-allowed-keys field (if (= field.type :select) select-field-keys field-keys) "field")
+  (validate-label field)
   (validate-default field)
   (when (= field.type :select)
     (validate-select-options field)))
@@ -87,6 +105,7 @@
 (fn validate-schema [schema _context]
   (when (not (= (type schema) :table))
     (schema-error "schema must be a table"))
+  (validate-allowed-keys schema schema-keys "schema")
   (when (not (= (type schema.fields) :table))
     (schema-error "schema requires fields table"))
   (local field-count (validate-fields-list schema.fields))
