@@ -58,10 +58,11 @@ A runtime may expose:
 - `lifecycle`: deterministic teardown such as `drop`.
 - `scheduler`: app simulation registrations.
 - `inspectors`: plain-data or moldable inspector registrations.
-- `commands`: sequential command facets such as `{:id id :title title
-  :description description :danger-level :normal :confirmation confirmation
-  :run fn}`. Commands are registered with `host.commands`; command handlers
-  receive the command facet and optional payload.
+- `commands`: command facets such as `{:id id :title title :description
+  description :danger-level :normal :confirmation confirmation :run fn}` or
+  opt-in async facets with `:run-async`. Commands are registered with
+  `host.commands`; command handlers receive the command facet and optional
+  payload.
 
 Command facets may include metadata-only danger and confirmation hints:
 
@@ -84,6 +85,50 @@ not imply confirmation: confirmation is controlled only by
 `:confirmation.required?`. Malformed command metadata fails loudly with the
 `[app-host.command-metadata]` prefix during snapshot reads, widget builds, and
 command runner dispatch.
+
+Synchronous commands keep the existing `:run` handler shape. Handler success
+returns the command-runner success envelope, and handler exceptions become error
+envelopes.
+
+### Async progress and cancellation
+
+Async commands opt in with canonical `:run-async`; there are no aliases or
+compatibility shims. An async handler receives the command facet, optional
+payload, and a callbacks table. It returns a pending handle with `{:pending true
+:cancel cancel-fn :drop drop-fn}`:
+
+```fennel
+{:id :generate-report
+ :title "Generate report"
+ :description "Build a report with progress"
+ :run-async
+ (fn [command payload callbacks]
+   (local cancelled? callbacks.cancelled?)
+   (local timer (start-report-work
+                  payload
+                  {:on-progress (fn [message value]
+                                  (when (not (cancelled?))
+                                    (callbacks.progress {:message message
+                                                         :value value})))
+                   :on-success (fn [report]
+                                 (callbacks.resolve report))
+                   :on-error (fn [err]
+                               (callbacks.reject err))}))
+   {:pending true
+    :cancel (fn [_reason]
+              (timer:cancel))
+    :drop (fn []
+            (timer:drop))})}
+```
+
+`callbacks.progress` accepts a table with optional string `:message` and optional
+numeric `:value` between 0 and 1. `callbacks.resolve(value)` emits the normal
+success envelope. `callbacks.reject(err)` emits the normal handler-error
+envelope. `callbacks.cancelled?()` lets app work avoid late progress or terminal
+delivery after cancellation. Cancellation is terminal and idempotent; late
+progress, resolve, or reject callbacks after cancellation are ignored. Drop is
+lifecycle cleanup, not a user-visible terminal result; late callbacks after drop
+are ignored.
 
 The core entry API does not add a new required method for every game feature.
 
@@ -148,10 +193,12 @@ rethrowing the original mount error.
 the app through `WorkspaceMount.mount(opts)`, and adds one HUD panel child that
 describes the hosted app session. The returned session exposes `session.mount`
 plus `session:pause()`, `session:resume()`, `session:step(delta-ms)`,
-`session:run-command(command-id, payload)`, and idempotent `session:close()`
-controls. Pause, resume, step, and command execution delegate to the generic
-runtime controller and command registries; close removes the HUD child and drops
-the workspace mount exactly once.
+`session:run-command(command-id, payload)`,
+`session:run-command-async(command-id, payload, callbacks)`, and idempotent
+`session:close()` controls. Pause, resume, step, and command execution delegate
+to the generic runtime controller and command registries; close removes the HUD
+child, drops any pending async command invocations, and drops the workspace mount
+exactly once.
 
 `session:run-command(command-id, payload)` resolves a unique command by id from
 `host.commands:list()` and calls its `:run` handler with the command facet and
@@ -159,6 +206,16 @@ optional payload. Handler success returns `{:id command-id :status :ok :value
 value}`; handler exceptions return `{:id command-id :status :error :error
 error-string}`. Structural host, registry, lookup, and command contract errors
 throw loudly with the command runner prefix.
+
+`session:run-command-async(command-id, payload, callbacks)` resolves the same
+command registry and dispatches through `CommandRunner.run-host-async`. The
+session callback table uses `:on-progress` and required `:on-result`. Async
+commands call `:on-progress` with progress tables and eventually call
+`:on-result` with `:ok`, `:error`, or `:cancelled` result envelopes. If a command
+does not define `:run-async`, async dispatch falls back to the synchronous
+`:run` handler and delivers its normal result envelope through `:on-result`.
+Closing the session drops pending async handles and removes them from the active
+session set without emitting a user-visible terminal result.
 
 The workspace panel also exposes a read-only inspector snapshot from the
 embedded host registries. Snapshot rows include readable inspector data,
@@ -169,30 +226,42 @@ not mutate app state.
 Workspace panels render generic command metadata rows from the read-only
 inspector snapshot. Warning and danger commands render matching badge tones and
 button variants. Each row includes a Run button that executes through
-`descriptor/session:run-command(command-id, payload)`. For commands with required
+`descriptor/session:run-command(command-id, payload)` for synchronous-only
+descriptors or `descriptor/session:run-command-async(command-id, payload,
+callbacks)` when async dispatch is available. For commands with required
 confirmation, the first click arms an inline confirmation state and changes the
 button label to `Confirm`; the second click runs the command. The first
 confirmation click only arms confirmation: it does not build payloads or call the
 handler. Confirmations are inline controls, not modal dialogs, and do not change
 the command execution path.
 
-Command controls display the latest result with a status badge plus wrapped text.
-Success envelopes render a success tone and, when `:value` is non-nil, include a
-deterministic bounded textual value. Handler error envelopes render a danger
-tone and include the envelope `:error` text. Unknown envelope statuses render as
-a warning/unknown display state instead of crashing the controls. Command buttons
-are synchronously disabled and guarded while a command run is in progress, so a
-reentrant click cannot launch the same synchronous command twice.
+Command controls display the latest progress or terminal result with a status
+badge plus wrapped text. Success envelopes render a success tone and, when
+`:value` is non-nil, include a deterministic bounded textual value. Handler error
+envelopes render a danger tone and include the envelope `:error` text. Progress
+updates keep the badge in the running state and render the progress message and
+percentage when provided. Cancelled results render a warning/cancelled display
+state. Unknown envelope statuses render as a warning/unknown display state
+instead of crashing the controls.
+
+Each controls widget allows one active command at a time. While a synchronous run
+is active, command buttons are disabled and guarded so a reentrant click cannot
+launch the same synchronous command twice. While an async run is active, the
+active command button becomes `Cancel`; clicking it cancels the invocation,
+restores the controls, and shows the cancelled result. Other command clicks are
+ignored until the active command reaches success, error, or cancellation. Dropping
+the controls widget drops the pending invocation without showing a terminal
+result, and late callbacks are ignored through the controls' active-run token.
 
 Handler exceptions remain error result envelopes, and snapshot reads remain
 metadata-only and never execute commands.
 
-Payload schema expansion, permissions/auth policy, async progress and
-cancellation, command queues, polling, pending command APIs, app-specific
-controls, editor integration, graph integration, persistent approvals, persistent
-app discovery, and launcher UX remain follow-up subprojects. Hosted command
-confirmations do not add permissions, authorization, or persistent approval
-behavior.
+Payload schema expansion beyond flat forms, permissions/auth policy, command
+queues, polling APIs, durable pending command APIs, persistent/background jobs,
+app-specific controls, editor integration, graph integration, persistent
+approvals, persistent app discovery, and launcher UX remain follow-up
+subprojects. Hosted command confirmations do not add permissions,
+authorization, or persistent approval behavior.
 
 ## Deferred alternatives
 
