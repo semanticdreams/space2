@@ -83,9 +83,32 @@
   (local run-command (if options.run-command
                        options.run-command
                        (make-default-run-command state results)))
+  (local descriptor {:read-inspector-snapshot (make-read-inspector-snapshot state commands)
+                     :run-command run-command})
+  (when options.run-command-async
+    (tset descriptor :run-command-async options.run-command-async))
   {:state state
-   :descriptor {:read-inspector-snapshot (make-read-inspector-snapshot state commands)
-                :run-command run-command}})
+   :descriptor descriptor})
+
+(fn make-pending-async-run-command [async-state]
+  (fn pending-run-command-async [_self command-id payload callbacks]
+    (set async-state.run-count (+ async-state.run-count 1))
+    (table.insert async-state.calls {:id command-id :payload payload})
+    (set async-state.callbacks callbacks)
+    {:cancel (fn [_handle]
+               (set async-state.cancel-count (+ async-state.cancel-count 1)))
+     :drop (fn [_handle]
+             (set async-state.drop-count (+ async-state.drop-count 1)))}))
+
+(fn make-async-controls-fixture []
+  (local async-state {:run-count 0 :calls [] :callbacks nil :cancel-count 0 :drop-count 0})
+  (local fixture
+    (make-descriptor
+      {:commands [{:id :long :title "Long" :status :metadata}
+                  {:id :other :title "Other" :status :metadata}]
+       :run-command-async (make-pending-async-run-command async-state)}))
+  (set fixture.async-state async-state)
+  fixture)
 
 (fn build-widget [descriptor ctx]
   (local builder (Controls.WorkspaceCommandControls {:descriptor descriptor}))
@@ -208,6 +231,98 @@
 
 (add-test "run button updates success result" test-run_button_updates_success_result)
 (add-test "run button updates error result" test-run_button_updates_error_result)
+
+(fn test-async_command_enters_pending_cancel_state []
+  (local fixture (make-async-controls-fixture))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (local button (. state.buttons-by-id :long))
+  (button:on-click {:source :test})
+  (assert (= state.busy? true))
+  (assert (= state.active-command-id :long))
+  (assert (= (. state.button-labels-by-id :long) "Cancel"))
+  (assert (= (. state.buttons-by-id :long :enabled?) true))
+  (assert (= (. state.buttons-by-id :other :enabled?) false))
+  (assert (= state.result-summary.phase :running))
+  (widget:drop))
+
+(fn test-async_progress_updates_visible_summary []
+  (local fixture (make-async-controls-fixture))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (local button (. state.buttons-by-id :long))
+  (button:on-click {:source :test})
+  (fixture.async-state.callbacks.on-progress {:message "halfway" :value 0.5})
+  (assert (= state.result-summary.phase :running))
+  (assert (string.find state.result-message "Long" 1 true))
+  (assert (string.find state.result-message "halfway" 1 true))
+  (assert (string.find state.result-message "50%" 1 true))
+  (assert (= state.result-badge.tone :info))
+  (widget:drop))
+
+(fn test-async_completion_restores_buttons_and_success []
+  (local fixture (make-async-controls-fixture))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (local button (. state.buttons-by-id :long))
+  (button:on-click {:source :test})
+  (fixture.async-state.callbacks.on-result {:id :long :status :ok :value "done"})
+  (assert (= state.busy? false))
+  (assert (= state.active-command-id nil))
+  (assert-command-buttons-enabled state true "buttons must re-enable after async success")
+  (assert (= (. state.button-labels-by-id :long) "Run"))
+  (assert (= state.last-result.status :ok))
+  (assert (= state.result-summary.phase :ok))
+  (assert (= state.result-badge.tone :success))
+  (assert (string.find state.result-message "done" 1 true))
+  (widget:drop))
+
+(fn test-async_cancel_click_cancels_once_and_ignores_late_success []
+  (local fixture (make-async-controls-fixture))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (local button (. state.buttons-by-id :long))
+  (button:on-click {:source :test})
+  (button:on-click {:source :test})
+  (assert (= fixture.async-state.cancel-count 1))
+  (assert (= state.result-summary.phase :cancelled))
+  (assert (= state.busy? false))
+  (assert (= state.active-command-id nil))
+  (assert-command-buttons-enabled state true "buttons must re-enable after cancel")
+  (assert (= (. state.button-labels-by-id :long) "Run"))
+  (local cancelled-message state.result-message)
+  (fixture.async-state.callbacks.on-result {:id :long :status :ok :value "late"})
+  (assert (= state.result-summary.phase :cancelled))
+  (assert (= state.result-message cancelled-message))
+  (assert (= state.last-result.status :cancelled))
+  (widget:drop))
+
+(fn test-async_drop_cleans_up_once_and_ignores_late_callbacks []
+  (local fixture (make-async-controls-fixture))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (local button (. state.buttons-by-id :long))
+  (button:on-click {:source :test})
+  (local message-before-drop state.result-message)
+  (local last-result-before-drop state.last-result)
+  (widget:drop)
+  (widget:drop)
+  (assert (= fixture.async-state.drop-count 1))
+  (fixture.async-state.callbacks.on-progress {:message "late" :value 1})
+  (fixture.async-state.callbacks.on-result {:id :long :status :ok :value "late"})
+  (assert (= state.result-message message-before-drop))
+  (assert (= state.last-result last-result-before-drop)))
+
+(add-test "async command enters pending cancel state" test-async_command_enters_pending_cancel_state)
+(add-test "async progress updates visible summary" test-async_progress_updates_visible_summary)
+(add-test "async completion restores buttons and success" test-async_completion_restores_buttons_and_success)
+(add-test "async cancel click cancels once and ignores late success" test-async_cancel_click_cancels_once_and_ignores_late_success)
+(add-test "async drop cleans up once and ignores late callbacks" test-async_drop_cleans_up_once_and_ignores_late_callbacks)
 
 (fn test-schema_form_builds_payload_for_command []
   (local fixture (make-descriptor {:commands [{:id :configure
