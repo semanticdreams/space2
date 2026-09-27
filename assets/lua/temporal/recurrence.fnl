@@ -9,7 +9,8 @@
    :interval true
    :count true
    :until true
-   :by-day true})
+   :by-day true
+   :by-month true})
 
 (local valid-occurrence-options
   {:limit true})
@@ -19,6 +20,7 @@
 (local freq-to-rrule {:daily "DAILY" :weekly "WEEKLY" :monthly "MONTHLY" :yearly "YEARLY"})
 (local rrule-to-freq {"DAILY" :daily "WEEKLY" :weekly "MONTHLY" :monthly "YEARLY" :yearly})
 (local day-to-number {:mo 1 :tu 2 :we 3 :th 4 :fr 5 :sa 6 :su 7})
+(local number-to-day [:mo :tu :we :th :fr :sa :su])
 
 (fn positive-integer? [value]
   (and (= (type value) :number)
@@ -35,6 +37,14 @@
     (error "invalid temporal recurrence BYDAY"))
   day)
 
+(fn validate-month [month]
+  (when (not (and (= (type month) :number)
+                  (= month (math.floor month))
+                  (>= month 1)
+                  (<= month 12)))
+    (error "invalid temporal recurrence BYMONTH"))
+  month)
+
 (fn normalize-by-day [days]
   (when (not= days nil)
     (when (not= (type days) :table)
@@ -44,6 +54,17 @@
       (table.insert normalized (validate-day day)))
     (when (= (# normalized) 0)
       (error "invalid temporal recurrence BYDAY"))
+    normalized))
+
+(fn normalize-by-month [months]
+  (when (not= months nil)
+    (when (not= (type months) :table)
+      (error "invalid temporal recurrence BYMONTH"))
+    (local normalized [])
+    (each [_ month (ipairs months)]
+      (table.insert normalized (validate-month month)))
+    (when (= (# normalized) 0)
+      (error "invalid temporal recurrence BYMONTH"))
     normalized))
 
 (fn from [options]
@@ -67,6 +88,9 @@
   (local by-day (normalize-by-day options.by-day))
   (when by-day
     (set rule.by-day by-day))
+  (local by-month (normalize-by-month options.by-month))
+  (when by-month
+    (set rule.by-month by-month))
   rule)
 
 (fn split-nonempty [text separator]
@@ -99,6 +123,12 @@
       (error "invalid RRULE BYDAY"))
     (table.insert days day))
   days)
+
+(fn parse-by-month [text]
+  (local months [])
+  (each [_ item (ipairs (split-nonempty text ","))]
+    (table.insert months (validate-month (parse-positive-integer item "BYMONTH"))))
+  months)
 
 (fn parse-rrule [text]
   (assert (= (type text) :string) "RRULE text must be a string")
@@ -134,6 +164,8 @@
         (set options.until value)
         (= key "BYDAY")
         (set options.by-day (parse-by-day value))
+        (= key "BYMONTH")
+        (set options.by-month (parse-by-month value))
         (error "unknown RRULE key")))
   (from options))
 
@@ -151,6 +183,12 @@
     (table.insert parts (. day-to-rrule (validate-day day))))
   (join parts ","))
 
+(fn serialize-by-month [months]
+  (local parts [])
+  (each [_ month (ipairs months)]
+    (table.insert parts (tostring (validate-month month))))
+  (join parts ","))
+
 (fn to-rrule [rule]
   (local normalized (from rule))
   (local parts [(.. "FREQ=" (. freq-to-rrule normalized.freq))])
@@ -160,6 +198,8 @@
     (table.insert parts (.. "COUNT=" normalized.count)))
   (when normalized.until
     (table.insert parts (.. "UNTIL=" normalized.until)))
+  (when normalized.by-month
+    (table.insert parts (.. "BYMONTH=" (serialize-by-month normalized.by-month))))
   (when normalized.by-day
     (table.insert parts (.. "BYDAY=" (serialize-by-day normalized.by-day))))
   (.. "RRULE:" (join parts ";")))
@@ -206,10 +246,77 @@
       (set allowed true)))
   allowed)
 
+(fn gcd [a b]
+  (var x (math.abs a))
+  (var y (math.abs b))
+  (while (not= y 0)
+    (local next (% x y))
+    (set x y)
+    (set y next))
+  x)
+
+(fn plain-month [plain]
+  (local fields (plain:fields))
+  fields.month)
+
+(fn by-month-allowed? [months month]
+  (var allowed false)
+  (each [_ value (ipairs months)]
+    (when (= value month)
+      (set allowed true)))
+  allowed)
+
+(fn month-filter-allowed? [rule candidate]
+  (if rule.by-month
+      (by-month-allowed? rule.by-month (plain-month candidate))
+      true))
+
 (fn assert-daily-by-day-satisfiable [rule dtstart]
   (when (and rule.by-day (= (% rule.interval 7) 0)
              (not (by-day-allowed? rule.by-day (dtstart:iso-weekday))))
     (error "unsupported temporal recurrence expansion")))
+
+(fn assert-daily-filters-satisfiable [rule dtstart]
+  (when rule.by-month
+    (local cycle (/ 146097 (gcd rule.interval 146097)))
+    (var current dtstart)
+    (var offset 0)
+    (var satisfiable false)
+    (while (and (< offset cycle) (not satisfiable))
+      (when (and (month-filter-allowed? rule current)
+                 (if rule.by-day
+                     (by-day-allowed? rule.by-day (current:iso-weekday))
+                     true))
+        (set satisfiable true))
+      (set current (current:add-days rule.interval))
+      (set offset (+ offset 1)))
+    (when (not satisfiable)
+      (error "unsupported temporal recurrence expansion"))))
+
+(fn assert-weekly-filters-satisfiable [rule dtstart]
+  (when rule.by-month
+    (local selected-week-cycle (/ 20871 (gcd rule.interval 20871)))
+    (local default-weekday (dtstart:iso-weekday))
+    (local allowed-weekdays
+      (if rule.by-day
+          rule.by-day
+          [(. number-to-day default-weekday)]))
+    (var selected-week-index 0)
+    (var satisfiable false)
+    (while (and (< selected-week-index selected-week-cycle) (not satisfiable))
+      (local week-start (dtstart:add-days (* selected-week-index rule.interval 7)))
+      (each [_ day (ipairs allowed-weekdays)]
+        (local weekday-number (. day-to-number day))
+        (var offset (- weekday-number default-weekday))
+        (when (< offset 0)
+          (set offset (+ offset 7)))
+        (local candidate (week-start:add-days offset))
+        (when (and (not satisfiable)
+                   (month-filter-allowed? rule candidate))
+          (set satisfiable true)))
+      (set selected-week-index (+ selected-week-index 1)))
+    (when (not satisfiable)
+      (error "unsupported temporal recurrence expansion"))))
 
 (fn calendar-step-period [freq offset]
   (if (= freq :monthly)
@@ -218,21 +325,45 @@
       {:years offset}
       (error "unsupported temporal recurrence expansion")))
 
+(fn assert-calendar-filters-satisfiable [period rule dtstart]
+  (when rule.by-month
+    (if (= rule.freq :monthly)
+        (do
+          (local cycle (/ 12 (gcd rule.interval 12)))
+          (var index 0)
+          (var satisfiable false)
+          (while (and (< index cycle) (not satisfiable))
+            (local candidate
+              (if (= index 0)
+                  dtstart
+                  (period.add-to-plain-date-time
+                    dtstart
+                    (calendar-step-period rule.freq (* index rule.interval)))))
+            (when (month-filter-allowed? rule candidate)
+              (set satisfiable true))
+            (set index (+ index 1)))
+          (when (not satisfiable)
+            (error "unsupported temporal recurrence expansion")))
+        (= rule.freq :yearly)
+        (when (not (month-filter-allowed? rule dtstart))
+          (error "unsupported temporal recurrence expansion")))))
+
 (fn expand-calendar [period rule dtstart limit]
   (when rule.by-day
     (error "unsupported temporal recurrence expansion"))
   (period.add-to-plain-date-time dtstart (calendar-step-period rule.freq 0))
+  (assert-calendar-filters-satisfiable period rule dtstart)
   (local results [])
   (var index 0)
-  (while (< index limit)
-    (if (= index 0)
-        (table.insert results dtstart)
-        (do
-          (local offset (* index rule.interval))
-          (table.insert results
-                        (period.add-to-plain-date-time
-                          dtstart
-                          (calendar-step-period rule.freq offset)))))
+  (while (< (# results) limit)
+    (local candidate
+      (if (= index 0)
+          dtstart
+          (period.add-to-plain-date-time
+            dtstart
+            (calendar-step-period rule.freq (* index rule.interval)))))
+    (when (month-filter-allowed? rule candidate)
+      (table.insert results candidate))
     (set index (+ index 1)))
   results)
 
@@ -242,16 +373,21 @@
   (if rule.by-day
       (do
         (assert-daily-by-day-satisfiable rule dtstart)
+        (assert-daily-filters-satisfiable rule dtstart)
         (var day-offset 0)
         (while (< (# results) limit)
           (when (and (= (% day-offset rule.interval) 0)
-                     (by-day-allowed? rule.by-day (current:iso-weekday)))
+                     (by-day-allowed? rule.by-day (current:iso-weekday))
+                     (month-filter-allowed? rule current))
             (table.insert results current))
           (set current (current:add-days 1))
           (set day-offset (+ day-offset 1))))
-      (while (< (# results) limit)
-        (table.insert results current)
-        (set current (current:add-days rule.interval))))
+      (do
+        (assert-daily-filters-satisfiable rule dtstart)
+        (while (< (# results) limit)
+          (when (month-filter-allowed? rule current)
+            (table.insert results current))
+          (set current (current:add-days rule.interval)))))
   results)
 
 (fn expand-weekly [rule dtstart limit]
@@ -259,10 +395,12 @@
   (var current dtstart)
   (var day-offset 0)
   (local default-weekday (dtstart:iso-weekday))
+  (assert-weekly-filters-satisfiable rule dtstart)
   (while (< (# results) limit)
     (local week-offset (math.floor (/ day-offset 7)))
     (when (and (= (% week-offset rule.interval) 0)
-               (weekly-day-allowed? rule (current:iso-weekday) default-weekday))
+               (weekly-day-allowed? rule (current:iso-weekday) default-weekday)
+               (month-filter-allowed? rule current))
       (table.insert results current))
     (set current (current:add-days 1))
     (set day-offset (+ day-offset 1)))
