@@ -259,6 +259,84 @@
 
 (add-test "drop unregisters button handlers" test-drop_unregisters_button_handlers)
 
+(fn test-danger_levels_update_badges_and_button_variants []
+  (local fixture (make-descriptor {:commands [{:id :inspect :title "Inspect" :status :metadata :danger-level :normal}
+                                               {:id :warn :title "Warn" :status :metadata :danger-level :warning}
+                                               {:id :delete :title "Delete" :status :metadata :danger-level :danger}]}))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (assert (= (. state.danger-levels-by-id :inspect) :normal))
+  (assert (= (. state.danger-levels-by-id :warn) :warning))
+  (assert (= (. state.danger-levels-by-id :delete) :danger))
+  (assert (= (. state.buttons-by-id :warn :variant) :warning))
+  (assert (= (. state.buttons-by-id :delete :variant) :danger))
+  (assert (= (. state.danger-badges-by-id :warn :tone) :warning))
+  (assert (= (. state.danger-badges-by-id :delete :tone) :danger))
+  (widget:drop))
+
+(fn test-required_confirmation_needs_second_click_to_run []
+  (local fixture (make-descriptor {:commands [{:id :reset
+                                               :title "Reset"
+                                               :status :metadata
+                                               :danger-level :danger
+                                               :confirmation {:message "Reset game state?"}}]
+                                  :results {:reset {:id :reset :status :ok :value {:reset? true}}}}))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (local button (. state.buttons-by-id :reset))
+  (button:on-click {:source :test})
+  (assert (= fixture.state.run-count 0) "first click must not run command")
+  (assert (= state.confirming-command-id :reset))
+  (assert (string.find state.result-message "Reset game state?" 1 true))
+  (assert (= (. state.button-labels-by-id :reset) "Confirm"))
+  (button:on-click {:source :test})
+  (assert (= fixture.state.run-count 1) "second click should run command")
+  (assert (= state.confirming-command-id nil))
+  (assert (= (. state.button-labels-by-id :reset) "Run"))
+  (widget:drop))
+
+(fn test-confirmation_required_false_runs_immediately []
+  (local fixture (make-descriptor {:commands [{:id :safe-reset
+                                               :title "Safe Reset"
+                                               :status :metadata
+                                               :confirmation {:message "No prompt" :required? false}}]
+                                  :results {:safe-reset {:id :safe-reset :status :ok :value {:reset? true}}}}))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local button (. widget.__command-controls.buttons-by-id :safe-reset))
+  (button:on-click {:source :test})
+  (assert (= fixture.state.run-count 1))
+  (assert (= widget.__command-controls.confirming-command-id nil))
+  (widget:drop))
+
+(fn test-confirmation_defers_payload_validation_until_execute_click []
+  (local schema {:fields [{:id :count :type :number :label "Count"}]})
+  (local fixture (make-descriptor {:commands [{:id :configure
+                                               :title "Configure"
+                                               :status :metadata
+                                               :payload-schema schema
+                                               :confirmation {:message "Apply config?"}}]}))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (local form (. state.forms-by-id :configure))
+  (local input (. form.inputs-by-id :count))
+  (local button (. state.buttons-by-id :configure))
+  (input:set-text "not-a-number")
+  (button:on-click {:source :test})
+  (assert (= fixture.state.run-count 0))
+  (assert (= state.confirming-command-id :configure))
+  (assert-error-contains #(button:on-click {:source :test}) "number field")
+  (assert (= fixture.state.run-count 0))
+  (widget:drop))
+
+(add-test "danger levels update badges and button variants" test-danger_levels_update_badges_and_button_variants)
+(add-test "required confirmation needs second click to run" test-required_confirmation_needs_second_click_to_run)
+(add-test "confirmation required false runs immediately" test-confirmation_required_false_runs_immediately)
+(add-test "confirmation defers payload validation until execute click" test-confirmation_defers_payload_validation_until_execute_click)
+
 (fn main []
   (Runner.run-tests {:name "app-host-workspace-command-controls" :tests tests}))
 
