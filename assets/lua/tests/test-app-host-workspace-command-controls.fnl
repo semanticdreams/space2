@@ -208,9 +208,25 @@
   (assert (= (# context.hoverables.registered) 0)
           "malformed schema must fail before registering hover handlers"))
 
+(fn test-false_payload_schema_fails_control_build []
+  (local fixture (make-descriptor {:commands [{:id :bad
+                                               :title "Bad"
+                                               :status :metadata
+                                               :payload-schema false}]}))
+  (local context (test-context))
+  (assert-error-contains #(build-widget fixture.descriptor context.ctx)
+                         "[app-host.command-payload-schema]")
+  (assert (= fixture.state.run-count 0)
+          "false payload schema must fail before descriptor run-command")
+  (assert (= (# context.clickables.registered) 0)
+          "false payload schema must fail before registering click handlers")
+  (assert (= (# context.hoverables.registered) 0)
+          "false payload schema must fail before registering hover handlers"))
+
 (add-test "schema form builds payload for command" test-schema_form_builds_payload_for_command)
 (add-test "invalid number payload fails before command run" test-invalid_number_payload_fails_before_command_run)
 (add-test "malformed payload schema fails control build" test-malformed_payload_schema_fails_control_build)
+(add-test "false payload schema fails control build" test-false_payload_schema_fails_control_build)
 
 (fn structural-failing-run-command [_self _command-id _payload]
   (error "structural failure"))

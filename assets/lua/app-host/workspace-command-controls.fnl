@@ -37,7 +37,7 @@
 
 (fn validate-command-schemas [commands]
   (each [_ command (ipairs commands)]
-    (when command.payload-schema
+    (when (not (= command.payload-schema nil))
       (Schema.validate-schema command.payload-schema {:command-id command.id}))))
 
 (fn build-command-header-row [command state ctx]
@@ -68,7 +68,7 @@
 
 (fn build-command-row [command state ctx]
   (local header (build-command-header-row command state ctx))
-  (if command.payload-schema
+  (if (not (= command.payload-schema nil))
       (do
         (local form-builder (PayloadForm.CommandPayloadForm {:command command}))
         (local form (form-builder ctx))
