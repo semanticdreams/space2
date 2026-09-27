@@ -4,6 +4,7 @@
 (local StatusBadge (require :status-badge))
 (local {: Flex : FlexChild} (require :flex))
 (local PayloadForm (require :app-host.workspace-command-payload-form))
+(local Schema (require :app-host.command-payload-schema))
 
 (fn controls-error [message]
   (error (.. "[app-host.workspace-command-controls] " message)))
@@ -33,6 +34,11 @@
   (if (not (= command.status nil))
       (tostring command.status)
       "metadata"))
+
+(fn validate-command-schemas [commands]
+  (each [_ command (ipairs commands)]
+    (when command.payload-schema
+      (Schema.validate-schema command.payload-schema {:command-id command.id}))))
 
 (fn build-command-header-row [command state ctx]
   (local text ((WrappedText {:text (command-description command)}) ctx))
@@ -93,6 +99,7 @@
   (fn build [ctx]
     (local snapshot (descriptor:read-inspector-snapshot))
     (local commands (if snapshot.commands snapshot.commands []))
+    (validate-command-schemas commands)
     (var result-text nil)
     (var dropped? false)
     (local state {:snapshot snapshot

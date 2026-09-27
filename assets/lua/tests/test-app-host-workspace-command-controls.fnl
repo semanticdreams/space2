@@ -202,7 +202,11 @@
                                                :payload-schema {:fields [{:id :x :type :object}]}}]}))
   (local context (test-context))
   (assert-error-contains #(build-widget fixture.descriptor context.ctx)
-                         "[app-host.command-payload-schema]"))
+                         "[app-host.command-payload-schema]")
+  (assert (= (# context.clickables.registered) 0)
+          "malformed schema must fail before registering click handlers")
+  (assert (= (# context.hoverables.registered) 0)
+          "malformed schema must fail before registering hover handlers"))
 
 (add-test "schema form builds payload for command" test-schema_form_builds_payload_for_command)
 (add-test "invalid number payload fails before command run" test-invalid_number_payload_fails_before_command_run)
