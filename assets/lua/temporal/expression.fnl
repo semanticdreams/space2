@@ -11,24 +11,36 @@
     (error "temporal expression context is required"))
   ctx)
 
+(fn project-reference-instant [instant zone-id]
+  (when (not= (type zone-id) :string)
+    (error "temporal expression context requires zone id"))
+  (local zdt (core.zoned-date-time.from-instant instant zone-id))
+  (core.plain-date-time.from-fields (zdt:fields)))
+
+(fn normalized-reference-plain-date-time [ctx]
+  (if (not= ctx.reference-plain-date-time nil)
+      ctx.reference-plain-date-time
+      (not= ctx.reference-instant nil)
+      (project-reference-instant ctx.reference-instant ctx.zone-id)
+      nil))
+
 (fn reference-plain-date-time [ctx]
   (require-context ctx)
-  (when (= ctx.reference-plain-date-time nil)
-    (if ctx.reference-instant
-        (error "reference instant resolution requires projection support")
-        (error "temporal expression context requires reference plain date-time")))
-  ctx.reference-plain-date-time)
+  (local reference (normalized-reference-plain-date-time ctx))
+  (when (= reference nil)
+    (error "temporal expression context requires reference plain date-time"))
+  reference)
 
 (fn context [options]
   (when (not= (type options) :table)
     (error "temporal expression context options must be a table"))
   (when (not= (type options.zone-id) :string)
     (error "temporal expression context requires zone id"))
-  (when (and (= options.reference-plain-date-time nil)
-             (= options.reference-instant nil))
+  (local reference (normalized-reference-plain-date-time options))
+  (when (= reference nil)
     (error "temporal expression context requires reference"))
   {:zone-id options.zone-id
-   :reference-plain-date-time options.reference-plain-date-time
+   :reference-plain-date-time reference
    :reference-instant options.reference-instant})
 
 (fn resolve-relative-date [expr ctx]

@@ -78,7 +78,18 @@ The initial RRULE subset supports `FREQ` values `DAILY`, `WEEKLY`, `MONTHLY`, an
 ; => {:kind :plain-date-time :value <2026-09-26T00:00:00>}
 ```
 
-The context requires an explicit `zone-id` and a reference value. Resolution currently supports relative dates (`:day` and `:week`), `:next-weekday`, and recurrence expressions. Natural parsing returns these structured expressions first; resolving them into temporal values is always a separate, context-dependent operation.
+Expression contexts require an explicit `:zone-id` and either a
+`:reference-plain-date-time` or a `:reference-instant`. Plain references are
+used directly. Instant references are projected through the explicit zone id
+before relative expressions are resolved, so the same instant can produce
+different civil dates in different zones. Space never falls back to the host
+local timezone for expression resolution.
+
+Resolution currently supports relative dates (`:day` and `:week`),
+`:next-weekday`, and recurrence expressions. Supported relative-date and
+next-weekday expressions resolve to plain-date-time results. Natural parsing
+returns these structured expressions first; resolving them into temporal values
+is always a separate, context-dependent operation.
 
 ## Natural grammar subset
 
