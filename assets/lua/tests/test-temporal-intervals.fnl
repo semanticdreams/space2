@@ -108,6 +108,14 @@
                    "RX/2026-09-25T12:00:00Z/2026-09-25T13:00:00Z"
                    {:type :instant})
                 "malformed repeat prefix should throw")
+  (assert-error #(Temporal.repeating-interval.parse
+                   "R3/2026-01-01T00:00:00/P1D"
+                   {:type :plain-date-time})
+                "repeating start/period form should throw")
+  (assert-error #(Temporal.repeating-interval.parse
+                   "R3/P1D/2026-01-02T00:00:00"
+                   {:type :plain-date-time})
+                "repeating period/end form should throw")
   (local repeating (Temporal.repeating-interval.parse
                      "R3/2026-09-25T12:00:00Z/2026-09-25T13:00:00Z"
                      {:type :instant}))
