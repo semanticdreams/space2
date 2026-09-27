@@ -62,7 +62,7 @@ Supported field tokens are `yyyy`, `MM`, `dd`, `HH`, `mm`, and `ss`; quoted lite
                                 {})
 ```
 
-The bounded RRULE subset supports `FREQ` values `DAILY`, `WEEKLY`, `MONTHLY`, and `YEARLY`, plus `INTERVAL`, `COUNT`, `UNTIL`, `BYDAY`, and `BYMONTH`. `BYMONTH` accepts integer months `1..12` and acts as an inclusion filter over the existing daily, weekly, monthly, or yearly candidate stream. Monthly and yearly rules remain anchor-based through `Temporal.period`; `YEARLY+BYMONTH` does not generate additional months in this slice. `UNTIL` remains parse/serialize-only and is not an expansion bound.
+The bounded RRULE subset supports `FREQ` values `DAILY`, `WEEKLY`, `MONTHLY`, and `YEARLY`, plus `INTERVAL`, `COUNT`, `UNTIL`, `BYDAY`, and `BYMONTH`. `BYMONTH` accepts integer months `1..12` and acts as an inclusion filter over the existing daily, weekly, monthly, or yearly candidate stream. Compact local `UNTIL=YYYYMMDDTHHMMSS` bounds occurrence expansion inclusively and can satisfy the finite-bound requirement without `COUNT` or `options.limit`; `COUNT`, `options.limit`, and `UNTIL` stop expansion at the earliest reached bound. Compact UTC `UNTIL=YYYYMMDDTHHMMSSZ` remains parse/serialize-compatible but is unsupported for expansion until timezone-aware recurrence exists. Monthly and yearly rules remain anchor-based through `Temporal.period`; `YEARLY+BYMONTH` does not generate additional months in this slice.
 
 ## Structured expressions
 
@@ -118,7 +118,7 @@ Unsupported phrases throw. Natural-language recurrence is only a frontend that e
 
 - **ICU/CLDR localization:** Deferred. Localized parsing and formatting need an explicit ICU/CLDR/data-packaging strategy before implementation.
 - **Broad natural language:** Deferred. Wider language coverage, ambiguous phrases, locales, and product ambiguity UX need their own design.
-- **Full RFC5545:** Deferred. The current RRULE subset is intentionally small; `BYMONTHDAY`, `BYSETPOS`, `WKST`, `RDATE`, `EXDATE`, timezone-aware recurrence, and full RFC5545 candidate-set expansion require separate semantics and compatibility tests.
+- **Full RFC5545:** Deferred. The current RRULE subset is intentionally small; timezone-aware recurrence, UTC/instant `UNTIL` expansion, date-only `UNTIL`, fractional `UNTIL`, `BYMONTHDAY`, `BYSETPOS`, `WKST`, `RDATE`, `EXDATE`, and full RFC5545 candidate-set expansion require separate semantics and compatibility tests.
 - **ISO intervals/repeating intervals:** Bounded `start/end` intervals and plain date-time `start/period` and `period/end` parsing are covered by [Temporal Intervals](./temporal-intervals). Date-only period endpoint forms are supported only by `Temporal.interval.parse` for plain date-times; repeating interval period endpoints, instant period endpoints, zoned interval period endpoints, time-based `PT...` period text, and full ISO interval grammar beyond those two plain date-time forms remain deferred.
 - **Calendar periods:** Date-only calendar period records and `PlainDateTime` arithmetic are covered by [Temporal Calendar Periods](./temporal-calendar-periods). Business days and locale calendar policy remain deferred. Exact `Duration` remains separate from calendar periods such as months and years.
 - **Non-Gregorian calendars:** Deferred. The current foundation uses ISO proleptic Gregorian civil fields only.
