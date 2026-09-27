@@ -145,8 +145,18 @@
   (assert-error-contains run-bad-command "[app-host.command-payload-schema]")
   (assert-error-contains run-bad-command "unsupported field type"))
 
+(fn test-false_payload_schema_is_structural_error []
+  (local host (host-with-commands [{:id :bad
+                                    :payload-schema false
+                                    :run exploding-command-run}]))
+  (fn run-bad-command []
+    (CommandRunner.run-host host :bad {}))
+  (assert-error-contains run-bad-command "[app-host.command-payload-schema]")
+  (assert-error-contains run-bad-command "schema must be a table"))
+
 (add-test "valid payload schema preserves payload dispatch" test-valid_payload_schema_preserves_payload_dispatch)
 (add-test "malformed payload schema is structural error" test-malformed_payload_schema_is_structural_error)
+(add-test "false payload schema is structural error" test-false_payload_schema_is_structural_error)
 
 (fn test-payload_schema_defaults_and_display_values []
   (local schema {:fields [{:id :name :type :string}
@@ -192,9 +202,23 @@
   (assert-error-contains payload-with-invalid-boolean "boolean field enabled requires boolean value")
   (assert-error-contains payload-with-invalid-select "select field mode requires declared option value"))
 
+(fn test-payload_schema_rejects_non_list_fields []
+  (local keyed-schema {:fields {:name {:id :name :type :object}}})
+  (local sparse-fields [])
+  (tset sparse-fields 2 {:id :name :type :string})
+  (local sparse-schema {:fields sparse-fields})
+  (fn validate-keyed-schema []
+    (Schema.validate-schema keyed-schema {:command-id :configure}))
+  (fn validate-sparse-schema []
+    (Schema.validate-schema sparse-schema {:command-id :configure}))
+  (assert-error-contains validate-keyed-schema "[app-host.command-payload-schema]")
+  (assert-error-contains validate-keyed-schema "fields must be an ordered list")
+  (assert-error-contains validate-sparse-schema "fields must be an ordered list"))
+
 (add-test "payload schema defaults and display values" test-payload_schema_defaults_and_display_values)
 (add-test "payload schema builds flat payload from values" test-payload_schema_builds_flat_payload_from_values)
 (add-test "payload schema rejects invalid payload values" test-payload_schema_rejects_invalid_payload_values)
+(add-test "payload schema rejects non-list fields" test-payload_schema_rejects_non_list_fields)
 
 (fn main []
   (Runner.run-tests {:name "app-host-command-runner" :tests tests}))

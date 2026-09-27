@@ -63,14 +63,36 @@
   (when (= field.type :select)
     (validate-select-options field)))
 
+(fn list-index? [key]
+  (and (= (type key) :number)
+       (>= key 1)
+       (= key (math.floor key))))
+
+(fn validate-fields-list [fields]
+  (var count 0)
+  (var max-index 0)
+  (each [key _field (pairs fields)]
+    (when (not (list-index? key))
+      (schema-error "fields must be an ordered list"))
+    (set count (+ count 1))
+    (when (> key max-index)
+      (set max-index key)))
+  (when (not (= count max-index))
+    (schema-error "fields must be an ordered list"))
+  (for [index 1 max-index]
+    (when (= (. fields index) nil)
+      (schema-error "fields must be an ordered list")))
+  max-index)
+
 (fn validate-schema [schema _context]
   (when (not (= (type schema) :table))
     (schema-error "schema must be a table"))
   (when (not (= (type schema.fields) :table))
     (schema-error "schema requires fields table"))
+  (local field-count (validate-fields-list schema.fields))
   (local seen-ids {})
-  (each [_ field (ipairs schema.fields)]
-    (validate-field field seen-ids))
+  (for [index 1 field-count]
+    (validate-field (. schema.fields index) seen-ids))
   schema)
 
 (fn default-value [field]

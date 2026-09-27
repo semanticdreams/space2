@@ -35,7 +35,7 @@
 
 (fn run-host [host command-id payload]
   (local command (find-command (command-list host) command-id))
-  (when command.payload-schema
+  (when (not (= command.payload-schema nil))
     (Schema.validate-schema command.payload-schema {:command-id command-id}))
   (local run-fn command.run)
   (when (not (= (type run-fn) :function))
