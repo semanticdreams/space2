@@ -24,21 +24,6 @@
                              (table.remove children i)))
                           true)})
 
-(fn make-builder-hud []
-  (local children [])
-  {:children children
-   :add-panel-child (fn [self child]
-                      (local widget (child.builder {} {}))
-                      (assert widget.layout "HUD builder should return a widget with layout")
-                      (set self.descriptor child)
-                      (table.insert children widget)
-                      widget)
-   :remove-panel-child (fn [_self child]
-                         (for [i (# children) 1 -1]
-                           (when (= (. children i) child)
-                             (table.remove children i)))
-                         true)})
-
 (fn make-throwing-hud []
   {:add-panel-child (fn [_self _child]
                        (error "hud add failed"))
@@ -50,7 +35,66 @@
            (local out [])
            (each [_ item (ipairs items)]
              (table.insert out item))
-           out)})
+            out)})
+
+(fn make-click-registry []
+  {:registered []
+   :unregistered []
+   :register (fn [self item]
+               (table.insert self.registered item)
+               item)
+   :register-right-click (fn [self item]
+                           (table.insert self.registered item)
+                           item)
+   :register-double-click (fn [self item]
+                            (table.insert self.registered item)
+                            item)
+   :unregister (fn [self item]
+                 (table.insert self.unregistered item)
+                 item)
+   :unregister-right-click (fn [self item]
+                             (table.insert self.unregistered item)
+                             item)
+   :unregister-double-click (fn [self item]
+                              (table.insert self.unregistered item)
+                              item)})
+
+(fn make-hover-registry []
+  {:registered []
+   :unregistered []
+   :register (fn [self item]
+               (table.insert self.registered item)
+               item)
+   :unregister (fn [self item]
+                 (table.insert self.unregistered item)
+                 item)})
+
+(fn make-text-ssbo-batcher []
+  {:upsert-text (fn [_self _key _payload] nil)
+   :update-text-transform (fn [_self _key _payload] nil)
+   :remove-text (fn [_self _key] nil)})
+
+(fn make-ui-context []
+  (local text-ssbo-batcher (make-text-ssbo-batcher))
+  {:clickables (make-click-registry)
+   :hoverables (make-hover-registry)
+   :get-text-ssbo-batcher (fn [_self] text-ssbo-batcher)})
+
+(fn make-builder-hud []
+  (local children [])
+  {:children children
+   :ctx (make-ui-context)
+   :add-panel-child (fn [self child]
+                      (local widget (child.builder self.ctx {}))
+                      (assert widget.layout "HUD builder should return a widget with layout")
+                      (set self.descriptor child)
+                      (table.insert children widget)
+                      widget)
+   :remove-panel-child (fn [_self child]
+                         (for [i (# children) 1 -1]
+                           (when (= (. children i) child)
+                             (table.remove children i)))
+                         true)})
 
 (fn read-fake-state [_self]
   {:value 42})
@@ -58,7 +102,7 @@
 (fn run-fake-restart-command [self payload]
   (set self.state.ran? true)
   (set self.state.payload payload)
-  {:restarted? true :value payload.value})
+  {:restarted? true :value (and payload payload.value)})
 
 (fn run-fake-explode-command [_self _payload]
   (error "command exploded"))
@@ -131,6 +175,25 @@
   (assert (= session.mount fake-mount) "session should expose workspace mount")
   (assert (= (. hud.descriptor :mount) fake-mount) "descriptor should retain mount metadata")
   (assert (. hud.children 1 :layout) "built HUD child should include layout")
+  (local controls (. hud.children 1 :__command-controls))
+  (assert controls "built panel widget should expose command controls state")
+  (assert (. controls.buttons-by-id :restart) "restart command should render a Run button")
+  (assert (= fake-mount.command-state.ran? false) "building visual controls must not execute commands")
+  (session:close)
+  (fixture:restore))
+
+(fn test_built_widget_command_button_runs_hosted_command []
+  (local hud (make-builder-hud))
+  (local fake-mount (make-fake-mount))
+  (local fixture (install-panel-module fake-mount))
+  (local session (fixture.WorkspacePanel.open (panel-opts hud)))
+  (local controls (. hud.children 1 :__command-controls))
+  (local button (. controls.buttons-by-id :restart))
+  (button:on-click {:source :test})
+  (assert (= fake-mount.command-state.ran? true))
+  (assert (= fake-mount.command-state.payload nil) "visual panel buttons pass nil payload")
+  (assert (= controls.last-result.status :ok))
+  (assert (string.find controls.result-message "Restart" 1 true))
   (session:close)
   (fixture:restore))
 
@@ -249,6 +312,7 @@
 
 (add-test "open adds exactly one HUD panel child" test-open-adds-one-hud-child)
 (add-test "builder path returns HUD widget with layout" test-builder_path_returns_hud_widget_with_layout)
+(add-test "built widget command button runs hosted command" test_built_widget_command_button_runs_hosted_command)
 (add-test "controls delegate to controller" test-controls_delegate_to_controller)
 (add-test "session exposes read-only inspector snapshot" test-session_exposes_read_only_inspector_snapshot)
 (add-test "session runs hosted command" test-session_runs_hosted_command)
