@@ -1,5 +1,6 @@
 (local Runner (require :tests/runner))
 (local CommandRunner (require :app-host.command-runner))
+(local Schema (require :app-host.command-payload-schema))
 (local tests [])
 
 (fn add-test [name test-fn]
@@ -42,6 +43,10 @@
   (set self.state.ran-restart? true)
   (set self.state.received-payload payload)
   {:self-id self.id :payload-value payload.value})
+
+(fn configure-command-run [self payload]
+  (set self.state.received-payload payload)
+  {:ok? true :name payload.name})
 
 (fn other-command-run [self _payload]
   (set self.state.ran-other? true))
@@ -119,6 +124,77 @@
   (assert-command-runner-error-contains run-host-with-non-table-command-facet "command facet"))
 
 (add-test "structural command failures are loud" test-structural-command-failures-are-loud)
+
+(fn test-valid_payload_schema_preserves_payload_dispatch []
+  (local state {:received-payload nil})
+  (local host (host-with-commands [{:id :configure
+                                    :state state
+                                    :payload-schema {:fields [{:id :name :type :string}]}
+                                    :run configure-command-run}]))
+  (local result (CommandRunner.run-host host :configure {:name "Ada"}))
+  (assert (= result.status :ok))
+  (assert (= result.value.name "Ada"))
+  (assert (= state.received-payload.name "Ada")))
+
+(fn test-malformed_payload_schema_is_structural_error []
+  (local host (host-with-commands [{:id :bad
+                                    :payload-schema {:fields [{:id :payload :type :object}]}
+                                    :run exploding-command-run}]))
+  (fn run-bad-command []
+    (CommandRunner.run-host host :bad {}))
+  (assert-error-contains run-bad-command "[app-host.command-payload-schema]")
+  (assert-error-contains run-bad-command "unsupported field type"))
+
+(add-test "valid payload schema preserves payload dispatch" test-valid_payload_schema_preserves_payload_dispatch)
+(add-test "malformed payload schema is structural error" test-malformed_payload_schema_is_structural_error)
+
+(fn test-payload_schema_defaults_and_display_values []
+  (local schema {:fields [{:id :name :type :string}
+                          {:id :count :type :number :default 3}
+                          {:id :enabled :type :boolean}
+                          {:id :mode :type :select :options [{:value :fast :label "Fast"}
+                                                             {:value :safe}]}]})
+  (Schema.validate-schema schema {:command-id :configure})
+  (assert (= (Schema.default-value (. schema.fields 1)) ""))
+  (assert (= (Schema.default-value (. schema.fields 2)) "3"))
+  (assert (= (Schema.default-value (. schema.fields 3)) false))
+  (assert (= (Schema.default-value (. schema.fields 4)) :fast))
+  (assert (= (Schema.display-value (. schema.fields 4) :fast) "Fast"))
+  (assert (= (Schema.display-value (. schema.fields 3) true) "true")))
+
+(fn test-payload_schema_builds_flat_payload_from_values []
+  (local schema {:fields [{:id :name :type :string}
+                          {:id :count :type :number}
+                          {:id :enabled :type :boolean}
+                          {:id :mode :type :select :options [{:value :fast}
+                                                             {:value :safe}]}]})
+  (local payload (Schema.payload-from-values schema {:name "Ada"
+                                                     :count "42"
+                                                     :enabled true
+                                                     :mode :safe}
+                                             {:command-id :configure}))
+  (assert (= payload.name "Ada"))
+  (assert (= payload.count 42))
+  (assert (= payload.enabled true))
+  (assert (= payload.mode :safe)))
+
+(fn test-payload_schema_rejects_invalid_payload_values []
+  (local number-schema {:fields [{:id :count :type :number}]})
+  (local boolean-schema {:fields [{:id :enabled :type :boolean}]})
+  (local select-schema {:fields [{:id :mode :type :select :options [{:value :fast}]}]})
+  (fn payload-with-invalid-number []
+    (Schema.payload-from-values number-schema {:count "abc"} {:command-id :configure}))
+  (fn payload-with-invalid-boolean []
+    (Schema.payload-from-values boolean-schema {:enabled "true"} {:command-id :configure}))
+  (fn payload-with-invalid-select []
+    (Schema.payload-from-values select-schema {:mode :safe} {:command-id :configure}))
+  (assert-error-contains payload-with-invalid-number "number field count requires numeric value")
+  (assert-error-contains payload-with-invalid-boolean "boolean field enabled requires boolean value")
+  (assert-error-contains payload-with-invalid-select "select field mode requires declared option value"))
+
+(add-test "payload schema defaults and display values" test-payload_schema_defaults_and_display_values)
+(add-test "payload schema builds flat payload from values" test-payload_schema_builds_flat_payload_from_values)
+(add-test "payload schema rejects invalid payload values" test-payload_schema_rejects_invalid_payload_values)
 
 (fn main []
   (Runner.run-tests {:name "app-host-command-runner" :tests tests}))
