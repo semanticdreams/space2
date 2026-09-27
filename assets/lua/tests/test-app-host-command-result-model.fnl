@@ -69,6 +69,23 @@
   (assert (string.find rendered ":z" 1 true))
   (assert (<= (# rendered) 500)))
 
+(fn test-opaque-key-value-is-deterministic-and-bounded []
+  (local opaque-key (fn [] true))
+  (local rendered (ResultModel.value-text {opaque-key "secret"}))
+  (assert (string.find rendered "<function>" 1 true))
+  (assert (= (string.find rendered "function:" 1 true) nil))
+  (assert (<= (# rendered) 500)))
+
+(fn test-ambiguous-key-ordering-is-stable []
+  (local first-key {})
+  (local second-key {})
+  (local rendered (ResultModel.value-text {first-key "z" second-key "a"}))
+  (local first-match (string.find rendered "<table>=a" 1 true))
+  (local second-match (string.find rendered "<table>=z" 1 true))
+  (assert first-match)
+  (assert second-match)
+  (assert (< first-match second-match)))
+
 (fn test-long-value-is-truncated []
   (local long (string.rep "x" 700))
   (local rendered (ResultModel.value-text long))
@@ -83,6 +100,8 @@
 (add-test "error summary" test-error-summary)
 (add-test "unknown summary" test-unknown-summary)
 (add-test "table value is stable and bounded" test-table-value-is-stable-and-bounded)
+(add-test "opaque key value is deterministic and bounded" test-opaque-key-value-is-deterministic-and-bounded)
+(add-test "ambiguous key ordering is stable" test-ambiguous-key-ordering-is-stable)
 (add-test "long value is truncated" test-long-value-is-truncated)
 
 (fn main []

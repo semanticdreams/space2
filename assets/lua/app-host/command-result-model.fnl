@@ -8,13 +8,6 @@
       (tostring command.id)
       "command"))
 
-(fn sorted-table-keys [tbl]
-  (local keys [])
-  (each [k _v (pairs tbl)]
-    (table.insert keys k))
-  (table.sort keys (fn [a b] (< (tostring a) (tostring b))))
-  keys)
-
 (fn scalar-text [value]
   (local value-type (type value))
   (if (= value-type :function)
@@ -25,10 +18,43 @@
       "<userdata>"
       (tostring value)))
 
-(fn key-text [key]
+(fn key-display-text [key]
   (if (= (type key) :string)
       (.. ":" key)
-      (tostring key)))
+      (= (type key) :table)
+      "<table>"
+      (scalar-text key)))
+
+(fn key-sort-text [key]
+  (local key-type (type key))
+  (if (= key-type :string)
+      (.. "1:string:" key)
+      (= key-type :number)
+      (.. "2:number:" (tostring key))
+      (= key-type :boolean)
+      (.. "3:boolean:" (tostring key))
+      (= key-type :table)
+      "8:table"
+      (= key-type :function)
+      "8:function"
+      (= key-type :thread)
+      "8:thread"
+      (= key-type :userdata)
+      "8:userdata"
+      (.. "9:other:" key-type)))
+
+(fn sorted-table-entry-texts [tbl seen render-value]
+  (local entries [])
+  (each [key value (pairs tbl)]
+    (local rendered-value (render-value value seen))
+    (local text (.. (key-display-text key) "=" rendered-value))
+    (table.insert entries {:sort (.. (key-sort-text key) "\31" rendered-value "\31" text)
+                           :text text}))
+  (table.sort entries (fn [a b] (< a.sort b.sort)))
+  (local parts [])
+  (each [_ entry (ipairs entries)]
+    (table.insert parts entry.text))
+  parts)
 
 (fn raw-value-text [value seen]
   (if (= value nil)
@@ -38,9 +64,7 @@
           "<cycle>"
           (do
             (tset seen value true)
-            (local parts [])
-            (each [_ key (ipairs (sorted-table-keys value))]
-              (table.insert parts (.. (key-text key) "=" (raw-value-text (. value key) seen))))
+            (local parts (sorted-table-entry-texts value seen raw-value-text))
             (tset seen value nil)
             (.. "{" (table.concat parts ", ") "}")))
       (scalar-text value)))
