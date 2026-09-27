@@ -70,9 +70,34 @@
   (assert-error-contains #(Snapshot.read-host {}) "inspectors")
   (assert-error-contains #(Snapshot.read-host {:inspectors (registry [])}) "commands"))
 
+(fn test-command_payload_schema_is_metadata_only []
+  (local command-state {:ran? false})
+  (local schema {:fields [{:id :title :type :string :label "Title"}]})
+  (local host
+    (host-with []
+               [{:id :configure
+                 :title "Configure"
+                 :payload-schema schema
+                 :state command-state
+                 :run mark-command-run}]))
+  (local snapshot (Snapshot.read-host host))
+  (assert (= (. snapshot.commands 1 :id) :configure))
+  (assert (= (. snapshot.commands 1 :payload-schema) schema))
+  (assert (= command-state.ran? false) "snapshot must not execute command handlers"))
+
+(fn test-malformed_command_payload_schema_fails_snapshot []
+  (local host
+    (host-with []
+               [{:id :bad
+                 :payload-schema {:fields [{:id :value :type :object}]}}]))
+  (assert-error-contains #(Snapshot.read-host host) "[app-host.command-payload-schema]")
+  (assert-error-contains #(Snapshot.read-host host) "unsupported field type"))
+
 (add-test "readable inspector and command metadata" test-readable-inspector-and-command-metadata)
 (add-test "unsupported and error inspectors are explicit" test-unsupported-and-error-inspectors-are-explicit)
 (add-test "missing registries fail loudly" test-missing-registries-fail-loudly)
+(add-test "command payload schema is metadata only" test-command_payload_schema_is_metadata_only)
+(add-test "malformed command payload schema fails snapshot" test-malformed_command_payload_schema_fails_snapshot)
 
 (fn main []
   (Runner.run-tests {:name "app-host-workspace-inspector-snapshot" :tests tests}))
