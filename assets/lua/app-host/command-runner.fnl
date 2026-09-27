@@ -33,15 +33,123 @@
     (command-error (.. "duplicate command id: " (tostring command-id))))
   found)
 
-(fn run-host [host command-id payload]
+(fn command-for-run [host command-id]
   (local command (find-command (command-list host) command-id))
   (Metadata.validate-command command {:command-id command-id})
+  command)
+
+(fn result-ok [command-id value]
+  {:id command-id :status :ok :value value})
+
+(fn result-error [command-id value]
+  {:id command-id :status :error :error (tostring value)})
+
+(fn validate-async-callbacks [callbacks]
+  (when (not (= (type callbacks) :table))
+    (command-error "run-host-async requires callbacks table"))
+  (when (not (= (type callbacks.on-result) :function))
+    (command-error "run-host-async requires on-result callback")))
+
+(fn validate-progress [progress]
+  (when (not (= (type progress) :table))
+    (command-error "async progress must be a table"))
+  (when (and (not (= progress.message nil)) (not (= (type progress.message) :string)))
+    (command-error "async progress.message must be a string"))
+  (when (not (= progress.value nil))
+    (if (not (= (type progress.value) :number))
+        (command-error "async progress.value must be a number between 0 and 1")
+        (< progress.value 0)
+        (command-error "async progress.value must be a number between 0 and 1")
+        (> progress.value 1)
+        (command-error "async progress.value must be a number between 0 and 1")))
+  progress)
+
+(fn validate-pending-handle [pending]
+  (when (not (= (type pending) :table))
+    (command-error "async command must return pending handle"))
+  (when (not (= pending.pending true))
+    (command-error "async command must return pending handle"))
+  (when (and (not (= pending.cancel nil)) (not (= (type pending.cancel) :function)))
+    (command-error "async pending handle cancel must be a function"))
+  (when (and (not (= pending.drop nil)) (not (= (type pending.drop) :function)))
+    (command-error "async pending handle drop must be a function"))
+  pending)
+
+(fn run-host [host command-id payload]
+  (local command (command-for-run host command-id))
   (local run-fn command.run)
   (when (not (= (type run-fn) :function))
     (command-error (.. "command requires run function: " (tostring command-id))))
   (local (ok value) (pcall run-fn command payload))
   (if ok
-      {:id command-id :status :ok :value value}
-      {:id command-id :status :error :error (tostring value)}))
+      (result-ok command-id value)
+      (result-error command-id value)))
 
-{:run-host run-host}
+(fn run-host-async [host command-id payload callbacks]
+  (validate-async-callbacks callbacks)
+  (local command (command-for-run host command-id))
+  (local run-async-fn command.run-async)
+  (when (and (not (= (type run-async-fn) :function))
+             (not (= (type command.run) :function)))
+    (command-error (.. "command requires run or run-async function: " (tostring command-id))))
+  (var terminal? false)
+  (var cancelled? false)
+  (var dropped? false)
+  (var pending-handle nil)
+  (local handle {:id command-id :status :running})
+  (fn deliver-result [result]
+    (when (and (not terminal?) (not dropped?))
+      (set terminal? true)
+      (set handle.status :completed)
+      (callbacks.on-result result)))
+  (fn deliver-error [message]
+    (deliver-result (result-error command-id message)))
+  (fn deliver-progress [progress]
+    (when (and (not terminal?) (not dropped?))
+      (local (ok value) (pcall validate-progress progress))
+      (if ok
+          (when (= (type callbacks.on-progress) :function)
+            (callbacks.on-progress value))
+          (deliver-error value))))
+  (fn cancel [_self reason]
+    (when (and (not terminal?) (not dropped?))
+      (set cancelled? true)
+      (when (and (= (type pending-handle) :table)
+                 (= (type pending-handle.cancel) :function))
+        (pending-handle.cancel reason))
+      (deliver-result {:id command-id :status :cancelled :reason reason})))
+  (fn drop [_self]
+    (when (and (not terminal?) (not dropped?))
+      (set dropped? true)
+      (set handle.status :dropped)
+      (when (and (= (type pending-handle) :table)
+                 (= (type pending-handle.drop) :function))
+        (pending-handle.drop))))
+  (fn is-cancelled? [_self]
+    cancelled?)
+  (set handle.cancel cancel)
+  (set handle.drop drop)
+  (set handle.cancelled? is-cancelled?)
+  (local async-callbacks {:progress deliver-progress
+                          :resolve (fn [value]
+                                     (deliver-result (result-ok command-id value)))
+                          :reject (fn [err]
+                                    (deliver-error err))
+                          :cancelled? (fn [] cancelled?)})
+  (if (= (type run-async-fn) :function)
+      (do
+        (local (ok value) (pcall run-async-fn command payload async-callbacks))
+        (if ok
+            (do
+              (local (pending-ok pending-or-error) (pcall validate-pending-handle value))
+              (if pending-ok
+                  (set pending-handle pending-or-error)
+                  (deliver-error pending-or-error)))
+            (deliver-error value)))
+      (deliver-result (run-host host command-id payload)))
+  (when (not terminal?)
+    (set handle.status :running))
+  handle)
+
+{:run-host run-host
+ :run-host-async run-host-async}
