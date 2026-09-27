@@ -211,45 +211,83 @@
              (not (by-day-allowed? rule.by-day (dtstart:iso-weekday))))
     (error "unsupported temporal recurrence expansion")))
 
-(fn occurrences [input-rule dtstart options]
-  (local rule (from input-rule))
-  (when (or (= rule.freq :monthly) (= rule.freq :yearly))
+(fn calendar-step-period [freq offset]
+  (if (= freq :monthly)
+      {:months offset}
+      (= freq :yearly)
+      {:years offset}
+      (error "unsupported temporal recurrence expansion")))
+
+(fn expand-calendar [period rule dtstart limit]
+  (when rule.by-day
     (error "unsupported temporal recurrence expansion"))
-  (local occurrence-options (normalize-occurrence-options options))
-  (local limit (occurrence-limit rule occurrence-options))
+  (period.add-to-plain-date-time dtstart (calendar-step-period rule.freq 0))
   (local results [])
-  (if (= rule.freq :daily)
+  (var index 0)
+  (while (< index limit)
+    (if (= index 0)
+        (table.insert results dtstart)
+        (do
+          (local offset (* index rule.interval))
+          (table.insert results
+                        (period.add-to-plain-date-time
+                          dtstart
+                          (calendar-step-period rule.freq offset)))))
+    (set index (+ index 1)))
+  results)
+
+(fn expand-daily [rule dtstart limit]
+  (local results [])
+  (var current dtstart)
+  (if rule.by-day
       (do
-        (var current dtstart)
-        (if rule.by-day
-            (do
-              (assert-daily-by-day-satisfiable rule dtstart)
-              (var day-offset 0)
-              (while (< (# results) limit)
-                (when (and (= (% day-offset rule.interval) 0)
-                           (by-day-allowed? rule.by-day (current:iso-weekday)))
-                  (table.insert results current))
-                (set current (current:add-days 1))
-                (set day-offset (+ day-offset 1))))
-            (while (< (# results) limit)
-              (table.insert results current)
-              (set current (current:add-days rule.interval)))))
-      (= rule.freq :weekly)
-      (do
-        (var current dtstart)
+        (assert-daily-by-day-satisfiable rule dtstart)
         (var day-offset 0)
-        (local default-weekday (dtstart:iso-weekday))
         (while (< (# results) limit)
-          (local week-offset (math.floor (/ day-offset 7)))
-          (when (and (= (% week-offset rule.interval) 0)
-                     (weekly-day-allowed? rule (current:iso-weekday) default-weekday))
+          (when (and (= (% day-offset rule.interval) 0)
+                     (by-day-allowed? rule.by-day (current:iso-weekday)))
             (table.insert results current))
           (set current (current:add-days 1))
           (set day-offset (+ day-offset 1))))
-      (error "unsupported temporal recurrence expansion"))
+      (while (< (# results) limit)
+        (table.insert results current)
+        (set current (current:add-days rule.interval))))
   results)
 
-{:from from
- :parse-rrule parse-rrule
- :to-rrule to-rrule
- :occurrences occurrences}
+(fn expand-weekly [rule dtstart limit]
+  (local results [])
+  (var current dtstart)
+  (var day-offset 0)
+  (local default-weekday (dtstart:iso-weekday))
+  (while (< (# results) limit)
+    (local week-offset (math.floor (/ day-offset 7)))
+    (when (and (= (% week-offset rule.interval) 0)
+               (weekly-day-allowed? rule (current:iso-weekday) default-weekday))
+      (table.insert results current))
+    (set current (current:add-days 1))
+    (set day-offset (+ day-offset 1)))
+  results)
+
+(fn occurrences [period input-rule dtstart options]
+  (local rule (from input-rule))
+  (local occurrence-options (normalize-occurrence-options options))
+  (local limit (occurrence-limit rule occurrence-options))
+  (if (or (= rule.freq :monthly) (= rule.freq :yearly))
+      (expand-calendar period rule dtstart limit)
+      (= rule.freq :daily)
+      (expand-daily rule dtstart limit)
+      (= rule.freq :weekly)
+      (expand-weekly rule dtstart limit)
+      (error "unsupported temporal recurrence expansion")))
+
+(fn create [deps]
+  (when (not (and deps deps.period deps.period.add-to-plain-date-time))
+    (error "temporal recurrence requires period dependency"))
+  (local period deps.period)
+  {:from from
+   :parse-rrule parse-rrule
+   :to-rrule to-rrule
+   :occurrences (fn [rule dtstart options]
+                  (occurrences period rule dtstart options))})
+
+create

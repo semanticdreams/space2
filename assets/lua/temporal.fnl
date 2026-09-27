@@ -4,9 +4,9 @@
 (local create-interval (require :temporal/interval))
 (local create-repeating-interval (require :temporal/repeating-interval))
 (local create-pattern (require :temporal/pattern))
-(local recurrence (require :temporal/recurrence))
+(local create-recurrence (require :temporal/recurrence))
 (local expression (require :temporal/expression))
-(local natural (require :temporal/natural))
+(local create-natural (require :temporal/natural))
 
 (fn disambiguation-to-core [value]
   (if (= value :reject)
@@ -70,6 +70,8 @@
 
 (local standard (create-standard base))
 (local period (create-period base))
+(local recurrence (create-recurrence {:period period}))
+(local natural (create-natural {:recurrence recurrence}))
 (local interval (create-interval {:standard standard :period period}))
 (local temporal-with-intervals {:standard standard :interval interval})
 
