@@ -68,6 +68,20 @@
   (assert-error #(Temporal.recurrence.parse-rrule "RRULE:FREQ=WEEKLY;BYHOUR=9")
                 "unknown RRULE key should throw"))
 
+(fn temporal-factory-wiring-keeps-public-recurrence-and-natural []
+  (local create-recurrence (require :temporal/recurrence))
+  (local create-natural (require :temporal/natural))
+  (assert (= (type create-recurrence) :function))
+  (assert (= (type create-natural) :function))
+  (assert-error #(create-recurrence {})
+                "recurrence factory should require period dependency")
+  (assert-error #(create-natural {})
+                "natural factory should require recurrence dependency")
+  (local parsed (Temporal.natural.parse "every Tuesday"))
+  (assert (= parsed.kind :recurrence))
+  (assert (= parsed.rule.freq :weekly))
+  (assert (= (. parsed.rule.by-day 1) :tu)))
+
 (fn recurrence-weekly-occurrences []
   (local dtstart (Temporal.plain-date-time.parse "2026-09-22T09:00:00"))
   (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=WEEKLY;COUNT=3;BYDAY=TU"))
@@ -171,6 +185,7 @@
 (table.insert tests {:name "pattern plain date time round trip" :fn pattern-plain-date-time-round-trip})
 (table.insert tests {:name "pattern literals and rejections" :fn pattern-literals-and-rejections})
 (table.insert tests {:name "recurrence RRULE round trip" :fn recurrence-rrule-round-trip})
+(table.insert tests {:name "temporal factory wiring keeps public recurrence and natural" :fn temporal-factory-wiring-keeps-public-recurrence-and-natural})
 (table.insert tests {:name "recurrence weekly occurrences" :fn recurrence-weekly-occurrences})
 (table.insert tests {:name "recurrence weekly without BYDAY uses DTSTART weekday" :fn recurrence-weekly-without-by-day-uses-dtstart-weekday})
 (table.insert tests {:name "recurrence daily limits and rejections" :fn recurrence-daily-limits-and-rejections})

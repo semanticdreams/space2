@@ -249,7 +249,12 @@
       (error "unsupported temporal recurrence expansion"))
   results)
 
-{:from from
- :parse-rrule parse-rrule
- :to-rrule to-rrule
- :occurrences occurrences}
+(fn create [deps]
+  (when (not (and deps deps.period deps.period.add-to-plain-date-time))
+    (error "temporal recurrence requires period dependency"))
+  {:from from
+   :parse-rrule parse-rrule
+   :to-rrule to-rrule
+   :occurrences occurrences})
+
+create

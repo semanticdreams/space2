@@ -1,5 +1,3 @@
-(local recurrence (require :temporal/recurrence))
-
 (local weekday-name-to-symbol
   {:monday :mo
    :tuesday :tu
@@ -47,30 +45,37 @@
   (when weekday
     {:kind :next-weekday :weekday weekday}))
 
-(fn parse-every-weekday [text]
-  (local weekday (parse-weekday-expression text "every"))
-  (when weekday
-    {:kind :recurrence
-     :rule (recurrence.from {:freq :weekly :by-day [weekday]})}))
+(fn create [deps]
+  (when (not (and deps deps.recurrence deps.recurrence.from))
+    (error "temporal natural parser requires recurrence dependency"))
+  (local recurrence deps.recurrence)
 
-(fn parse [input]
-  (when (not= (type input) :string)
-    (unsupported))
-  (local trimmed (trim input))
-  (local text (trimmed:lower))
-  (local relative (parse-relative text))
-  (local next-weekday (parse-next-weekday text))
-  (local every-weekday (parse-every-weekday text))
-  (if (= text "today")
-      {:kind :relative-date :amount 0 :unit :day}
-      (= text "tomorrow")
-      {:kind :relative-date :amount 1 :unit :day}
-      relative
-      relative
-      next-weekday
-      next-weekday
-      every-weekday
-      every-weekday
-      (unsupported)))
+  (fn parse-every-weekday [text]
+    (local weekday (parse-weekday-expression text "every"))
+    (when weekday
+      {:kind :recurrence
+       :rule (recurrence.from {:freq :weekly :by-day [weekday]})}))
 
-{:parse parse}
+  (fn parse [input]
+    (when (not= (type input) :string)
+      (unsupported))
+    (local trimmed (trim input))
+    (local text (trimmed:lower))
+    (local relative (parse-relative text))
+    (local next-weekday (parse-next-weekday text))
+    (local every-weekday (parse-every-weekday text))
+    (if (= text "today")
+        {:kind :relative-date :amount 0 :unit :day}
+        (= text "tomorrow")
+        {:kind :relative-date :amount 1 :unit :day}
+        relative
+        relative
+        next-weekday
+        next-weekday
+        every-weekday
+        every-weekday
+        (unsupported)))
+
+  {:parse parse})
+
+create
