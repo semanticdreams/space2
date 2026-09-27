@@ -9,7 +9,8 @@
    :interval true
    :count true
    :until true
-   :by-day true})
+   :by-day true
+   :by-month true})
 
 (local valid-occurrence-options
   {:limit true})
@@ -35,6 +36,14 @@
     (error "invalid temporal recurrence BYDAY"))
   day)
 
+(fn validate-month [month]
+  (when (not (and (= (type month) :number)
+                  (= month (math.floor month))
+                  (>= month 1)
+                  (<= month 12)))
+    (error "invalid temporal recurrence BYMONTH"))
+  month)
+
 (fn normalize-by-day [days]
   (when (not= days nil)
     (when (not= (type days) :table)
@@ -44,6 +53,17 @@
       (table.insert normalized (validate-day day)))
     (when (= (# normalized) 0)
       (error "invalid temporal recurrence BYDAY"))
+    normalized))
+
+(fn normalize-by-month [months]
+  (when (not= months nil)
+    (when (not= (type months) :table)
+      (error "invalid temporal recurrence BYMONTH"))
+    (local normalized [])
+    (each [_ month (ipairs months)]
+      (table.insert normalized (validate-month month)))
+    (when (= (# normalized) 0)
+      (error "invalid temporal recurrence BYMONTH"))
     normalized))
 
 (fn from [options]
@@ -67,6 +87,9 @@
   (local by-day (normalize-by-day options.by-day))
   (when by-day
     (set rule.by-day by-day))
+  (local by-month (normalize-by-month options.by-month))
+  (when by-month
+    (set rule.by-month by-month))
   rule)
 
 (fn split-nonempty [text separator]
@@ -99,6 +122,12 @@
       (error "invalid RRULE BYDAY"))
     (table.insert days day))
   days)
+
+(fn parse-by-month [text]
+  (local months [])
+  (each [_ item (ipairs (split-nonempty text ","))]
+    (table.insert months (validate-month (parse-positive-integer item "BYMONTH"))))
+  months)
 
 (fn parse-rrule [text]
   (assert (= (type text) :string) "RRULE text must be a string")
@@ -134,6 +163,8 @@
         (set options.until value)
         (= key "BYDAY")
         (set options.by-day (parse-by-day value))
+        (= key "BYMONTH")
+        (set options.by-month (parse-by-month value))
         (error "unknown RRULE key")))
   (from options))
 
@@ -151,6 +182,12 @@
     (table.insert parts (. day-to-rrule (validate-day day))))
   (join parts ","))
 
+(fn serialize-by-month [months]
+  (local parts [])
+  (each [_ month (ipairs months)]
+    (table.insert parts (tostring (validate-month month))))
+  (join parts ","))
+
 (fn to-rrule [rule]
   (local normalized (from rule))
   (local parts [(.. "FREQ=" (. freq-to-rrule normalized.freq))])
@@ -160,6 +197,8 @@
     (table.insert parts (.. "COUNT=" normalized.count)))
   (when normalized.until
     (table.insert parts (.. "UNTIL=" normalized.until)))
+  (when normalized.by-month
+    (table.insert parts (.. "BYMONTH=" (serialize-by-month normalized.by-month))))
   (when normalized.by-day
     (table.insert parts (.. "BYDAY=" (serialize-by-day normalized.by-day))))
   (.. "RRULE:" (join parts ";")))

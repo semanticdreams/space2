@@ -68,6 +68,33 @@
   (assert-error #(Temporal.recurrence.parse-rrule "RRULE:FREQ=WEEKLY;BYHOUR=9")
                 "unknown RRULE key should throw"))
 
+(fn recurrence-bymonth-parse-and-serialize []
+  (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=YEARLY;COUNT=2;BYMONTH=1,3,12"))
+  (assert (= rule.freq :yearly))
+  (assert (= rule.count 2))
+  (assert (= (. rule.by-month 1) 1))
+  (assert (= (. rule.by-month 2) 3))
+  (assert (= (. rule.by-month 3) 12))
+  (assert (= (Temporal.recurrence.to-rrule rule)
+             "RRULE:FREQ=YEARLY;COUNT=2;BYMONTH=1,3,12"))
+
+  (local from-rule (Temporal.recurrence.from {:freq :monthly :by-month [2 4]}))
+  (assert (= (. from-rule.by-month 1) 2))
+  (assert (= (. from-rule.by-month 2) 4))
+
+  (assert-error #(Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;BYMONTH=0")
+                "BYMONTH=0 should throw")
+  (assert-error #(Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;BYMONTH=13")
+                "BYMONTH=13 should throw")
+  (assert-error #(Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;BYMONTH=JAN")
+                "BYMONTH=JAN should throw")
+  (assert-error #(Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;BYMONTH=1,,2")
+                "BYMONTH with empty member should throw")
+  (assert-error #(Temporal.recurrence.from {:freq :monthly :by-month []})
+                "empty by-month should throw")
+  (assert-error #(Temporal.recurrence.from {:freq :monthly :by-month 1})
+                "non-table by-month should throw"))
+
 (fn assert-occurrence-strings [actual expected]
   (assert (= (# actual) (# expected)))
   (each [index value (ipairs expected)]
@@ -258,6 +285,7 @@
 (table.insert tests {:name "pattern plain date time round trip" :fn pattern-plain-date-time-round-trip})
 (table.insert tests {:name "pattern literals and rejections" :fn pattern-literals-and-rejections})
 (table.insert tests {:name "recurrence RRULE round trip" :fn recurrence-rrule-round-trip})
+(table.insert tests {:name "recurrence BYMONTH parse and serialize" :fn recurrence-bymonth-parse-and-serialize})
 (table.insert tests {:name "temporal factory wiring keeps public recurrence and natural" :fn temporal-factory-wiring-keeps-public-recurrence-and-natural})
 (table.insert tests {:name "recurrence weekly occurrences" :fn recurrence-weekly-occurrences})
 (table.insert tests {:name "recurrence weekly without BYDAY uses DTSTART weekday" :fn recurrence-weekly-without-by-day-uses-dtstart-weekday})
