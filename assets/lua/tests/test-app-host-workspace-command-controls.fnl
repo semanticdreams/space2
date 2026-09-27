@@ -1,5 +1,6 @@
 (local Runner (require :tests/runner))
 (local Controls (require :app-host.workspace-command-controls))
+(local History (require :app-host.command-run-history))
 (local tests [])
 
 (fn add-test [name test-fn]
@@ -111,9 +112,17 @@
   (set fixture.async-state async-state)
   fixture)
 
-(fn build-widget [descriptor ctx]
-  (local builder (Controls.WorkspaceCommandControls {:descriptor descriptor}))
+(fn build-widget [descriptor ctx opts]
+  (local options (if opts opts {}))
+  (set options.descriptor descriptor)
+  (local builder (Controls.WorkspaceCommandControls options))
   (builder ctx))
+
+(fn history-entries [state]
+  (History.entries state.run-history))
+
+(fn first-history-entry [state]
+  (. (history-entries state) 1))
 
 (fn assert-command-buttons-enabled [state expected message]
   (each [command-id button (pairs state.buttons-by-id)]
@@ -230,8 +239,61 @@
   (assert (string.find state.result-message "boom" 1 true))
   (widget:drop))
 
+(fn test-confirmation_first_click_leaves_history_empty []
+  (local fixture (make-descriptor {:commands [{:id :reset
+                                               :title "Reset"
+                                               :status :metadata
+                                               :confirmation {:message "Reset game state?"}}]
+                                  :results {:reset {:id :reset :status :ok :value {:reset? true}}}}))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (local button (. state.buttons-by-id :reset))
+  (button:on-click {:source :test})
+  (assert (= (# (history-entries state)) 0) "confirmation prompt must not create a history entry")
+  (assert (string.find state.history-message "No command runs yet" 1 true))
+  (widget:drop))
+
+(fn test-confirmed_second_click_creates_success_history_entry []
+  (local fixture (make-descriptor {:commands [{:id :reset
+                                               :title "Reset"
+                                               :status :metadata
+                                               :confirmation {:message "Reset game state?"}}]
+                                  :results {:reset {:id :reset :status :ok :value {:reset? true}}}}))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (local button (. state.buttons-by-id :reset))
+  (button:on-click {:source :test})
+  (button:on-click {:source :test})
+  (assert (= (# (history-entries state)) 1) "execution click should create exactly one entry")
+  (local entry (first-history-entry state))
+  (assert (= entry.status :ok))
+  (assert (= entry.command-id :reset))
+  (assert (string.find entry.result-text "reset" 1 true))
+  (assert (string.find state.history-message "Reset" 1 true))
+  (assert (string.find state.history-message "result=" 1 true))
+  (widget:drop))
+
+(fn test-history_trims_to_default_limit []
+  (local fixture (make-descriptor {:commands [{:id :restart :title "Restart" :status :metadata}]
+                                  :results {:restart {:id :restart :status :ok :value "done"}}}))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (local button (. state.buttons-by-id :restart))
+  (for [i 1 12]
+    (button:on-click {:source :test}))
+  (assert (= (# (history-entries state)) 10))
+  (assert (= (. (history-entries state) 1 :run-id) 12) "newest run should be first")
+  (assert (= (. (history-entries state) 10 :run-id) 3) "oldest retained run should be within default limit")
+  (widget:drop))
+
 (add-test "run button updates success result" test-run_button_updates_success_result)
 (add-test "run button updates error result" test-run_button_updates_error_result)
+(add-test "confirmation first click leaves history empty" test-confirmation_first_click_leaves_history_empty)
+(add-test "confirmed second click creates success history entry" test-confirmed_second_click_creates_success_history_entry)
+(add-test "history trims to default limit" test-history_trims_to_default_limit)
 
 (fn test-async_command_enters_pending_cancel_state []
   (local fixture (make-async-controls-fixture))
@@ -263,6 +325,25 @@
   (assert (= state.result-badge.tone :info))
   (widget:drop))
 
+(fn test-async_progress_updates_active_history_entry []
+  (local fixture (make-async-controls-fixture))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (local button (. state.buttons-by-id :long))
+  (button:on-click {:source :test})
+  (assert (= (# (history-entries state)) 1) "async start should create one running history entry")
+  (local entry (first-history-entry state))
+  (assert (= entry.status :running))
+  (fixture.async-state.callbacks.on-progress {:message "halfway" :value 0.5})
+  (assert (= (# (history-entries state)) 1) "progress must update the active entry instead of appending")
+  (assert (= (first-history-entry state) entry))
+  (assert (= entry.status :running))
+  (assert (= entry.progress-text "halfway"))
+  (assert (= entry.progress-value 0.5))
+  (assert (string.find state.history-message "halfway" 1 true))
+  (widget:drop))
+
 (fn test-async_completion_restores_buttons_and_success []
   (local fixture (make-async-controls-fixture))
   (local context (test-context))
@@ -279,6 +360,22 @@
   (assert (= state.result-summary.phase :ok))
   (assert (= state.result-badge.tone :success))
   (assert (string.find state.result-message "done" 1 true))
+  (widget:drop))
+
+(fn test-async_success_finishes_active_history_entry []
+  (local fixture (make-async-controls-fixture))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (local button (. state.buttons-by-id :long))
+  (button:on-click {:source :test})
+  (fixture.async-state.callbacks.on-result {:id :long :status :ok :value "done"})
+  (assert (= (# (history-entries state)) 1))
+  (local entry (first-history-entry state))
+  (assert (= entry.status :ok))
+  (assert (= entry.result-text "done"))
+  (assert (= state.active-history-run-id nil))
+  (assert (string.find state.history-message "done" 1 true))
   (widget:drop))
 
 (fn test-async_cancel_click_cancels_once_and_ignores_late_success []
@@ -306,6 +403,22 @@
   (assert (= state.last-result.status :cancelled))
   (widget:drop))
 
+(fn test-async_cancel_finishes_active_history_entry []
+  (local fixture (make-async-controls-fixture))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (local button (. state.buttons-by-id :long))
+  (button:on-click {:source :test})
+  (button:on-click {:source :test})
+  (assert (= (# (history-entries state)) 1))
+  (local entry (first-history-entry state))
+  (assert (= entry.status :cancelled))
+  (assert (string.find entry.error-text "user cancelled" 1 true))
+  (assert (= state.active-history-run-id nil))
+  (assert (string.find state.history-message "user cancelled" 1 true))
+  (widget:drop))
+
 (fn test-async_drop_cleans_up_once_and_ignores_late_callbacks []
   (local fixture (make-async-controls-fixture))
   (local context (test-context))
@@ -323,11 +436,35 @@
   (assert (= state.result-message message-before-drop))
   (assert (= state.last-result last-result-before-drop)))
 
+(fn test-drop_does_not_create_terminal_history_entry []
+  (local fixture (make-async-controls-fixture))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (local button (. state.buttons-by-id :long))
+  (button:on-click {:source :test})
+  (local entry (first-history-entry state))
+  (widget:drop)
+  (assert (= (# (history-entries state)) 1))
+  (assert (= (first-history-entry state) entry))
+  (assert (= entry.status :running))
+  (fixture.async-state.callbacks.on-progress {:message "late" :value 1})
+  (fixture.async-state.callbacks.on-result {:id :long :status :ok :value "late"})
+  (assert (= (# (history-entries state)) 1))
+  (assert (= (first-history-entry state) entry))
+  (assert (= entry.status :running))
+  (assert (= entry.progress-text nil))
+  (assert (= entry.result-text nil)))
+
 (add-test "async command enters pending cancel state" test-async_command_enters_pending_cancel_state)
 (add-test "async progress updates visible summary" test-async_progress_updates_visible_summary)
+(add-test "async progress updates active history entry" test-async_progress_updates_active_history_entry)
 (add-test "async completion restores buttons and success" test-async_completion_restores_buttons_and_success)
+(add-test "async success finishes active history entry" test-async_success_finishes_active_history_entry)
 (add-test "async cancel click cancels once and ignores late success" test-async_cancel_click_cancels_once_and_ignores_late_success)
+(add-test "async cancel finishes active history entry" test-async_cancel_finishes_active_history_entry)
 (add-test "async drop cleans up once and ignores late callbacks" test-async_drop_cleans_up_once_and_ignores_late_callbacks)
+(add-test "drop does not create terminal history entry" test-drop_does_not_create_terminal_history_entry)
 
 (fn test-schema_form_builds_payload_for_command []
   (local fixture (make-descriptor {:commands [{:id :configure
@@ -378,6 +515,27 @@
   (assert (= state.result-summary.phase :idle))
   (widget:drop))
 
+(fn test-invalid_payload_creates_failed_history_entry []
+  (local fixture (make-descriptor {:commands [{:id :configure
+                                               :title "Configure"
+                                               :status :metadata
+                                               :payload-schema configure-schema}]}))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (local form (. state.forms-by-id :configure))
+  (local count-input (. form.inputs-by-id :count))
+  (local run-button (. state.buttons-by-id :configure))
+  (count-input:set-text "not-a-number")
+  (assert-error-contains #(run-button:on-click {:source :test}) "number field")
+  (assert (= fixture.state.run-count 0) "invalid payload must fail before descriptor run-command")
+  (assert (= (# (history-entries state)) 1))
+  (local entry (first-history-entry state))
+  (assert (= entry.status :error))
+  (assert (string.find entry.error-text "number field" 1 true))
+  (assert (string.find state.history-message "number field" 1 true))
+  (widget:drop))
+
 (fn test-malformed_payload_schema_fails_control_build []
   (local fixture (make-descriptor {:commands [{:id :bad
                                                :title "Bad"
@@ -408,6 +566,7 @@
 
 (add-test "schema form builds payload for command" test-schema_form_builds_payload_for_command)
 (add-test "invalid number payload fails before command run" test-invalid_number_payload_fails_before_command_run)
+(add-test "invalid payload creates failed history entry" test-invalid_payload_creates_failed_history_entry)
 (add-test "malformed payload schema fails control build" test-malformed_payload_schema_fails_control_build)
 (add-test "false payload schema fails control build" test-false_payload_schema_fails_control_build)
 
@@ -451,6 +610,23 @@
     (button:on-click {:source :test}))
   (assert-error-contains click-button "structural failure")
   (assert (= state.last-result nil) "structural errors must not become result envelopes")
+  (widget:drop))
+
+(fn test-sync_structural_error_creates_failed_history_entry []
+  (local fixture (make-descriptor {:run-command structural-failing-run-command}))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (local previous-summary state.result-summary)
+  (local button (. state.buttons-by-id :restart))
+  (assert-error-contains #(button:on-click {:source :test}) "structural failure")
+  (assert (= state.result-summary previous-summary))
+  (assert (= state.last-result nil))
+  (assert (= (# (history-entries state)) 1))
+  (local entry (first-history-entry state))
+  (assert (= entry.status :error))
+  (assert (string.find entry.error-text "structural failure" 1 true))
+  (assert (string.find state.history-message "structural failure" 1 true))
   (widget:drop))
 
 (fn test-busy_guard_ignores_reentrant_clicks []
@@ -537,6 +713,7 @@
   (widget:drop))
 
 (add-test "structural run-command errors propagate" test-structural_run_command_errors_propagate)
+(add-test "sync structural error creates failed history entry" test-sync_structural_error_creates_failed_history_entry)
 (add-test "busy guard ignores reentrant clicks" test-busy_guard_ignores_reentrant_clicks)
 (add-test "sync active reentrant click does not cancel busy state" test-sync_active_reentrant_click_does_not_cancel_busy_state)
 (add-test "structural error restores previous summary and buttons" test-structural_error_restores_previous_summary_and_buttons)
