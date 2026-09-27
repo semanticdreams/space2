@@ -45,6 +45,11 @@
       command
       {:id entry.command-id :title entry.title}))
 
+(fn valid-progress-value [value]
+  (if (and (= (type value) :number) (>= value 0) (<= value 1))
+      value
+      nil))
+
 (fn start-run! [history command]
   (local now (history.now))
   (local run-id history.next-run-id)
@@ -74,7 +79,7 @@
     (set entry.title (command-title (entry-command entry command)))
     (set entry.status :running)
     (set entry.progress-text (and progress progress.message (bounded-text progress.message)))
-    (set entry.progress-value (and progress progress.value))
+    (set entry.progress-value (valid-progress-value (and progress progress.value)))
     (set entry.updated-at (history.now)))
   entry)
 

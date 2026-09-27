@@ -59,6 +59,17 @@
   (assert (= (. entries 1 :progress-text) "halfway"))
   (assert (= (. entries 1 :progress-value) 0.5)))
 
+(fn test-progress-rejects_raw_value_objects []
+  (local clock (make-clock))
+  (local history (History.create {:now clock.now}))
+  (local entry (History.start-run! history {:id :export :title "Export"}))
+  (local progress {:message "object progress" :value {:raw true}})
+  (History.progress! history entry.run-id {:id :export :title "Export"} progress)
+  (local stored (. (History.entries history) 1))
+  (assert (= stored.progress-text "object progress"))
+  (assert (= stored.progress-value nil))
+  (assert (= stored.progress nil)))
+
 (fn test-finish-statuses_and_text []
   (local clock (make-clock))
   (local history (History.create {:now clock.now}))
@@ -95,6 +106,7 @@
 (add-test "start run ids and timestamps" test-start-run-ids-and-timestamps)
 (add-test "limit trims oldest" test-limit-trims_oldest)
 (add-test "progress updates existing entry" test-progress-updates_existing_entry)
+(add-test "progress rejects raw value objects" test-progress-rejects_raw_value_objects)
 (add-test "finish statuses and text" test-finish-statuses_and_text)
 (add-test "fail and no raw objects" test-fail-and-no-raw-objects)
 
