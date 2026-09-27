@@ -95,6 +95,35 @@
   (assert-error #(Temporal.recurrence.from {:freq :monthly :by-month 1})
                 "non-table by-month should throw"))
 
+(fn recurrence-bymonthday-parse-and-serialize []
+  (local rule
+    (Temporal.recurrence.parse-rrule
+      "RRULE:FREQ=MONTHLY;COUNT=2;BYMONTH=2;BYMONTHDAY=1,29;BYDAY=MO"))
+  (assert (= rule.freq :monthly))
+  (assert (= rule.count 2))
+  (assert (= (. rule.by-month 1) 2))
+  (assert (= (. rule.by-month-day 1) 1))
+  (assert (= (. rule.by-month-day 2) 29))
+  (assert (= (. rule.by-day 1) :mo))
+  (assert (= (Temporal.recurrence.to-rrule rule)
+             "RRULE:FREQ=MONTHLY;COUNT=2;BYMONTH=2;BYMONTHDAY=1,29;BYDAY=MO"))
+
+  (local from-rule (Temporal.recurrence.from {:freq :daily :by-month-day [31]}))
+  (assert (= (. from-rule.by-month-day 1) 31))
+
+  (assert-error #(Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;BYMONTHDAY=0")
+                "BYMONTHDAY=0 should throw")
+  (assert-error #(Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;BYMONTHDAY=32")
+                "BYMONTHDAY=32 should throw")
+  (assert-error #(Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;BYMONTHDAY=-1")
+                "negative BYMONTHDAY should throw")
+  (assert-error #(Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;BYMONTHDAY=1,,2")
+                "BYMONTHDAY with empty member should throw")
+  (assert-error #(Temporal.recurrence.from {:freq :monthly :by-month-day []})
+                "empty by-month-day should throw")
+  (assert-error #(Temporal.recurrence.from {:freq :monthly :by-month-day 1})
+                "non-table by-month-day should throw"))
+
 (fn assert-occurrence-strings [actual expected]
   (assert (= (# actual) (# expected)))
   (each [index value (ipairs expected)]
@@ -237,6 +266,83 @@
                    monthly-start
                    {})
                  "monthly BYDAY with BYMONTH should still throw"))
+
+(fn recurrence-bymonthday-filters-occurrences []
+  (local daily-start (Temporal.plain-date-time.parse "2026-01-30T09:00:00"))
+  (local daily-rule
+    (Temporal.recurrence.parse-rrule "RRULE:FREQ=DAILY;COUNT=3;BYMONTHDAY=31"))
+  (assert-occurrence-strings
+    (Temporal.recurrence.occurrences daily-rule daily-start {})
+    ["2026-01-31T09:00:00"
+     "2026-03-31T09:00:00"
+     "2026-05-31T09:00:00"])
+
+  (local weekly-start (Temporal.plain-date-time.parse "2026-01-01T09:00:00"))
+  (local weekly-rule
+    (Temporal.recurrence.parse-rrule
+      "RRULE:FREQ=WEEKLY;COUNT=2;BYDAY=MO;BYMONTH=2;BYMONTHDAY=2,16"))
+  (assert-occurrence-strings
+    (Temporal.recurrence.occurrences weekly-rule weekly-start {})
+    ["2026-02-02T09:00:00"
+     "2026-02-16T09:00:00"])
+
+  (local monthly-start (Temporal.plain-date-time.parse "2026-01-31T10:11:12"))
+  (local monthly-rule
+    (Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;COUNT=2;BYMONTHDAY=30"))
+  (assert-occurrence-strings
+    (Temporal.recurrence.occurrences monthly-rule monthly-start {})
+    ["2026-04-30T10:11:12"
+     "2026-06-30T10:11:12"])
+
+  (local yearly-start (Temporal.plain-date-time.parse "2028-02-29T10:11:12"))
+  (local yearly-rule
+    (Temporal.recurrence.parse-rrule "RRULE:FREQ=YEARLY;COUNT=2;BYMONTHDAY=29"))
+  (assert-occurrence-strings
+    (Temporal.recurrence.occurrences yearly-rule yearly-start {})
+    ["2028-02-29T10:11:12"
+     "2032-02-29T10:11:12"])
+
+  (local yearly-clamped
+    (Temporal.recurrence.parse-rrule "RRULE:FREQ=YEARLY;COUNT=2;BYMONTHDAY=28"))
+  (assert-occurrence-strings
+    (Temporal.recurrence.occurrences yearly-clamped yearly-start {})
+    ["2029-02-28T10:11:12"
+     "2030-02-28T10:11:12"]))
+
+(fn recurrence-bymonthday-unsatisfiable-filters-throw []
+  (local daily-start (Temporal.plain-date-time.parse "2026-01-01T09:00:00"))
+  (local daily-rule
+    (Temporal.recurrence.parse-rrule
+      "RRULE:FREQ=DAILY;INTERVAL=146097;COUNT=1;BYMONTHDAY=2"))
+  (local daily-err
+    (assert-error #(Temporal.recurrence.occurrences daily-rule daily-start {})
+                  "unsatisfiable daily BYMONTHDAY should throw instead of hanging"))
+  (assert (tostring daily-err):find "unsupported temporal recurrence expansion" 1 true)
+
+  (local weekly-start (Temporal.plain-date-time.parse "2026-01-01T09:00:00"))
+  (local weekly-rule
+    (Temporal.recurrence.parse-rrule
+      "RRULE:FREQ=WEEKLY;INTERVAL=20871;COUNT=1;BYDAY=FR;BYMONTHDAY=3"))
+  (local weekly-err
+    (assert-error #(Temporal.recurrence.occurrences weekly-rule weekly-start {})
+                  "unsatisfiable weekly BYMONTHDAY should throw instead of hanging"))
+  (assert (tostring weekly-err):find "unsupported temporal recurrence expansion" 1 true)
+
+  (local monthly-start (Temporal.plain-date-time.parse "2026-01-31T10:11:12"))
+  (local monthly-rule
+    (Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;COUNT=1;BYMONTHDAY=15"))
+  (local monthly-err
+    (assert-error #(Temporal.recurrence.occurrences monthly-rule monthly-start {})
+                  "unsatisfiable monthly BYMONTHDAY should throw instead of hanging"))
+  (assert (tostring monthly-err):find "unsupported temporal recurrence expansion" 1 true)
+
+  (local yearly-start (Temporal.plain-date-time.parse "2028-02-29T10:11:12"))
+  (local yearly-rule
+    (Temporal.recurrence.parse-rrule "RRULE:FREQ=YEARLY;COUNT=1;BYMONTHDAY=31"))
+  (local yearly-err
+    (assert-error #(Temporal.recurrence.occurrences yearly-rule yearly-start {})
+                  "unsatisfiable yearly BYMONTHDAY should throw instead of hanging"))
+  (assert (tostring yearly-err):find "unsupported temporal recurrence expansion" 1 true))
 
 (fn recurrence-until-bounds-occurrences []
   (local daily-start (Temporal.plain-date-time.parse "2026-09-22T09:00:00"))
@@ -387,6 +493,7 @@
 (table.insert tests {:name "pattern literals and rejections" :fn pattern-literals-and-rejections})
 (table.insert tests {:name "recurrence RRULE round trip" :fn recurrence-rrule-round-trip})
 (table.insert tests {:name "recurrence BYMONTH parse and serialize" :fn recurrence-bymonth-parse-and-serialize})
+(table.insert tests {:name "recurrence BYMONTHDAY parse and serialize" :fn recurrence-bymonthday-parse-and-serialize})
 (table.insert tests {:name "temporal factory wiring keeps public recurrence and natural" :fn temporal-factory-wiring-keeps-public-recurrence-and-natural})
 (table.insert tests {:name "recurrence weekly occurrences" :fn recurrence-weekly-occurrences})
 (table.insert tests {:name "recurrence weekly without BYDAY uses DTSTART weekday" :fn recurrence-weekly-without-by-day-uses-dtstart-weekday})
@@ -394,6 +501,8 @@
 (table.insert tests {:name "recurrence yearly leap day anchor clamps without drift" :fn recurrence-yearly-leap-day-anchor-clamps-without-drift})
 (table.insert tests {:name "recurrence monthly yearly bounds and rejections" :fn recurrence-monthly-yearly-bounds-and-rejections})
 (table.insert tests {:name "recurrence BYMONTH filters occurrences" :fn recurrence-bymonth-filters-occurrences})
+(table.insert tests {:name "recurrence BYMONTHDAY filters occurrences" :fn recurrence-bymonthday-filters-occurrences})
+(table.insert tests {:name "recurrence BYMONTHDAY unsatisfiable filters throw" :fn recurrence-bymonthday-unsatisfiable-filters-throw})
 (table.insert tests {:name "recurrence UNTIL bounds occurrences" :fn recurrence-until-bounds-occurrences})
 (table.insert tests {:name "recurrence monthly yearly validate first DTSTART" :fn recurrence-monthly-yearly-validate-first-dtstart})
 (table.insert tests {:name "recurrence daily limits and rejections" :fn recurrence-daily-limits-and-rejections})
