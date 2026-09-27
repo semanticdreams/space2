@@ -99,6 +99,8 @@
     (schema-error "field must be a table"))
   (when (= field.id nil)
     (schema-error "field requires id"))
+  (when (not (scalar? field.id))
+    (schema-error "field id must be scalar"))
   (when (. seen-ids field.id)
     (schema-error (.. "duplicate field id: " (tostring field.id))))
   (set (. seen-ids field.id) true)

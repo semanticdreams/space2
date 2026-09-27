@@ -252,12 +252,21 @@
   (assert-error-contains validate-schema-with-keyed-option "[app-host.command-payload-schema]")
   (assert-error-contains validate-schema-with-keyed-option "options for field mode must be an ordered list"))
 
+(fn test-payload_schema_rejects_nested_field_id []
+  (local schema {:fields [{:id {:name :title}
+                           :type :string}]})
+  (fn validate-schema-with-nested-id []
+    (Schema.validate-schema schema {:command-id :configure}))
+  (assert-error-contains validate-schema-with-nested-id "[app-host.command-payload-schema]")
+  (assert-error-contains validate-schema-with-nested-id "field id must be scalar"))
+
 (add-test "payload schema defaults and display values" test-payload_schema_defaults_and_display_values)
 (add-test "payload schema builds flat payload from values" test-payload_schema_builds_flat_payload_from_values)
 (add-test "payload schema rejects invalid payload values" test-payload_schema_rejects_invalid_payload_values)
 (add-test "payload schema rejects non-list fields" test-payload_schema_rejects_non_list_fields)
 (add-test "payload schema rejects nested and extra shapes" test-payload_schema_rejects_nested_and_extra_shapes)
 (add-test "payload schema rejects non-list select options" test-payload_schema_rejects_non_list_select_options)
+(add-test "payload schema rejects nested field id" test-payload_schema_rejects_nested_field_id)
 
 (fn main []
   (Runner.run-tests {:name "app-host-command-runner" :tests tests}))
