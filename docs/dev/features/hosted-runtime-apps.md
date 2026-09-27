@@ -144,9 +144,15 @@ explicit inspector read errors, unsupported inspector markers, and command
 metadata. Snapshot reads list command metadata without executing commands and do
 not mutate app state.
 
-Richer visual command controls, command schemas, async progress, permissions,
-editor integration, graph integration, persistent app discovery, and launcher UX
-remain follow-up subprojects.
+Workspace panels render generic command metadata rows from the read-only
+inspector snapshot. Each row includes a Run button that calls
+`descriptor/session:run-command(command-id, nil)`. The panel displays the latest
+success or error result from the command result envelope, while snapshot reads
+remain metadata-only and never execute commands.
+
+Payload schemas, confirmations and permissions, async progress and cancellation,
+app-specific controls, editor integration, graph integration, persistent app
+discovery, and launcher UX remain follow-up subprojects.
 
 ## Deferred alternatives
 
