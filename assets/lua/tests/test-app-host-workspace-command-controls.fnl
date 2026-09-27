@@ -117,6 +117,59 @@
 
 (add-test "build reads command metadata without running commands" test-build_reads_metadata_without_running_commands)
 
+(fn test-initial_result_badge_and_message []
+  (local fixture (make-descriptor))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (assert (= state.result-summary.phase :idle))
+  (assert (= state.result-message "No command run yet"))
+  (assert (= state.result-badge.tone :neutral))
+  (widget:drop))
+
+(fn test-success_result_shows_badge_and_value []
+  (local fixture (make-descriptor))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (local button (. state.buttons-by-id :restart))
+  (button:on-click {:source :test})
+  (assert (= state.result-summary.phase :ok))
+  (assert (= state.result-badge.tone :success))
+  (assert (string.find state.result-message "Restart" 1 true))
+  (assert (string.find state.result-message "done" 1 true))
+  (widget:drop))
+
+(fn test-error_result_shows_danger_badge []
+  (local fixture (make-descriptor))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (local button (. state.buttons-by-id :explode))
+  (button:on-click {:source :test})
+  (assert (= state.result-summary.phase :error))
+  (assert (= state.result-badge.tone :danger))
+  (assert (string.find state.result-message "boom" 1 true))
+  (widget:drop))
+
+(fn test-unknown_result_status_is_warning []
+  (local fixture (make-descriptor {:commands [{:id :wait :title "Wait" :status :metadata}]
+                                   :results {:wait {:id :wait :status :queued}}}))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (local button (. state.buttons-by-id :wait))
+  (button:on-click {:source :test})
+  (assert (= state.result-summary.phase :unknown))
+  (assert (= state.result-badge.tone :warning))
+  (assert (string.find state.result-message "queued" 1 true))
+  (widget:drop))
+
+(add-test "initial result badge and message" test-initial_result_badge_and_message)
+(add-test "success result shows badge and value" test-success_result_shows_badge_and_value)
+(add-test "error result shows danger badge" test-error_result_shows_danger_badge)
+(add-test "unknown result status is warning" test-unknown_result_status_is_warning)
+
 (fn test-run_button_updates_success_result []
   (local fixture (make-descriptor))
   (local context (test-context))
@@ -187,12 +240,15 @@
                                                :payload-schema configure-schema}]}))
   (local context (test-context))
   (local widget (build-widget fixture.descriptor context.ctx))
-  (local form (. widget.__command-controls.forms-by-id :configure))
+  (local state widget.__command-controls)
+  (local form (. state.forms-by-id :configure))
   (local count-input (. form.inputs-by-id :count))
-  (local run-button (. widget.__command-controls.buttons-by-id :configure))
+  (local run-button (. state.buttons-by-id :configure))
   (count-input:set-text "not-a-number")
   (assert-error-contains #(run-button:on-click {:source :test}) "number field")
   (assert (= fixture.state.run-count 0) "invalid payload must fail before descriptor run-command")
+  (assert (= state.busy? false))
+  (assert (= state.result-summary.phase :idle))
   (widget:drop))
 
 (fn test-malformed_payload_schema_fails_control_build []
@@ -231,6 +287,15 @@
 (fn structural-failing-run-command [_self _command-id _payload]
   (error "structural failure"))
 
+(fn make-reentrant-run-command [run-state widget-ref]
+  (fn reentrant-run-command [_self command-id payload]
+    (set run-state.run-count (+ run-state.run-count 1))
+    (table.insert run-state.calls {:id command-id :payload payload})
+    (when (= command-id :restart)
+      (local reentrant-button (. widget-ref.widget.__command-controls.buttons-by-id :explode))
+      (reentrant-button:on-click {:source :reentrant}))
+    {:id command-id :status :ok :value "done"}))
+
 (fn test-structural_run_command_errors_propagate []
   (local fixture (make-descriptor {:run-command structural-failing-run-command}))
   (local context (test-context))
@@ -243,7 +308,44 @@
   (assert (= state.last-result nil) "structural errors must not become result envelopes")
   (widget:drop))
 
+(fn test-busy_guard_ignores_reentrant_clicks []
+  (local widget-ref {})
+  (local run-state {:run-count 0 :calls []})
+  (local fixture
+    (make-descriptor
+      {:commands [{:id :restart :title "Restart" :status :metadata}
+                  {:id :explode :title "Explode" :status :metadata}]
+       :run-command (make-reentrant-run-command run-state widget-ref)}))
+  (local context (test-context))
+  (set widget-ref.widget (build-widget fixture.descriptor context.ctx))
+  (local button (. widget-ref.widget.__command-controls.buttons-by-id :restart))
+  (button:on-click {:source :test})
+  (assert (= run-state.run-count 1))
+  (assert (= (# run-state.calls) 1))
+  (assert (= (. run-state.calls 1 :id) :restart))
+  (assert (= widget-ref.widget.__command-controls.busy? false))
+  (widget-ref.widget:drop))
+
+(fn test-structural_error_restores_previous_summary_and_buttons []
+  (local fixture (make-descriptor {:run-command structural-failing-run-command}))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (local previous-message state.result-message)
+  (local button (. state.buttons-by-id :restart))
+  (fn click-button []
+    (button:on-click {:source :test}))
+  (assert-error-contains click-button "structural failure")
+  (assert (= state.last-result nil))
+  (assert (= state.result-message previous-message))
+  (assert (= state.result-summary.phase :idle))
+  (assert (= state.busy? false))
+  (assert (= (. state.button-labels-by-id :restart) "Run"))
+  (widget:drop))
+
 (add-test "structural run-command errors propagate" test-structural_run_command_errors_propagate)
+(add-test "busy guard ignores reentrant clicks" test-busy_guard_ignores_reentrant_clicks)
+(add-test "structural error restores previous summary and buttons" test-structural_error_restores_previous_summary_and_buttons)
 
 (fn test-drop_unregisters_button_handlers []
   (local fixture (make-descriptor))
@@ -289,6 +391,8 @@
   (button:on-click {:source :test})
   (assert (= fixture.state.run-count 0) "first click must not run command")
   (assert (= state.confirming-command-id :reset))
+  (assert (= state.busy? false))
+  (assert (= state.result-summary.phase :confirming))
   (assert (string.find state.result-message "Reset game state?" 1 true))
   (assert (= (. state.button-labels-by-id :reset) "Confirm"))
   (button:on-click {:source :test})
@@ -328,6 +432,8 @@
   (button:on-click {:source :test})
   (assert (= fixture.state.run-count 0))
   (assert (= state.confirming-command-id :configure))
+  (assert (= state.busy? false))
+  (assert (= state.result-summary.phase :confirming))
   (assert-error-contains #(button:on-click {:source :test}) "number field")
   (assert (= fixture.state.run-count 0))
   (widget:drop))
