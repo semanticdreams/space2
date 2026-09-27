@@ -73,10 +73,14 @@
             (= start-text "")
             (= end-text ""))
     (error "temporal interval text requires start and end"))
-  (when (or (start-text:match "^P")
-            (end-text:match "^P"))
-    (error "temporal interval duration endpoint forms are not supported"))
   (values start-text end-text))
+
+(fn period-endpoint-text? [text]
+  (if (text:match "^P")
+      true
+      (text:match "^%-P")
+      true
+      false))
 
 (fn create [Temporal]
   (fn from [options]
@@ -95,12 +99,34 @@
         (Temporal.standard.parse-instant text)
         (Temporal.standard.parse-plain-date-time text)))
 
+  (fn resolve-parse-endpoints [endpoint-type start-text end-text]
+    (local start-period? (period-endpoint-text? start-text))
+    (local end-period? (period-endpoint-text? end-text))
+    (when (and start-period? end-period?)
+      (error "temporal interval requires one date-time endpoint when using a period endpoint"))
+    (when (and (if start-period? true end-period?)
+               (not (= endpoint-type :plain-date-time)))
+      (error "temporal interval period endpoint forms require :plain-date-time"))
+    (if end-period?
+        (do
+          (local start (parse-endpoint endpoint-type start-text))
+          (local period (Temporal.period.parse end-text))
+          (values start (Temporal.period.add-to-plain-date-time start period)))
+        start-period?
+        (do
+          (local end (parse-endpoint endpoint-type end-text))
+          (local period (Temporal.period.parse start-text))
+          (values (Temporal.period.subtract-from-plain-date-time end period) end))
+        (values (parse-endpoint endpoint-type start-text)
+                (parse-endpoint endpoint-type end-text))))
+
   (fn parse [text options]
     (validate-parse-options options)
     (local (start-text end-text) (split-interval-text text))
+    (local (start end) (resolve-parse-endpoints options.type start-text end-text))
     (from {:type options.type
-           :start (parse-endpoint options.type start-text)
-           :end (parse-endpoint options.type end-text)}))
+           :start start
+           :end end}))
 
   (fn format-endpoint [endpoint-type endpoint]
     (if (= endpoint-type :instant)

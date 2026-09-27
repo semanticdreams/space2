@@ -1,6 +1,6 @@
 # Temporal Intervals
 
-Temporal intervals add half-open bounded interval records and bounded repeating interval expansion above the native temporal core. They are public through `Temporal.interval` and `Temporal.repeating-interval` on `(require :temporal)`. Calendar period records exist separately in `Temporal.period`, but ISO interval duration endpoint forms remain deferred.
+Temporal intervals add half-open bounded interval records and bounded repeating interval expansion above the native temporal core. They are public through `Temporal.interval` and `Temporal.repeating-interval` on `(require :temporal)`. Calendar period endpoint forms are supported only for `Temporal.interval.parse` with `{:type :plain-date-time}`. The supported forms are `start/period` and `period/end`; instant intervals and repeating intervals still reject period endpoint forms.
 
 ## Layering model
 
@@ -35,7 +35,7 @@ Endpoints must have the same declared type. The initial slice supports only `:in
 `Temporal.interval` creates, parses, formats, measures, checks, and shifts bounded start/end intervals.
 
 - `Temporal.interval.from {:type type :start start :end end}` builds a record with `:kind :interval` and `:bounds :half-open` after validating endpoint type and ordering.
-- `Temporal.interval.parse text {:type type}` accepts only `start/end` text. `:instant` endpoints use `Temporal.standard.parse-instant`; `:plain-date-time` endpoints use `Temporal.standard.parse-plain-date-time`.
+- `Temporal.interval.parse text {:type type}` accepts `start/end` text for `:instant` and `:plain-date-time`. For `{:type :plain-date-time}` it also accepts `start/period` and `period/end`, where `period` is date-only `Temporal.period` text. `start/period` computes the end by adding the period to the start; `period/end` computes the start by subtracting the period from the end. The final interval must still be half-open with `start < end`.
 - `Temporal.interval.format interval` returns canonical `start/end` text.
 - `Temporal.interval.duration interval` returns the exact elapsed `Duration` from start to end.
 - `Temporal.interval.contains interval value` applies half-open containment.
@@ -54,6 +54,16 @@ Endpoints must have the same declared type. The initial slice supports only `:in
 
 (Temporal.interval.format later)
 ; => "2026-09-25T14:00:00/2026-09-25T15:00:00"
+
+(Temporal.interval.format
+  (Temporal.interval.parse "2026-01-31T10:00:00/P1M"
+                           {:type :plain-date-time}))
+; => "2026-01-31T10:00:00/2026-02-28T10:00:00"
+
+(Temporal.interval.format
+  (Temporal.interval.parse "P2W/2026-02-15T09:30:00"
+                           {:type :plain-date-time}))
+; => "2026-02-01T09:30:00/2026-02-15T09:30:00"
 ```
 
 ## Temporal.repeating-interval
@@ -87,11 +97,14 @@ Each next occurrence starts by shifting the previous interval by its exact durat
 
 ## Unsupported forms and deferred scope
 
-The interval layer intentionally supports only bounded `start/end` intervals and bounded expansion of repeating intervals in this slice. The following remain deferred and must fail loudly when presented to current APIs:
+The interval layer intentionally supports bounded `start/end` intervals, date-only `start/period` and `period/end` forms for plain date-time interval parsing, and bounded expansion of repeating intervals in this slice. The following remain deferred and must fail loudly when presented to current APIs:
 
 - native interval userdata in the C++ temporal core.
-- full ISO interval grammar.
-- `duration/start`, `start/duration`, and `duration/end` forms, even though `Temporal.period` calendar period records now exist separately.
+- full ISO interval grammar beyond the two supported plain date-time period endpoint forms.
+- instant period endpoints.
+- repeating interval period endpoints.
+- `Temporal.interval.from` period endpoints.
+- time-based `PT...` period text in interval endpoint forms.
 - zoned intervals.
 - DST-aware interval expansion.
 - calendar-period-driven interval expansion, business days, or locale calendars.
@@ -106,7 +119,7 @@ These deferrals preserve the native core layering boundary and leave product-spe
 For docs-only interval changes, run the focused term check required by the implementation plan:
 
 ```bash
-rg "Temporal Intervals|Temporal.interval|Temporal.repeating-interval|half-open|duration/start|duration/end|zoned intervals|calendar periods|interval algebra" docs/dev/features/temporal-intervals.md docs/dev/features/temporal.md docs/dev/features/temporal-parsing-recurrence.md docs/dev/features/index.md
+rg "start/period|period/end|Temporal.period|repeating interval period endpoint|instant period endpoint|Temporal.interval.parse" docs/dev/features/temporal-intervals.md docs/dev/features/temporal-calendar-periods.md docs/dev/features/temporal-parsing-recurrence.md
 ```
 
 If interval behavior changes, validate the Fennel surface with the project-native compile check, constraints, and focused temporal interval tests in that order.

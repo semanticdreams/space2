@@ -29,6 +29,32 @@
              "2026-09-25T14:00:00/2026-09-25T15:00:00"))
   (assert (= (elapsed:compare (Temporal.duration.from {:seconds 3600})) 0)))
 
+(fn plain-interval-period-endpoint-forms []
+  (local by-start
+    (Temporal.interval.parse "2026-01-31T10:00:00/P1M" {:type :plain-date-time}))
+  (assert (= (Temporal.interval.format by-start)
+             "2026-01-31T10:00:00/2026-02-28T10:00:00"))
+
+  (local by-end
+    (Temporal.interval.parse "P2W/2026-02-15T09:30:00" {:type :plain-date-time}))
+  (assert (= (Temporal.interval.format by-end)
+             "2026-02-01T09:30:00/2026-02-15T09:30:00"))
+
+  (assert-error #(Temporal.interval.parse "2026-02-01T00:00:00/-P1D" {:type :plain-date-time})
+                "negative start/period should throw when it reverses range")
+  (assert-error #(Temporal.interval.parse "-P1D/2026-02-01T00:00:00" {:type :plain-date-time})
+                "negative period/end should throw when it reverses range")
+  (assert-error #(Temporal.interval.parse "2026-02-01T00:00:00/P0D" {:type :plain-date-time})
+                "zero period endpoint should throw")
+  (assert-error #(Temporal.interval.parse "2026-02-01T00:00:00Z/P1D" {:type :instant})
+                "instant start/period should throw")
+  (assert-error #(Temporal.interval.parse "P1D/2026-02-01T00:00:00Z" {:type :instant})
+                "instant period/end should throw")
+  (assert-error #(Temporal.interval.from {:type :plain-date-time
+                                          :start (Temporal.period.parse "P1D")
+                                          :end (Temporal.standard.parse-plain-date-time "2026-02-01T00:00:00")})
+                "interval.from should reject period start endpoints"))
+
 (fn invalid-intervals-throw []
   (local start (Temporal.standard.parse-instant "2026-09-25T12:00:00Z"))
   (local plain-start (Temporal.standard.parse-plain-date-time "2026-09-25T12:00:00"))
@@ -82,6 +108,14 @@
                    "RX/2026-09-25T12:00:00Z/2026-09-25T13:00:00Z"
                    {:type :instant})
                 "malformed repeat prefix should throw")
+  (assert-error #(Temporal.repeating-interval.parse
+                   "R3/2026-01-01T00:00:00/P1D"
+                   {:type :plain-date-time})
+                "repeating start/period form should throw")
+  (assert-error #(Temporal.repeating-interval.parse
+                   "R3/P1D/2026-01-02T00:00:00"
+                   {:type :plain-date-time})
+                "repeating period/end form should throw")
   (local repeating (Temporal.repeating-interval.parse
                      "R3/2026-09-25T12:00:00Z/2026-09-25T13:00:00Z"
                      {:type :instant}))
@@ -95,6 +129,7 @@
 
 (table.insert tests {:name "instant interval basic behavior" :fn instant-interval-basic-behavior})
 (table.insert tests {:name "plain interval parse shift" :fn plain-interval-parse-shift})
+(table.insert tests {:name "plain interval period endpoint forms" :fn plain-interval-period-endpoint-forms})
 (table.insert tests {:name "invalid intervals throw" :fn invalid-intervals-throw})
 (table.insert tests {:name "repeating interval counted occurrences" :fn repeating-interval-counted-occurrences})
 (table.insert tests {:name "repeating interval unbounded limit" :fn repeating-interval-unbounded-limit})

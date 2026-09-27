@@ -45,6 +45,24 @@
         count)
       (error "temporal repeating interval repeat prefix is malformed")))
 
+(fn period-endpoint-text? [text]
+  (if (= text nil)
+      false
+      (text:match "^P")
+      true
+      (text:match "^%-P")
+      true
+      false))
+
+(fn reject-period-endpoint-forms [interval-text]
+  (local (_ slash-count) (interval-text:gsub "/" ""))
+  (when (= slash-count 1)
+    (local (start-text end-text) (interval-text:match "^([^/]*)/([^/]*)$"))
+    (when (if (period-endpoint-text? start-text)
+              true
+              (period-endpoint-text? end-text))
+      (error "temporal repeating interval period endpoint forms are not supported"))))
+
 (fn create [Temporal]
   (fn from [options]
     (validate-from-options options)
@@ -60,6 +78,7 @@
     (local prefix (text:sub 1 (- slash-at 1)))
     (local count (parse-repeat-prefix prefix))
     (local interval-text (text:sub (+ slash-at 1)))
+    (reject-period-endpoint-forms interval-text)
     (from {:interval (Temporal.interval.parse interval-text options)
            :count count}))
 
