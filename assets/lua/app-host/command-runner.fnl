@@ -75,6 +75,9 @@
     (command-error "async pending handle drop must be a function"))
   pending)
 
+(fn cancel-reason [reason]
+  (if (= reason nil) "cancelled" (tostring reason)))
+
 (fn run-host [host command-id payload]
   (local command (command-for-run host command-id))
   (local run-fn command.run)
@@ -123,18 +126,21 @@
     (when (and (not terminal?) (not dropped?))
       (set cancelled? true)
       (set terminal? true)
-      (set handle.status :completed)
+      (set handle.status :cancelled)
       (when (and (= (type pending-handle) :table)
-                 (= (type pending-handle.cancel) :function))
+                  (= (type pending-handle.cancel) :function))
         (pcall pending-handle.cancel reason))
-      (callbacks.on-result {:id command-id :status :cancelled :reason reason})))
+      (callbacks.on-result {:id command-id :status :cancelled :error (cancel-reason reason)})))
   (fn drop [_self]
     (when (and (not terminal?) (not dropped?))
+      (set cancelled? true)
       (set dropped? true)
       (set handle.status :dropped)
-      (when (and (= (type pending-handle) :table)
-                 (= (type pending-handle.drop) :function))
-        (pending-handle.drop))))
+      (when (= (type pending-handle) :table)
+        (if (= (type pending-handle.drop) :function)
+            (pending-handle.drop)
+            (= (type pending-handle.cancel) :function)
+            (pending-handle.cancel "dropped")))))
   (fn is-cancelled? [_self]
     cancelled?)
   (set handle.cancel cancel)
@@ -152,14 +158,21 @@
         (local (ok value) (pcall run-async-fn command payload async-callbacks))
         (if ok
             (do
-              (local (pending-ok pending-or-error) (pcall validate-pending-handle value))
-              (set initializing? false)
-              (if pending-ok
+              (if (= value :completed)
                   (do
-                    (set pending-handle pending-or-error)
-                    (when (not (= queued-terminal-result nil))
-                      (deliver-result queued-terminal-result)))
-                  (deliver-error pending-or-error)))
+                    (set initializing? false)
+                    (if (not (= queued-terminal-result nil))
+                        (deliver-result queued-terminal-result)
+                        (deliver-error "async command returned :completed without terminal callback")))
+                  (do
+                    (local (pending-ok pending-or-error) (pcall validate-pending-handle value))
+                    (set initializing? false)
+                    (if pending-ok
+                        (do
+                          (set pending-handle pending-or-error)
+                          (when (not (= queued-terminal-result nil))
+                            (deliver-result queued-terminal-result)))
+                        (deliver-error pending-or-error)))))
             (do
               (set initializing? false)
               (deliver-error value))))

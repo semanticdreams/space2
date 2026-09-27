@@ -95,13 +95,14 @@
     (set async-state.run-count (+ async-state.run-count 1))
     (table.insert async-state.calls {:id command-id :payload payload})
     (set async-state.callbacks callbacks)
-    {:cancel (fn [_handle]
-               (set async-state.cancel-count (+ async-state.cancel-count 1)))
+    {:cancel (fn [_handle reason]
+                (set async-state.cancel-reason reason)
+                (set async-state.cancel-count (+ async-state.cancel-count 1)))
      :drop (fn [_handle]
              (set async-state.drop-count (+ async-state.drop-count 1)))}))
 
 (fn make-async-controls-fixture []
-  (local async-state {:run-count 0 :calls [] :callbacks nil :cancel-count 0 :drop-count 0})
+  (local async-state {:run-count 0 :calls [] :callbacks nil :cancel-count 0 :cancel-reason nil :drop-count 0})
   (local fixture
     (make-descriptor
       {:commands [{:id :long :title "Long" :status :metadata}
@@ -289,7 +290,11 @@
   (button:on-click {:source :test})
   (button:on-click {:source :test})
   (assert (= fixture.async-state.cancel-count 1))
+  (assert (= fixture.async-state.cancel-reason "user cancelled"))
   (assert (= state.result-summary.phase :cancelled))
+  (assert (= state.last-result.error "user cancelled"))
+  (assert (= state.last-result.reason nil))
+  (assert (string.find state.result-message "user cancelled" 1 true))
   (assert (= state.busy? false))
   (assert (= state.active-command-id nil))
   (assert-command-buttons-enabled state true "buttons must re-enable after cancel")

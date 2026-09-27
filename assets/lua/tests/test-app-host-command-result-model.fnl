@@ -75,12 +75,19 @@
 
 (fn test-cancelled-result-summary []
   (local summary (ResultModel.result-summary {:id :long :title "Long"}
-                                             {:id :long :status :cancelled :error "user cancelled"}))
+                                              {:id :long :status :cancelled :error "user cancelled"}))
   (assert (= summary.phase :cancelled))
   (assert (= summary.tone :warning))
   (assert (= summary.badge-text "Cancelled"))
   (assert (string.find summary.message "Long" 1 true))
   (assert (string.find summary.message "user cancelled" 1 true)))
+
+(fn test-cancelled-result-summary_ignores_legacy_reason []
+  (local summary (ResultModel.result-summary {:id :long :title "Long"}
+                                             {:id :long :status :cancelled :reason "legacy reason"}))
+  (assert (= summary.phase :cancelled))
+  (assert (string.find summary.message "Long" 1 true))
+  (assert (= (string.find summary.message "legacy reason" 1 true) nil)))
 
 (fn test-unknown-summary []
   (local summary (ResultModel.result-summary {:id :mystery :title "Mystery"}
@@ -149,6 +156,7 @@
 (add-test "ok summary with nil value" test-ok-summary-with-nil-value)
 (add-test "error summary" test-error-summary)
 (add-test "cancelled result summary" test-cancelled-result-summary)
+(add-test "cancelled result summary ignores legacy reason" test-cancelled-result-summary_ignores_legacy_reason)
 (add-test "unknown summary" test-unknown-summary)
 (add-test "table value is stable and bounded" test-table-value-is-stable-and-bounded)
 (add-test "opaque key value is deterministic and bounded" test-opaque-key-value-is-deterministic-and-bounded)

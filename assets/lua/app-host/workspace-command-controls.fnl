@@ -177,14 +177,15 @@
 
 (fn cancel-active-command [state apply-result-summary command]
   (local invocation state.active-invocation)
-  (local result {:id command.id :status :cancelled})
+  (local reason "user cancelled")
+  (local result {:id command.id :status :cancelled :error reason})
   (set state.active-invocation nil)
   (set state.busy? false)
   (set-active-command state nil)
   (set-command-buttons-enabled state true)
   (restore-button-labels state)
   (when (and invocation invocation.cancel)
-    (invocation:cancel))
+    (invocation:cancel reason))
   (set state.last-result result)
   (apply-result-summary (ResultModel.result-summary command result))
   result)

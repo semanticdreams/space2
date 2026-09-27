@@ -93,6 +93,19 @@
   (callbacks.resolve {:too-early true})
   {:pending false})
 
+(fn resolving-completed-async-command-run [_self _payload callbacks]
+  (callbacks.resolve {:done true})
+  :completed)
+
+(fn completed-without-terminal-async-command-run []
+  :completed)
+
+(fn cancel-only-async-command-run [self _payload callbacks]
+  (set self.state.callbacks callbacks)
+  {:pending true
+   :cancel (fn [_reason]
+             (set self.state.cancel-count (+ self.state.cancel-count 1)))})
+
 (fn run-host-with-missing-host []
   (CommandRunner.run-host nil :restart {}))
 
@@ -257,6 +270,9 @@
   (assert (= (state.callbacks.cancelled?) true))
   (assert (= (# state.results) 1))
   (assert (= (. state.results 1 :status) :cancelled))
+  (assert (= (. state.results 1 :error) "user cancelled"))
+  (assert (= (. state.results 1 :reason) nil))
+  (assert (= handle.status :cancelled))
   (state.callbacks.resolve {:late true})
   (handle:cancel "again")
   (assert (= state.cancel-count 1))
@@ -344,7 +360,8 @@
   (assert (= state.progress-count 0))
   (assert (= (# state.results) 1))
   (assert (= (. state.results 1 :status) :cancelled))
-  (assert (= handle.status :completed)))
+  (assert (= (. state.results 1 :error) "user cancelled"))
+  (assert (= handle.status :cancelled)))
 
 (fn test-async_runner_rejects_malformed_run_async_facet_loudly []
   (local state {:ran? false})
@@ -376,6 +393,62 @@
   (assert (= (. state.results 1 :value) nil))
   (assert (= handle.status :completed)))
 
+(fn test-async_runner_accepts_completed_after_terminal_callback []
+  (local state {:results []})
+  (local command {:id :done
+                  :run-async resolving-completed-async-command-run})
+  (fn on-result [result]
+    (table.insert state.results result))
+  (local handle (CommandRunner.run-host-async
+                  (host-with-commands [command]) :done nil
+                  {:on-result on-result}))
+  (assert (= (# state.results) 1))
+  (assert (= (. state.results 1 :status) :ok))
+  (assert (= (. state.results 1 :value :done) true))
+  (assert (= handle.status :completed)))
+
+(fn test-async_runner_completed_without_terminal_returns_error []
+  (local state {:results []})
+  (local command {:id :bad
+                  :run-async completed-without-terminal-async-command-run})
+  (fn on-result [result]
+    (table.insert state.results result))
+  (local handle (CommandRunner.run-host-async
+                  (host-with-commands [command]) :bad nil
+                  {:on-result on-result}))
+  (assert (= (# state.results) 1))
+  (assert (= (. state.results 1 :status) :error))
+  (assert (string.find (. state.results 1 :error) "terminal callback" 1 true))
+  (assert (= handle.status :completed)))
+
+(fn test-async_runner_drop_falls_back_to_cancel_and_marks_cancelled []
+  (local state {:callbacks nil :cancel-count 0 :results [] :progress-count 0})
+  (local command {:id :long
+                  :state state
+                  :run-async cancel-only-async-command-run})
+  (fn on-result [result]
+    (table.insert state.results result))
+  (fn on-progress [_progress]
+    (set state.progress-count (+ state.progress-count 1)))
+  (local handle (CommandRunner.run-host-async
+                  (host-with-commands [command]) :long nil
+                  {:on-result on-result
+                   :on-progress on-progress}))
+  (assert (= (state.callbacks.cancelled?) false))
+  (handle:drop)
+  (assert (= state.cancel-count 1))
+  (assert (= (state.callbacks.cancelled?) true))
+  (assert (= (handle:cancelled?) true))
+  (assert (= (# state.results) 0))
+  (state.callbacks.progress {:message "late"})
+  (state.callbacks.resolve {:late true})
+  (state.callbacks.reject "late")
+  (handle:drop)
+  (assert (= state.cancel-count 1))
+  (assert (= state.progress-count 0))
+  (assert (= (# state.results) 0))
+  (assert (= handle.status :dropped)))
+
 (add-test "async runner wraps sync command" test-async_runner_wraps_sync_command)
 (add-test "async runner reports progress and resolve" test-async_runner_reports_progress_and_resolve)
 (add-test "async runner reject returns error result" test-async_runner_reject_returns_error_result)
@@ -387,6 +460,9 @@
 (add-test "async runner cancel suppresses hook callbacks and errors" test-async_runner_cancel_suppresses_hook_callbacks_and_errors)
 (add-test "async runner rejects malformed run-async facet loudly" test-async_runner_rejects_malformed_run_async_facet_loudly)
 (add-test "async runner malformed return wins over sync resolve" test-async_runner_malformed_return_wins_over_sync_resolve)
+(add-test "async runner accepts completed after terminal callback" test-async_runner_accepts_completed_after_terminal_callback)
+(add-test "async runner completed without terminal returns error" test-async_runner_completed_without_terminal_returns_error)
+(add-test "async runner drop falls back to cancel and marks cancelled" test-async_runner_drop_falls_back_to_cancel_and_marks_cancelled)
 
 (fn test-valid_payload_schema_preserves_payload_dispatch []
   (local state {:received-payload nil})
