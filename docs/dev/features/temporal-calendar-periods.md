@@ -46,6 +46,8 @@ Examples:
 (Temporal.period.format (Temporal.period.negate p)) ; => "-P1Y2M3W4D"
 ```
 
+`Temporal.recurrence.occurrences` reuses `Temporal.period.add-to-plain-date-time` for bounded plain-date-time monthly and yearly expansion. Full RFC5545 selectors, timezone-aware recurrence, and DST-aware recurrence remain deferred.
+
 ## Unsupported forms and deferred scope
 
 Current APIs fail loudly for unsupported forms. Deferred scope includes:
@@ -53,7 +55,6 @@ Current APIs fail loudly for unsupported forms. Deferred scope includes:
 - native Period userdata in the C++ temporal core.
 - Instant/ZonedDateTime period arithmetic, including ZonedDateTime period expansion.
 - DST-aware arithmetic and timezone-aware period arithmetic.
-- monthly/yearly recurrence expansion.
 - Date-only `start/period` and `period/end` endpoint forms are supported only by `Temporal.interval.parse` for plain date-times. Repeating interval period endpoints, instant period endpoints, zoned interval period endpoints, time-based `PT...` period text, and full ISO interval grammar beyond those two plain date-time forms remain deferred.
 - `Period.between` and calendar diffing.
 - time-based fields such as hours, minutes, seconds, milliseconds, microseconds, or nanoseconds.
