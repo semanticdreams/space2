@@ -244,6 +244,22 @@ percentage when provided. Cancelled results render a warning/cancelled display
 state. Unknown envelope statuses render as a warning/unknown display state
 instead of crashing the controls.
 
+Command controls also render a session-local `Recent runs` history block below
+the latest-result row. The history is in-memory only, scoped to that controls
+widget, ordered newest first, and bounded to the 10 most recent execution
+attempts by default. History entries are created only by actual execution
+attempts: a first confirmation click arms the inline confirmation state but does
+not create a history row. After the execution click, payload validation failures
+and structural invocation failures create failed local history entries while
+preserving the existing throwing and latest-result restoration behavior. Async
+progress updates the active history row in place rather than appending one row
+per progress event; async success or error finishes that active row. Clicking
+`Cancel` finishes the active row as cancelled with the same cancellation reason
+shown by the latest-result UI. Dropping or closing the widget is lifecycle
+cleanup, not a user-visible terminal command outcome: it does not append or
+finish a terminal history row, and late callbacks after drop do not mutate the
+history.
+
 Each controls widget allows one active command at a time. While a synchronous run
 is active, command buttons are disabled and guarded so a reentrant click cannot
 launch the same synchronous command twice. While an async run is active, the
@@ -256,12 +272,14 @@ result, and late callbacks are ignored through the controls' active-run token.
 Handler exceptions remain error result envelopes, and snapshot reads remain
 metadata-only and never execute commands.
 
-Payload schema expansion beyond flat forms, permissions/auth policy, command
-queues, polling APIs, durable pending command APIs, persistent/background jobs,
-app-specific controls, editor integration, graph integration, persistent
-approvals, persistent app discovery, and launcher UX remain follow-up
-subprojects. Hosted command confirmations do not add permissions,
-authorization, or persistent approval behavior.
+Payload schema expansion beyond flat forms, persistence or global run logs,
+permissions/auth policy, command queues, polling APIs, durable pending command
+APIs, persistent/background jobs, history filtering/search/export, app-specific
+history APIs, app-specific controls, editor integration, graph integration,
+persistent approvals, persistent app discovery, and launcher UX remain follow-up
+subprojects. Hosted command confirmations and recent-runs history do not add
+permissions, authorization, persistent approval behavior, durable jobs, polling,
+or app-provided logging/history APIs.
 
 ## Deferred alternatives
 
