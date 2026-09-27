@@ -69,7 +69,8 @@
    :tzdb {:version core.tzdb.version}})
 
 (local standard (create-standard base))
-(local interval (create-interval {:standard standard}))
+(local period (create-period base))
+(local interval (create-interval {:standard standard :period period}))
 (local temporal-with-intervals {:standard standard :interval interval})
 
 {:duration base.duration
@@ -78,7 +79,7 @@
  :zoned-date-time base.zoned-date-time
  :clock base.clock
   :tzdb base.tzdb
-  :period (create-period base)
+  :period period
   :standard standard
   :interval interval
   :repeating-interval (create-repeating-interval temporal-with-intervals)
