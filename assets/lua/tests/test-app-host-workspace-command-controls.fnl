@@ -91,6 +91,11 @@
   (local builder (Controls.WorkspaceCommandControls {:descriptor descriptor}))
   (builder ctx))
 
+(fn assert-command-buttons-enabled [state expected message]
+  (each [command-id button (pairs state.buttons-by-id)]
+    (assert (= button.enabled? expected)
+            (.. message " (" (tostring command-id) ")"))))
+
 (local configure-schema
   {:fields [{:id :title :type :string :label "Title" :default "draft"}
             {:id :count :type :number :label "Count" :default 2}
@@ -138,6 +143,7 @@
   (assert (= state.result-badge.tone :success))
   (assert (string.find state.result-message "Restart" 1 true))
   (assert (string.find state.result-message "done" 1 true))
+  (assert-command-buttons-enabled state true "buttons must re-enable after success result")
   (widget:drop))
 
 (fn test-error_result_shows_danger_badge []
@@ -150,6 +156,7 @@
   (assert (= state.result-summary.phase :error))
   (assert (= state.result-badge.tone :danger))
   (assert (string.find state.result-message "boom" 1 true))
+  (assert-command-buttons-enabled state true "buttons must re-enable after error result")
   (widget:drop))
 
 (fn test-unknown_result_status_is_warning []
@@ -287,6 +294,11 @@
 (fn structural-failing-run-command [_self _command-id _payload]
   (error "structural failure"))
 
+(fn success-then-structural-run-command [_self command-id _payload]
+  (if (= command-id :restart)
+      {:id :restart :status :ok :value "kept"}
+      (error "structural failure after success")))
+
 (fn make-reentrant-run-command [run-state widget-ref]
   (fn reentrant-run-command [_self command-id payload]
     (set run-state.run-count (+ run-state.run-count 1))
@@ -341,11 +353,39 @@
   (assert (= state.result-summary.phase :idle))
   (assert (= state.busy? false))
   (assert (= (. state.button-labels-by-id :restart) "Run"))
+  (assert-command-buttons-enabled state true "buttons must re-enable after structural error")
+  (widget:drop))
+
+(fn test-structural_error_preserves_prior_visible_result_and_buttons []
+  (local fixture (make-descriptor {:run-command success-then-structural-run-command}))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (local restart-button (. state.buttons-by-id :restart))
+  (local explode-button (. state.buttons-by-id :explode))
+  (restart-button:on-click {:source :test})
+  (local previous-summary state.result-summary)
+  (local previous-message state.result-message)
+  (local previous-result state.last-result)
+  (assert (= previous-summary.phase :ok))
+  (assert (string.find previous-message "kept" 1 true))
+  (fn click-failing-button []
+    (explode-button:on-click {:source :test}))
+  (assert-error-contains click-failing-button "structural failure after success")
+  (assert (= state.result-summary previous-summary))
+  (assert (= state.result-message previous-message))
+  (assert (= state.last-result previous-result))
+  (assert (= state.last-result.status :ok))
+  (assert (= state.busy? false))
+  (assert (= (. state.button-labels-by-id :restart) "Run"))
+  (assert (= (. state.button-labels-by-id :explode) "Run"))
+  (assert-command-buttons-enabled state true "buttons must re-enable after structural error with prior result")
   (widget:drop))
 
 (add-test "structural run-command errors propagate" test-structural_run_command_errors_propagate)
 (add-test "busy guard ignores reentrant clicks" test-busy_guard_ignores_reentrant_clicks)
 (add-test "structural error restores previous summary and buttons" test-structural_error_restores_previous_summary_and_buttons)
+(add-test "structural error preserves prior visible result and buttons" test-structural_error_preserves_prior_visible_result_and_buttons)
 
 (fn test-drop_unregisters_button_handlers []
   (local fixture (make-descriptor))
