@@ -1,8 +1,7 @@
 (local WorkspaceMount (require :app-host.workspace-mount))
 (local Snapshot (require :app-host.workspace-inspector-snapshot))
 (local CommandRunner (require :app-host.command-runner))
-(local glm (require :glm))
-(local {: Layout} (require :layout))
+(local CommandControls (require :app-host.workspace-command-controls))
 
 (fn panel-error [message]
   (error (.. "[app-host.workspace-panel] " message)))
@@ -19,22 +18,6 @@
   (when (not (= (type hud.remove-panel-child) :function))
     (panel-error "HUD requires remove-panel-child"))
   hud)
-
-(fn measure-zero [self]
-  (set self.measure (glm.vec3 0 0 0)))
-
-(fn layout-noop [_self]
-  nil)
-
-(fn make-panel-widget [descriptor]
-  (local layout
-    (Layout {:name "hosted-app-workspace-panel"
-             :measurer measure-zero
-             :layouter layout-noop}))
-  {:layout layout
-   :drop (fn [self]
-           (self.layout:drop))
-   :hosted-app-workspace-panel descriptor})
 
 (fn open [opts]
   (when (= opts nil)
@@ -71,8 +54,9 @@
       (mount:drop))
     nil)
 
-  (fn build-panel [_ctx _builder-options]
-    (make-panel-widget descriptor))
+  (fn build-panel [ctx _builder-options]
+    (local builder (CommandControls.WorkspaceCommandControls {:descriptor descriptor}))
+    (builder ctx))
 
   (fn add-panel-descriptor []
     (hud:add-panel-child descriptor))
