@@ -130,6 +130,40 @@
     (table.insert months (validate-month (parse-positive-integer item "BYMONTH"))))
   months)
 
+(fn compact-local-until? [text]
+  (and (= (type text) :string)
+       (not= (text:match "^%d%d%d%d%d%d%d%dT%d%d%d%d%d%d$") nil)))
+
+(fn compact-utc-until? [text]
+  (and (= (type text) :string)
+       (not= (text:match "^%d%d%d%d%d%d%d%dT%d%d%d%d%d%dZ$") nil)))
+
+(fn compact-local-until->iso [text]
+  (.. (text:sub 1 4)
+      "-"
+      (text:sub 5 6)
+      "-"
+      (text:sub 7 8)
+      "T"
+      (text:sub 10 11)
+      ":"
+      (text:sub 12 13)
+      ":"
+      (text:sub 14 15)))
+
+(fn parse-local-until [standard text]
+  (local (ok value) (pcall standard.parse-plain-date-time (compact-local-until->iso text)))
+  (when (not ok)
+    (error "invalid temporal recurrence UNTIL"))
+  value)
+
+(fn parse-until [standard text]
+  (if (compact-local-until? text)
+      {:kind :plain-date-time :value (parse-local-until standard text)}
+      (compact-utc-until? text)
+      {:kind :instant}
+      (error "invalid temporal recurrence UNTIL")))
+
 (fn parse-rrule [text]
   (assert (= (type text) :string) "RRULE text must be a string")
   (when (not= (text:sub 1 6) "RRULE:")
@@ -218,9 +252,7 @@
             (set has-limit true)))
         {:limit options.limit :has-limit has-limit})))
 
-(fn occurrence-limit [rule options]
-  (when (and (= rule.count nil) (not options.has-limit))
-    (error "temporal recurrence expansion requires count or limit"))
+(fn numeric-occurrence-limit [rule options]
   (when options.has-limit
     (validate-positive-integer options.limit "limit"))
   (if (and rule.count options.has-limit)
@@ -228,6 +260,19 @@
       rule.count
       rule.count
       options.limit))
+
+(fn occurrence-bounds [standard rule options]
+  (local limit (numeric-occurrence-limit rule options))
+  (var until nil)
+  (when rule.until
+    (local parsed (parse-until standard rule.until))
+    (if (= parsed.kind :plain-date-time)
+        (set until parsed.value)
+        (= parsed.kind :instant)
+        (error "unsupported temporal recurrence UNTIL")))
+  (when (and (= limit nil) (= until nil))
+    (error "temporal recurrence expansion requires count, limit, or until"))
+  {:limit limit :until until})
 
 (fn weekly-day-allowed? [rule weekday default-weekday]
   (if rule.by-day
@@ -270,6 +315,14 @@
   (if rule.by-month
       (by-month-allowed? rule.by-month (plain-month candidate))
       true))
+
+(fn limit-reached? [results bounds]
+  (and bounds.limit (>= (# results) bounds.limit)))
+
+(fn within-until? [candidate until]
+  (if (= until nil)
+      true
+      (<= (candidate:compare until) 0)))
 
 (fn assert-daily-by-day-satisfiable [rule dtstart]
   (when (and rule.by-day (= (% rule.interval 7) 0)
@@ -348,26 +401,30 @@
         (when (not (month-filter-allowed? rule dtstart))
           (error "unsupported temporal recurrence expansion")))))
 
-(fn expand-calendar [period rule dtstart limit]
+(fn expand-calendar [period rule dtstart bounds]
   (when rule.by-day
     (error "unsupported temporal recurrence expansion"))
   (period.add-to-plain-date-time dtstart (calendar-step-period rule.freq 0))
   (assert-calendar-filters-satisfiable period rule dtstart)
   (local results [])
   (var index 0)
-  (while (< (# results) limit)
+  (var done false)
+  (while (and (not done) (not (limit-reached? results bounds)))
     (local candidate
       (if (= index 0)
           dtstart
           (period.add-to-plain-date-time
             dtstart
             (calendar-step-period rule.freq (* index rule.interval)))))
-    (when (month-filter-allowed? rule candidate)
-      (table.insert results candidate))
-    (set index (+ index 1)))
+    (if (not (within-until? candidate bounds.until))
+        (set done true)
+        (do
+          (when (month-filter-allowed? rule candidate)
+            (table.insert results candidate))
+          (set index (+ index 1)))))
   results)
 
-(fn expand-daily [rule dtstart limit]
+(fn expand-daily [rule dtstart bounds]
   (local results [])
   (var current dtstart)
   (if rule.by-day
@@ -375,7 +432,8 @@
         (assert-daily-by-day-satisfiable rule dtstart)
         (assert-daily-filters-satisfiable rule dtstart)
         (var day-offset 0)
-        (while (< (# results) limit)
+        (while (and (not (limit-reached? results bounds))
+                    (within-until? current bounds.until))
           (when (and (= (% day-offset rule.interval) 0)
                      (by-day-allowed? rule.by-day (current:iso-weekday))
                      (month-filter-allowed? rule current))
@@ -384,19 +442,21 @@
           (set day-offset (+ day-offset 1))))
       (do
         (assert-daily-filters-satisfiable rule dtstart)
-        (while (< (# results) limit)
+        (while (and (not (limit-reached? results bounds))
+                    (within-until? current bounds.until))
           (when (month-filter-allowed? rule current)
             (table.insert results current))
           (set current (current:add-days rule.interval)))))
   results)
 
-(fn expand-weekly [rule dtstart limit]
+(fn expand-weekly [rule dtstart bounds]
   (local results [])
   (var current dtstart)
   (var day-offset 0)
   (local default-weekday (dtstart:iso-weekday))
   (assert-weekly-filters-satisfiable rule dtstart)
-  (while (< (# results) limit)
+  (while (and (not (limit-reached? results bounds))
+              (within-until? current bounds.until))
     (local week-offset (math.floor (/ day-offset 7)))
     (when (and (= (% week-offset rule.interval) 0)
                (weekly-day-allowed? rule (current:iso-weekday) default-weekday)
@@ -406,26 +466,29 @@
     (set day-offset (+ day-offset 1)))
   results)
 
-(fn occurrences [period input-rule dtstart options]
+(fn occurrences [period standard input-rule dtstart options]
   (local rule (from input-rule))
   (local occurrence-options (normalize-occurrence-options options))
-  (local limit (occurrence-limit rule occurrence-options))
+  (local bounds (occurrence-bounds standard rule occurrence-options))
   (if (or (= rule.freq :monthly) (= rule.freq :yearly))
-      (expand-calendar period rule dtstart limit)
+      (expand-calendar period rule dtstart bounds)
       (= rule.freq :daily)
-      (expand-daily rule dtstart limit)
+      (expand-daily rule dtstart bounds)
       (= rule.freq :weekly)
-      (expand-weekly rule dtstart limit)
+      (expand-weekly rule dtstart bounds)
       (error "unsupported temporal recurrence expansion")))
 
 (fn create [deps]
   (when (not (and deps deps.period deps.period.add-to-plain-date-time))
     (error "temporal recurrence requires period dependency"))
+  (when (not (and deps.standard deps.standard.parse-plain-date-time))
+    (error "temporal recurrence requires standard dependency"))
   (local period deps.period)
+  (local standard deps.standard)
   {:from from
    :parse-rrule parse-rrule
    :to-rrule to-rrule
    :occurrences (fn [rule dtstart options]
-                  (occurrences period rule dtstart options))})
+                   (occurrences period standard rule dtstart options))})
 
 create
