@@ -172,6 +172,7 @@
       :tests.test-agent-session-migration
       :tests.test-disclosure-row
     :tests.test-status-badge
+    :tests.test-app-host-command-result-model
     :tests.test-cgltf
     :tests.test-graph-kind-badge
     :tests.test-graph-core
