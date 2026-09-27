@@ -1,4 +1,4 @@
-(local Schema (require :app-host.command-payload-schema))
+(local Metadata (require :app-host.command-metadata))
 
 (fn snapshot-error [message]
   (error (.. "[app-host.workspace-inspector-snapshot] " message)))
@@ -22,12 +22,16 @@
       {:id facet.id :title facet.title :status :unsupported}))
 
 (fn command-entry [facet]
+  (Metadata.validate-command facet {:command-id facet.id})
   (local entry {:id facet.id
-                :title facet.title
-                :description facet.description
-                :status :metadata})
+                 :title facet.title
+                 :description facet.description
+                 :status :metadata
+                 :danger-level (Metadata.danger-level facet)})
+  (local confirmation (Metadata.confirmation facet))
+  (when (not (= confirmation nil))
+    (set entry.confirmation confirmation))
   (when (not (= facet.payload-schema nil))
-    (Schema.validate-schema facet.payload-schema {:command-id facet.id})
     (set entry.payload-schema facet.payload-schema))
   entry)
 

@@ -25,10 +25,21 @@ Hosted app command facets may declare an optional `:payload-schema` so workspace
 
 Commands without `:payload-schema` still run with nil payload from visual controls. Commands with schemas build flat payload tables keyed by field id and execute through `descriptor/session:run-command(command-id, payload)`.
 
+## Inline confirmations
+
+When a command has required `:confirmation` metadata, the first click only arms
+the inline confirmation state and does not build payloads. Payload construction
+and payload validation happen only on the actual execution click. Invalid
+payloads fail before command execution, so the command handler is not run.
+Confirmations do not add permissions, authorization, modal dialogs, persistent
+approvals, or “always allow” behavior.
+
 ## Errors
 
 Malformed schemas fail loudly with `[app-host.command-payload-schema]` during snapshot reads, widget builds, and command runner dispatch. Command handler exceptions still use the existing command-runner error result envelope.
 
 ## Out of scope
 
-Nested objects, arrays, validation DSLs, async progress/cancellation, permissions, confirmations, persistent form state, app-specific controls, and dropdown framework work are future slices.
+Nested objects, arrays, validation DSLs, async progress/cancellation,
+permissions/auth policy, persistent form state, app-specific controls, and
+dropdown framework work are future slices.

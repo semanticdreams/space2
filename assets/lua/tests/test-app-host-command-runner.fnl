@@ -51,6 +51,10 @@
 (fn other-command-run [self _payload]
   (set self.state.ran-other? true))
 
+(fn mark-ran-command-run [self _payload]
+  (set self.state.ran? true)
+  true)
+
 (fn run-host-with-missing-host []
   (CommandRunner.run-host nil :restart {}))
 
@@ -154,9 +158,33 @@
   (assert-error-contains run-bad-command "[app-host.command-payload-schema]")
   (assert-error-contains run-bad-command "schema must be a table"))
 
+(fn test-runner_rejects_invalid_danger_metadata_before_handler []
+  (local state {:ran? false})
+  (local host (host-with-commands [{:id :bad
+                                    :danger-level :critical
+                                    :state state
+                                    :run mark-ran-command-run}]))
+  (fn run-bad-command []
+    (CommandRunner.run-host host :bad {}))
+  (assert-error-contains run-bad-command "[app-host.command-metadata]")
+  (assert (= state.ran? false) "invalid metadata must fail before handler invocation"))
+
+(fn test-runner_rejects_invalid_confirmation_before_handler []
+  (local state {:ran? false})
+  (local host (host-with-commands [{:id :bad
+                                    :confirmation "confirm"
+                                    :state state
+                                    :run mark-ran-command-run}]))
+  (fn run-bad-command []
+    (CommandRunner.run-host host :bad {}))
+  (assert-error-contains run-bad-command "[app-host.command-metadata]")
+  (assert (= state.ran? false) "invalid confirmation must fail before handler invocation"))
+
 (add-test "valid payload schema preserves payload dispatch" test-valid_payload_schema_preserves_payload_dispatch)
 (add-test "malformed payload schema is structural error" test-malformed_payload_schema_is_structural_error)
 (add-test "false payload schema is structural error" test-false_payload_schema_is_structural_error)
+(add-test "runner rejects invalid danger metadata before handler" test-runner_rejects_invalid_danger_metadata_before_handler)
+(add-test "runner rejects invalid confirmation before handler" test-runner_rejects_invalid_confirmation_before_handler)
 
 (fn test-payload_schema_defaults_and_display_values []
   (local schema {:fields [{:id :name :type :string}
