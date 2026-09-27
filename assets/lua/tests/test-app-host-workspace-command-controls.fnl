@@ -423,6 +423,19 @@
       (reentrant-button:on-click {:source :reentrant}))
     {:id command-id :status :ok :value "done"}))
 
+(fn make-active-reentrant-sync-run-command [run-state widget-ref]
+  (fn active-reentrant-sync-run-command [_self command-id payload]
+    (set run-state.run-count (+ run-state.run-count 1))
+    (table.insert run-state.calls {:id command-id :payload payload})
+    (when (= command-id :restart)
+      (local state widget-ref.widget.__command-controls)
+      (local active-button (. state.buttons-by-id :restart))
+      (local other-button (. state.buttons-by-id :explode))
+      (active-button:on-click {:source :active-reentrant})
+      (set run-state.busy-after-active-click state.busy?)
+      (other-button:on-click {:source :post-active-reentrant}))
+    {:id command-id :status :ok :value "done"}))
+
 (fn test-structural_run_command_errors_propagate []
   (local fixture (make-descriptor {:run-command structural-failing-run-command}))
   (local context (test-context))
@@ -448,6 +461,27 @@
   (local button (. widget-ref.widget.__command-controls.buttons-by-id :restart))
   (button:on-click {:source :test})
   (assert (= run-state.run-count 1))
+  (assert (= (# run-state.calls) 1))
+  (assert (= (. run-state.calls 1 :id) :restart))
+  (assert (= widget-ref.widget.__command-controls.busy? false))
+  (widget-ref.widget:drop))
+
+(fn test-sync_active_reentrant_click_does_not_cancel_busy_state []
+  (local widget-ref {})
+  (local run-state {:run-count 0 :calls [] :busy-after-active-click nil})
+  (local fixture
+    (make-descriptor
+      {:commands [{:id :restart :title "Restart" :status :metadata}
+                  {:id :explode :title "Explode" :status :metadata}]
+       :run-command (make-active-reentrant-sync-run-command run-state widget-ref)}))
+  (local context (test-context))
+  (set widget-ref.widget (build-widget fixture.descriptor context.ctx))
+  (local button (. widget-ref.widget.__command-controls.buttons-by-id :restart))
+  (button:on-click {:source :test})
+  (assert (= run-state.busy-after-active-click true)
+          "sync active-command reentrant click must not clear busy state")
+  (assert (= run-state.run-count 1)
+          "sync busy reentrant clicks must not start nested commands")
   (assert (= (# run-state.calls) 1))
   (assert (= (. run-state.calls 1 :id) :restart))
   (assert (= widget-ref.widget.__command-controls.busy? false))
@@ -499,6 +533,7 @@
 
 (add-test "structural run-command errors propagate" test-structural_run_command_errors_propagate)
 (add-test "busy guard ignores reentrant clicks" test-busy_guard_ignores_reentrant_clicks)
+(add-test "sync active reentrant click does not cancel busy state" test-sync_active_reentrant_click_does_not_cancel_busy_state)
 (add-test "structural error restores previous summary and buttons" test-structural_error_restores_previous_summary_and_buttons)
 (add-test "structural error preserves prior visible result and buttons" test-structural_error_preserves_prior_visible_result_and_buttons)
 

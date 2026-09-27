@@ -259,7 +259,7 @@
 (fn make-run-command [descriptor state apply-result-summary dropped?-fn]
   (fn run-command [command]
     (if state.busy?
-        (if (= state.active-command-id command.id)
+        (if (and state.active-invocation (= state.active-command-id command.id))
             (cancel-active-command state apply-result-summary command)
             nil)
         (do
