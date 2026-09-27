@@ -16,6 +16,12 @@
                 (remove-active-async-handle active-async-handles current-handle.handle)
                 (callbacks.on-result result))})
 
+(fn validate-async-callbacks [callbacks]
+  (when (not (= (type callbacks) :table))
+    (panel-error "run-host-async requires callbacks table"))
+  (when (not (= (type callbacks.on-result) :function))
+    (panel-error "run-host-async requires on-result callback")))
+
 (fn drop-async-handle [handle]
   (handle:drop))
 
@@ -61,6 +67,9 @@
     (CommandRunner.run-host mount.host command-id payload))
 
   (fn run-command-async [_self command-id payload callbacks]
+    (when closed?
+      (panel-error "run-command-async called after session closed"))
+    (validate-async-callbacks callbacks)
     (local current-handle {:handle nil})
     (local wrapped-callbacks (make-async-callbacks active-async-handles callbacks current-handle))
     (local handle (CommandRunner.run-host-async mount.host command-id payload wrapped-callbacks))
