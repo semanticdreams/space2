@@ -476,6 +476,13 @@
   (assert (= state.result-summary.phase :confirming))
   (assert-error-contains #(button:on-click {:source :test}) "number field")
   (assert (= fixture.state.run-count 0))
+  (assert (= state.confirming-command-id nil))
+  (assert (= (. state.button-labels-by-id :configure) "Run"))
+  (assert (= state.result-summary.phase :confirming))
+  (assert (string.find state.result-message "Apply config?" 1 true))
+  (assert (= state.last-result nil))
+  (assert (= state.busy? false))
+  (assert-command-buttons-enabled state true "buttons must remain enabled after confirmed invalid payload")
   (widget:drop))
 
 (add-test "danger levels update badges and button variants" test-danger_levels_update_badges_and_button_variants)

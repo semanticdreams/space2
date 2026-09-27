@@ -1,5 +1,7 @@
 (local max-value-length 500)
 (local truncation-suffix "... [truncated]")
+(local max-table-depth 4)
+(local max-table-entries 24)
 
 (fn command-label [command]
   (if (and command command.title)
@@ -43,10 +45,21 @@
       "8:userdata"
       (.. "9:other:" key-type)))
 
-(fn sorted-table-entry-texts [tbl seen render-value]
-  (local entries [])
+(fn sorted-table-keys [tbl]
+  (local keys [])
   (each [key value (pairs tbl)]
-    (local rendered-value (render-value value seen))
+    (table.insert keys key))
+  (table.sort keys (fn [a b] (< (key-sort-text a) (key-sort-text b))))
+  keys)
+
+(fn sorted-table-entry-texts [tbl seen render-value depth]
+  (local keys (sorted-table-keys tbl))
+  (local entries [])
+  (local entry-count (# keys))
+  (local render-count (math.min entry-count max-table-entries))
+  (for [index 1 render-count]
+    (local key (. keys index))
+    (local rendered-value (render-value (. tbl key) seen (+ depth 1)))
     (local text (.. (key-display-text key) "=" rendered-value))
     (table.insert entries {:sort (.. (key-sort-text key) "\31" rendered-value "\31" text)
                            :text text}))
@@ -54,17 +67,21 @@
   (local parts [])
   (each [_ entry (ipairs entries)]
     (table.insert parts entry.text))
+  (when (> entry-count max-table-entries)
+    (table.insert parts (.. "... " (- entry-count max-table-entries) " more entries")))
   parts)
 
-(fn raw-value-text [value seen]
+(fn raw-value-text [value seen depth]
   (if (= value nil)
       nil
       (= (type value) :table)
-      (if (. seen value)
+      (if (>= depth max-table-depth)
+          "<max depth>"
+          (. seen value)
           "<cycle>"
           (do
             (tset seen value true)
-            (local parts (sorted-table-entry-texts value seen raw-value-text))
+            (local parts (sorted-table-entry-texts value seen raw-value-text depth))
             (tset seen value nil)
             (.. "{" (table.concat parts ", ") "}")))
       (scalar-text value)))
@@ -75,7 +92,7 @@
       text))
 
 (fn value-text [value]
-  (truncate-value (raw-value-text value {})))
+  (truncate-value (raw-value-text value {} 0)))
 
 (fn summary [phase badge-text tone message command result]
   {:phase phase

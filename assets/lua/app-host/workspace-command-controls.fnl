@@ -122,6 +122,29 @@
   (fn build [ctx]
     (build-command-row command state ctx)))
 
+(fn restore-after-structural-error [state previous-summary apply-result-summary]
+  (apply-result-summary previous-summary)
+  (set state.busy? false)
+  (set-active-command state nil)
+  (set-command-buttons-enabled state true)
+  (restore-button-labels state))
+
+(fn make-initial-state [snapshot commands initial-summary]
+  {:snapshot snapshot
+   :commands commands
+   :buttons-by-id {}
+   :button-labels-by-id {}
+   :danger-levels-by-id {}
+   :danger-badges-by-id {}
+   :forms-by-id {}
+   :confirming-command-id nil
+   :last-result nil
+   :busy? false
+   :active-command-id nil
+   :result-summary initial-summary
+   :result-message initial-summary.message
+   :result-badge nil})
+
 (fn WorkspaceCommandControls [opts]
   (when (not (= (type opts) :table))
     (controls-error "opts table is required"))
@@ -135,20 +158,7 @@
     (local initial-summary (ResultModel.initial-summary))
     (var result-text nil)
     (var dropped? false)
-    (local state {:snapshot snapshot
-                    :commands commands
-                    :buttons-by-id {}
-                    :button-labels-by-id {}
-                    :danger-levels-by-id {}
-                    :danger-badges-by-id {}
-                     :forms-by-id {}
-                     :confirming-command-id nil
-                     :last-result nil
-                     :busy? false
-                     :active-command-id nil
-                     :result-summary initial-summary
-                     :result-message initial-summary.message
-                     :result-badge nil})
+    (local state (make-initial-state snapshot commands initial-summary))
 
     (fn apply-result-summary [summary]
       (set state.result-summary summary)
@@ -182,9 +192,13 @@
                 (do
                   (local previous-summary state.result-summary)
                   (local form (. state.forms-by-id command.id))
-                  (local payload (if form (form:build-payload) nil))
                   (set state.confirming-command-id nil)
                   (restore-button-labels state)
+                  (local (payload-ok payload-or-error) (pcall #(if form (form:build-payload) nil)))
+                  (when (not payload-ok)
+                    (restore-after-structural-error state previous-summary apply-result-summary)
+                    (error payload-or-error))
+                  (local payload payload-or-error)
                   (set state.busy? true)
                   (set-active-command state command.id)
                   (set-command-buttons-enabled state false)
@@ -200,7 +214,7 @@
                         (apply-result-summary (ResultModel.result-summary command result-or-error))
                         result-or-error)
                       (do
-                        (apply-result-summary previous-summary)
+                        (restore-after-structural-error state previous-summary apply-result-summary)
                         (error result-or-error))))))))
 
     (set state.run-command run-command)

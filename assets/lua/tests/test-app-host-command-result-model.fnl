@@ -92,6 +92,27 @@
   (assert (<= (# rendered) 500))
   (assert (string.find rendered "truncated" 1 true)))
 
+(fn test-large_table_value_reports_omitted_entries []
+  (local value {})
+  (for [i 1 80]
+    (tset value (.. "k" i) i))
+  (local rendered (ResultModel.value-text value))
+  (assert (<= (# rendered) 500))
+  (assert (string.find rendered "more entries" 1 true)
+          (.. "expected omitted-entry marker, got " rendered)))
+
+(fn test-deep_table_value_reports_depth_limit []
+  (local value {:level 1})
+  (var cursor value)
+  (for [i 2 40]
+    (local child {:level i})
+    (tset cursor :child child)
+    (set cursor child))
+  (local rendered (ResultModel.value-text value))
+  (assert (<= (# rendered) 500))
+  (assert (string.find rendered "max depth" 1 true)
+          (.. "expected depth-limit marker, got " rendered)))
+
 (add-test "initial summary" test-initial-summary)
 (add-test "confirmation summary" test-confirmation-summary)
 (add-test "running summary" test-running-summary)
@@ -103,6 +124,8 @@
 (add-test "opaque key value is deterministic and bounded" test-opaque-key-value-is-deterministic-and-bounded)
 (add-test "ambiguous key ordering is stable" test-ambiguous-key-ordering-is-stable)
 (add-test "long value is truncated" test-long-value-is-truncated)
+(add-test "large table value reports omitted entries" test-large_table_value_reports_omitted_entries)
+(add-test "deep table value reports depth limit" test-deep_table_value_reports_depth_limit)
 
 (fn main []
   (Runner.run-tests {:name "app-host-command-result-model" :tests tests}))
