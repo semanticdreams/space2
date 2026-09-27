@@ -6,6 +6,7 @@
 (local PayloadForm (require :app-host.workspace-command-payload-form))
 (local Metadata (require :app-host.command-metadata))
 (local ResultModel (require :app-host.command-result-model))
+(local History (require :app-host.command-run-history))
 
 (fn controls-error [message]
   (error (.. "[app-host.workspace-command-controls] " message)))
@@ -142,30 +143,43 @@
   (set-command-buttons-enabled state true)
   (restore-button-labels state))
 
-(fn make-initial-state [snapshot commands initial-summary]
+(fn make-initial-state [snapshot commands initial-summary run-history]
   {:snapshot snapshot
    :commands commands
+   :run-history run-history
+   :active-history-run-id nil
+   :history-message (History.list-text run-history)
+   :history-text nil
    :buttons-by-id {}
    :button-labels-by-id {}
    :danger-levels-by-id {}
    :danger-badges-by-id {}
    :forms-by-id {}
-    :confirming-command-id nil
-    :last-result nil
-    :busy? false
-    :active-command-id nil
-    :active-invocation nil
-    :active-run-token 0
-    :result-summary initial-summary
-    :result-message initial-summary.message
-    :result-badge nil})
+   :confirming-command-id nil
+   :last-result nil
+   :busy? false
+   :active-command-id nil
+   :active-invocation nil
+   :active-run-token 0
+   :result-summary initial-summary
+   :result-message initial-summary.message
+   :result-badge nil})
+
+(fn refresh-history-text [state]
+  (set state.history-message (History.list-text state.run-history))
+  (when state.history-text
+    (state.history-text:set-text state.history-message))
+  state.history-message)
 
 (fn callback-current? [state dropped?-fn token command-id]
   (and (not (dropped?-fn))
        (= state.active-run-token token)
        (= state.active-command-id command-id)))
 
-(fn finish-terminal-result [state apply-result-summary command result]
+(fn finish-terminal-result [state apply-result-summary command result run-id]
+  (when run-id
+    (History.finish! state.run-history run-id command result)
+    (refresh-history-text state))
   (set state.last-result result)
   (set state.busy? false)
   (set state.active-invocation nil)
@@ -179,30 +193,39 @@
   (local invocation state.active-invocation)
   (local reason "user cancelled")
   (local result {:id command.id :status :cancelled :error reason})
+  (local run-id state.active-history-run-id)
   (set state.active-invocation nil)
   (set state.busy? false)
   (set-active-command state nil)
+  (set state.active-history-run-id nil)
   (set-command-buttons-enabled state true)
   (restore-button-labels state)
   (when (and invocation invocation.cancel)
     (invocation:cancel reason))
   (set state.last-result result)
+  (when run-id
+    (History.finish! state.run-history run-id command result)
+    (refresh-history-text state))
   (apply-result-summary (ResultModel.result-summary command result))
   result)
 
-(fn start-async-command [descriptor state apply-result-summary dropped?-fn command payload previous-summary]
+(fn start-async-command [descriptor state apply-result-summary dropped?-fn command payload previous-summary run-id]
   (set state.active-run-token (+ state.active-run-token 1))
   (local token state.active-run-token)
   (set state.busy? true)
   (set-active-command state command.id)
+  (set state.active-history-run-id run-id)
   (set-running-button-state state command.id)
   (apply-result-summary (ResultModel.running-summary command))
   (fn on-progress [progress]
     (when (callback-current? state dropped?-fn token command.id)
+      (History.progress! state.run-history run-id command progress)
+      (refresh-history-text state)
       (apply-result-summary (ResultModel.progress-summary command progress))))
   (fn on-result [result]
     (when (callback-current? state dropped?-fn token command.id)
-      (finish-terminal-result state apply-result-summary command result)))
+      (finish-terminal-result state apply-result-summary command result run-id)
+      (set state.active-history-run-id nil)))
   (fn invoke-async []
     (descriptor:run-command-async command.id payload {:on-progress on-progress :on-result on-result}))
   (local (ok invocation-or-error) (pcall invoke-async))
@@ -211,12 +234,15 @@
         (when (callback-current? state dropped?-fn token command.id)
           (set state.active-invocation invocation-or-error))
         invocation-or-error)
-      (do
-        (restore-after-structural-error state previous-summary apply-result-summary)
-        (set state.active-invocation nil)
-        (error invocation-or-error))))
+       (do
+         (History.fail! state.run-history run-id command invocation-or-error)
+         (refresh-history-text state)
+         (restore-after-structural-error state previous-summary apply-result-summary)
+         (set state.active-invocation nil)
+         (set state.active-history-run-id nil)
+         (error invocation-or-error))))
 
-(fn run-sync-command [descriptor state apply-result-summary command payload previous-summary]
+(fn run-sync-command [descriptor state apply-result-summary command payload previous-summary run-id]
   (set state.active-run-token (+ state.active-run-token 1))
   (set state.busy? true)
   (set-active-command state command.id)
@@ -226,8 +252,10 @@
     (descriptor:run-command command.id payload))
   (local (ok result-or-error) (pcall invoke-sync))
   (if ok
-      (finish-terminal-result state apply-result-summary command result-or-error)
+      (finish-terminal-result state apply-result-summary command result-or-error run-id)
       (do
+        (History.fail! state.run-history run-id command result-or-error)
+        (refresh-history-text state)
         (restore-after-structural-error state previous-summary apply-result-summary)
         (error result-or-error))))
 
@@ -238,14 +266,21 @@
   (local form (. state.forms-by-id command.id))
   (set state.confirming-command-id nil)
   (restore-button-labels state)
+  (local history-entry (History.start-run! state.run-history command))
+  (local run-id history-entry.run-id)
+  (refresh-history-text state)
   (local (payload-ok payload-or-error) (pcall #(build-command-payload form)))
   (when (not payload-ok)
+    (History.fail! state.run-history run-id command payload-or-error)
+    (refresh-history-text state)
     (restore-after-structural-error state previous-summary apply-result-summary)
     (error payload-or-error))
   (local payload payload-or-error)
+  (History.set-payload! state.run-history run-id payload)
+  (refresh-history-text state)
   (if (. descriptor :run-command-async)
-      (start-async-command descriptor state apply-result-summary dropped?-fn command payload previous-summary)
-      (run-sync-command descriptor state apply-result-summary command payload previous-summary)))
+      (start-async-command descriptor state apply-result-summary dropped?-fn command payload previous-summary run-id)
+      (run-sync-command descriptor state apply-result-summary command payload previous-summary run-id)))
 
 (fn prompt-for-confirmation [state apply-result-summary command confirmation]
   (restore-button-labels state)
@@ -282,9 +317,10 @@
     (local commands (if snapshot.commands snapshot.commands []))
     (validate-commands commands)
     (local initial-summary (ResultModel.initial-summary))
+    (local run-history (History.create {:limit opts.history-limit :now opts.now}))
     (var result-text nil)
     (var dropped? false)
-    (local state (make-initial-state snapshot commands initial-summary))
+    (local state (make-initial-state snapshot commands initial-summary run-history))
 
     (fn apply-result-summary [summary]
       (set state.result-summary summary)
@@ -319,10 +355,14 @@
               :children [(FlexChild build-badge 0)
                          (FlexChild build-text 1)]})
        child-ctx))
+    (fn history-builder [child-ctx]
+      (set state.history-text ((WrappedText {:text state.history-message}) child-ctx))
+      state.history-text)
     (local children [])
     (each [_ command (ipairs commands)]
       (table.insert children (FlexChild (command-row command state) 0)))
     (table.insert children (FlexChild result-builder 0))
+    (table.insert children (FlexChild history-builder 0))
     (local root-builder
       (Padding {:edge-insets [0.5 0.5]
                 :child (Flex {:axis 2
