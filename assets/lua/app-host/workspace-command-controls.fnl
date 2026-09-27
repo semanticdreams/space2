@@ -3,6 +3,7 @@
 (local WrappedText (require :wrapped-text))
 (local StatusBadge (require :status-badge))
 (local {: Flex : FlexChild} (require :flex))
+(local PayloadForm (require :app-host.workspace-command-payload-form))
 
 (fn controls-error [message]
   (error (.. "[app-host.workspace-command-controls] " message)))
@@ -33,7 +34,7 @@
       (tostring command.status)
       "metadata"))
 
-(fn build-command-row [command state ctx]
+(fn build-command-header-row [command state ctx]
   (local text ((WrappedText {:text (command-description command)}) ctx))
   (local badge ((StatusBadge {:text (status-text-for-command command)
                               :tone :neutral})
@@ -59,6 +60,26 @@
                      (FlexChild build-button 0)]})
    ctx))
 
+(fn build-command-row [command state ctx]
+  (local header (build-command-header-row command state ctx))
+  (if command.payload-schema
+      (do
+        (local form-builder (PayloadForm.CommandPayloadForm {:command command}))
+        (local form (form-builder ctx))
+        (when command.id
+          (tset state.forms-by-id command.id form))
+        (fn build-header [_ctx]
+          header)
+        (fn build-form [_ctx]
+          form)
+        ((Flex {:axis 2
+                :yspacing 0.25
+                :xalign :stretch
+                :children [(FlexChild build-header 0)
+                           (FlexChild build-form 0)]})
+         ctx))
+      header))
+
 (fn command-row [command state]
   (fn build [ctx]
     (build-command-row command state ctx)))
@@ -75,13 +96,16 @@
     (var result-text nil)
     (var dropped? false)
     (local state {:snapshot snapshot
-                  :commands commands
-                  :buttons-by-id {}
-                  :last-result nil
-                  :result-message "No command run yet"})
+                   :commands commands
+                   :buttons-by-id {}
+                   :forms-by-id {}
+                   :last-result nil
+                   :result-message "No command run yet"})
 
     (fn run-command [command]
-      (local result (descriptor:run-command command.id nil))
+      (local form (. state.forms-by-id command.id))
+      (local payload (if form (form:build-payload) nil))
+      (local result (descriptor:run-command command.id payload))
       (local message (result-message command result))
       (set state.last-result result)
       (set state.result-message message)
