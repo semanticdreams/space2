@@ -111,6 +111,26 @@
 (fn running-summary [command]
   (summary :running "Running" :info (.. (command-label command) " is running...") command nil))
 
+(fn progress-percent-text [progress]
+  (local value (and progress progress.value))
+  (if (and (= (type value) :number) (>= value 0) (<= value 1))
+      (.. (math.floor (+ (* value 100) 0.5)) "%")
+      nil))
+
+(fn progress-summary [command progress]
+  (local label (command-label command))
+  (local message (and progress progress.message))
+  (local percent (progress-percent-text progress))
+  (summary :running "Running" :info
+           (if (and message percent)
+               (.. label " is running: " message " (" percent ")")
+               message
+               (.. label " is running: " message)
+               percent
+               (.. label " is running: " percent)
+               (.. label " is running..."))
+           command nil))
+
 (fn result-summary [command result]
   (local label (command-label command))
   (if (= result.status :ok)
@@ -118,13 +138,20 @@
         (local rendered (value-text result.value))
         (summary :ok "Success" :success
                  (if rendered (.. label " succeeded: " rendered) (.. label " succeeded"))
-                 command result))
+                  command result))
       (= result.status :error)
       (summary :error "Error" :danger (.. label " failed: " (tostring result.error)) command result)
+      (= result.status :cancelled)
+      (summary :cancelled "Cancelled" :warning
+               (if result.error
+                   (.. label " cancelled: " (tostring result.error))
+                   (.. label " cancelled"))
+               command result)
       (summary :unknown "Unknown" :warning (.. label " returned status " (tostring result.status)) command result)))
 
 {:initial-summary initial-summary
  :confirmation-summary confirmation-summary
  :running-summary running-summary
+ :progress-summary progress-summary
  :result-summary result-summary
  :value-text value-text}
