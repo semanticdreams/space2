@@ -47,12 +47,41 @@
   (when (and (not (= field.label nil)) (not (scalar? field.label)))
     (schema-error (.. "label for field " (field-name field) " must be scalar"))))
 
+(fn list-index? [key]
+  (and (= (type key) :number)
+       (>= key 1)
+       (= key (math.floor key))))
+
+(fn validate-ordered-list [items message]
+  (var count 0)
+  (var max-index 0)
+  (each [key _item (pairs items)]
+    (when (not (list-index? key))
+      (schema-error message))
+    (set count (+ count 1))
+    (when (> key max-index)
+      (set max-index key)))
+  (when (not (= count max-index))
+    (schema-error message))
+  (for [index 1 max-index]
+    (when (= (. items index) nil)
+      (schema-error message)))
+  max-index)
+
+(fn validate-fields-list [fields]
+  (validate-ordered-list fields "fields must be an ordered list"))
+
+(fn validate-options-list [field]
+  (validate-ordered-list field.options (.. "options for field " (field-name field) " must be an ordered list")))
+
 (fn validate-select-options [field]
   (when (not (= (type field.options) :table))
     (schema-error (.. "select field " (field-name field) " requires options")))
   (when (= (# field.options) 0)
     (schema-error (.. "select field " (field-name field) " requires non-empty options")))
-  (each [_ option (ipairs field.options)]
+  (local option-count (validate-options-list field))
+  (for [index 1 option-count]
+    (local option (. field.options index))
     (when (not (= (type option) :table))
       (schema-error (.. "select field " (field-name field) " option must be a table")))
     (validate-allowed-keys option option-keys "option")
@@ -80,27 +109,6 @@
   (validate-default field)
   (when (= field.type :select)
     (validate-select-options field)))
-
-(fn list-index? [key]
-  (and (= (type key) :number)
-       (>= key 1)
-       (= key (math.floor key))))
-
-(fn validate-fields-list [fields]
-  (var count 0)
-  (var max-index 0)
-  (each [key _field (pairs fields)]
-    (when (not (list-index? key))
-      (schema-error "fields must be an ordered list"))
-    (set count (+ count 1))
-    (when (> key max-index)
-      (set max-index key)))
-  (when (not (= count max-index))
-    (schema-error "fields must be an ordered list"))
-  (for [index 1 max-index]
-    (when (= (. fields index) nil)
-      (schema-error "fields must be an ordered list")))
-  max-index)
 
 (fn validate-schema [schema _context]
   (when (not (= (type schema) :table))
