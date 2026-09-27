@@ -132,7 +132,7 @@
 (fn natural-relative-resolution []
   (local reference (Temporal.plain-date-time.parse "2026-09-25T15:30:00"))
   (local ctx (Temporal.expression.context {:reference-plain-date-time reference
-                                           :zone-id "America/New_York"}))
+                                            :zone-id "America/New_York"}))
   (local today-result (Temporal.expression.resolve (Temporal.natural.parse "today") ctx))
   (local tomorrow-result (Temporal.expression.resolve (Temporal.natural.parse "tomorrow") ctx))
   (local in-two-weeks-result (Temporal.expression.resolve (Temporal.natural.parse "in 2 weeks") ctx))
@@ -140,10 +140,21 @@
   (assert (= (tomorrow-result.value:to-string) "2026-09-26T00:00:00"))
   (assert (= (in-two-weeks-result.value:to-string) "2026-10-09T00:00:00")))
 
+(fn expression-reference-instant-projects-through-zone []
+  (local instant (Temporal.instant.parse "2026-09-25T00:30:00Z"))
+  (local ny-ctx (Temporal.expression.context {:reference-instant instant
+                                              :zone-id "America/New_York"}))
+  (local tokyo-ctx (Temporal.expression.context {:reference-instant instant
+                                                 :zone-id "Asia/Tokyo"}))
+  (local ny-today (Temporal.expression.resolve (Temporal.natural.parse "today") ny-ctx))
+  (local tokyo-today (Temporal.expression.resolve (Temporal.natural.parse "today") tokyo-ctx))
+  (assert (= (ny-today.value:to-string) "2026-09-24T00:00:00"))
+  (assert (= (tokyo-today.value:to-string) "2026-09-25T00:00:00")))
+
 (fn natural-next-weekday-and-recurrence []
   (local reference (Temporal.plain-date-time.parse "2026-09-25T15:30:00"))
   (local ctx (Temporal.expression.context {:reference-plain-date-time reference
-                                           :zone-id "America/New_York"}))
+                                            :zone-id "America/New_York"}))
   (local next-tu (Temporal.expression.resolve (Temporal.natural.parse "next Tuesday") ctx))
   (assert (= (next-tu.value:to-string) "2026-09-29T00:00:00"))
   (local recurring (Temporal.natural.parse "every Tuesday"))
@@ -166,6 +177,7 @@
 (table.insert tests {:name "recurrence daily BYDAY filters nonmatching DTSTART" :fn recurrence-daily-by-day-filters-nonmatching-dtstart})
 (table.insert tests {:name "recurrence daily BYDAY unsatisfiable interval throws" :fn recurrence-daily-by-day-unsatisfiable-interval-throws})
 (table.insert tests {:name "natural relative resolution" :fn natural-relative-resolution})
+(table.insert tests {:name "expression reference instant projects through zone" :fn expression-reference-instant-projects-through-zone})
 (table.insert tests {:name "natural next weekday and recurrence" :fn natural-next-weekday-and-recurrence})
 
 (local main
