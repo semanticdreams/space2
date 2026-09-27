@@ -1,4 +1,4 @@
-(local Schema (require :app-host.command-payload-schema))
+(local Metadata (require :app-host.command-metadata))
 
 (fn command-error [message]
   (error (.. "[app-host.command-runner] " message)))
@@ -35,8 +35,7 @@
 
 (fn run-host [host command-id payload]
   (local command (find-command (command-list host) command-id))
-  (when (not (= command.payload-schema nil))
-    (Schema.validate-schema command.payload-schema {:command-id command-id}))
+  (Metadata.validate-command command {:command-id command-id})
   (local run-fn command.run)
   (when (not (= (type run-fn) :function))
     (command-error (.. "command requires run function: " (tostring command-id))))

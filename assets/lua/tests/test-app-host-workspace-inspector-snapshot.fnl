@@ -93,11 +93,48 @@
   (assert-error-contains #(Snapshot.read-host host) "[app-host.command-payload-schema]")
   (assert-error-contains #(Snapshot.read-host host) "unsupported field type"))
 
+(fn test-command_danger_and_confirmation_are_metadata_only []
+  (local command-state {:ran? false})
+  (local host
+    (host-with []
+               [{:id :reset
+                 :title "Reset"
+                 :danger-level :danger
+                 :confirmation {:message "Reset game state?"}
+                 :state command-state
+                 :run mark-command-run}]))
+  (local snapshot (Snapshot.read-host host))
+  (local command (. snapshot.commands 1))
+  (assert (= command.id :reset))
+  (assert (= command.danger-level :danger))
+  (assert (= command.confirmation.message "Reset game state?"))
+  (assert (= command.confirmation.required? true))
+  (assert (= command-state.ran? false) "snapshot must not execute command handlers"))
+
+(fn test-command_danger_defaults_to_normal []
+  (local host (host-with [] [{:id :inspect :title "Inspect"}]))
+  (local snapshot (Snapshot.read-host host))
+  (assert (= (. snapshot.commands 1 :danger-level) :normal)))
+
+(fn test-invalid_command_metadata_fails_snapshot []
+  (local host (host-with [] [{:id :bad :danger-level :catastrophic}]))
+  (assert-error-contains #(Snapshot.read-host host) "[app-host.command-metadata]")
+  (assert-error-contains #(Snapshot.read-host host) "danger-level"))
+
+(fn test-invalid_confirmation_shape_fails_snapshot []
+  (local host (host-with [] [{:id :bad :confirmation {:required? "yes"}}]))
+  (assert-error-contains #(Snapshot.read-host host) "[app-host.command-metadata]")
+  (assert-error-contains #(Snapshot.read-host host) "required?"))
+
 (add-test "readable inspector and command metadata" test-readable-inspector-and-command-metadata)
 (add-test "unsupported and error inspectors are explicit" test-unsupported-and-error-inspectors-are-explicit)
 (add-test "missing registries fail loudly" test-missing-registries-fail-loudly)
 (add-test "command payload schema is metadata only" test-command_payload_schema_is_metadata_only)
 (add-test "malformed command payload schema fails snapshot" test-malformed_command_payload_schema_fails_snapshot)
+(add-test "command danger and confirmation are metadata only" test-command_danger_and_confirmation_are_metadata_only)
+(add-test "command danger defaults to normal" test-command_danger_defaults_to_normal)
+(add-test "invalid command metadata fails snapshot" test-invalid_command_metadata_fails_snapshot)
+(add-test "invalid confirmation shape fails snapshot" test-invalid_confirmation_shape_fails_snapshot)
 
 (fn main []
   (Runner.run-tests {:name "app-host-workspace-inspector-snapshot" :tests tests}))

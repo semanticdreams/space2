@@ -59,9 +59,31 @@ A runtime may expose:
 - `scheduler`: app simulation registrations.
 - `inspectors`: plain-data or moldable inspector registrations.
 - `commands`: sequential command facets such as `{:id id :title title
-  :description description :run fn}`. Commands are registered with
-  `host.commands`; command handlers receive the command facet and optional
-  payload.
+  :description description :danger-level :normal :confirmation confirmation
+  :run fn}`. Commands are registered with `host.commands`; command handlers
+  receive the command facet and optional payload.
+
+Command facets may include metadata-only danger and confirmation hints:
+
+```fennel
+{:id :reset
+ :title "Reset"
+ :description "Reset game state"
+ :danger-level :danger
+ :confirmation {:message "Reset game state?" :required? true}
+ :run run-reset}
+```
+
+`:danger-level` values are exactly `:normal`, `:warning`, and `:danger`;
+omitting the key normalizes to `:normal`. `:confirmation`, when present,
+supports only `:message` and `:required?`; omitting `:confirmation.required?`
+normalizes to true. `:confirmation`, when present, must be a table;
+`:confirmation.message`, when present, must be a string; and
+`:confirmation.required?`, when present, must be a boolean. Danger level does
+not imply confirmation: confirmation is controlled only by
+`:confirmation.required?`. Malformed command metadata fails loudly with the
+`[app-host.command-metadata]` prefix during snapshot reads, widget builds, and
+command runner dispatch.
 
 The core entry API does not add a new required method for every game feature.
 
@@ -145,14 +167,21 @@ metadata. Snapshot reads list command metadata without executing commands and do
 not mutate app state.
 
 Workspace panels render generic command metadata rows from the read-only
-inspector snapshot. Each row includes a Run button that calls
-`descriptor/session:run-command(command-id, nil)`. The panel displays the latest
-success or error result from the command result envelope, while snapshot reads
+inspector snapshot. Warning and danger commands render matching badge tones and
+button variants. Each row includes a Run button that executes through
+`descriptor/session:run-command(command-id, payload)`. For commands with required
+confirmation, the first click arms an inline confirmation state and changes the
+button label to `Confirm`; the second click runs the command. Confirmations are
+inline controls, not modal dialogs, and do not change the command execution path.
+The panel displays the latest success or error result from the command result
+envelope, handler exceptions remain error result envelopes, and snapshot reads
 remain metadata-only and never execute commands.
 
-Payload schemas, confirmations and permissions, async progress and cancellation,
-app-specific controls, editor integration, graph integration, persistent app
-discovery, and launcher UX remain follow-up subprojects.
+Payload schema expansion, permissions/auth policy, async progress and
+cancellation, app-specific controls, editor integration, graph integration,
+persistent approvals, persistent app discovery, and launcher UX remain follow-up
+subprojects. Hosted command confirmations do not add permissions, authorization,
+or persistent approval behavior.
 
 ## Deferred alternatives
 
