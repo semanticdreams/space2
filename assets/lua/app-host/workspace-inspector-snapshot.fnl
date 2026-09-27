@@ -1,3 +1,5 @@
+(local Schema (require :app-host.command-payload-schema))
+
 (fn snapshot-error [message]
   (error (.. "[app-host.workspace-inspector-snapshot] " message)))
 
@@ -20,10 +22,14 @@
       {:id facet.id :title facet.title :status :unsupported}))
 
 (fn command-entry [facet]
-  {:id facet.id
-   :title facet.title
-   :description facet.description
-   :status :metadata})
+  (local entry {:id facet.id
+                :title facet.title
+                :description facet.description
+                :status :metadata})
+  (when (not (= facet.payload-schema nil))
+    (Schema.validate-schema facet.payload-schema {:command-id facet.id})
+    (set entry.payload-schema facet.payload-schema))
+  entry)
 
 (fn read-host [host]
   (when (not (= (type host) :table))

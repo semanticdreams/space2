@@ -16,6 +16,7 @@ Detailed design and implementation notes for major feature systems.
 - [Graph Browsing](./graph-browsing)
 - [Graph Foundation](./graph-foundation)
 - [Graph Notebooks](./graph-notebooks)
+- [Hosted App Command Payload Forms](./hosted-app-command-payload-forms)
 - [Hot Reload Units](./hot-reload-units)
 - [Kernel System](./kernel-system)
 - [Lazy Text Buffer and Virtual Input](./lazy-text-buffer-virtual-input)

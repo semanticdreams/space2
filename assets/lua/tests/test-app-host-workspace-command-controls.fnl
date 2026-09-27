@@ -91,6 +91,14 @@
   (local builder (Controls.WorkspaceCommandControls {:descriptor descriptor}))
   (builder ctx))
 
+(local configure-schema
+  {:fields [{:id :title :type :string :label "Title" :default "draft"}
+            {:id :count :type :number :label "Count" :default 2}
+            {:id :enabled :type :boolean :label "Enabled" :default false}
+            {:id :mode :type :select :label "Mode"
+             :options [{:value :fast :label "Fast"}
+                       {:value :safe :label "Safe"}]}]})
+
 (fn test-build_reads_metadata_without_running_commands []
   (local fixture (make-descriptor))
   (local context (test-context))
@@ -118,7 +126,7 @@
   (button:on-click {:source :test})
   (assert (= fixture.state.run-count 1))
   (assert (= (. fixture.state.calls 1 :id) :restart))
-  (assert (= (. fixture.state.calls 1 :payload) nil) "visual command buttons pass nil payload")
+  (assert (= (. fixture.state.calls 1 :payload) nil) "no-schema command should still pass nil payload")
   (assert (= state.last-result.status :ok))
   (assert (string.find state.result-message "Restart" 1 true))
   (assert (string.find state.result-message "succeeded" 1 true))
@@ -140,6 +148,85 @@
 
 (add-test "run button updates success result" test-run_button_updates_success_result)
 (add-test "run button updates error result" test-run_button_updates_error_result)
+
+(fn test-schema_form_builds_payload_for_command []
+  (local fixture (make-descriptor {:commands [{:id :configure
+                                               :title "Configure"
+                                               :status :metadata
+                                               :payload-schema configure-schema}]
+                                  :results {:configure {:id :configure
+                                                        :status :ok
+                                                        :value {:configured? true}}}}))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local state widget.__command-controls)
+  (local form (. state.forms-by-id :configure))
+  (assert form "schema command should build a payload form")
+  (local title-input (. form.inputs-by-id :title))
+  (local count-input (. form.inputs-by-id :count))
+  (local enabled-button (. form.buttons-by-id :enabled))
+  (local mode-button (. form.buttons-by-id :mode))
+  (local run-button (. state.buttons-by-id :configure))
+  (title-input:set-text "launch")
+  (count-input:set-text "3.5")
+  (enabled-button:on-click {:source :test})
+  (mode-button:on-click {:source :test})
+  (run-button:on-click {:source :test})
+  (local call (. fixture.state.calls 1))
+  (assert (= call.id :configure))
+  (assert (= call.payload.title "launch"))
+  (assert (= call.payload.count 3.5))
+  (assert (= call.payload.enabled true))
+  (assert (= call.payload.mode :safe))
+  (widget:drop))
+
+(fn test-invalid_number_payload_fails_before_command_run []
+  (local fixture (make-descriptor {:commands [{:id :configure
+                                               :title "Configure"
+                                               :status :metadata
+                                               :payload-schema configure-schema}]}))
+  (local context (test-context))
+  (local widget (build-widget fixture.descriptor context.ctx))
+  (local form (. widget.__command-controls.forms-by-id :configure))
+  (local count-input (. form.inputs-by-id :count))
+  (local run-button (. widget.__command-controls.buttons-by-id :configure))
+  (count-input:set-text "not-a-number")
+  (assert-error-contains #(run-button:on-click {:source :test}) "number field")
+  (assert (= fixture.state.run-count 0) "invalid payload must fail before descriptor run-command")
+  (widget:drop))
+
+(fn test-malformed_payload_schema_fails_control_build []
+  (local fixture (make-descriptor {:commands [{:id :bad
+                                               :title "Bad"
+                                               :status :metadata
+                                               :payload-schema {:fields [{:id :x :type :object}]}}]}))
+  (local context (test-context))
+  (assert-error-contains #(build-widget fixture.descriptor context.ctx)
+                         "[app-host.command-payload-schema]")
+  (assert (= (# context.clickables.registered) 0)
+          "malformed schema must fail before registering click handlers")
+  (assert (= (# context.hoverables.registered) 0)
+          "malformed schema must fail before registering hover handlers"))
+
+(fn test-false_payload_schema_fails_control_build []
+  (local fixture (make-descriptor {:commands [{:id :bad
+                                               :title "Bad"
+                                               :status :metadata
+                                               :payload-schema false}]}))
+  (local context (test-context))
+  (assert-error-contains #(build-widget fixture.descriptor context.ctx)
+                         "[app-host.command-payload-schema]")
+  (assert (= fixture.state.run-count 0)
+          "false payload schema must fail before descriptor run-command")
+  (assert (= (# context.clickables.registered) 0)
+          "false payload schema must fail before registering click handlers")
+  (assert (= (# context.hoverables.registered) 0)
+          "false payload schema must fail before registering hover handlers"))
+
+(add-test "schema form builds payload for command" test-schema_form_builds_payload_for_command)
+(add-test "invalid number payload fails before command run" test-invalid_number_payload_fails_before_command_run)
+(add-test "malformed payload schema fails control build" test-malformed_payload_schema_fails_control_build)
+(add-test "false payload schema fails control build" test-false_payload_schema_fails_control_build)
 
 (fn structural-failing-run-command [_self _command-id _payload]
   (error "structural failure"))
