@@ -54,7 +54,7 @@ Current APIs fail loudly for unsupported forms. Deferred scope includes:
 - Instant/ZonedDateTime period arithmetic, including ZonedDateTime period expansion.
 - DST-aware arithmetic and timezone-aware period arithmetic.
 - monthly/yearly recurrence expansion.
-- ISO interval duration endpoint forms such as `duration/start`, `start/duration`, and `duration/end`.
+- Date-only `start/period` and `period/end` endpoint forms are supported only by `Temporal.interval.parse` for plain date-times. Repeating interval period endpoints, instant period endpoints, zoned interval period endpoints, time-based `PT...` period text, and full ISO interval grammar beyond those two plain date-time forms remain deferred.
 - `Period.between` and calendar diffing.
 - time-based fields such as hours, minutes, seconds, milliseconds, microseconds, or nanoseconds.
 - non-Gregorian calendars.
@@ -67,7 +67,7 @@ These deferrals preserve the boundary between exact elapsed time, civil calendar
 For docs-only calendar period changes, run the focused term check from the implementation plan:
 
 ```bash
-rg "Temporal Calendar Periods|Temporal.period|calendar period|Duration remains nanoseconds|duration/start|monthly/yearly recurrence|ZonedDateTime period" docs/dev/features/temporal-calendar-periods.md docs/dev/features/index.md docs/dev/features/temporal.md docs/dev/features/temporal-intervals.md docs/dev/features/temporal-parsing-recurrence.md
+rg "start/period|period/end|Temporal.period|repeating interval period endpoint|instant period endpoint|Temporal.interval.parse" docs/dev/features/temporal-intervals.md docs/dev/features/temporal-calendar-periods.md docs/dev/features/temporal-parsing-recurrence.md
 ```
 
 If period behavior changes, validate the Fennel surface with the project-native compile check, constraints, and focused temporal period tests in that order.
