@@ -30,6 +30,24 @@
   (assert (= summary.command-id :configure))
   (assert (string.find summary.message "Configure" 1 true)))
 
+(fn test-progress-summary-with-percent []
+  (local summary (ResultModel.progress-summary {:id :long :title "Long"}
+                                               {:message "halfway" :value 0.5}))
+  (assert (= summary.phase :running))
+  (assert (= summary.tone :info))
+  (assert (= summary.badge-text "Running"))
+  (assert (= summary.command-id :long))
+  (assert (string.find summary.message "Long" 1 true))
+  (assert (string.find summary.message "halfway" 1 true))
+  (assert (string.find summary.message "50%" 1 true)))
+
+(fn test-progress-summary-message-only []
+  (local summary (ResultModel.progress-summary {:id :long :title "Long"}
+                                               {:message "working"}))
+  (assert (= summary.phase :running))
+  (assert (string.find summary.message "working" 1 true))
+  (assert (= (string.find summary.message "%" 1 true) nil)))
+
 (fn test-ok-summary-includes-value []
   (local summary (ResultModel.result-summary {:id :restart :title "Restart"}
                                              {:id :restart :status :ok :value "done"}))
@@ -54,6 +72,22 @@
   (assert (= summary.badge-text "Error"))
   (assert (string.find summary.message "Explode" 1 true))
   (assert (string.find summary.message "boom" 1 true)))
+
+(fn test-cancelled-result-summary []
+  (local summary (ResultModel.result-summary {:id :long :title "Long"}
+                                              {:id :long :status :cancelled :error "user cancelled"}))
+  (assert (= summary.phase :cancelled))
+  (assert (= summary.tone :warning))
+  (assert (= summary.badge-text "Cancelled"))
+  (assert (string.find summary.message "Long" 1 true))
+  (assert (string.find summary.message "user cancelled" 1 true)))
+
+(fn test-cancelled-result-summary_ignores_legacy_reason []
+  (local summary (ResultModel.result-summary {:id :long :title "Long"}
+                                             {:id :long :status :cancelled :reason "legacy reason"}))
+  (assert (= summary.phase :cancelled))
+  (assert (string.find summary.message "Long" 1 true))
+  (assert (= (string.find summary.message "legacy reason" 1 true) nil)))
 
 (fn test-unknown-summary []
   (local summary (ResultModel.result-summary {:id :mystery :title "Mystery"}
@@ -116,9 +150,13 @@
 (add-test "initial summary" test-initial-summary)
 (add-test "confirmation summary" test-confirmation-summary)
 (add-test "running summary" test-running-summary)
+(add-test "progress summary with percent" test-progress-summary-with-percent)
+(add-test "progress summary message only" test-progress-summary-message-only)
 (add-test "ok summary includes value" test-ok-summary-includes-value)
 (add-test "ok summary with nil value" test-ok-summary-with-nil-value)
 (add-test "error summary" test-error-summary)
+(add-test "cancelled result summary" test-cancelled-result-summary)
+(add-test "cancelled result summary ignores legacy reason" test-cancelled-result-summary_ignores_legacy_reason)
 (add-test "unknown summary" test-unknown-summary)
 (add-test "table value is stable and bounded" test-table-value-is-stable-and-bounded)
 (add-test "opaque key value is deterministic and bounded" test-opaque-key-value-is-deterministic-and-bounded)

@@ -8,7 +8,14 @@
   (local (ok err) (pcall f))
   (assert (= ok false) "expected call to fail")
   (assert (string.find (tostring err) expected 1 true)
-          (.. "expected error to contain " expected ", got " (tostring err))))
+           (.. "expected error to contain " expected ", got " (tostring err))))
+
+(fn noop-result [_result]
+  nil)
+
+(fn make-result-capture [state]
+  (fn [result]
+    (set state.result result)))
 
 (fn make-fake-hud []
   (local children [])
@@ -107,8 +114,19 @@
 (fn run-fake-explode-command [_self _payload]
   (error "command exploded"))
 
+(fn make-fake-long-drop [state]
+  (fn []
+    (set state.drop-count (+ state.drop-count 1))))
+
+(fn run-fake-long-command [self payload callbacks]
+  (set self.state.payload payload)
+  (set self.state.callbacks callbacks)
+  {:pending true
+   :drop (make-fake-long-drop self.state)})
+
 (fn make-fake-mount []
   (local command-state {:ran? false :payload nil})
+  (local async-state {:payload nil :callbacks nil :drop-count 0})
   (local controller {:paused-calls []
                       :step-calls []
                       :set-paused (fn [self paused]
@@ -125,13 +143,18 @@
                                  :title "Restart"
                                  :state command-state
                                  :run run-fake-restart-command}
-                                {:id :explode
-                                 :title "Explode"
-                                 :run run-fake-explode-command}])}
-    :command-state command-state
-    :drop-count 0
-    :drop (fn [self]
-             (set self.drop-count (+ self.drop-count 1)))})
+                                 {:id :explode
+                                  :title "Explode"
+                                  :run run-fake-explode-command}
+                                 {:id :long
+                                  :title "Long"
+                                  :state async-state
+                                  :run-async run-fake-long-command}])}
+     :command-state command-state
+     :async-state async-state
+     :drop-count 0
+     :drop (fn [self]
+              (set self.drop-count (+ self.drop-count 1)))})
 
 (fn create-empty-runtime [_host]
   {})
@@ -271,6 +294,89 @@
   (assert (string.find result.error "command exploded" 1 true))
   (fixture:restore))
 
+(fn test-session_runs_hosted_async_command []
+  (local hud (make-fake-hud))
+  (local fake-mount (make-fake-mount))
+  (local fixture (install-panel-module fake-mount))
+  (local session (fixture.WorkspacePanel.open (panel-opts hud)))
+  (local callbacks {:on-result noop-result})
+  (local handle (session:run-command-async :long nil callbacks))
+  (assert fake-mount.async-state.callbacks "async command should store callbacks")
+  (assert (= (type fake-mount.async-state.callbacks.resolve) :function)
+          "async command should receive runner resolve callback")
+  (assert (= handle.status :running) "pending async command should return running handle")
+  (session:close)
+  (fixture:restore))
+
+(fn test-descriptor_runs_hosted_async_command []
+  (local hud (make-fake-hud))
+  (local fake-mount (make-fake-mount))
+  (local fixture (install-panel-module fake-mount))
+  (local session (fixture.WorkspacePanel.open (panel-opts hud)))
+  (local descriptor (. hud.children 1))
+  (local handle (descriptor:run-command-async :long {:value 12} {:on-result noop-result}))
+  (assert (= handle.status :running) "descriptor async command should return running handle")
+  (assert (= fake-mount.async-state.payload.value 12)
+          "descriptor async command should pass payload")
+  (session:close)
+  (fixture:restore))
+
+(fn test-close_drops_active_async_handles_once []
+  (local hud (make-fake-hud))
+  (local fake-mount (make-fake-mount))
+  (local fixture (install-panel-module fake-mount))
+  (local session (fixture.WorkspacePanel.open (panel-opts hud)))
+  (session:run-command-async :long nil {:on-result noop-result})
+  (session:close)
+  (assert (= fake-mount.async-state.drop-count 1)
+          "close should drop active async handle once")
+  (session:close)
+  (assert (= fake-mount.async-state.drop-count 1)
+          "second close should not drop active async handle again")
+  (fixture:restore))
+
+(fn test-completed_async_handle_is_not_dropped_on_close []
+  (local hud (make-fake-hud))
+  (local fake-mount (make-fake-mount))
+  (local fixture (install-panel-module fake-mount))
+  (local session (fixture.WorkspacePanel.open (panel-opts hud)))
+  (local delivered {:result nil})
+  (session:run-command-async :long nil {:on-result (make-result-capture delivered)})
+  (fake-mount.async-state.callbacks.resolve {:done true})
+  (assert (= delivered.result.status :ok) "async result should be forwarded")
+  (session:close)
+  (assert (= fake-mount.async-state.drop-count 0)
+          "completed async handle should be removed before close cleanup")
+  (fixture:restore))
+
+(fn test-closed_session_rejects_async_command_without_starting_handler []
+  (local hud (make-fake-hud))
+  (local fake-mount (make-fake-mount))
+  (local fixture (install-panel-module fake-mount))
+  (local session (fixture.WorkspacePanel.open (panel-opts hud)))
+  (session:close)
+  (fn attempt-run-after-close []
+    (session:run-command-async :long nil {:on-result noop-result}))
+  (assert-error-contains attempt-run-after-close "closed")
+  (assert (= fake-mount.async-state.callbacks nil)
+          "closed session must not invoke async handler")
+  (assert (= fake-mount.async-state.drop-count 0)
+          "closed session must not create a handle needing cleanup")
+  (fixture:restore))
+
+(fn test-invalid_async_callbacks_do_not_start_handler []
+  (local hud (make-fake-hud))
+  (local fake-mount (make-fake-mount))
+  (local fixture (install-panel-module fake-mount))
+  (local session (fixture.WorkspacePanel.open (panel-opts hud)))
+  (fn attempt-invalid-callbacks []
+    (session:run-command-async :long nil {}))
+  (assert-error-contains attempt-invalid-callbacks "on-result")
+  (assert (= fake-mount.async-state.callbacks nil)
+          "invalid callbacks must fail before invoking async handler")
+  (session:close)
+  (fixture:restore))
+
 (fn test-close_removes_child_and_drops_mount_once []
   (local hud (make-fake-hud))
   (local fake-mount (make-fake-mount))
@@ -319,6 +425,12 @@
 (add-test "descriptor and built widget expose snapshot reader" test_descriptor_and_built_widget_expose_snapshot_reader)
 (add-test "descriptor and widget run hosted command" test_descriptor_and_widget_run_hosted_command)
 (add-test "command errors return result envelope" test_command_errors_return_result_envelope)
+(add-test "session runs hosted async command" test-session_runs_hosted_async_command)
+(add-test "descriptor runs hosted async command" test-descriptor_runs_hosted_async_command)
+(add-test "close drops active async handles once" test-close_drops_active_async_handles_once)
+(add-test "completed async handle is not dropped on close" test-completed_async_handle_is_not_dropped_on_close)
+(add-test "closed session rejects async command without starting handler" test-closed_session_rejects_async_command_without_starting_handler)
+(add-test "invalid async callbacks do not start handler" test-invalid_async_callbacks_do_not_start_handler)
 (add-test "close removes child and drops mount once" test-close_removes_child_and_drops_mount_once)
 (add-test "HUD add failure drops mount once" test-hud_add_failure_drops_mount_once)
 (add-test "missing HUD fails loudly" test-missing_hud_fails_loudly)
