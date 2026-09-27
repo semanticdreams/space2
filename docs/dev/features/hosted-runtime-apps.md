@@ -246,8 +246,11 @@ instead of crashing the controls.
 
 Command controls also render a session-local `Recent runs` history block below
 the latest-result row. The history is in-memory only, scoped to that controls
-widget, ordered newest first, and bounded to the 10 most recent execution
-attempts by default. History entries are created only by actual execution
+widget and session, ordered newest first, and bounded to the 10 most recent
+execution attempts by default. Run ids are controls-local, session-local,
+monotonically increasing integers; they are not durable ids. History entries
+store bounded text summaries only and do not retain raw payload or result
+objects. History entries are created only by actual execution
 attempts: a first confirmation click arms the inline confirmation state but does
 not create a history row. After the execution click, payload validation failures
 and structural invocation failures create failed local history entries while
