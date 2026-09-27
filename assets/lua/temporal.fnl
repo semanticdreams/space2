@@ -70,7 +70,7 @@
 
 (local standard (create-standard base))
 (local period (create-period base))
-(local recurrence (create-recurrence {:period period :standard standard}))
+(local recurrence (create-recurrence {:period period :standard standard :plain-date-time base.plain-date-time}))
 (local natural (create-natural {:recurrence recurrence}))
 (local interval (create-interval {:standard standard :period period}))
 (local temporal-with-intervals {:standard standard :interval interval})

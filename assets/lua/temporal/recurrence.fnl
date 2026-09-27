@@ -347,6 +347,25 @@
   (local fields (plain:fields))
   fields.day)
 
+(fn plain-fields [plain]
+  (plain:fields))
+
+(fn build-generated-candidate [plain-date-time dtstart year month day]
+  (local source-fields (plain-fields dtstart))
+  (local (ok value)
+    (pcall plain-date-time.from-fields
+           {:year year
+            :month month
+            :day day
+            :hour source-fields.hour
+            :minute source-fields.minute
+            :second source-fields.second
+            :nanosecond source-fields.nanosecond}))
+  (if ok value nil))
+
+(fn before-dtstart? [candidate dtstart]
+  (< (candidate:compare dtstart) 0))
+
 (fn by-month-allowed? [months month]
   (var allowed false)
   (each [_ value (ipairs months)]
@@ -464,6 +483,70 @@
     (when (not satisfiable)
       (error "unsupported temporal recurrence expansion"))))
 
+(fn monthly-generated-candidates [plain-date-time rule dtstart anchor]
+  (local fields (plain-fields anchor))
+  (local generated [])
+  (when (month-filter-allowed? rule anchor)
+    (each [_ day (ipairs rule.by-month-day)]
+      (local candidate (build-generated-candidate plain-date-time dtstart fields.year fields.month day))
+      (when candidate
+        (table.insert generated candidate))))
+  generated)
+
+(fn yearly-generated-months [rule dtstart]
+  (if rule.by-month
+      rule.by-month
+      [(plain-month dtstart)]))
+
+(fn yearly-generated-candidates [plain-date-time rule dtstart anchor]
+  (local fields (plain-fields anchor))
+  (local generated [])
+  (each [_ month (ipairs (yearly-generated-months rule dtstart))]
+    (each [_ day (ipairs rule.by-month-day)]
+      (local candidate (build-generated-candidate plain-date-time dtstart fields.year month day))
+      (when candidate
+        (table.insert generated candidate))))
+  generated)
+
+(fn append-generated-candidates [results bounds dtstart candidates]
+  (each [_ candidate (ipairs candidates)]
+    (when (and (not (limit-reached? results bounds))
+               (not (before-dtstart? candidate dtstart))
+               (within-until? candidate bounds.until))
+      (table.insert results candidate))))
+
+(fn generated-candidates-for-anchor [plain-date-time rule dtstart anchor]
+  (if (= rule.freq :monthly)
+      (monthly-generated-candidates plain-date-time rule dtstart anchor)
+      (= rule.freq :yearly)
+      (yearly-generated-candidates plain-date-time rule dtstart anchor)
+      []))
+
+(fn generator-cycle [rule]
+  (if (= rule.freq :monthly)
+      (/ 4800 (gcd rule.interval 4800))
+      (= rule.freq :yearly)
+      (/ 400 (gcd rule.interval 400))
+      (error "unsupported temporal recurrence expansion")))
+
+(fn assert-generator-filters-satisfiable [period plain-date-time rule dtstart]
+  (local cycle (generator-cycle rule))
+  (var index 0)
+  (var satisfiable false)
+  (while (and (< index cycle) (not satisfiable))
+    (local anchor
+      (if (= index 0)
+          dtstart
+          (period.add-to-plain-date-time
+            dtstart
+            (calendar-step-period rule.freq (* index rule.interval)))))
+    (each [_ candidate (ipairs (generated-candidates-for-anchor plain-date-time rule dtstart anchor))]
+      (when candidate
+        (set satisfiable true)))
+    (set index (+ index 1)))
+  (when (not satisfiable)
+    (error "unsupported temporal recurrence expansion")))
+
 (fn expand-calendar [period rule dtstart bounds]
   (when rule.by-day
     (error "unsupported temporal recurrence expansion"))
@@ -485,6 +568,32 @@
           (when (candidate-calendar-filters-allowed? rule candidate)
             (table.insert results candidate))
           (set index (+ index 1)))))
+  results)
+
+(fn expand-calendar-generator [period plain-date-time rule dtstart bounds]
+  (when rule.by-day
+    (error "unsupported temporal recurrence expansion"))
+  (period.add-to-plain-date-time dtstart (calendar-step-period rule.freq 0))
+  (assert-generator-filters-satisfiable period plain-date-time rule dtstart)
+  (local results [])
+  (var index 0)
+  (var done false)
+  (while (and (not done) (not (limit-reached? results bounds)))
+    (local anchor
+      (if (= index 0)
+          dtstart
+          (period.add-to-plain-date-time
+            dtstart
+            (calendar-step-period rule.freq (* index rule.interval)))))
+    (append-generated-candidates
+      results
+      bounds
+      dtstart
+      (generated-candidates-for-anchor plain-date-time rule dtstart anchor))
+    (when (and bounds.until (> (anchor:compare bounds.until) 0))
+      (set done true))
+    (when (not done)
+      (set index (+ index 1))))
   results)
 
 (fn expand-daily [rule dtstart bounds]
@@ -529,12 +638,14 @@
     (set day-offset (+ day-offset 1)))
   results)
 
-(fn occurrences [period standard input-rule dtstart options]
+(fn occurrences [period standard plain-date-time input-rule dtstart options]
   (local rule (from input-rule))
   (local occurrence-options (normalize-occurrence-options options))
   (local bounds (occurrence-bounds standard rule occurrence-options))
   (if (or (= rule.freq :monthly) (= rule.freq :yearly))
-      (expand-calendar period rule dtstart bounds)
+      (if rule.by-month-day
+          (expand-calendar-generator period plain-date-time rule dtstart bounds)
+          (expand-calendar period rule dtstart bounds))
       (= rule.freq :daily)
       (expand-daily rule dtstart bounds)
       (= rule.freq :weekly)
@@ -546,12 +657,15 @@
     (error "temporal recurrence requires period dependency"))
   (when (not (and deps.standard deps.standard.parse-plain-date-time))
     (error "temporal recurrence requires standard dependency"))
+  (when (not (and deps.plain-date-time deps.plain-date-time.from-fields))
+    (error "temporal recurrence requires plain-date-time dependency"))
   (local period deps.period)
   (local standard deps.standard)
+  (local plain-date-time deps.plain-date-time)
   {:from from
    :parse-rrule parse-rrule
    :to-rrule to-rrule
    :occurrences (fn [rule dtstart options]
-                   (occurrences period standard rule dtstart options))})
+                    (occurrences period standard plain-date-time rule dtstart options))})
 
 create
