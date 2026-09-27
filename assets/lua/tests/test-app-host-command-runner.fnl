@@ -79,6 +79,20 @@
 (fn malformed-pending-async-command-run []
   {:pending false})
 
+(fn cancelling-callbacking-async-command-run [self _payload callbacks]
+  (set self.state.callbacks callbacks)
+  {:pending true
+   :cancel (fn [_reason]
+             (set self.state.cancel-count (+ self.state.cancel-count 1))
+             (callbacks.progress {:message "too late"})
+             (callbacks.resolve {:too-late true})
+             (callbacks.reject "too late")
+             (error "cancel exploded"))})
+
+(fn resolving-with-malformed-return-async-command-run [_self _payload callbacks]
+  (callbacks.resolve {:too-early true})
+  {:pending false})
+
 (fn run-host-with-missing-host []
   (CommandRunner.run-host nil :restart {}))
 
@@ -312,6 +326,56 @@
   (assert (string.find (. state.results 1 :error) "pending handle" 1 true))
   (assert (= handle.status :completed)))
 
+(fn test-async_runner_cancel_suppresses_hook_callbacks_and_errors []
+  (local state {:callbacks nil :cancel-count 0 :results [] :progress-count 0})
+  (local command {:id :long
+                  :state state
+                  :run-async cancelling-callbacking-async-command-run})
+  (fn on-result [result]
+    (table.insert state.results result))
+  (fn on-progress [_progress]
+    (set state.progress-count (+ state.progress-count 1)))
+  (local handle (CommandRunner.run-host-async
+                  (host-with-commands [command]) :long nil
+                  {:on-result on-result
+                   :on-progress on-progress}))
+  (handle:cancel "user cancelled")
+  (assert (= state.cancel-count 1))
+  (assert (= state.progress-count 0))
+  (assert (= (# state.results) 1))
+  (assert (= (. state.results 1 :status) :cancelled))
+  (assert (= handle.status :completed)))
+
+(fn test-async_runner_rejects_malformed_run_async_facet_loudly []
+  (local state {:ran? false})
+  (local command {:id :bad
+                  :state state
+                  :run mark-ran-command-run
+                  :run-async "not a function"})
+  (fn on-result [_result]
+    (set state.result? true))
+  (fn run-bad-command []
+    (CommandRunner.run-host-async
+      (host-with-commands [command]) :bad nil
+      {:on-result on-result}))
+  (assert-command-runner-error-contains run-bad-command "run-async")
+  (assert (= state.ran? false)))
+
+(fn test-async_runner_malformed_return_wins_over_sync_resolve []
+  (local state {:results []})
+  (local command {:id :bad
+                  :run-async resolving-with-malformed-return-async-command-run})
+  (fn on-result [result]
+    (table.insert state.results result))
+  (local handle (CommandRunner.run-host-async
+                  (host-with-commands [command]) :bad nil
+                  {:on-result on-result}))
+  (assert (= (# state.results) 1))
+  (assert (= (. state.results 1 :status) :error))
+  (assert (string.find (. state.results 1 :error) "pending handle" 1 true))
+  (assert (= (. state.results 1 :value) nil))
+  (assert (= handle.status :completed)))
+
 (add-test "async runner wraps sync command" test-async_runner_wraps_sync_command)
 (add-test "async runner reports progress and resolve" test-async_runner_reports_progress_and_resolve)
 (add-test "async runner reject returns error result" test-async_runner_reject_returns_error_result)
@@ -320,6 +384,9 @@
 (add-test "async runner drop suppresses late callbacks" test-async_runner_drop_suppresses_late_callbacks)
 (add-test "async runner malformed progress returns one error" test-async_runner_malformed_progress_returns_one_error)
 (add-test "async runner malformed pending return returns error" test-async_runner_malformed_pending_return_returns_error)
+(add-test "async runner cancel suppresses hook callbacks and errors" test-async_runner_cancel_suppresses_hook_callbacks_and_errors)
+(add-test "async runner rejects malformed run-async facet loudly" test-async_runner_rejects_malformed_run_async_facet_loudly)
+(add-test "async runner malformed return wins over sync resolve" test-async_runner_malformed_return_wins_over_sync_resolve)
 
 (fn test-valid_payload_schema_preserves_payload_dispatch []
   (local state {:received-payload nil})

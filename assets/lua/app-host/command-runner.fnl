@@ -89,19 +89,27 @@
   (validate-async-callbacks callbacks)
   (local command (command-for-run host command-id))
   (local run-async-fn command.run-async)
-  (when (and (not (= (type run-async-fn) :function))
-             (not (= (type command.run) :function)))
+  (when (and (not (= run-async-fn nil))
+             (not (= (type run-async-fn) :function)))
+    (command-error (.. "command run-async must be a function: " (tostring command-id))))
+  (when (and (= run-async-fn nil) (not (= (type command.run) :function)))
     (command-error (.. "command requires run or run-async function: " (tostring command-id))))
   (var terminal? false)
   (var cancelled? false)
   (var dropped? false)
+  (var initializing? false)
+  (var queued-terminal-result nil)
   (var pending-handle nil)
   (local handle {:id command-id :status :running})
   (fn deliver-result [result]
     (when (and (not terminal?) (not dropped?))
-      (set terminal? true)
-      (set handle.status :completed)
-      (callbacks.on-result result)))
+      (if initializing?
+          (when (= queued-terminal-result nil)
+            (set queued-terminal-result result))
+          (do
+            (set terminal? true)
+            (set handle.status :completed)
+            (callbacks.on-result result)))))
   (fn deliver-error [message]
     (deliver-result (result-error command-id message)))
   (fn deliver-progress [progress]
@@ -114,10 +122,12 @@
   (fn cancel [_self reason]
     (when (and (not terminal?) (not dropped?))
       (set cancelled? true)
+      (set terminal? true)
+      (set handle.status :completed)
       (when (and (= (type pending-handle) :table)
                  (= (type pending-handle.cancel) :function))
-        (pending-handle.cancel reason))
-      (deliver-result {:id command-id :status :cancelled :reason reason})))
+        (pcall pending-handle.cancel reason))
+      (callbacks.on-result {:id command-id :status :cancelled :reason reason})))
   (fn drop [_self]
     (when (and (not terminal?) (not dropped?))
       (set dropped? true)
@@ -138,14 +148,21 @@
                           :cancelled? (fn [] cancelled?)})
   (if (= (type run-async-fn) :function)
       (do
+        (set initializing? true)
         (local (ok value) (pcall run-async-fn command payload async-callbacks))
         (if ok
             (do
               (local (pending-ok pending-or-error) (pcall validate-pending-handle value))
+              (set initializing? false)
               (if pending-ok
-                  (set pending-handle pending-or-error)
+                  (do
+                    (set pending-handle pending-or-error)
+                    (when (not (= queued-terminal-result nil))
+                      (deliver-result queued-terminal-result)))
                   (deliver-error pending-or-error)))
-            (deliver-error value)))
+            (do
+              (set initializing? false)
+              (deliver-error value))))
       (deliver-result (run-host host command-id payload)))
   (when (not terminal?)
     (set handle.status :running))
