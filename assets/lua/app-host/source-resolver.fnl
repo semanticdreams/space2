@@ -65,11 +65,20 @@
 
 (fn file-module-info [path]
   (local marker "/assets/lua/")
-  (local (start-index end-index) (string.find path marker 1 true))
-  (if start-index
+  (var search-start 1)
+  (var closest-end-index nil)
+  (var done? false)
+  (while (not done?)
+    (local (_start-index end-index) (string.find path marker search-start true))
+    (if end-index
+        (do
+          (set closest-end-index end-index)
+          (set search-start (+ end-index 1)))
+        (set done? true)))
+  (if closest-end-index
       (do
-        (local lua-root (string.sub path 1 (- end-index 1)))
-        (local relative (string.sub path (+ end-index 1)))
+        (local lua-root (string.sub path 1 (- closest-end-index 1)))
+        (local relative (string.sub path (+ closest-end-index 1)))
         {:lua-root lua-root
          :module-name (module-name-from-relative relative)})
       (do

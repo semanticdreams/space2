@@ -24,17 +24,23 @@
       source.path
       "hosted app"))
 
-(fn disabled-status [result]
+(fn current-latest-launch [node]
+  (and node node._hosted-app-launcher node._hosted-app-launcher.status
+       node._hosted-app-launcher.status.latest-launch))
+
+(fn disabled-status [result latest-launch]
   {:status :disabled
    :reason (and result result.reason)
    :message (if (and result result.message)
                 result.message
-                "select one filesystem app source")})
+                "select one filesystem app source")
+   :latest-launch latest-launch})
 
-(fn ready-status [source]
+(fn ready-status [source latest-launch]
   {:status :ready
    :message (.. "Ready to launch " (source-label source))
-   :source source})
+   :source source
+   :latest-launch latest-launch})
 
 (fn launched-status [source]
   {:status :launched
@@ -62,9 +68,10 @@
 
 (fn refresh-selection [self]
   (local result (resolve-current-selection self))
+  (local latest-launch (current-latest-launch self))
   (if (and result result.ok?)
-      (set-status! self (ready-status result))
-      (set-status! self (disabled-status result))))
+      (set-status! self (ready-status result latest-launch))
+      (set-status! self (disabled-status result latest-launch))))
 
 (fn current-status [self]
   (. (hosted-state self) :status))
@@ -75,17 +82,17 @@
     (pcall state.launcher.open-source source opts))
   (if ok
       (do
-        (set-status! self (launched-status source))
+        (set-status! self (ready-status source (launched-status source)))
         session-or-error)
       (do
-        (set-status! self (error-status session-or-error source))
+        (set-status! self (ready-status source (error-status session-or-error source)))
         nil)))
 
 (fn open-selected [self opts]
   (local result (resolve-current-selection self))
   (if (not (and result result.ok?))
       (do
-        (set-status! self (disabled-status result))
+        (set-status! self (disabled-status result (current-latest-launch self)))
         nil)
       (launch-source self result opts)))
 

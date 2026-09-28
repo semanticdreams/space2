@@ -41,9 +41,8 @@
 
 (fn launch-line [status]
   (local current (assert status "HostedAppLauncherView requires launcher status"))
-  (if (or (= current.status :launched)
-          (= current.status :error))
-      (.. "Latest launch: " (status-message current))
+  (if current.latest-launch
+      (.. "Latest launch: " (status-message current.latest-launch))
       "Latest launch: none"))
 
 (fn ready? [status]

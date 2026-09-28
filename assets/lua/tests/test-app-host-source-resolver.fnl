@@ -93,7 +93,19 @@
       (assert-success (resolve [(.. "fs:" entry)] {})
                       {:source-kind :file
                        :lua-root lua-root
-                       :module-name "snake/app"
+                        :module-name "snake/app"
+                        :entry-path entry}))))
+
+(fn test-file-under-nested-assets-lua-uses-nearest-root []
+  (with-temp-dir "assets-nested-root"
+    (fn [root]
+      (local outer-root (fs.join-path root "assets" "lua"))
+      (local inner-root (fs.join-path outer-root "vendor" "app" "assets" "lua"))
+      (local entry (write-file (fs.join-path inner-root "main.fnl")))
+      (assert-success (resolve [(.. "fs:" entry)] {})
+                      {:source-kind :file
+                       :lua-root inner-root
+                       :module-name "main"
                        :entry-path entry}))))
 
 (fn test-standalone-file []
@@ -171,6 +183,7 @@
 (add-test "unsupported file extension returns unsupported-file" test-unsupported-file-extension)
 (add-test "file under assets lua main resolves module" test-file-under-assets-lua-main)
 (add-test "file under assets lua nested resolves slash module" test-file-under_assets_lua_nested_module)
+(add-test "file under nested assets lua uses nearest root" test-file-under-nested-assets-lua-uses-nearest-root)
 (add-test "standalone file resolves from parent" test-standalone-file)
 (add-test "directory assets lua main resolves" test-directory-assets-lua-main)
 (add-test "directory main resolves" test-directory-main)

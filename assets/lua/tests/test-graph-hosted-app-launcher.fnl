@@ -221,14 +221,22 @@
 (fn open-selected-updates-status-to-launched []
   (local ctx (make-node ["fs:/tmp/app/main.fnl"] (success-result)))
   (ctx.node:open-selected {})
-  (assert-status ctx.node :launched "Hosted app launched"))
+  (local status (assert-status ctx.node :ready "Ready to launch"))
+  (assert status.latest-launch "successful launch should keep latest launch status")
+  (assert-equals status.latest-launch.status :launched "latest launch status should be launched")
+  (assert (string.find status.latest-launch.message "Hosted app launched" 1 true)
+          "latest launch should report success"))
 
 (fn open-selected-captures-launch-failure []
   (local ctx (make-node ["fs:/tmp/app/main.fnl"] (success-result)
                         failing-open-source))
   (local session (ctx.node:open-selected {}))
   (assert-equals session nil "failed launch should return nil")
-  (assert-status ctx.node :error "boom"))
+  (local status (assert-status ctx.node :ready "Ready to launch"))
+  (assert status.latest-launch "failed launch should keep latest launch status")
+  (assert-equals status.latest-launch.status :error "latest launch status should be error")
+  (assert (string.find status.latest-launch.message "boom" 1 true)
+          "latest launch should report error"))
 
 (fn node-exposes-hosted-launcher-view-constructor []
   (local ctx (make-node [] (fail-result :no-selection "select one filesystem app source")))
@@ -265,10 +273,23 @@
   (assert-equals view.launch-button.enabled? true "ready launch button should start enabled")
   (view.launch-button:on-click {:button 1})
   (assert-equals last-launched-source source "click should open selected source")
-  (assert-equals view.status-kind :launched "click should refresh visible status")
-  (assert (string.find view.status-message "Hosted app launched" 1 true)
-          "view should render launched status text")
-  (assert-equals view.launch-button.enabled? false "launch button should disable after launched status")
+  (assert-equals view.status-kind :ready "click should preserve visible selection readiness")
+  (assert (string.find view.launch-message "Hosted app launched" 1 true)
+          "view should render latest launched status text")
+  (assert-equals view.launch-button.enabled? true "launch button should remain enabled while selection is ready")
+  (view:drop))
+
+(fn failed-launch-keeps-button-enabled-for-ready-selection []
+  (local ctx (make-node ["fs:/tmp/app/main.fnl"] (success-result)
+                        failing-open-source))
+  (local view ((ctx.node.view ctx.node) (make-ui-ctx)))
+  (assert-equals view.launch-button.enabled? true "ready launch button should start enabled")
+  (local session (ctx.node:open-selected {}))
+  (assert-equals session nil "failed launch should return nil")
+  (assert-equals view.status-kind :ready "failed launch should preserve visible selection readiness")
+  (assert (string.find view.launch-message "boom" 1 true)
+          "view should render latest launch error")
+  (assert-equals view.launch-button.enabled? true "launch button should remain enabled so user can retry")
   (view:drop))
 
 (add-test "built-in descriptors include hosted app launcher scheme" builtin-descriptors-include-hosted-app-launcher-scheme)
@@ -287,6 +308,7 @@
 (add-test "built view renders disabled status for invalid selection" built-view-renders-disabled-status-for-invalid-selection)
 (add-test "launch button disabled unless ready" launch-button-disabled-unless-ready)
 (add-test "clicking enabled button opens selection and refreshes status" clicking-enabled-button-opens-selection-and-refreshes-status)
+(add-test "failed launch keeps button enabled for ready selection" failed-launch-keeps-button-enabled-for-ready-selection)
 
 (fn main []
   (Runner.run-tests {:name "graph-hosted-app-launcher" :tests tests}))
