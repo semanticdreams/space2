@@ -3,6 +3,7 @@
 (local Signal (require :signal))
 (local SourceResolver (require :app-host.source-resolver))
 (local HostedSourceLauncher (require :app-host.hosted-source-launcher))
+(local HostedAppLauncherView (require :graph/view/views/hosted-app-launcher))
 
 (local NODE-KEY "hosted-app-launcher:workspace")
 
@@ -133,7 +134,8 @@
                 :label "Hosted App Launcher"
                 :color (glm.vec4 0.34 0.45 0.74 1)
                 :sub-color (glm.vec4 0.45 0.58 0.9 1)
-                :kind-badge "HOST"}))
+                :kind-badge "HOST"
+                :view HostedAppLauncherView}))
   (set node._hosted-app-launcher
        {:resolver resolver
         :launcher launcher
