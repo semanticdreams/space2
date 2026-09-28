@@ -143,6 +143,30 @@
 (fn test-make-module-loads-selected-main-when-main-cached []
   (with-temp-dir "cached-main" assert-selected-main-loaded))
 
+(fn create-cached-dependency []
+  {:source :cached-dependency})
+
+(fn assert-dependency-loaded-once [root]
+  (write-file (fs.join-path root "main.fnl")
+              "{:create (fn [_host]\n  (local first (require :shared-dep))\n  (local second (require :shared-dep))\n  {:same? (= first second)\n   :init-count first.init-count})}\n")
+  (write-file (fs.join-path root "shared-dep.fnl")
+              "(set _G.__hosted_source_dep_init_count (+ (or _G.__hosted_source_dep_init_count 0) 1))\n{:source :selected-dependency\n :init-count _G.__hosted_source_dep_init_count}\n")
+  (local cached-dependency (create-cached-dependency))
+  (fn assert-loads-dependency-once []
+    (set _G.__hosted_source_dep_init_count 0)
+    (clear-module "main")
+    (local wrapper (HostedSourceLauncher.make-module (source-for root "main")))
+    (local result (wrapper:create {:id :host}))
+    (assert-equals result.same? true "source-owned dependency should reuse selected launch cache")
+    (assert-equals result.init-count 1 "source-owned dependency should initialize once during launch")
+    (assert-equals (. package.loaded "shared-dep") cached-dependency "cached dependency should be restored after launch")
+    (set _G.__hosted_source_dep_init_count nil)
+    (clear-module "main"))
+  (with-package-loaded "shared-dep" cached-dependency assert-loads-dependency-once))
+
+(fn test-make-module-reuses-source-owned-dependency-during-launch []
+  (with-temp-dir "dependency-cache" assert-dependency-loaded-once))
+
 (fn test-open-source-opens_workspace_panel_with_wrapper_and_label []
   (local calls [])
   (local fake-panel {:open (fn [opts]
@@ -169,6 +193,7 @@
 (add-test "make-module rejects missing create and restores state" test-make-module-rejects-missing-create-and-restores-state)
 (add-test "make-module restores state when create errors" test-make-module-restores_state_when_create_errors)
 (add-test "make-module loads selected main when main is cached" test-make-module-loads-selected-main-when-main-cached)
+(add-test "make-module reuses source-owned dependency during launch" test-make-module-reuses-source-owned-dependency-during-launch)
 (add-test "open-source opens workspace panel with wrapper and label" test-open-source-opens_workspace_panel_with_wrapper_and_label)
 
 (fn main []

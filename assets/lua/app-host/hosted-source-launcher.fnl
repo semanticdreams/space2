@@ -43,8 +43,8 @@
   (when (= (. saved-loaded name) nil)
     (local existing (. package.loaded name))
     (tset saved-loaded name {:present? (not (= existing nil))
-                             :value existing}))
-  (tset package.loaded name nil))
+                             :value existing})
+    (tset package.loaded name nil)))
 
 (fn restore-loaded! [saved-loaded]
   (each [name saved (pairs saved-loaded)]
