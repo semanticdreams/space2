@@ -51,6 +51,15 @@
 (fn clear-module [module-name]
   (set (. package.loaded module-name) nil))
 
+(fn with-package-loaded [module-name value f]
+  (local previous (. package.loaded module-name))
+  (set (. package.loaded module-name) value)
+  (local (ok result) (pcall f))
+  (set (. package.loaded module-name) previous)
+  (if ok
+      result
+      (error result)))
+
 (fn test-make-module-loads-source-and-restores-state []
   (with-temp-dir "success"
     (fn [root]
@@ -115,6 +124,25 @@
       (set app.__suppress-main-run? previous-suppress)
       (clear-module module-name))))
 
+(fn create-cached-main [_host]
+  {:source :cached})
+
+(fn assert-selected-main-loaded [root]
+  (write-file (fs.join-path root "main.fnl")
+              "{:create (fn [host]\n  {:source :selected :host host})}\n")
+  (local cached-main {:create create-cached-main})
+  (fn assert-loads-selected-main []
+    (local wrapper (HostedSourceLauncher.make-module (source-for root "main")))
+    (local host {:id :host})
+    (local result (wrapper:create host))
+    (assert-equals result.source :selected "selected source module should bypass cached main")
+    (assert-equals result.host host "selected source create should receive host")
+    (assert-equals (. package.loaded "main") cached-main "cached main should be restored after launch"))
+  (with-package-loaded "main" cached-main assert-loads-selected-main))
+
+(fn test-make-module-loads-selected-main-when-main-cached []
+  (with-temp-dir "cached-main" assert-selected-main-loaded))
+
 (fn test-open-source-opens_workspace_panel_with_wrapper_and_label []
   (local calls [])
   (local fake-panel {:open (fn [opts]
@@ -140,6 +168,7 @@
 (add-test "make-module loads source create and restores state" test-make-module-loads-source-and-restores-state)
 (add-test "make-module rejects missing create and restores state" test-make-module-rejects-missing-create-and-restores-state)
 (add-test "make-module restores state when create errors" test-make-module-restores_state_when_create_errors)
+(add-test "make-module loads selected main when main is cached" test-make-module-loads-selected-main-when-main-cached)
 (add-test "open-source opens workspace panel with wrapper and label" test-open-source-opens_workspace_panel_with_wrapper_and_label)
 
 (fn main []

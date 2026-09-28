@@ -23,14 +23,50 @@
 (fn module-paths [lua-root]
   (.. lua-root "/?.fnl;" lua-root "/?/init.fnl"))
 
+(fn path-under? [path root]
+  (and (= (type path) :string)
+       (= (type root) :string)
+       (do
+         (local path-len (# path))
+         (local root-len (# root))
+         (and (>= path-len root-len)
+              (= (string.sub path 1 root-len) root)
+              (if (= path-len root-len)
+                  true
+                  (= (string.sub path (+ root-len 1) (+ root-len 1)) "/"))))))
+
+(fn source-owned-module? [source module-name]
+  (local (ok path) (pcall fennel.search-module module-name))
+  (and ok (path-under? path source.lua-root)))
+
+(fn save-and-clear-loaded! [saved-loaded name]
+  (when (= (. saved-loaded name) nil)
+    (local existing (. package.loaded name))
+    (tset saved-loaded name {:present? (not (= existing nil))
+                             :value existing}))
+  (tset package.loaded name nil))
+
+(fn restore-loaded! [saved-loaded]
+  (each [name saved (pairs saved-loaded)]
+    (if saved.present?
+        (tset package.loaded name saved.value)
+        (tset package.loaded name nil))))
+
 (fn with-source-loader-state [source f]
   (local previous-fennel-path fennel.path)
   (local previous-require _G.require)
   (local previous-suppress (and app app.__suppress-main-run?))
+  (local saved-loaded {})
   (set fennel.path (.. (module-paths source.lua-root) ";" fennel.path))
+  (set _G.require
+       (fn [name]
+         (when (source-owned-module? source name)
+           (save-and-clear-loaded! saved-loaded name))
+         (previous-require name)))
   (when app
     (set app.__suppress-main-run? true))
   (local (ok result) (pcall f))
+  (restore-loaded! saved-loaded)
   (set _G.require previous-require)
   (set fennel.path previous-fennel-path)
   (when app
