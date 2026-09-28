@@ -26,7 +26,7 @@
 (local ray-box (require :ray-box))
 (local glm (require :glm))
 
-(local hit point distance
+(local (hit point distance)
   (ray-box.ray-box-intersection
     {:origin (glm.vec3 0 0 -5) :direction (glm.vec3 0 0 1)}
     {:position (glm.vec3 0 0 0) :size (glm.vec3 2 2 2)}))
