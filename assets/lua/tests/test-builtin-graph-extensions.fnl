@@ -15,6 +15,7 @@
    "agent-session" "class" "code-dir" "code-entity" "cpp-module" "entities"
    "fnl-module" "fs" "fs-file-viewer" "hackernews-root" "hackernews-story"
    "hackernews-story-list" "hackernews-user" "hud-panel" "hud-panels" "identity"
+   "hosted-app-launcher"
    "kernel" "kernel-instance" "kernels" "link-entity" "link-entity-list" "list-entity"
    "list-entity-list" "llm" "llm-conversation" "llm-conversations" "llm-message"
    "llm-model" "llm-provider" "llm-tool" "llm-tool-call" "llm-tool-result"
@@ -178,6 +179,7 @@
   (assert-loads graph "string-entity-list")
   (assert-loads graph (.. "fs:" temp-dir.path))
   (assert-loads graph "llm")
+  (assert-loads graph "hosted-app-launcher:workspace")
   (assert-loads graph "kernels")
   (assert-loads graph "worlds")
   (registry:uninstall-runtime runtime)
