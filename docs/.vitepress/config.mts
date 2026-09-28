@@ -22,10 +22,60 @@ export default defineConfig({
       { text: 'Home', link: '/' },
       { text: 'Quick Start', link: '/user/quick-start' },
       { text: 'User', link: '/user/' },
+      { text: 'SDK', link: '/sdk/' },
       { text: 'Developer', link: '/dev/' }
     ],
 
     sidebar: {
+      '/sdk/': [
+        {
+          text: 'Overview',
+          items: [
+            { text: 'SDK Docs', link: '/sdk/' },
+            { text: 'Getting Started', link: '/sdk/getting-started' },
+            { text: 'Concepts', link: '/sdk/concepts' }
+          ]
+        },
+        {
+          text: 'Tutorials',
+          items: [
+            { text: 'Tutorials Overview', link: '/sdk/tutorials/' },
+            { text: 'Your First Space App', link: '/sdk/tutorials/your-first-space-app' },
+            { text: 'Add a Command', link: '/sdk/tutorials/add-a-command' },
+            { text: 'Publish an App', link: '/sdk/tutorials/publish-an-app' }
+          ]
+        },
+        {
+          text: 'Guides',
+          items: [
+            { text: 'Guides Overview', link: '/sdk/guides/' },
+            { text: 'App Layout', link: '/sdk/guides/app-layout' },
+            { text: 'Hostable Runtime Apps', link: '/sdk/guides/hostable-runtime-apps' },
+            { text: 'Embedded Workspace Hosting', link: '/sdk/guides/embedded-workspace-hosting' },
+            { text: 'Graph Extension Units', link: '/sdk/guides/graph-extension-units' },
+            { text: 'UI Surfaces', link: '/sdk/guides/ui-surfaces' }
+          ]
+        },
+        {
+          text: 'Reference',
+          items: [
+            { text: 'Reference Overview', link: '/sdk/reference/' },
+            { text: 'App Module Contract', link: '/sdk/reference/app-module-contract' },
+            { text: 'Host Capabilities', link: '/sdk/reference/host-capabilities' },
+            { text: 'Runtime Facets', link: '/sdk/reference/runtime-facets' },
+            { text: 'Commands', link: '/sdk/reference/commands' },
+            { text: 'Scene Capability', link: '/sdk/reference/scene-capability' },
+            { text: 'Packaging Workflow', link: '/sdk/reference/packaging-workflow' },
+            { text: 'Graph Extension Descriptors', link: '/sdk/reference/graph-extension-descriptors' }
+          ]
+        },
+        {
+          text: 'Examples',
+          items: [
+            { text: 'Examples Overview', link: '/sdk/examples/' }
+          ]
+        }
+      ],
       '/user/': [
         {
           text: 'User',

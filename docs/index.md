@@ -17,6 +17,9 @@ hero:
       text: User Docs
       link: /user/
     - theme: alt
+      text: SDK Docs
+      link: /sdk/
+    - theme: alt
       text: Developer Docs
       link: /dev/
 
