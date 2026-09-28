@@ -64,7 +64,7 @@ Supported field tokens are `yyyy`, `MM`, `dd`, `HH`, `mm`, and `ss`; quoted lite
 
 The in-scope RFC5545 RRULE engine supports `FREQ` values `SECONDLY`, `MINUTELY`, `HOURLY`, `DAILY`, `WEEKLY`, `MONTHLY`, and `YEARLY`, plus `INTERVAL`, `COUNT`, compact local `UNTIL=YYYYMMDDTHHMMSS`, `BYSECOND`, `BYMINUTE`, `BYHOUR`, `BYDAY`, `BYMONTHDAY`, `BYYEARDAY`, `BYWEEKNO`, `BYMONTH`, `BYSETPOS`, and `WKST`. Expansion is `PlainDateTime`-only: rules expand from a caller-supplied `PlainDateTime` `DTSTART`; compact local `UNTIL` is inclusive; `COUNT`, `options.limit`, and local `UNTIL` stop at the first reached bound.
 
-Rules use RFC5545 candidate-set ordering. Each frequency bucket generates date and time candidates, removes candidates before `DTSTART`, sorts by plain date-time, applies `BYSETPOS` to the sorted bucket, then applies bounds. For example, `RRULE:FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=1,-1` selects the first and last weekday in each month. `WKST` controls week bucket starts and week-number calculations for weekly interval rules and `BYWEEKNO`.
+Rules use RFC5545 candidate-set ordering. Each frequency bucket generates date and time candidates, sorts the full bucket by plain date-time, applies `BYSETPOS` to that sorted bucket, then applies bounds including `DTSTART`, compact local `UNTIL`, `COUNT`, and `options.limit`. For example, `RRULE:FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=1,-1` selects the first and last weekday in each month. `WKST` controls week bucket starts and week-number calculations for weekly interval rules and `BYWEEKNO`.
 
 Selector examples:
 
