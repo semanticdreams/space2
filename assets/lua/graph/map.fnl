@@ -663,13 +663,11 @@
             (local computed-next-island-id (next-island-number-after-records))
             (when (< next-island-id computed-next-island-id)
                 (set next-island-id computed-next-island-id))
-            (set self.selected_node_keys
-                 (or (and (= (type payload.selected_node_keys) :table)
-                          (icollect [_ key (ipairs payload.selected_node_keys)]
-                              (if (and (= (type key) :string)
-                                       (lookup self key))
-                                  key)))
-                     []))
+            (local restored-selected-keys
+                (if (= (type payload.selected_node_keys) :table)
+                    payload.selected_node_keys
+                    []))
+            (set-selected-node-keys self restored-selected-keys)
             (set self.focused_node_key
                  (and (= (type payload.focused_node_key) :string)
                       (lookup self payload.focused_node_key)
