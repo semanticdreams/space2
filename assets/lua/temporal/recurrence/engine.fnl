@@ -49,6 +49,19 @@
             :hour source-fields.hour
             :minute source-fields.minute
             :second source-fields.second
+             :nanosecond source-fields.nanosecond}))
+  (if ok value nil))
+
+(fn build-time-candidate [plain-date-time source year month day hour minute second]
+  (local source-fields (plain-fields source))
+  (local (ok value)
+    (pcall plain-date-time.from-fields
+           {:year year
+            :month month
+            :day day
+            :hour hour
+            :minute minute
+            :second second
             :nanosecond source-fields.nanosecond}))
   (if ok value nil))
 
@@ -104,11 +117,23 @@
         (set found true))))
   found)
 
-(fn assert-supported-expansion-surface [recurrence-rule]
-  (when (or recurrence-rule.by-second
-             recurrence-rule.by-minute
-             recurrence-rule.by-hour)
-    (error "unsupported temporal recurrence expansion")))
+(fn needs-duration? [recurrence-rule]
+  (if (= recurrence-rule.freq :secondly)
+      true
+      (= recurrence-rule.freq :minutely)
+      true
+      (= recurrence-rule.freq :hourly)
+      true
+      false))
+
+(fn has-time-selectors? [recurrence-rule]
+  (if recurrence-rule.by-second
+      true
+      recurrence-rule.by-minute
+      true
+      recurrence-rule.by-hour
+      true
+      false))
 
 (fn limit-reached? [results bounds]
   (and bounds.limit (>= (# results) bounds.limit)))
@@ -388,7 +413,7 @@
 (fn candidate-present? [candidates candidate]
   (var found false)
   (each [_ existing (ipairs candidates)]
-    (when (same-date? existing candidate)
+    (when (= (existing:compare candidate) 0)
       (set found true)))
   found)
 
@@ -486,6 +511,33 @@
     (when (= item value)
       (set found true)))
   found)
+
+(fn selected-values [items default-value]
+  (if items items [default-value]))
+
+(fn time-selectors-allowed? [recurrence-rule candidate]
+  (local fields (plain-fields candidate))
+  (and (if recurrence-rule.by-hour
+           (numeric-list-contains? recurrence-rule.by-hour fields.hour)
+           true)
+       (if recurrence-rule.by-minute
+           (numeric-list-contains? recurrence-rule.by-minute fields.minute)
+           true)
+       (if recurrence-rule.by-second
+           (numeric-list-contains? recurrence-rule.by-second fields.second)
+           true)))
+
+(fn expand-time-candidates [plain-date-time recurrence-rule dtstart date-candidate]
+  (local date-fields (plain-fields date-candidate))
+  (local start-fields (plain-fields dtstart))
+  (local candidates [])
+  (each [_ hour (ipairs (selected-values recurrence-rule.by-hour start-fields.hour))]
+    (each [_ minute (ipairs (selected-values recurrence-rule.by-minute start-fields.minute))]
+      (each [_ second (ipairs (selected-values recurrence-rule.by-second start-fields.second))]
+        (insert-candidate-once
+          candidates
+          (build-time-candidate plain-date-time dtstart date-fields.year date-fields.month date-fields.day hour minute second)))))
+  (sort-candidates candidates))
 
 (fn resolved-month-day-allowed? [plain-date-time days candidate]
   (local fields (plain-fields candidate))
@@ -607,7 +659,8 @@
   (while (< offset days)
     (local candidate (start:add-days offset))
     (when (date-selectors-allowed? plain-date-time recurrence-rule candidate dtstart yearly?)
-      (table.insert candidates candidate))
+      (each [_ timed (ipairs (expand-time-candidates plain-date-time recurrence-rule dtstart candidate))]
+        (table.insert candidates timed)))
     (set offset (+ offset 1)))
   (apply-by-set-pos recurrence-rule candidates))
 
@@ -708,8 +761,84 @@
     (set index (+ index 1)))
   results)
 
+(fn sub-daily-step-seconds [recurrence-rule]
+  (if (= recurrence-rule.freq :secondly)
+      recurrence-rule.interval
+      (= recurrence-rule.freq :minutely)
+      (* recurrence-rule.interval 60)
+      (= recurrence-rule.freq :hourly)
+      (* recurrence-rule.interval 3600)
+      (error "unsupported temporal recurrence expansion")))
+
+(fn exact-add-seconds [duration candidate seconds]
+  (candidate:add (duration.from {:seconds seconds})))
+
+(fn build-minute-candidates [plain-date-time recurrence-rule dtstart anchor]
+  (local fields (plain-fields anchor))
+  (local candidates [])
+  (each [_ second (ipairs (selected-values recurrence-rule.by-second (. (plain-fields dtstart) :second)))]
+    (local candidate (build-time-candidate plain-date-time dtstart fields.year fields.month fields.day fields.hour fields.minute second))
+    (when (and candidate (time-selectors-allowed? recurrence-rule candidate))
+      (insert-candidate-once candidates candidate)))
+  (apply-by-set-pos recurrence-rule candidates))
+
+(fn build-hour-candidates [plain-date-time recurrence-rule dtstart anchor]
+  (local fields (plain-fields anchor))
+  (local start-fields (plain-fields dtstart))
+  (local candidates [])
+  (each [_ minute (ipairs (selected-values recurrence-rule.by-minute start-fields.minute))]
+    (each [_ second (ipairs (selected-values recurrence-rule.by-second start-fields.second))]
+      (local candidate (build-time-candidate plain-date-time dtstart fields.year fields.month fields.day fields.hour minute second))
+      (when (and candidate (time-selectors-allowed? recurrence-rule candidate))
+        (insert-candidate-once candidates candidate))))
+  (apply-by-set-pos recurrence-rule candidates))
+
+(fn build-sub-daily-candidates [plain-date-time recurrence-rule dtstart anchor]
+  (if (= recurrence-rule.freq :secondly)
+      (if (time-selectors-allowed? recurrence-rule anchor)
+          (apply-by-set-pos recurrence-rule [anchor])
+          [])
+      (= recurrence-rule.freq :minutely)
+      (build-minute-candidates plain-date-time recurrence-rule dtstart anchor)
+      (= recurrence-rule.freq :hourly)
+      (build-hour-candidates plain-date-time recurrence-rule dtstart anchor)
+      []))
+
+(fn assert-sub-daily-satisfiable [duration plain-date-time recurrence-rule dtstart]
+  (local cycle (/ 86400 (gcd (sub-daily-step-seconds recurrence-rule) 86400)))
+  (var index 0)
+  (var satisfiable false)
+  (while (and (< index cycle) (not satisfiable))
+    (local anchor (exact-add-seconds duration dtstart (* index (sub-daily-step-seconds recurrence-rule))))
+    (when (> (# (build-sub-daily-candidates plain-date-time recurrence-rule dtstart anchor)) 0)
+      (set satisfiable true))
+    (set index (+ index 1)))
+  (when (not satisfiable)
+    (error "unsupported temporal recurrence expansion")))
+
+(fn expand-sub-daily [duration plain-date-time recurrence-rule dtstart bounds]
+  (assert-sub-daily-satisfiable duration plain-date-time recurrence-rule dtstart)
+  (local results [])
+  (local step-seconds (sub-daily-step-seconds recurrence-rule))
+  (var index 0)
+  (var done false)
+  (while (and (not done) (not (limit-reached? results bounds)))
+    (local anchor (exact-add-seconds duration dtstart (* index step-seconds)))
+    (if (not (within-until? anchor bounds.until))
+        (set done true)
+        (do
+          (append-generated-candidates
+            results
+            bounds
+            dtstart
+            (build-sub-daily-candidates plain-date-time recurrence-rule dtstart anchor))
+          (set index (+ index 1)))))
+  results)
+
 (fn needs-candidate-selector-engine? [recurrence-rule]
-  (if recurrence-rule.by-year-day
+  (if (has-time-selectors? recurrence-rule)
+      true
+      recurrence-rule.by-year-day
       true
       recurrence-rule.by-week-no
       true
@@ -733,13 +862,20 @@
   (when (not (and deps.plain-date-time deps.plain-date-time.from-fields))
     (error "temporal recurrence requires plain-date-time dependency")))
 
+(fn validate-duration-dep [deps recurrence-rule]
+  (when (and (or (needs-duration? recurrence-rule) (has-time-selectors? recurrence-rule))
+             (not (and deps.duration deps.duration.from)))
+    (error "temporal recurrence requires duration dependency")))
+
 (fn occurrences [deps input-rule dtstart options]
   (validate-deps deps)
   (local recurrence-rule (rule.from input-rule))
-  (assert-supported-expansion-surface recurrence-rule)
+  (validate-duration-dep deps recurrence-rule)
   (local occurrence-options (rule.normalize-occurrence-options options))
   (local bounds (rule.occurrence-bounds deps.standard recurrence-rule occurrence-options))
-  (if (and (= recurrence-rule.freq :daily) (needs-candidate-selector-engine? recurrence-rule))
+  (if (needs-duration? recurrence-rule)
+      (expand-sub-daily deps.duration deps.plain-date-time recurrence-rule dtstart bounds)
+      (and (= recurrence-rule.freq :daily) (needs-candidate-selector-engine? recurrence-rule))
       (expand-daily-candidates deps.plain-date-time recurrence-rule dtstart bounds)
       (and (= recurrence-rule.freq :weekly) (needs-candidate-selector-engine? recurrence-rule))
       (expand-weekly-candidates deps.plain-date-time recurrence-rule dtstart bounds)

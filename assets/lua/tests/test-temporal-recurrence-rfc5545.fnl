@@ -57,19 +57,6 @@
     (assert-error #(Temporal.recurrence.parse-rrule rrule)
                    (.. rrule " should throw"))))
 
-(fn rejects-unsupported-rfc5545-occurrence-selectors []
-  (local dtstart (Temporal.plain-date-time.parse "2026-09-22T09:00:00"))
-  (each [_ rrule (ipairs ["RRULE:FREQ=DAILY;COUNT=1;BYSECOND=30"
-                          "RRULE:FREQ=DAILY;COUNT=1;BYMINUTE=30"
-                          "RRULE:FREQ=DAILY;COUNT=1;BYHOUR=17"])]
-    (local err
-      (assert-error #(Temporal.recurrence.occurrences
-                       (Temporal.recurrence.parse-rrule rrule)
-                       dtstart
-                       {})
-                     (.. rrule " should throw during occurrence expansion")))
-    (assert (tostring err):find "unsupported temporal recurrence expansion" 1 true)))
-
 (fn expands-last-friday-of-month []
   (local dtstart (Temporal.plain-date-time.parse "2026-01-01T09:00:00"))
   (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;BYDAY=-1FR;COUNT=3"))
@@ -118,12 +105,31 @@
   (local err (assert-error #(Temporal.recurrence.occurrences rule dtstart)))
   (assert (tostring err):find "unsupported temporal recurrence expansion" 1 true))
 
+(fn expands-hourly-frequency []
+  (local dtstart (Temporal.plain-date-time.parse "2026-01-01T09:30:00"))
+  (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=HOURLY;INTERVAL=2;COUNT=4"))
+  (assert-strings (Temporal.recurrence.occurrences rule dtstart) ["2026-01-01T09:30:00" "2026-01-01T11:30:00" "2026-01-01T13:30:00" "2026-01-01T15:30:00"]))
+
+(fn expands-minutely-frequency-across-hour []
+  (local dtstart (Temporal.plain-date-time.parse "2026-01-01T23:58:00"))
+  (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=MINUTELY;COUNT=4"))
+  (assert-strings (Temporal.recurrence.occurrences rule dtstart) ["2026-01-01T23:58:00" "2026-01-01T23:59:00" "2026-01-02T00:00:00" "2026-01-02T00:01:00"]))
+
+(fn expands-secondly-frequency-across-minute []
+  (local dtstart (Temporal.plain-date-time.parse "2026-01-01T00:00:58"))
+  (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=SECONDLY;COUNT=4"))
+  (assert-strings (Temporal.recurrence.occurrences rule dtstart) ["2026-01-01T00:00:58" "2026-01-01T00:00:59" "2026-01-01T00:01:00" "2026-01-01T00:01:01"]))
+
+(fn applies-time-selectors []
+  (local dtstart (Temporal.plain-date-time.parse "2026-01-01T00:00:00"))
+  (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=DAILY;BYHOUR=9,17;BYMINUTE=15;BYSECOND=30;COUNT=4"))
+  (assert-strings (Temporal.recurrence.occurrences rule dtstart) ["2026-01-01T09:15:30" "2026-01-01T17:15:30" "2026-01-02T09:15:30" "2026-01-02T17:15:30"]))
+
 (table.insert tests {:name "parses sub daily frequencies" :fn parses-sub-daily-frequencies})
 (table.insert tests {:name "parses new selector lists" :fn parses-new-selector-lists})
 (table.insert tests {:name "parses ordinal BYDAY" :fn parses-ordinal-byday})
 (table.insert tests {:name "serializes full field order" :fn serializes-full-field-order})
 (table.insert tests {:name "rejects invalid RFC5545 rule fields" :fn rejects-invalid-rfc5545-rule-fields})
-(table.insert tests {:name "rejects unsupported RFC5545 occurrence selectors" :fn rejects-unsupported-rfc5545-occurrence-selectors})
 (table.insert tests {:name "expands last Friday of month" :fn expands-last-friday-of-month})
 (table.insert tests {:name "expands negative month day" :fn expands-negative-month-day})
 (table.insert tests {:name "applies BYSETPOS after sorting" :fn applies-bysetpos-after-sorting})
@@ -133,6 +139,10 @@
 (table.insert tests {:name "applies default week start to weekly BYDAY intervals" :fn applies-default-week-start-to-weekly-byday-intervals})
 (table.insert tests {:name "applies yearly ordinal BYDAY within BYMONTH" :fn applies-yearly-ordinal-byday-within-bymonth})
 (table.insert tests {:name "rejects unsatisfiable count-only selector intersections" :fn rejects-unsatisfiable-count-only-selector-intersections})
+(table.insert tests {:name "expands hourly frequency" :fn expands-hourly-frequency})
+(table.insert tests {:name "expands minutely frequency across hour" :fn expands-minutely-frequency-across-hour})
+(table.insert tests {:name "expands secondly frequency across minute" :fn expands-secondly-frequency-across-minute})
+(table.insert tests {:name "applies time selectors" :fn applies-time-selectors})
 
 (local main
   (fn []
