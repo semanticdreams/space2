@@ -102,6 +102,7 @@
     :tests.test-launchables
      :tests.test-random
      :tests.test-temporal
+     :tests.test-temporal-provider-registry
      :tests.test-temporal-period
      :tests.test-temporal-intervals
     :tests.test-temporal-parsing-recurrence
