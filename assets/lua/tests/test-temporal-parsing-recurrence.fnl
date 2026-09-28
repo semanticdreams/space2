@@ -254,8 +254,14 @@
     (Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;COUNT=2;BYMONTH=2;BYDAY=MO"))
   (assert-occurrence-strings
     (Temporal.recurrence.occurrences monthly-byday-with-bymonth monthly-start {})
-    ["2027-02-01T10:11:12"
-     "2027-02-08T10:11:12"]))
+    ["2026-02-02T10:11:12"
+     "2026-02-09T10:11:12"])
+
+  (local midmonth-start (Temporal.plain-date-time.parse "2026-01-15T09:00:00"))
+  (assert-occurrence-strings
+    (Temporal.recurrence.occurrences monthly-byday-with-bymonth midmonth-start {})
+    ["2026-02-02T09:00:00"
+     "2026-02-09T09:00:00"]))
 
 (fn recurrence-monthly-byday-generates-weekdays []
   (local dtstart (Temporal.plain-date-time.parse "2026-01-14T09:00:00"))

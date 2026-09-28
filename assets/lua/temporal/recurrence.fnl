@@ -490,18 +490,11 @@
 
 (fn month-weekday-candidates [plain-date-time rule dtstart year month]
   (local generated [])
-  (local start-fields (plain-fields dtstart))
   (var day 1)
   (while (<= day 31)
     (local candidate (build-generated-candidate plain-date-time dtstart year month day))
     (when (and candidate
-               (by-day-filter-allowed? rule candidate)
-               (if (and (= rule.freq :monthly)
-                        rule.by-month
-                        (= year start-fields.year)
-                        (not= month start-fields.month))
-                   (>= day start-fields.day)
-                   true))
+               (by-day-filter-allowed? rule candidate))
       (table.insert generated candidate))
     (set day (+ day 1)))
   generated)
