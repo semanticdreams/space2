@@ -18,6 +18,10 @@ Space treats the temporal library as complete when every temporal capability cat
 - Native standards adapters: isolated modules such as `temporal_ical` and `temporal_localization` for libical and ICU/CLDR integration.
 - Fennel facades: public policy and option shapes under `Temporal.recurrence`, `Temporal.recurrence-set`, `Temporal.interval`, `Temporal.repeating-interval`, `Temporal.ics`, `Temporal.localization`, `Temporal.calendar`, `Temporal.business-calendar`, `Temporal.providers`, `Temporal.natural`, `Temporal.migrations`, and `RuntimeScheduler`.
 
+## Provider registry status
+
+`Temporal.providers` is the local deterministic provider registry used by later temporal tracks. It validates in-process provider manifests, orders providers by priority and id, exposes defensive summaries, and provides natural-parse candidate dispatch. Concrete localization, calendar, business-calendar, and natural-language providers are added by later tracks.
+
 ## Program tracks
 
 1. Roadmap documentation and acceptance contract.

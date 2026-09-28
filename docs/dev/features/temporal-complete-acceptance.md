@@ -5,7 +5,7 @@ This matrix is the closeout contract for the complete temporal library program. 
 | Category | Public surface | Required evidence | Track |
 | --- | --- | --- | --- |
 | Dependency/data packaging | vendored ICU/CLDR, iCalendar library, holiday data metadata | manifest/layout foundation, no-network validator, CMake/CTest registration, version/license/source/checksum docs before source/data import | Dependency and data packaging foundation |
-| Provider registry | `Temporal.providers` | manifest validation tests, deterministic ordering tests, no-network invariant docs | Provider/plugin registry |
+| Provider registry | `Temporal.providers` | manifest validation tests, deterministic ordering tests, no-network invariant docs, fast-suite registration | Provider/plugin registry |
 | RFC5545 recurrence | `Temporal.recurrence` | standard RRULE examples, full selector tests, invalid-rule diagnostics, focused recurrence suite | Full RFC5545 recurrence engine |
 | Recurrence sets and zoned expansion | `Temporal.recurrence-set` | RDATE/EXDATE/exclusion tests, DST gap/overlap tests, explicit zone tests | Recurrence sets and explicit-zone/DST expansion |
 | ISO intervals | `Temporal.interval`, `Temporal.repeating-interval` | full grammar tests, zoned interval tests, half-open invariant tests | Full ISO intervals and repeating intervals |
