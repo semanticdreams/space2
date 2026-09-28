@@ -4,8 +4,16 @@
 
 (fn sequential-length [items]
   (var count 0)
-  (each [index _value (ipairs items)]
-    (set count index))
+  (var max-index 0)
+  (each [key _value (pairs items)]
+    (assert (and (= (type key) :number)
+                 (> key 0)
+                 (= key (math.floor key)))
+            "temporal provider capabilities must be a sequential array")
+    (set count (+ count 1))
+    (when (> key max-index)
+      (set max-index key)))
+  (assert (= count max-index) "temporal provider capabilities must be a sequential array")
   count)
 
 (fn copy-array [items]
@@ -73,7 +81,7 @@
           (< a.id b.id)))))
 
 (fn create-registry []
-  (local state {:providers [] :by-id {}})
+  (local state {:providers [] :by-id {} :handles {}})
 
   (fn ordered-providers []
     (local providers [])
@@ -95,22 +103,21 @@
                    :business-calendar provider.business-calendar})
     (table.insert state.providers stored)
     (tset state.by-id stored.id stored)
-    {:kind :temporal-provider-handle :id stored.id :active? true :registry state})
+    (local handle {})
+    (tset state.handles handle {:id stored.id :active? true})
+    handle)
 
   (fn unregister [handle]
-    (assert (and (= (type handle) :table)
-                 (= handle.kind :temporal-provider-handle)
-                 (= handle.registry state)
-                 (= (type handle.id) :string))
-            "invalid temporal provider handle")
-    (if (not handle.active?)
+    (local metadata (and (= (type handle) :table) (. state.handles handle)))
+    (assert metadata "invalid temporal provider handle")
+    (if (not metadata.active?)
         false
         (do
-          (set handle.active? false)
-          (tset state.by-id handle.id nil)
+          (set metadata.active? false)
+          (tset state.by-id metadata.id nil)
           (local kept [])
           (each [_ provider (ipairs state.providers)]
-            (when (not (= provider.id handle.id))
+            (when (not (= provider.id metadata.id))
               (table.insert kept provider)))
           (set state.providers kept)
           true)))
