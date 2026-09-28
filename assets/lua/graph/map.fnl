@@ -59,6 +59,7 @@
     (local node-morphed (Signal))
     (local edge-added (Signal))
     (local edge-removed (Signal))
+    (local selection-changed (Signal))
     (var unresolved-restored-node-keys [])
     (var unresolved-restored-edge-list [])
     (var next-island-id 1)
@@ -81,8 +82,9 @@
                  :node-removed node-removed
                  :node-replaced node-replaced
                  :node-morphed node-morphed
-                 :edge-added edge-added
-                 :edge-removed edge-removed})
+                  :edge-added edge-added
+                  :edge-removed edge-removed
+                  :selection-changed selection-changed})
 
     (fn canonical-node [_self node context]
         (assert node (string.format "GraphMap missing node for %s" context))
@@ -110,6 +112,35 @@
 
     (fn lookup [_self key]
         (and key (. nodes key)))
+
+    (fn selected-node-keys-equal? [left right]
+        (assert (= (type left) :table)
+                "GraphMap selection comparison requires left table")
+        (assert (= (type right) :table)
+                "GraphMap selection comparison requires right table")
+        (if (not (= (length left) (length right)))
+            false
+            (do
+                (var equal? true)
+                (each [idx key (ipairs left) &until (not equal?)]
+                    (when (not (= key (. right idx)))
+                        (set equal? false)))
+                equal?)))
+
+    (fn copy-visible-selected-node-keys [keys]
+        (assert (= (type keys) :table)
+                "GraphMap.set-selected-node-keys requires keys table")
+        (icollect [_ key (ipairs keys)]
+            (if (and (= (type key) :string)
+                     (lookup self key))
+                key)))
+
+    (fn set-selected-node-keys [_self keys]
+        (local stored (copy-visible-selected-node-keys keys))
+        (when (not (selected-node-keys-equal? self.selected_node_keys stored))
+            (set self.selected_node_keys stored)
+            (selection-changed:emit {:selected-node-keys stored}))
+        self.selected_node_keys)
 
     (fn next-island-number-after-records []
         (var next-value 1)
@@ -397,7 +428,7 @@
                     (each [_ key (ipairs self.selected_node_keys)]
                         (when (not (. removed-keys key))
                             (table.insert kept-selection key)))
-                    (set self.selected_node_keys kept-selection))
+                    (set-selected-node-keys self kept-selection))
                 (when (and self.focused_node_key (. removed-keys self.focused_node_key))
                     (set self.focused_node_key nil))
                 (local valid-node-keys {})
@@ -410,6 +441,7 @@
     (set self.add-edge add-edge)
     (set self.remove-edge remove-edge)
     (set self.remove-nodes remove-nodes)
+    (set self.set-selected-node-keys set-selected-node-keys)
     (set self.create-island create-island)
     (set self.upsert-island upsert-island)
     (set self.update-island update-island)
@@ -907,7 +939,8 @@
             (node-replaced:clear)
             (node-morphed:clear)
             (edge-added:clear)
-            (edge-removed:clear)))
+            (edge-removed:clear)
+            (selection-changed:clear)))
 
     self)
 

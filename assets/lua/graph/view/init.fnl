@@ -380,6 +380,19 @@
             (when (not (rawget previous node))
                 (update-point-state node))))
 
+    (fn selected-node-keys [nodes]
+        (assert (= (type nodes) :table)
+                "GraphView selected-node-keys requires nodes table")
+        (icollect [_ node (ipairs nodes)]
+            (and node node.key)))
+
+    (fn sync-map-selected-node-keys [keys]
+        (if graph-map.set-selected-node-keys
+            (graph-map:set-selected-node-keys keys)
+            (do
+                (set graph-map.selected_node_keys keys)
+                graph-map.selected_node_keys)))
+
     (fn handle-focus-change [payload]
         (assert-not-dropped "handle-focus-change")
         (local previous-focus (and payload payload.previous))
@@ -1238,8 +1251,10 @@
              (layout.stabilized:connect (fn [] (persistence:schedule-save)))))
 
     (set selection-handler
-         (selected-nodes-changed:connect (fn [nodes]
-                                             (update-selection-set nodes))))
+          (selected-nodes-changed:connect (fn [nodes]
+                                              (update-selection-set nodes)
+                                              (sync-map-selected-node-keys
+                                                  (selected-node-keys nodes)))))
     (set focus-focus-handler
          (focus-manager.focus-focus:connect handle-focus-change))
     (set focus-blur-handler
@@ -1591,10 +1606,9 @@
            (fn [_self]
                (assert-not-dropped "capture-state")
                (flush-island-layout-positions! options._island-layout-runtime graph-map)
-               (local keys (icollect [_ node (ipairs selected-nodes)]
-                               (and node node.key)))
-              (set graph-map.selected_node_keys keys)
-              (set graph-map.focused_node_key (and focused-node focused-node.key))
+                (local keys (selected-node-keys selected-nodes))
+               (sync-map-selected-node-keys keys)
+               (set graph-map.focused_node_key (and focused-node focused-node.key))
               (sync-extra-panel-runtime-states!)
               (local view-state (and views views.capture-state (views:capture-state)))
               (when (and view-state view-state.open-views persistence.set-panels)
