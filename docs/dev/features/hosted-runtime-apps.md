@@ -284,6 +284,34 @@ subprojects. Hosted command confirmations and recent-runs history do not add
 permissions, authorization, persistent approval behavior, durable jobs, polling,
 or app-provided logging/history APIs.
 
+## Graph launcher node
+
+`hosted-app-launcher:workspace` is a UX-purpose graph node for opening one
+selected filesystem-backed app source in the existing hosted workspace panel.
+Users can reach it from the `start` node through the built-in graph extension
+target labeled `Hosted App Launcher`.
+
+The launcher reads the active graph-map selection at render and click time. It
+enables only when exactly one selected node is an `fs:` source that resolves to a
+hosted app entry point. Selected `.fnl` files are treated as the entry module.
+Selected directories resolve through strict deterministic first-slice
+conventions rather than scanning: the resolver accepts only the supported
+well-known Fennel entry files and reports ambiguity or absence explicitly. The
+launch action opens through `app-host.workspace-panel`, so hosted app lifecycle,
+controls, and teardown use the same embedded workspace path described above.
+
+Invalid selections and launch failures are user-visible launcher status, not
+silent no-ops. Examples include no selection, multiple selections, non-`fs:`
+nodes, unsupported file types, ambiguous directories, module load errors,
+modules without `create(host)`, and workspace-panel open failures.
+
+This node does not add a hosted app registry, catalog, marketplace, search,
+fs-node hosted actions, a manifest format, launchable scans, remote source
+adapters, or graph topology persistence of hosted app source data. Graph
+persistence remains limited to graph keys, explicit map edges, and map-local
+interaction state; the selected source is read from current graph selection
+instead of being stored as launcher topology.
+
 ## Deferred alternatives
 
 Process-isolated hosting and compositor embedding are future work. wlroots/Xwayland embedding remains deferred because the previous attempt was unstable in headless rendering, DMA-BUF import, readback, socket lifecycle, and teardown.

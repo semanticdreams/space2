@@ -1248,6 +1248,84 @@
     (map:drop)
     (graph:drop))
 
+(fn graph-map-restore-state-emits-selection-change []
+    (local graph (Graph {:with-start false}))
+    (graph:register-key-loader "test"
+        (fn [key]
+            (Graph.GraphNode {:key key})))
+    (local map (GraphMap.GraphMap {:graph graph :id "test-restore-sel-signal"}))
+    (map:restore-state {:nodes ["test:a" "test:b" "test:c"]
+                        :edges []
+                        :selected_node_keys ["test:a" "test:b" "test:c"]})
+    (var emit-count 0)
+    (var emitted-keys nil)
+    (local handler (map.selection-changed:connect
+                       (fn [payload]
+                           (set emit-count (+ emit-count 1))
+                           (set emitted-keys (and payload payload.selected-node-keys)))))
+    (map:restore-state {:nodes ["test:b" "test:c"]
+                        :edges []
+                        :selected_node_keys ["test:b" "test:c" "test:missing"]})
+    (assert (= emit-count 1)
+            "GraphMap restore-state should emit when restored selection changes")
+    (assert (= (length map.selected_node_keys) 2)
+            "GraphMap restore-state should store restored visible selected keys")
+    (assert (= (length emitted-keys) 2)
+            "GraphMap restore-state selection payload should include restored selection")
+    (assert (= (. emitted-keys 1) "test:b"))
+    (assert (= (. emitted-keys 2) "test:c"))
+    (map.selection-changed:disconnect handler true)
+    (map:drop)
+    (graph:drop))
+
+(fn graph-map-set-selected-node-keys-copies-visible-string-keys []
+    (local graph (Graph {:with-start false}))
+    (register-test-loader graph)
+    (local map (GraphMap.GraphMap {:graph graph :id "test-set-selection"}))
+    (map:add-node (Graph.GraphNode {:key "test:a"}) {})
+    (map:add-node (Graph.GraphNode {:key "test:b"}) {})
+    (local input ["test:a" 42 "test:missing" "test:b"])
+    (local stored (map:set-selected-node-keys input))
+    (assert (= stored map.selected_node_keys)
+            "GraphMap selection setter should return the stored selection table")
+    (assert (not (= stored input))
+            "GraphMap selection setter should store a fresh table")
+    (assert (= (length stored) 2)
+            "GraphMap selection setter should keep only visible string keys")
+    (assert (= (. stored 1) "test:a"))
+    (assert (= (. stored 2) "test:b"))
+    (tset input 1 "test:b")
+    (assert (= (. map.selected_node_keys 1) "test:a")
+            "Mutating the input after set should not mutate stored selection")
+    (map:drop)
+    (graph:drop))
+
+(fn graph-map-set-selected-node-keys-emits-on-change-only []
+    (local graph (Graph {:with-start false}))
+    (register-test-loader graph)
+    (local map (GraphMap.GraphMap {:graph graph :id "test-set-selection-signal"}))
+    (map:add-node (Graph.GraphNode {:key "test:a"}) {})
+    (map:add-node (Graph.GraphNode {:key "test:b"}) {})
+    (var emit-count 0)
+    (var emitted-keys nil)
+    (local handler (map.selection-changed:connect
+                       (fn [payload]
+                           (set emit-count (+ emit-count 1))
+                           (set emitted-keys (and payload payload.selected-node-keys)))))
+    (map:set-selected-node-keys ["test:a" "test:b"])
+    (assert (= emit-count 1)
+            "GraphMap selection setter should emit exactly once when selection changes")
+    (assert (= (length emitted-keys) 2)
+            "GraphMap selection-changed payload should include selected-node-keys")
+    (assert (= (. emitted-keys 1) "test:a"))
+    (assert (= (. emitted-keys 2) "test:b"))
+    (map:set-selected-node-keys ["test:a" "test:b"])
+    (assert (= emit-count 1)
+            "GraphMap selection setter should not emit duplicate unchanged selection")
+    (map.selection-changed:disconnect handler true)
+    (map:drop)
+    (graph:drop))
+
 (fn graph-map-remove-nodes-prunes-selection []
     (local graph (Graph {:with-start false}))
     (register-test-loader graph)
@@ -1270,6 +1348,36 @@
     (map:drop)
     (graph:drop))
 
+(fn graph-map-remove-nodes-emits-pruned-selection []
+    (local graph (Graph {:with-start false}))
+    (register-test-loader graph)
+    (local map (GraphMap.GraphMap {:graph graph :id "test-rm-sel-signal"}))
+    (local a (Graph.GraphNode {:key "test:a"}))
+    (local b (Graph.GraphNode {:key "test:b"}))
+    (local c (Graph.GraphNode {:key "test:c"}))
+    (map:add-node a {})
+    (map:add-node b {})
+    (map:add-node c {})
+    (map:set-selected-node-keys ["test:a" "test:b" "test:c"])
+    (var emit-count 0)
+    (var emitted-keys nil)
+    (local handler (map.selection-changed:connect
+                       (fn [payload]
+                           (set emit-count (+ emit-count 1))
+                           (set emitted-keys (and payload payload.selected-node-keys)))))
+    (map:remove-nodes [a])
+    (assert (= emit-count 1)
+            "GraphMap remove-nodes should emit when pruning selected nodes")
+    (assert (= (length map.selected_node_keys) 2)
+            "GraphMap remove-nodes should prune removed node from selected_node_keys")
+    (assert (= (length emitted-keys) 2)
+            "GraphMap remove-nodes selection payload should include pruned selection")
+    (assert (= (. emitted-keys 1) "test:b"))
+    (assert (= (. emitted-keys 2) "test:c"))
+    (map.selection-changed:disconnect handler true)
+    (map:drop)
+    (graph:drop))
+
 (table.insert tests {:name "GraphMap remove-nodes preserves list-entity backing store" :fn graph-map-remove-nodes-preserves-list-entity-backing-store})
 (table.insert tests {:name "GraphMap remove-nodes preserves notebook backing store" :fn graph-map-remove-nodes-preserves-notebook-backing-store})
 (table.insert tests {:name "GraphMap shared-delete sync removes list-entity item" :fn graph-map-shared-delete-sync-removes-list-entity-item})
@@ -1280,7 +1388,11 @@
 (table.insert tests {:name "GraphMap capture includes selection and focused_node_key" :fn graph-map-capture-includes-selection-state})
 (table.insert tests {:name "GraphMap restore includes selection and focused_node_key" :fn graph-map-restore-includes-selection-state})
 (table.insert tests {:name "GraphMap restore prunes stale selected keys" :fn graph-map-restore-prunes-stale-selected-keys})
+(table.insert tests {:name "GraphMap restore-state emits selection changes" :fn graph-map-restore-state-emits-selection-change})
+(table.insert tests {:name "GraphMap set-selected-node-keys copies visible string keys" :fn graph-map-set-selected-node-keys-copies-visible-string-keys})
+(table.insert tests {:name "GraphMap set-selected-node-keys emits on change only" :fn graph-map-set-selected-node-keys-emits-on-change-only})
 (table.insert tests {:name "GraphMap remove-nodes prunes selection" :fn graph-map-remove-nodes-prunes-selection})
+(table.insert tests {:name "GraphMap remove-nodes emits pruned selection" :fn graph-map-remove-nodes-emits-pruned-selection})
 
 (local main
     (fn []

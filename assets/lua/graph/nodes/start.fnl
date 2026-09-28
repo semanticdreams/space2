@@ -46,6 +46,10 @@
              (table.insert produced [quit-node (or quit-node.label quit-node.key (node-id quit-node))])
              (local hn-node (HackerNewsRootNode))
              (table.insert produced [hn-node (or hn-node.label hn-node.key (node-id hn-node))])
+             (local HostedAppLauncherNode (require :graph/nodes/hosted-app-launcher))
+             (local hosted-app-launcher-node (HostedAppLauncherNode {}))
+             (table.insert produced [hosted-app-launcher-node
+                                     (or hosted-app-launcher-node.label hosted-app-launcher-node.key)])
              (local entities-node (EntitiesNode))
              (table.insert produced [entities-node (or entities-node.label entities-node.key)])
              (local notebooks-node (NotebooksNode {}))
