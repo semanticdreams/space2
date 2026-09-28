@@ -144,6 +144,18 @@
   (assert (= parsed.rule.freq :weekly))
   (assert (= (. parsed.rule.by-day 1) :tu)))
 
+(fn recurrence-engine-validates-dependencies []
+  (local engine (require :temporal/recurrence/engine))
+  (assert (= (type engine.occurrences) :function))
+  (local dtstart (Temporal.plain-date-time.parse "2026-09-22T09:00:00"))
+  (local err
+    (assert-error #(engine.occurrences {:period Temporal.period :standard Temporal.standard}
+                                       {:freq :daily :count 1}
+                                       dtstart
+                                       {})
+                  "engine should require plain-date-time dependency"))
+  (assert (tostring err):find "plain-date-time dependency" 1 true))
+
 (fn recurrence-weekly-occurrences []
   (local dtstart (Temporal.plain-date-time.parse "2026-09-22T09:00:00"))
   (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=WEEKLY;COUNT=3;BYDAY=TU"))
@@ -598,6 +610,7 @@
 (table.insert tests {:name "recurrence BYMONTH parse and serialize" :fn recurrence-bymonth-parse-and-serialize})
 (table.insert tests {:name "recurrence BYMONTHDAY parse and serialize" :fn recurrence-bymonthday-parse-and-serialize})
 (table.insert tests {:name "temporal factory wiring keeps public recurrence and natural" :fn temporal-factory-wiring-keeps-public-recurrence-and-natural})
+(table.insert tests {:name "recurrence engine validates dependencies" :fn recurrence-engine-validates-dependencies})
 (table.insert tests {:name "recurrence weekly occurrences" :fn recurrence-weekly-occurrences})
 (table.insert tests {:name "recurrence weekly without BYDAY uses DTSTART weekday" :fn recurrence-weekly-without-by-day-uses-dtstart-weekday})
 (table.insert tests {:name "recurrence monthly anchor clamps without drift" :fn recurrence-monthly-anchor-clamps-without-drift})
