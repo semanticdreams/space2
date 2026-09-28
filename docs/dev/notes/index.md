@@ -71,6 +71,7 @@ Architecture notes, design sketches, debugging logs, and explorations. These are
 - [Runtime Asset Overlays](./runtime-asset-overlays)
 - [Sandbox Interaction Toolbar](./sandbox-interaction-toolbar)
 - [Scene Terrain Recovery](./scene-terrain-recovery)
+- [SDK Docs](./sdk-docs)
 - [Sdl3 Input Migration](./sdl3-input-migration)
 - [Selection](./selection)
 - [String Entities](./string-entities)

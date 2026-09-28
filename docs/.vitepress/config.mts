@@ -37,6 +37,13 @@ export default defineConfig({
           ]
         },
         {
+          text: 'Modules',
+          items: [
+            { text: 'Module Reference', link: '/sdk/modules/' },
+            { text: 'Aliases and Search Terms', link: '/sdk/modules/aliases' }
+          ]
+        },
+        {
           text: 'Tutorials',
           items: [
             { text: 'Tutorials Overview', link: '/sdk/tutorials/' },
