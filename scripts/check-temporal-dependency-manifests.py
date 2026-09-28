@@ -27,15 +27,15 @@ REQUIRED_PLANNED_FIELDS = [
 ]
 
 
-def load_json(path: Path, errors: list[str]) -> dict:
+def load_json(path: Path, errors: list[str]) -> dict | None:
     try:
         data = json.loads(path.read_text())
     except Exception as exc:
         errors.append(f"{path}: invalid JSON: {exc}")
-        return {}
+        return None
     if not isinstance(data, dict):
         errors.append(f"{path}: top-level JSON value must be an object")
-        return {}
+        return None
     return data
 
 
@@ -50,7 +50,7 @@ def validate_dependency_manifest(repo_root: Path, rel_path: Path, errors: list[s
         errors.append(f"missing required manifest: {rel_path}")
         return
     data = load_json(path, errors)
-    if not data:
+    if data is None:
         return
     for field in REQUIRED_PLANNED_FIELDS:
         if field not in data:
@@ -58,6 +58,7 @@ def validate_dependency_manifest(repo_root: Path, rel_path: Path, errors: list[s
     runtime = data.get("runtime")
     if not isinstance(runtime, dict):
         errors.append(f"{rel_path}: runtime must be an object")
+        require_false(None, rel_path, "runtime.network_fetch_allowed", errors)
     else:
         require_false(runtime.get("network_fetch_allowed"), rel_path, "runtime.network_fetch_allowed", errors)
     runtime_root = data.get("runtime_data_root")
@@ -83,7 +84,7 @@ def validate_runtime_manifest(repo_root: Path, errors: list[str]) -> None:
         errors.append(f"missing required manifest: {RUNTIME_MANIFEST}")
         return
     data = load_json(path, errors)
-    if not data:
+    if data is None:
         return
     require_false(data.get("runtime_network_fetch_allowed"), RUNTIME_MANIFEST, "runtime_network_fetch_allowed", errors)
     if "packaged_data_sets" not in data or not isinstance(data.get("packaged_data_sets"), list):

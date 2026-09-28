@@ -39,6 +39,27 @@ def test_missing_dependency_manifest_fails(tmp_path):
     assert any("missing required manifest" in error and "icu" in error for error in errors)
 
 
+def test_empty_dependency_manifest_reports_missing_required_fields(tmp_path):
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    path = root / "external/temporal/icu/DEPENDENCY_MANIFEST.json"
+    path.write_text("{}\n")
+    errors = checker.validate_repo(root)
+    assert any("missing required field schema_version" in error for error in errors)
+    assert any("missing required field runtime" in error for error in errors)
+    assert any("runtime.network_fetch_allowed must be false" in error for error in errors)
+
+
+def test_empty_runtime_manifest_reports_missing_policy_fields(tmp_path):
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    path = root / "assets/temporal/manifest.json"
+    path.write_text("{}\n")
+    errors = checker.validate_repo(root)
+    assert any("runtime_network_fetch_allowed must be false" in error for error in errors)
+    assert any("packaged_data_sets must be an array" in error for error in errors)
+
+
 def test_runtime_network_fetch_is_forbidden(tmp_path):
     checker = load_checker()
     root = copy_foundation(tmp_path)
