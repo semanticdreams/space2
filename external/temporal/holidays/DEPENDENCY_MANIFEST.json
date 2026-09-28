@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "holiday-snapshots",
+  "status": "planned",
+  "purpose": "Deterministic business and holiday calendar data snapshots",
+  "candidate": "Generated checked-in snapshots from MIT-compatible sources such as Python holidays/Vacanza or Workalendar",
+  "license_policy": "MIT-compatible checked-in generated snapshots only; avoid CC BY-SA or live API terms for runtime data",
+  "adapter_boundary": "Temporal.business-calendar",
+  "public_surfaces": ["Temporal.business-calendar"],
+  "runtime_data_root": "assets/temporal/holidays",
+  "runtime": {
+    "network_fetch_allowed": false
+  },
+  "follow_up_gate": "Choose initial jurisdictions, year range, source package/version, license review result, and snapshot generation command before adding data."
+}

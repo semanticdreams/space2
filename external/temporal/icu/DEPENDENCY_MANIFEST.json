@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "icu-cldr",
+  "status": "planned",
+  "purpose": "Localization, localized temporal parsing/formatting, and non-Gregorian calendar data",
+  "candidate": "ICU4C/CLDR",
+  "license_policy": "Unicode License v3",
+  "adapter_boundary": "temporal_localization",
+  "public_surfaces": ["Temporal.localization", "Temporal.calendar"],
+  "runtime_data_root": "assets/temporal/icu",
+  "runtime": {
+    "network_fetch_allowed": false
+  },
+  "follow_up_gate": "Choose exact ICU4C/CLDR version, data packaging mode, license notice handling, and adapter build strategy before importing source or data."
+}

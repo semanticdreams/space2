@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "libical",
+  "status": "planned",
+  "purpose": "RFC5545 recurrence, ICS, VEVENT, and VTIMEZONE interoperability",
+  "candidate": "libical or equivalent vetted iCalendar library",
+  "license_policy": "MPL-2.0 OR LGPL-2.1 for libical unless a later spec selects an equivalent alternative",
+  "adapter_boundary": "temporal_ical",
+  "public_surfaces": ["Temporal.ics", "Temporal.recurrence", "Temporal.recurrence-set"],
+  "runtime_data_root": "assets/temporal/ical",
+  "runtime": {
+    "network_fetch_allowed": false
+  },
+  "follow_up_gate": "Choose exact iCalendar library/version, license compliance path, builtin timezone data mode, and adapter build strategy before importing source or data."
+}

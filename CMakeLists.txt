@@ -96,6 +96,7 @@ set(SPACE_WINDOWS_FILE_VERSION_COMMAS
 include(CTest)
 enable_testing()
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/cef-defaults.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/temporal-deps.cmake)
 
 option(SPACE_BUILD_MATRIX "Build Matrix Rust library" ON)
 option(SPACE_SUPPRESS_THIRD_PARTY_WARNINGS "Suppress warnings from third-party libraries" ON)
@@ -780,6 +781,11 @@ set(SPACE_TEST_COMMAND_TARGET ${PROJECT_NAME})
 if(WIN32)
     set(SPACE_TEST_COMMAND_TARGET space-cli)
 endif()
+
+add_test(
+    NAME test_temporal_dependency_manifests
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-temporal-dependency-manifests.py --repo-root ${CMAKE_CURRENT_SOURCE_DIR}
+)
 
 add_test(NAME ${PROJECT_NAME}_fnl_tests
     COMMAND $<TARGET_FILE:${SPACE_TEST_COMMAND_TARGET}> -m tests.fast:main
