@@ -40,7 +40,113 @@ export default defineConfig({
           text: 'Modules',
           items: [
             { text: 'Module Reference', link: '/sdk/modules/' },
-            { text: 'Aliases and Search Terms', link: '/sdk/modules/aliases' }
+            { text: 'Aliases and Search Terms', link: '/sdk/modules/aliases' },
+            {
+              text: 'Runtime and platform',
+              collapsed: true,
+              items: [
+                { text: 'appdirs', link: '/sdk/modules/appdirs' },
+                { text: 'engine', link: '/sdk/modules/engine' },
+                { text: 'runtime', link: '/sdk/modules/runtime' },
+                { text: 'cli-args', link: '/sdk/modules/cli-args' },
+                { text: 'fs', link: '/sdk/modules/fs' },
+                { text: 'logging', link: '/sdk/modules/logging' },
+                { text: 'error-reporting', link: '/sdk/modules/error-reporting' },
+                { text: 'callbacks', link: '/sdk/modules/callbacks' },
+                { text: 'jobs', link: '/sdk/modules/jobs' },
+                { text: 'keyring', link: '/sdk/modules/keyring' },
+                { text: 'process', link: '/sdk/modules/process' },
+                { text: 'shell', link: '/sdk/modules/shell' },
+                { text: 'file-watch', link: '/sdk/modules/file-watch' },
+                { text: 'notify', link: '/sdk/modules/notify' },
+                { text: 'tray', link: '/sdk/modules/tray' },
+                { text: 'terminal', link: '/sdk/modules/terminal' },
+                { text: 'sysinfo', link: '/sdk/modules/sysinfo' },
+                { text: 'uuid', link: '/sdk/modules/uuid' },
+                { text: 'random', link: '/sdk/modules/random' },
+                { text: 'input-state', link: '/sdk/modules/input-state' },
+                { text: 'dial-type', link: '/sdk/modules/dial-type' },
+                { text: 'webbrowser', link: '/sdk/modules/webbrowser' }
+              ]
+            },
+            {
+              text: 'Data, storage, and parsing',
+              collapsed: true,
+              items: [
+                { text: 'temporal', link: '/sdk/modules/temporal' },
+                { text: 'temporal-core', link: '/sdk/modules/temporal-core' },
+                { text: 'json', link: '/sdk/modules/json' },
+                { text: 'json-utils', link: '/sdk/modules/json-utils' },
+                { text: 'toml', link: '/sdk/modules/toml' },
+                { text: 'lsqlite3', link: '/sdk/modules/lsqlite3' },
+                { text: 'sql-builder', link: '/sdk/modules/sql-builder' },
+                { text: 'tree-sitter', link: '/sdk/modules/tree-sitter' }
+              ]
+            },
+            {
+              text: 'Rendering, media, and graphics',
+              collapsed: true,
+              items: [
+                { text: 'gl', link: '/sdk/modules/gl' },
+                { text: 'shaders', link: '/sdk/modules/shaders' },
+                { text: 'textures', link: '/sdk/modules/textures' },
+                { text: 'vector-buffer', link: '/sdk/modules/vector-buffer' },
+                { text: 'image-io', link: '/sdk/modules/image-io' },
+                { text: 'glm', link: '/sdk/modules/glm' },
+                { text: 'colors', link: '/sdk/modules/colors' },
+                { text: 'cgltf', link: '/sdk/modules/cgltf' },
+                { text: 'ray-box', link: '/sdk/modules/ray-box' },
+                { text: 'graph-edge-batch', link: '/sdk/modules/graph-edge-batch' },
+                { text: 'force-layout', link: '/sdk/modules/force-layout' },
+                { text: 'msdf-atlas-gen', link: '/sdk/modules/msdf-atlas-gen' },
+                { text: 'video', link: '/sdk/modules/video' }
+              ]
+            },
+            {
+              text: 'Audio',
+              collapsed: true,
+              items: [
+                { text: 'audio', link: '/sdk/modules/audio' },
+                { text: 'audio-input', link: '/sdk/modules/audio-input' },
+                { text: 'aubio', link: '/sdk/modules/aubio' }
+              ]
+            },
+            {
+              text: 'Physics and world systems',
+              collapsed: true,
+              items: [
+                { text: 'bt', link: '/sdk/modules/bt' },
+                { text: 'perlin-terrain-native', link: '/sdk/modules/perlin-terrain-native' }
+              ]
+            },
+            {
+              text: 'Networking and services',
+              collapsed: true,
+              items: [
+                { text: 'http', link: '/sdk/modules/http' },
+                { text: 'http-server', link: '/sdk/modules/http-server' },
+                { text: 'zmq', link: '/sdk/modules/zmq' },
+                { text: 'realtime', link: '/sdk/modules/realtime' },
+                { text: 'libtorrent', link: '/sdk/modules/libtorrent' },
+                { text: 'matrix', link: '/sdk/modules/matrix' },
+                { text: 'xapian', link: '/sdk/modules/xapian' }
+              ]
+            },
+            {
+              text: 'Wallet and identity',
+              collapsed: true,
+              items: [
+                { text: 'wallet', link: '/sdk/modules/wallet' },
+                { text: 'wallet-core', link: '/sdk/modules/wallet-core' }
+              ]
+            },
+            {
+              text: 'Advanced/native tooling',
+              collapsed: true,
+              items: [
+                { text: 'gccjit', link: '/sdk/modules/gccjit' }
+              ]
+            }
           ]
         },
         {
