@@ -265,11 +265,18 @@
             (table.insert generated candidate)))
         recurrence-rule.by-day
         (each [_ candidate (ipairs (month-weekday-candidates plain-date-time recurrence-rule dtstart fields.year month))]
-          (table.insert generated candidate))))
+           (table.insert generated candidate))))
   generated)
 
+(fn compare-candidates [left right]
+  (< (left:compare right) 0))
+
+(fn sort-candidates [candidates]
+  (table.sort candidates compare-candidates)
+  candidates)
+
 (fn append-generated-candidates [results bounds dtstart candidates]
-  (each [_ candidate (ipairs candidates)]
+  (each [_ candidate (ipairs (sort-candidates candidates))]
     (when (and (not (limit-reached? results bounds))
                (not (before-dtstart? candidate dtstart))
                (within-until? candidate bounds.until))
@@ -395,13 +402,6 @@
     (set current (current:add-days 1))
     (set day-offset (+ day-offset 1)))
   results)
-
-(fn compare-candidates [left right]
-  (< (left:compare right) 0))
-
-(fn sort-candidates [candidates]
-  (table.sort candidates compare-candidates)
-  candidates)
 
 (fn same-date? [left right]
   (local left-fields (plain-fields left))
@@ -625,10 +625,27 @@
       (= (candidate:iso-weekday) (dtstart:iso-weekday))
       true))
 
-(fn date-selectors-allowed? [plain-date-time recurrence-rule candidate dtstart yearly?]
+(fn calendar-frequency? [recurrence-rule]
+  (if (= recurrence-rule.freq :monthly)
+      true
+      (= recurrence-rule.freq :yearly)
+      true
+      false))
+
+(fn default-month-day-allowed? [recurrence-rule candidate default-day]
+  (if (and default-day
+           (calendar-frequency? recurrence-rule)
+           (not recurrence-rule.by-month-day)
+           (not recurrence-rule.by-day)
+           (not recurrence-rule.by-year-day)
+           (not recurrence-rule.by-week-no))
+      (= (plain-day candidate) default-day)
+      true))
+
+(fn date-selectors-allowed? [plain-date-time recurrence-rule candidate dtstart yearly? default-day]
   (local fields (plain-fields candidate))
   (and (if recurrence-rule.by-month
-           (numeric-list-contains? recurrence-rule.by-month fields.month)
+            (numeric-list-contains? recurrence-rule.by-month fields.month)
            true)
        (if recurrence-rule.by-month-day
            (resolved-month-day-allowed? plain-date-time recurrence-rule.by-month-day candidate)
@@ -636,10 +653,11 @@
        (if recurrence-rule.by-year-day
            (resolved-year-day-allowed? plain-date-time recurrence-rule.by-year-day candidate)
            true)
-       (if recurrence-rule.by-week-no
-           (resolved-week-no-allowed? plain-date-time recurrence-rule.by-week-no candidate recurrence-rule.week-start dtstart)
-           true)
-        (date-by-day-allowed? plain-date-time recurrence-rule candidate dtstart (and yearly? (not recurrence-rule.by-month)))))
+        (if recurrence-rule.by-week-no
+            (resolved-week-no-allowed? plain-date-time recurrence-rule.by-week-no candidate recurrence-rule.week-start dtstart)
+            true)
+        (default-month-day-allowed? recurrence-rule candidate default-day)
+         (date-by-day-allowed? plain-date-time recurrence-rule candidate dtstart (and yearly? (not recurrence-rule.by-month)))))
 
 (fn apply-by-set-pos [recurrence-rule candidates]
   (sort-candidates candidates)
@@ -653,12 +671,12 @@
         (sort-candidates selected))
       candidates))
 
-(fn build-day-candidates [plain-date-time recurrence-rule dtstart start days yearly?]
+(fn build-day-candidates [plain-date-time recurrence-rule dtstart start days yearly? default-day]
   (local candidates [])
   (var offset 0)
   (while (< offset days)
     (local candidate (start:add-days offset))
-    (when (date-selectors-allowed? plain-date-time recurrence-rule candidate dtstart yearly?)
+    (when (date-selectors-allowed? plain-date-time recurrence-rule candidate dtstart yearly? default-day)
       (each [_ timed (ipairs (expand-time-candidates plain-date-time recurrence-rule dtstart candidate))]
         (table.insert candidates timed)))
     (set offset (+ offset 1)))
@@ -679,24 +697,24 @@
   (if (= recurrence-rule.freq :daily)
       (do
         (local start (dtstart:add-days (* index recurrence-rule.interval)))
-        (build-day-candidates plain-date-time recurrence-rule dtstart start 1 false))
+        (build-day-candidates plain-date-time recurrence-rule dtstart start 1 false nil))
       (= recurrence-rule.freq :weekly)
       (do
         (local base-start (start-of-week dtstart recurrence-rule.week-start))
         (local start (base-start:add-days (* index recurrence-rule.interval 7)))
-        (build-day-candidates plain-date-time recurrence-rule dtstart start 7 false))
+        (build-day-candidates plain-date-time recurrence-rule dtstart start 7 false nil))
       (= recurrence-rule.freq :monthly)
       (do
         (local anchor (period.add-to-plain-date-time dtstart {:months (* index recurrence-rule.interval)}))
         (local fields (plain-fields anchor))
         (local start (build-generated-candidate plain-date-time dtstart fields.year fields.month 1))
-        (build-day-candidates plain-date-time recurrence-rule dtstart start (days-in-month plain-date-time fields.year fields.month) false))
+        (build-day-candidates plain-date-time recurrence-rule dtstart start (days-in-month plain-date-time fields.year fields.month) false fields.day))
       (= recurrence-rule.freq :yearly)
       (do
         (local anchor (period.add-to-plain-date-time dtstart {:years (* index recurrence-rule.interval)}))
         (local fields (plain-fields anchor))
         (local start (build-generated-candidate plain-date-time dtstart fields.year 1 1))
-        (build-day-candidates plain-date-time recurrence-rule dtstart start (days-in-year fields.year) true))
+        (build-day-candidates plain-date-time recurrence-rule dtstart start (days-in-year fields.year) true fields.day))
       []))
 
 (fn assert-candidate-selectors-satisfiable [period plain-date-time recurrence-rule dtstart]
@@ -715,7 +733,7 @@
   (local results [])
   (var current dtstart)
   (while (and (not (limit-reached? results bounds)) (within-until? current bounds.until))
-    (append-generated-candidates results bounds dtstart (build-day-candidates plain-date-time recurrence-rule dtstart current 1 false))
+    (append-generated-candidates results bounds dtstart (build-day-candidates plain-date-time recurrence-rule dtstart current 1 false nil))
     (set current (current:add-days recurrence-rule.interval)))
   results)
 
@@ -725,7 +743,7 @@
   (var start (start-of-week dtstart recurrence-rule.week-start))
   (var done false)
   (while (and (not done) (not (limit-reached? results bounds)))
-    (append-generated-candidates results bounds dtstart (build-day-candidates plain-date-time recurrence-rule dtstart start 7 false))
+    (append-generated-candidates results bounds dtstart (build-day-candidates plain-date-time recurrence-rule dtstart start 7 false nil))
     (when (and bounds.until (> (start:compare bounds.until) 0))
       (set done true))
     (set start (start:add-days (* recurrence-rule.interval 7))))
@@ -740,7 +758,7 @@
     (local anchor (period.add-to-plain-date-time dtstart {:months (* index recurrence-rule.interval)}))
     (local fields (plain-fields anchor))
     (local start (build-generated-candidate plain-date-time dtstart fields.year fields.month 1))
-    (append-generated-candidates results bounds dtstart (build-day-candidates plain-date-time recurrence-rule dtstart start (days-in-month plain-date-time fields.year fields.month) false))
+    (append-generated-candidates results bounds dtstart (build-day-candidates plain-date-time recurrence-rule dtstart start (days-in-month plain-date-time fields.year fields.month) false fields.day))
     (when (and bounds.until (> (anchor:compare bounds.until) 0))
       (set done true))
     (set index (+ index 1)))
@@ -755,7 +773,7 @@
     (local anchor (period.add-to-plain-date-time dtstart {:years (* index recurrence-rule.interval)}))
     (local fields (plain-fields anchor))
     (local start (build-generated-candidate plain-date-time dtstart fields.year 1 1))
-    (append-generated-candidates results bounds dtstart (build-day-candidates plain-date-time recurrence-rule dtstart start (days-in-year fields.year) true))
+    (append-generated-candidates results bounds dtstart (build-day-candidates plain-date-time recurrence-rule dtstart start (days-in-year fields.year) true fields.day))
     (when (and bounds.until (> (anchor:compare bounds.until) 0))
       (set done true))
     (set index (+ index 1)))
@@ -779,7 +797,7 @@
   (each [_ second (ipairs (selected-values recurrence-rule.by-second (. (plain-fields dtstart) :second)))]
     (local candidate (build-time-candidate plain-date-time dtstart fields.year fields.month fields.day fields.hour fields.minute second))
     (when (and candidate
-               (date-selectors-allowed? plain-date-time recurrence-rule candidate dtstart false)
+                (date-selectors-allowed? plain-date-time recurrence-rule candidate dtstart false nil)
                (time-selectors-allowed? recurrence-rule candidate))
       (insert-candidate-once candidates candidate)))
   (apply-by-set-pos recurrence-rule candidates))
@@ -792,14 +810,14 @@
     (each [_ second (ipairs (selected-values recurrence-rule.by-second start-fields.second))]
       (local candidate (build-time-candidate plain-date-time dtstart fields.year fields.month fields.day fields.hour minute second))
       (when (and candidate
-                 (date-selectors-allowed? plain-date-time recurrence-rule candidate dtstart false)
+                  (date-selectors-allowed? plain-date-time recurrence-rule candidate dtstart false nil)
                  (time-selectors-allowed? recurrence-rule candidate))
         (insert-candidate-once candidates candidate))))
   (apply-by-set-pos recurrence-rule candidates))
 
 (fn build-sub-daily-candidates [plain-date-time recurrence-rule dtstart anchor]
   (if (= recurrence-rule.freq :secondly)
-      (if (and (date-selectors-allowed? plain-date-time recurrence-rule anchor dtstart false)
+      (if (and (date-selectors-allowed? plain-date-time recurrence-rule anchor dtstart false nil)
                (time-selectors-allowed? recurrence-rule anchor))
           (apply-by-set-pos recurrence-rule [anchor])
           [])
@@ -883,7 +901,9 @@
       true
       (has-ordinal-by-day? recurrence-rule.by-day)
       true
-      (has-negative-month-day? recurrence-rule.by-month-day)
+      recurrence-rule.by-month-day
+      true
+      (and (calendar-frequency? recurrence-rule) recurrence-rule.by-month)
       true
       false))
 

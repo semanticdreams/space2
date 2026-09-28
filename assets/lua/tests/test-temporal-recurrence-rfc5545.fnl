@@ -103,6 +103,16 @@
   (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=YEARLY;BYYEARDAY=1,-1;COUNT=4"))
   (assert-strings (Temporal.recurrence.occurrences rule dtstart) ["2026-01-01T09:00:00" "2026-12-31T09:00:00" "2027-01-01T09:00:00" "2027-12-31T09:00:00"]))
 
+(fn expands-yearly-bymonth-buckets-with-default-month-day []
+  (local dtstart (Temporal.plain-date-time.parse "2026-01-01T09:00:00"))
+  (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=YEARLY;BYMONTH=3;COUNT=2"))
+  (assert-strings (Temporal.recurrence.occurrences rule dtstart) ["2026-03-01T09:00:00" "2027-03-01T09:00:00"]))
+
+(fn orders-generated-month-day-candidates-chronologically []
+  (local dtstart (Temporal.plain-date-time.parse "2026-01-31T10:11:12"))
+  (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;COUNT=4;BYMONTHDAY=15,1"))
+  (assert-strings (Temporal.recurrence.occurrences rule dtstart) ["2026-02-01T10:11:12" "2026-02-15T10:11:12" "2026-03-01T10:11:12" "2026-03-15T10:11:12"]))
+
 (fn expands-negative-week-number-selectors []
   (local dtstart (Temporal.plain-date-time.parse "2026-01-01T09:00:00"))
   (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=YEARLY;BYWEEKNO=-1;BYDAY=MO;COUNT=2"))
@@ -197,6 +207,8 @@
 (table.insert tests {:name "expands negative month day" :fn expands-negative-month-day})
 (table.insert tests {:name "applies BYSETPOS after sorting" :fn applies-bysetpos-after-sorting})
 (table.insert tests {:name "expands year day selectors" :fn expands-year-day-selectors})
+(table.insert tests {:name "expands yearly BYMONTH buckets with default month day" :fn expands-yearly-bymonth-buckets-with-default-month-day})
+(table.insert tests {:name "orders generated month day candidates chronologically" :fn orders-generated-month-day-candidates-chronologically})
 (table.insert tests {:name "expands negative week number selectors" :fn expands-negative-week-number-selectors})
 (table.insert tests {:name "applies week start to weekly intervals" :fn applies-week-start-to-weekly-intervals})
 (table.insert tests {:name "applies default week start to weekly BYDAY intervals" :fn applies-default-week-start-to-weekly-byday-intervals})

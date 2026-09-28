@@ -125,10 +125,11 @@
                 "non-table by-month-day should throw"))
 
 (fn assert-occurrence-strings [actual expected]
-  (assert (= (# actual) (# expected)))
+  (assert (= (# actual) (# expected)) (.. "expected " (# expected) " occurrences, got " (# actual)))
   (each [index value (ipairs expected)]
     (local occurrence (. actual index))
-    (assert (= (occurrence:to-string) value))))
+    (assert (= (occurrence:to-string) value)
+            (.. "expected occurrence " index " to be " value ", got " (occurrence:to-string)))))
 
 (fn temporal-factory-wiring-keeps-public-recurrence-and-natural []
   (local create-recurrence (require :temporal/recurrence))
@@ -257,11 +258,12 @@
      "2029-02-28T10:11:12"
      "2030-02-28T10:11:12"])
 
-  (assert-error #(Temporal.recurrence.occurrences
-                   (Temporal.recurrence.parse-rrule "RRULE:FREQ=YEARLY;COUNT=1;BYMONTH=3")
-                   yearly-start
-                   {})
-                "yearly BYMONTH excluding anchor month should throw")
+  (assert-occurrence-strings
+    (Temporal.recurrence.occurrences
+      (Temporal.recurrence.parse-rrule "RRULE:FREQ=YEARLY;COUNT=1;BYMONTH=3")
+      yearly-start
+      {})
+    ["2028-03-29T10:11:12"])
   (local monthly-byday-with-bymonth
     (Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;COUNT=2;BYMONTH=2;BYDAY=MO"))
   (assert-occurrence-strings
@@ -380,10 +382,10 @@
     (Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;COUNT=4;BYMONTHDAY=15,1"))
   (assert-occurrence-strings
     (Temporal.recurrence.occurrences monthly-ordered monthly-start {})
-    ["2026-02-15T10:11:12"
-     "2026-02-01T10:11:12"
-     "2026-03-15T10:11:12"
-     "2026-03-01T10:11:12"])
+    ["2026-02-01T10:11:12"
+     "2026-02-15T10:11:12"
+     "2026-03-01T10:11:12"
+     "2026-03-15T10:11:12"])
 
   (local monthly-invalid-days
     (Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;COUNT=3;BYMONTHDAY=31"))
@@ -406,8 +408,8 @@
     (Temporal.recurrence.parse-rrule "RRULE:FREQ=YEARLY;COUNT=2;BYMONTHDAY=15"))
   (assert-occurrence-strings
     (Temporal.recurrence.occurrences yearly-anchor-month anchor-month-start {})
-    ["2027-05-15T10:11:12"
-     "2028-05-15T10:11:12"]))
+    ["2026-06-15T10:11:12"
+     "2026-07-15T10:11:12"]))
 
 (fn recurrence-bymonthday-generator-bounds-and-rejections []
   (local monthly-start (Temporal.plain-date-time.parse "2026-01-31T10:11:12"))
