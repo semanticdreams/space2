@@ -7,6 +7,7 @@
 (local create-recurrence (require :temporal/recurrence))
 (local expression (require :temporal/expression))
 (local create-natural (require :temporal/natural))
+(local create-provider-registry (require :temporal/provider-registry))
 
 (fn disambiguation-to-core [value]
   (if (= value :reject)
@@ -72,6 +73,7 @@
 (local period (create-period base))
 (local recurrence (create-recurrence {:period period :standard standard :plain-date-time base.plain-date-time}))
 (local natural (create-natural {:recurrence recurrence}))
+(local providers (create-provider-registry {}))
 (local interval (create-interval {:standard standard :period period}))
 (local temporal-with-intervals {:standard standard :interval interval})
 
@@ -88,4 +90,5 @@
   :pattern (create-pattern base)
  :recurrence recurrence
  :expression expression
- :natural natural}
+ :natural natural
+ :providers providers}
