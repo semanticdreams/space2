@@ -127,6 +127,18 @@
 (fn test-directory-main []
   (assert-directory-entry "main.fnl" (fn [root] root) "main"))
 
+(fn test-directory-main-with-trailing-slash []
+  (with-temp-dir "dir-main-trailing-slash"
+    (fn [root]
+      (write-file (fs.join-path root "main.fnl"))
+      (local selected-path (.. root "/"))
+      (local result (resolve [(.. "fs:" selected-path)] {}))
+      (assert-success result
+                      {:source-kind :directory
+                       :selection-key (.. "fs:" selected-path)
+                       :path selected-path
+                       :module-name "main"}))))
+
 (fn test-directory-init []
   (assert-directory-entry "init.fnl" (fn [root] root) "init"))
 
@@ -162,6 +174,7 @@
 (add-test "standalone file resolves from parent" test-standalone-file)
 (add-test "directory assets lua main resolves" test-directory-assets-lua-main)
 (add-test "directory main resolves" test-directory-main)
+(add-test "directory main with trailing slash resolves" test-directory-main-with-trailing-slash)
 (add-test "directory init resolves" test-directory-init)
 (add-test "directory without entry fails" test-directory-no-entry)
 (add-test "directory with multiple entries is ambiguous" test-directory-ambiguous-entry)

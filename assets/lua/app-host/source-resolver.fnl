@@ -13,10 +13,21 @@
       (string.sub value (+ (string.len prefix) 1))
       nil))
 
+(fn trim-trailing-separators [path]
+  (var trimmed path)
+  (while (and (> (string.len trimmed) 1)
+              (= (string.sub trimmed -1) "/"))
+    (set trimmed (string.sub trimmed 1 -2)))
+  trimmed)
+
 (fn filename [path]
-  (local name (string.match path "([^/]+)$"))
-  (assert name (.. "source resolver could not determine filename for " (tostring path)))
-  name)
+  (local trimmed (trim-trailing-separators path))
+  (if (= trimmed "/")
+      trimmed
+      (do
+        (local name (string.match trimmed "([^/]+)$"))
+        (assert name (.. "source resolver could not determine filename for " (tostring path)))
+        name)))
 
 (fn basename-without-extension [path]
   (local name (filename path))
