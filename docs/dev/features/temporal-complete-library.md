@@ -38,6 +38,8 @@ Space treats the temporal library as complete when every temporal capability cat
 
 ICU4C/CLDR and libical or an equivalent vetted iCalendar library are acceptable when selected by a track spec. Holiday data and natural-language corpora must be deterministic local data with source, license, version, and update process documented.
 
+The manifest and runtime data layout for these dependencies is defined in [Temporal Dependency/Data Packaging](../notes/temporal-dependency-data-packaging).
+
 ## Autonomy contract
 
 After this roadmap and its plan are committed and reviewed, temporal implementation proceeds through PR-sized track specs and plans. The supervisor continues from track to track after each PR merges and stops only for semantic ambiguity not resolved by the active track spec, dependency or data license incompatibility, nondeterministic packaging, unavailable infrastructure, unsafe git history actions, validation failures without establishable root cause, PR CI or merge-queue blockers requiring human access, or material scope change.
