@@ -49,3 +49,5 @@ Track specs must resolve the finite choices they introduce, including initial lo
 ## Current implementation status
 
 The current implementation remains the documented subset on the existing temporal pages until each track lands. Unsupported inputs must continue to fail loudly rather than silently guessing behavior.
+
+The closeout evidence is tracked in [Temporal Complete Acceptance](./temporal-complete-acceptance).
