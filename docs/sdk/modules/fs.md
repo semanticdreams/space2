@@ -30,7 +30,8 @@
 (local path (fs.join-path (fs.cwd) "notes.txt"))
 (fs.write-file path "hello\n")
 (print (fs.read-file path))
-(print (: (fs.stat path) :type))
+(local info (fs.stat path))
+(print info.type)
 ```
 
 ## Errors and Platform Notes

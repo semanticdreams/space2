@@ -30,7 +30,8 @@
 (local term (terminal.Terminal 24 80))
 (term:inject-output "hello\n")
 (term:update)
-(print (: (term:get-size) :rows))
+(local size (term:get-size))
+(print size.rows)
 ```
 
 ## Errors and Platform Notes
