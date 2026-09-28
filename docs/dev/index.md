@@ -5,8 +5,11 @@ Space is a 3D spatial computing platform and malleable software environment — 
 - **Website:** [spaceui.org](https://spaceui.org)
 - **Source:** [github.com/semanticdreams/space2](https://github.com/semanticdreams/space2)
 
+If you want to build with Space rather than maintain Space itself, start with the [SDK Docs](/sdk/). SDK pages link back here for internals, architecture history, and maintainer workflows.
+
 ## Navigation
 
+- [SDK Docs](/sdk/) — build apps, extensions, worlds, widgets, and workflows with Space
 - [Goals](/dev/project/goals) — what we're building toward
 - [Features](/dev/project/features) — what's being built
 - [Architecture Decisions](/dev/adrs/) — why we chose what we chose
