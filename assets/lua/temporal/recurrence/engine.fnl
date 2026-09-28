@@ -88,6 +88,34 @@
   (and (month-filter-allowed? recurrence-rule candidate)
        (month-day-filter-allowed? recurrence-rule candidate)))
 
+(fn has-ordinal-by-day? [days]
+  (var found false)
+  (when days
+    (each [_ day (ipairs days)]
+      (when (= (type day) :table)
+        (set found true))))
+  found)
+
+(fn has-negative-month-day? [days]
+  (var found false)
+  (when days
+    (each [_ day (ipairs days)]
+      (when (< day 0)
+        (set found true))))
+  found)
+
+(fn assert-supported-expansion-surface [recurrence-rule]
+  (when (or recurrence-rule.by-second
+            recurrence-rule.by-minute
+            recurrence-rule.by-hour
+            recurrence-rule.by-year-day
+            recurrence-rule.by-week-no
+            recurrence-rule.by-set-pos
+            (not= recurrence-rule.week-start :mo)
+            (has-ordinal-by-day? recurrence-rule.by-day)
+            (has-negative-month-day? recurrence-rule.by-month-day))
+    (error "unsupported temporal recurrence expansion")))
+
 (fn limit-reached? [results bounds]
   (and bounds.limit (>= (# results) bounds.limit)))
 
@@ -360,6 +388,7 @@
 (fn occurrences [deps input-rule dtstart options]
   (validate-deps deps)
   (local recurrence-rule (rule.from input-rule))
+  (assert-supported-expansion-surface recurrence-rule)
   (local occurrence-options (rule.normalize-occurrence-options options))
   (local bounds (rule.occurrence-bounds deps.standard recurrence-rule occurrence-options))
   (if (or (= recurrence-rule.freq :monthly) (= recurrence-rule.freq :yearly))

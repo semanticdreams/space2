@@ -49,13 +49,33 @@
                          "RRULE:FREQ=MONTHLY;BYDAY=MO1"
                          "RRULE:FREQ=WEEKLY;WKST=MO;WKST=SU"])]
     (assert-error #(Temporal.recurrence.parse-rrule rrule)
-                  (.. rrule " should throw"))))
+                   (.. rrule " should throw"))))
+
+(fn rejects-unsupported-rfc5545-occurrence-selectors []
+  (local dtstart (Temporal.plain-date-time.parse "2026-09-22T09:00:00"))
+  (each [_ rrule (ipairs ["RRULE:FREQ=DAILY;COUNT=1;BYSECOND=30"
+                         "RRULE:FREQ=DAILY;COUNT=1;BYMINUTE=30"
+                         "RRULE:FREQ=DAILY;COUNT=1;BYHOUR=17"
+                         "RRULE:FREQ=YEARLY;COUNT=1;BYYEARDAY=1"
+                         "RRULE:FREQ=YEARLY;COUNT=1;BYWEEKNO=1"
+                         "RRULE:FREQ=MONTHLY;COUNT=1;BYSETPOS=1"
+                         "RRULE:FREQ=WEEKLY;COUNT=1;WKST=SU"
+                         "RRULE:FREQ=MONTHLY;COUNT=1;BYDAY=1MO"
+                         "RRULE:FREQ=MONTHLY;COUNT=1;BYMONTHDAY=-1"])]
+    (local err
+      (assert-error #(Temporal.recurrence.occurrences
+                       (Temporal.recurrence.parse-rrule rrule)
+                       dtstart
+                       {})
+                    (.. rrule " should throw during occurrence expansion")))
+    (assert (tostring err):find "unsupported temporal recurrence expansion" 1 true)))
 
 (table.insert tests {:name "parses sub daily frequencies" :fn parses-sub-daily-frequencies})
 (table.insert tests {:name "parses new selector lists" :fn parses-new-selector-lists})
 (table.insert tests {:name "parses ordinal BYDAY" :fn parses-ordinal-byday})
 (table.insert tests {:name "serializes full field order" :fn serializes-full-field-order})
 (table.insert tests {:name "rejects invalid RFC5545 rule fields" :fn rejects-invalid-rfc5545-rule-fields})
+(table.insert tests {:name "rejects unsupported RFC5545 occurrence selectors" :fn rejects-unsupported-rfc5545-occurrence-selectors})
 
 (local main
   (fn []
