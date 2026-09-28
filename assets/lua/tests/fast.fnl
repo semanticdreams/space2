@@ -175,6 +175,7 @@
     :tests.test-app-host-command-result-model
     :tests.test-app-host-command-run-history
     :tests.test-app-host-source-resolver
+    :tests.test-app-host-hosted-source-launcher
     :tests.test-app-host-workspace-command-controls
     :tests.test-cgltf
     :tests.test-graph-kind-badge
