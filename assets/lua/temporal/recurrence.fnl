@@ -390,6 +390,11 @@
       (by-month-day-allowed? rule.by-month-day (plain-day candidate))
       true))
 
+(fn by-day-filter-allowed? [rule candidate]
+  (if rule.by-day
+      (by-day-allowed? rule.by-day (candidate:iso-weekday))
+      true))
+
 (fn candidate-calendar-filters-allowed? [rule candidate]
   (and (month-filter-allowed? rule candidate)
        (month-day-filter-allowed? rule candidate)))
@@ -483,14 +488,29 @@
     (when (not satisfiable)
       (error "unsupported temporal recurrence expansion"))))
 
+(fn month-weekday-candidates [plain-date-time rule dtstart year month]
+  (local generated [])
+  (var day 1)
+  (while (<= day 31)
+    (local candidate (build-generated-candidate plain-date-time dtstart year month day))
+    (when (and candidate
+               (by-day-filter-allowed? rule candidate))
+      (table.insert generated candidate))
+    (set day (+ day 1)))
+  generated)
+
 (fn monthly-generated-candidates [plain-date-time rule dtstart anchor]
   (local fields (plain-fields anchor))
   (local generated [])
   (when (month-filter-allowed? rule anchor)
-    (each [_ day (ipairs rule.by-month-day)]
-      (local candidate (build-generated-candidate plain-date-time dtstart fields.year fields.month day))
-      (when candidate
-        (table.insert generated candidate))))
+    (if rule.by-month-day
+        (each [_ day (ipairs rule.by-month-day)]
+          (local candidate (build-generated-candidate plain-date-time dtstart fields.year fields.month day))
+          (when (and candidate (by-day-filter-allowed? rule candidate))
+            (table.insert generated candidate)))
+        rule.by-day
+        (each [_ candidate (ipairs (month-weekday-candidates plain-date-time rule dtstart fields.year fields.month))]
+          (table.insert generated candidate))))
   generated)
 
 (fn yearly-generated-months [rule dtstart]
@@ -502,10 +522,14 @@
   (local fields (plain-fields anchor))
   (local generated [])
   (each [_ month (ipairs (yearly-generated-months rule dtstart))]
-    (each [_ day (ipairs rule.by-month-day)]
-      (local candidate (build-generated-candidate plain-date-time dtstart fields.year month day))
-      (when candidate
-        (table.insert generated candidate))))
+    (if rule.by-month-day
+        (each [_ day (ipairs rule.by-month-day)]
+          (local candidate (build-generated-candidate plain-date-time dtstart fields.year month day))
+          (when (and candidate (by-day-filter-allowed? rule candidate))
+            (table.insert generated candidate)))
+        rule.by-day
+        (each [_ candidate (ipairs (month-weekday-candidates plain-date-time rule dtstart fields.year month))]
+          (table.insert generated candidate))))
   generated)
 
 (fn append-generated-candidates [results bounds dtstart candidates]
@@ -571,8 +595,6 @@
   results)
 
 (fn expand-calendar-generator [period plain-date-time rule dtstart bounds]
-  (when rule.by-day
-    (error "unsupported temporal recurrence expansion"))
   (period.add-to-plain-date-time dtstart (calendar-step-period rule.freq 0))
   (assert-generator-filters-satisfiable period plain-date-time rule dtstart)
   (local results [])
@@ -643,7 +665,7 @@
   (local occurrence-options (normalize-occurrence-options options))
   (local bounds (occurrence-bounds standard rule occurrence-options))
   (if (or (= rule.freq :monthly) (= rule.freq :yearly))
-      (if rule.by-month-day
+      (if (or rule.by-month-day rule.by-day)
           (expand-calendar-generator period plain-date-time rule dtstart bounds)
           (expand-calendar period rule dtstart bounds))
       (= rule.freq :daily)
