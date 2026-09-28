@@ -70,7 +70,7 @@ For non-canonical names, see [Module Aliases and Search Terms](/sdk/modules/alia
 ## Networking and services
 
 - [http](/sdk/modules/http)
-- [http-server](/sdk/modules/http-server)
+- [http_server](/sdk/modules/http-server)
 - [zmq](/sdk/modules/zmq)
 - [realtime](/sdk/modules/realtime)
 - [libtorrent](/sdk/modules/libtorrent)

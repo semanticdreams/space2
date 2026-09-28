@@ -124,7 +124,7 @@ export default defineConfig({
               collapsed: true,
               items: [
                 { text: 'http', link: '/sdk/modules/http' },
-                { text: 'http-server', link: '/sdk/modules/http-server' },
+                { text: 'http_server', link: '/sdk/modules/http-server' },
                 { text: 'zmq', link: '/sdk/modules/zmq' },
                 { text: 'realtime', link: '/sdk/modules/realtime' },
                 { text: 'libtorrent', link: '/sdk/modules/libtorrent' },
