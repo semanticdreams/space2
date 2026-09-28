@@ -79,9 +79,17 @@
   (assert-error #(registry.register {:id "duplicate-capability" :version "1.0" :capabilities [:natural :natural] :parse noop-parse})
                 "duplicate temporal provider capability")
   (assert-error #(registry.register {:id "unknown-key" :version "1.0" :capabilities [:natural] :parse noop-parse :legacy true})
-                "invalid temporal provider key")
+                 "invalid temporal provider key")
+  (assert-error #(registry.register {:id "bad-parse-type" :version "1.0" :capabilities [:natural] :parse "parse" :format noop-parse})
+                "temporal provider parse must be a function")
+  (assert-error #(registry.register {:id "bad-format-type" :version "1.0" :capabilities [:natural] :parse noop-parse :format {}})
+                "temporal provider format must be a function")
+  (assert-error #(registry.register {:id "bad-calendar-type" :version "1.0" :capabilities [:natural] :parse noop-parse :calendar 42})
+                "temporal provider calendar must be a function or table")
+  (assert-error #(registry.register {:id "bad-business-calendar-type" :version "1.0" :capabilities [:natural] :parse noop-parse :business-calendar "business"})
+                "temporal provider business-calendar must be a function or table")
   (assert-error #(registry.register {:id "no-operation" :version "1.0" :capabilities [:natural]})
-                "temporal provider requires an operational field"))
+                 "temporal provider requires an operational field"))
 
 (fn unregister-handles []
   (local registry (create-provider-registry {}))
@@ -147,6 +155,20 @@
   (assert-error #(registry.parse "tomorrow" {})
                 "temporal provider bad parse failed:"))
 
+(fn parse-rejects-invalid-result-shapes []
+  (local sparse-results [{:kind :first}])
+  (tset sparse-results 3 {:kind :third})
+  (local sparse-registry (create-provider-registry {}))
+  (sparse-registry.register {:id "sparse" :version "1.0" :capabilities [:natural]
+                             :parse (fn [_text _context] sparse-results)})
+  (assert-error #(sparse-registry.parse "tomorrow" {})
+                "temporal provider parse result must be a sequential array")
+  (local hash-registry (create-provider-registry {}))
+  (hash-registry.register {:id "hash" :version "1.0" :capabilities [:natural]
+                           :parse (fn [_text _context] {:candidate {:kind :hash}})})
+  (assert-error #(hash-registry.parse "tomorrow" {})
+                "temporal provider parse result must be a sequential array"))
+
 (table.insert tests {:name "temporal facade exports providers" :fn facade-exports-providers})
 (table.insert tests {:name "orders providers by priority then id" :fn orders-providers})
 (table.insert tests {:name "rejects duplicate provider ids" :fn rejects-duplicate-provider-ids})
@@ -156,6 +178,7 @@
 (table.insert tests {:name "parse returns empty array when no providers match" :fn parse-returns-empty-when-no-providers-match})
 (table.insert tests {:name "parse composes deterministic candidates and annotates provider ids" :fn parse-composes-candidates})
 (table.insert tests {:name "parse prefixes provider failures" :fn parse-prefixes-provider-failures})
+(table.insert tests {:name "parse rejects hash-shaped and sparse results" :fn parse-rejects-invalid-result-shapes})
 
 (local main
   (fn []

@@ -2,18 +2,18 @@
   {:id true :version true :capabilities true :priority true
    :parse true :format true :calendar true :business-calendar true})
 
-(fn sequential-length [items]
+(fn sequential-length [items message]
   (var count 0)
   (var max-index 0)
   (each [key _value (pairs items)]
     (assert (and (= (type key) :number)
                  (> key 0)
                  (= key (math.floor key)))
-            "temporal provider capabilities must be a sequential array")
+            message)
     (set count (+ count 1))
     (when (> key max-index)
       (set max-index key)))
-  (assert (= count max-index) "temporal provider capabilities must be a sequential array")
+  (assert (= count max-index) message)
   count)
 
 (fn copy-array [items]
@@ -39,12 +39,28 @@
 
 (fn validate-capabilities [provider]
   (assert (= (type provider.capabilities) :table) "temporal provider capabilities must be an array")
-  (assert (> (sequential-length provider.capabilities) 0) "temporal provider capabilities must not be empty")
+  (assert (> (sequential-length provider.capabilities
+                                "temporal provider capabilities must be a sequential array") 0)
+          "temporal provider capabilities must not be empty")
   (local seen {})
   (each [_ capability (ipairs provider.capabilities)]
     (assert (= (type capability) :string) "temporal provider capability must be a keyword")
     (assert (not (. seen capability)) "duplicate temporal provider capability")
     (tset seen capability true)))
+
+(fn validate-operational-fields [provider]
+  (when (not (= provider.parse nil))
+    (assert (= (type provider.parse) :function) "temporal provider parse must be a function"))
+  (when (not (= provider.format nil))
+    (assert (= (type provider.format) :function) "temporal provider format must be a function"))
+  (when (not (= provider.calendar nil))
+    (assert (or (= (type provider.calendar) :function)
+                (= (type provider.calendar) :table))
+            "temporal provider calendar must be a function or table"))
+  (when (not (= provider.business-calendar nil))
+    (assert (or (= (type provider.business-calendar) :function)
+                (= (type provider.business-calendar) :table))
+            "temporal provider business-calendar must be a function or table")))
 
 (fn validate-provider [provider]
   (assert (= (type provider) :table) "temporal provider must be a table")
@@ -55,6 +71,7 @@
   (validate-capabilities provider)
   (when (not (= provider.priority nil))
     (assert (= (type provider.priority) :number) "temporal provider priority must be a number"))
+  (validate-operational-fields provider)
   (assert (has-operational-field? provider) "temporal provider requires an operational field"))
 
 (fn capability-present? [provider capability]
@@ -139,6 +156,7 @@
   (fn append-candidates [out provider candidates]
     (when (not (= candidates nil))
       (assert (= (type candidates) :table) "temporal provider parse result must be an array")
+      (sequential-length candidates "temporal provider parse result must be a sequential array")
       (each [_ candidate (ipairs candidates)]
         (assert (= (type candidate) :table) "temporal provider candidate must be a table")
         (local copied {})
