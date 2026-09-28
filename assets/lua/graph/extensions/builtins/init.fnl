@@ -2,11 +2,12 @@
 (local Filesystem (require :graph/extensions/builtins/filesystem))
 (local Llm (require :graph/extensions/builtins/llm))
 (local HackerNews (require :graph/extensions/builtins/hackernews))
+(local HostedApps (require :graph/extensions/builtins/hosted-apps))
 (local Kernels (require :graph/extensions/builtins/kernels))
 (local Workflows (require :graph/extensions/builtins/workflows))
 (local Worlds (require :graph/extensions/builtins/worlds))
 
-(local family-modules [Entities Workflows Filesystem Llm HackerNews Kernels Worlds])
+(local family-modules [Entities Workflows Filesystem HostedApps Llm HackerNews Kernels Worlds])
 
 (fn descriptors [opts]
   (local all [])
