@@ -9,6 +9,11 @@
   (assert (not ok) message)
   err)
 
+(fn assert-error-contains [f fragment message]
+  (local err (assert-error f message))
+  (assert (tostring err):find fragment 1 true)
+  err)
+
 (fn assert-strings [actual expected]
   (assert= (# actual) (# expected))
   (each [index value (ipairs expected)]
@@ -56,6 +61,27 @@
                          "RRULE:FREQ=WEEKLY;WKST=MO;WKST=SU"])]
     (assert-error #(Temporal.recurrence.parse-rrule rrule)
                    (.. rrule " should throw"))))
+
+(fn reports-rfc5545-diagnostic-boundaries []
+  (each [_ diagnostic (ipairs [{:rrule "RRULE:FREQ=DAILY;BYSECOND=60" :fragment "BYSECOND"}
+                               {:rrule "RRULE:FREQ=DAILY;WKST=XX" :fragment "WKST"}
+                               {:rrule "RRULE:FREQ=DAILY;BYDAY=0MO" :fragment "BYDAY"}
+                               {:rrule "RRULE:FREQ=DAILY;BYSETPOS=0" :fragment "BYSETPOS"}])]
+    (assert-error-contains #(Temporal.recurrence.parse-rrule diagnostic.rrule)
+                           diagnostic.fragment
+                           (.. diagnostic.rrule " should identify " diagnostic.fragment)))
+  (local dtstart (Temporal.plain-date-time.parse "2026-01-01T00:00:00"))
+  (local utc-until-rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=DAILY;COUNT=2;UNTIL=20260101T000000Z"))
+  (assert-error-contains #(Temporal.recurrence.occurrences utc-until-rule dtstart)
+                         "UTC UNTIL"
+                         "UTC UNTIL should report the unsupported boundary")
+  (local unbounded-rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=DAILY"))
+  (local unbounded-error (assert-error #(Temporal.recurrence.occurrences unbounded-rule dtstart)
+                                       "unbounded expansion should throw"))
+  (local text (tostring unbounded-error))
+  (assert (text:find "COUNT" 1 true))
+  (assert (text:find "local UNTIL" 1 true))
+  (assert (text:find ":limit" 1 true)))
 
 (fn expands-last-friday-of-month []
   (local dtstart (Temporal.plain-date-time.parse "2026-01-01T09:00:00"))
@@ -146,11 +172,27 @@
   (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=MINUTELY;BYSECOND=0;UNTIL=20260101T090115"))
   (assert-strings (Temporal.recurrence.occurrences rule dtstart) ["2026-01-01T09:01:00"]))
 
+(fn combines-count-limit-and-until-bounds []
+  (local dtstart (Temporal.plain-date-time.parse "2026-01-01T09:00:00"))
+  (local count-first (Temporal.recurrence.parse-rrule "RRULE:FREQ=DAILY;COUNT=2"))
+  (assert-strings (Temporal.recurrence.occurrences count-first dtstart {:limit 5})
+                  ["2026-01-01T09:00:00" "2026-01-02T09:00:00"])
+  (local limit-first (Temporal.recurrence.parse-rrule "RRULE:FREQ=DAILY;COUNT=5"))
+  (assert-strings (Temporal.recurrence.occurrences limit-first dtstart {:limit 2})
+                  ["2026-01-01T09:00:00" "2026-01-02T09:00:00"])
+  (local inclusive-until (Temporal.recurrence.parse-rrule "RRULE:FREQ=DAILY;UNTIL=20260102T090000"))
+  (assert-strings (Temporal.recurrence.occurrences inclusive-until dtstart)
+                  ["2026-01-01T09:00:00" "2026-01-02T09:00:00"])
+  (local selector-heavy (Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1;UNTIL=20260227T090000"))
+  (assert-strings (Temporal.recurrence.occurrences selector-heavy dtstart)
+                  ["2026-01-30T09:00:00" "2026-02-27T09:00:00"]))
+
 (table.insert tests {:name "parses sub daily frequencies" :fn parses-sub-daily-frequencies})
 (table.insert tests {:name "parses new selector lists" :fn parses-new-selector-lists})
 (table.insert tests {:name "parses ordinal BYDAY" :fn parses-ordinal-byday})
 (table.insert tests {:name "serializes full field order" :fn serializes-full-field-order})
 (table.insert tests {:name "rejects invalid RFC5545 rule fields" :fn rejects-invalid-rfc5545-rule-fields})
+(table.insert tests {:name "reports RFC5545 diagnostic boundaries" :fn reports-rfc5545-diagnostic-boundaries})
 (table.insert tests {:name "expands last Friday of month" :fn expands-last-friday-of-month})
 (table.insert tests {:name "expands negative month day" :fn expands-negative-month-day})
 (table.insert tests {:name "applies BYSETPOS after sorting" :fn applies-bysetpos-after-sorting})
@@ -168,6 +210,7 @@
 (table.insert tests {:name "rejects unsupported sub daily date selectors" :fn rejects-unsupported-sub-daily-date-selectors})
 (table.insert tests {:name "expands hourly BYMINUTE candidates before UNTIL" :fn expands-hourly-byminute-candidates-before-until})
 (table.insert tests {:name "expands minutely BYSECOND candidates before UNTIL" :fn expands-minutely-bysecond-candidates-before-until})
+(table.insert tests {:name "combines COUNT limit and UNTIL bounds" :fn combines-count-limit-and-until-bounds})
 
 (local main
   (fn []

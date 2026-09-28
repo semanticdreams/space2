@@ -437,9 +437,9 @@
     (if (= parsed.kind :plain-date-time)
         (set until parsed.value)
         (= parsed.kind :instant)
-        (error "unsupported temporal recurrence UNTIL")))
+        (error "unsupported temporal recurrence UTC UNTIL")))
   (when (and (= limit nil) (= until nil))
-    (error "temporal recurrence expansion requires count, limit, or until"))
+    (error "temporal recurrence expansion requires COUNT, local UNTIL, or :limit"))
   {:limit limit :until until})
 
 {:from from
