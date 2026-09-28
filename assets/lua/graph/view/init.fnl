@@ -103,7 +103,7 @@
                         (set (. next-state k) v))
                     (set next-state.position [position.x position.y position.z])
                     (graph-map:update-island island-id {:state next-state}))
-                (set (. runtime.positions island-id) nil)))))
+                (set (. runtime.positions island-id) nil))))) (fn selected-node-keys [nodes] (assert (= (type nodes) :table) "GraphView selected-node-keys requires nodes table") (icollect [_ node (ipairs nodes)] (and node node.key))) (fn sync-map-selected-node-keys! [graph-map keys] (assert graph-map "GraphView selected-node-key sync requires graph-map") (if graph-map.set-selected-node-keys (graph-map:set-selected-node-keys keys) (do (set graph-map.selected_node_keys keys) graph-map.selected_node_keys)))
 
 (fn GraphView [opts]
     (local options (or opts {}))
@@ -380,18 +380,18 @@
             (when (not (rawget previous node))
                 (update-point-state node))))
 
-    (fn selected-node-keys [nodes]
-        (assert (= (type nodes) :table)
-                "GraphView selected-node-keys requires nodes table")
-        (icollect [_ node (ipairs nodes)]
-            (and node node.key)))
 
-    (fn sync-map-selected-node-keys [keys]
-        (if graph-map.set-selected-node-keys
-            (graph-map:set-selected-node-keys keys)
-            (do
-                (set graph-map.selected_node_keys keys)
-                graph-map.selected_node_keys)))
+
+
+
+
+
+
+
+
+
+
+
 
     (fn handle-focus-change [payload]
         (assert-not-dropped "handle-focus-change")
@@ -1253,7 +1253,8 @@
     (set selection-handler
           (selected-nodes-changed:connect (fn [nodes]
                                               (update-selection-set nodes)
-                                              (sync-map-selected-node-keys
+                                              (sync-map-selected-node-keys!
+                                                  graph-map
                                                   (selected-node-keys nodes)))))
     (set focus-focus-handler
          (focus-manager.focus-focus:connect handle-focus-change))
@@ -1343,7 +1344,6 @@
                     (values "receiver" receiver.id)
                     "canvas"))
             "canvas"))
-
     (fn handle-extra-panel-transferred [payload]
         (local persistence (and payload payload.persistence))
         (when (= (type persistence) :table)
@@ -1607,7 +1607,7 @@
                (assert-not-dropped "capture-state")
                (flush-island-layout-positions! options._island-layout-runtime graph-map)
                 (local keys (selected-node-keys selected-nodes))
-               (sync-map-selected-node-keys keys)
+               (sync-map-selected-node-keys! graph-map keys)
                (set graph-map.focused_node_key (and focused-node focused-node.key))
               (sync-extra-panel-runtime-states!)
               (local view-state (and views views.capture-state (views:capture-state)))
