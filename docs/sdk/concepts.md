@@ -16,6 +16,12 @@ A capability is a named contract an app or extension expects the host to provide
 
 A runtime facet is one builder-facing surface of the host, such as `scheduler`, `input`, `presentation`, `scene`, asset loading, or command registration. Facets group related operations so an app can request only the host behavior it needs.
 
+## Modules vs. App Contracts
+
+Modules are reusable Space ecosystem libraries that builders import directly. Use the [module reference](/sdk/modules/) to find canonical import names, APIs, examples, aliases, and platform notes.
+
+App contracts describe how an app talks to the Space host. Use the [app/host reference](/sdk/reference/) for app module shape, host capabilities, runtime facets, commands, scene access, packaging, and graph extension descriptors.
+
 ## Command
 
 A command is an invocable action exposed by an app, extension, or host facet. `commands` should document required arguments, expected results, and failure behavior so malformed invocations are visible during development.
