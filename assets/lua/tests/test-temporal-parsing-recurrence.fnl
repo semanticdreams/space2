@@ -65,7 +65,7 @@
              "RRULE:FREQ=WEEKLY;COUNT=3;BYDAY=TU"))
   (assert-error #(Temporal.recurrence.parse-rrule "RRULE:FREQ=WEEKLY;FREQ=DAILY")
                 "duplicate RRULE key should throw")
-  (assert-error #(Temporal.recurrence.parse-rrule "RRULE:FREQ=WEEKLY;BYHOUR=9")
+  (assert-error #(Temporal.recurrence.parse-rrule "RRULE:FREQ=WEEKLY;BYFOO=9")
                 "unknown RRULE key should throw"))
 
 (fn recurrence-bymonth-parse-and-serialize []
@@ -106,7 +106,7 @@
   (assert (= (. rule.by-month-day 2) 29))
   (assert (= (. rule.by-day 1) :mo))
   (assert (= (Temporal.recurrence.to-rrule rule)
-             "RRULE:FREQ=MONTHLY;COUNT=2;BYMONTH=2;BYMONTHDAY=1,29;BYDAY=MO"))
+             "RRULE:FREQ=MONTHLY;COUNT=2;BYDAY=MO;BYMONTHDAY=1,29;BYMONTH=2"))
 
   (local from-rule (Temporal.recurrence.from {:freq :daily :by-month-day [31]}))
   (assert (= (. from-rule.by-month-day 1) 31))
@@ -115,8 +115,8 @@
                 "BYMONTHDAY=0 should throw")
   (assert-error #(Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;BYMONTHDAY=32")
                 "BYMONTHDAY=32 should throw")
-  (assert-error #(Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;BYMONTHDAY=-1")
-                "negative BYMONTHDAY should throw")
+  (local negative-month-day (Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;BYMONTHDAY=-1"))
+  (assert (= (. negative-month-day.by-month-day 1) -1))
   (assert-error #(Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;BYMONTHDAY=1,,2")
                 "BYMONTHDAY with empty member should throw")
   (assert-error #(Temporal.recurrence.from {:freq :monthly :by-month-day []})
@@ -341,10 +341,12 @@
                   "unsatisfiable monthly BYDAY should throw instead of hanging"))
   (assert (tostring monthly-err):find "unsupported temporal recurrence expansion" 1 true)
 
-  (assert-error #(Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;BYDAY=1MO")
-                "ordinal monthly BYDAY should remain unsupported")
-  (assert-error #(Temporal.recurrence.parse-rrule "RRULE:FREQ=YEARLY;BYDAY=-1FR")
-                "negative ordinal yearly BYDAY should remain unsupported"))
+  (local first-monday (Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;BYDAY=1MO"))
+  (assert (= (. first-monday.by-day 1 :weekday) :mo))
+  (assert (= (. first-monday.by-day 1 :ordinal) 1))
+  (local last-friday (Temporal.recurrence.parse-rrule "RRULE:FREQ=YEARLY;BYDAY=-1FR"))
+  (assert (= (. last-friday.by-day 1 :weekday) :fr))
+  (assert (= (. last-friday.by-day 1 :ordinal) -1)))
 
 (fn recurrence-bymonthday-filters-occurrences []
   (local daily-start (Temporal.plain-date-time.parse "2026-01-30T09:00:00"))

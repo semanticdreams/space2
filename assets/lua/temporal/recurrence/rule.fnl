@@ -1,5 +1,8 @@
 (local valid-freq
-  {:daily true
+  {:secondly true
+   :minutely true
+   :hourly true
+   :daily true
    :weekly true
    :monthly true
    :yearly true})
@@ -7,19 +10,26 @@
 (local valid-options
   {:freq true
    :interval true
-   :count true
-   :until true
-   :by-day true
-   :by-month true
-   :by-month-day true})
+    :count true
+    :until true
+    :by-second true
+    :by-minute true
+    :by-hour true
+    :by-day true
+    :by-month true
+    :by-month-day true
+    :by-year-day true
+    :by-week-no true
+    :by-set-pos true
+    :week-start true})
 
 (local valid-occurrence-options
   {:limit true})
 
 (local day-to-rrule {:mo "MO" :tu "TU" :we "WE" :th "TH" :fr "FR" :sa "SA" :su "SU"})
 (local rrule-to-day {"MO" :mo "TU" :tu "WE" :we "TH" :th "FR" :fr "SA" :sa "SU" :su})
-(local freq-to-rrule {:daily "DAILY" :weekly "WEEKLY" :monthly "MONTHLY" :yearly "YEARLY"})
-(local rrule-to-freq {"DAILY" :daily "WEEKLY" :weekly "MONTHLY" :monthly "YEARLY" :yearly})
+(local freq-to-rrule {:secondly "SECONDLY" :minutely "MINUTELY" :hourly "HOURLY" :daily "DAILY" :weekly "WEEKLY" :monthly "MONTHLY" :yearly "YEARLY"})
+(local rrule-to-freq {"SECONDLY" :secondly "MINUTELY" :minutely "HOURLY" :hourly "DAILY" :daily "WEEKLY" :weekly "MONTHLY" :monthly "YEARLY" :yearly})
 (local day-to-number {:mo 1 :tu 2 :we 3 :th 4 :fr 5 :sa 6 :su 7})
 (local number-to-day [:mo :tu :we :th :fr :sa :su])
 
@@ -38,13 +48,72 @@
     (error "invalid temporal recurrence BYDAY"))
   day)
 
+(fn integer? [value]
+  (and (= (type value) :number)
+       (= value (math.floor value))))
+
+(fn validate-integer-range [value name min max]
+  (when (not (and (integer? value)
+                  (>= value min)
+                  (<= value max)))
+    (error (.. "invalid temporal recurrence " name)))
+  value)
+
+(fn validate-nonzero-integer-range [value name min max]
+  (when (not (and (integer? value)
+                  (not= value 0)
+                  (>= value min)
+                  (<= value max)))
+    (error (.. "invalid temporal recurrence " name)))
+  value)
+
+(fn validate-week-start [day]
+  (when (not (. day-to-rrule day))
+    (error "invalid temporal recurrence WKST"))
+  day)
+
+(fn validate-by-day-entry [entry]
+  (if (= (type entry) :table)
+      (do
+        (validate-day entry.weekday)
+        (validate-nonzero-integer-range entry.ordinal "BYDAY" -53 53)
+        {:weekday entry.weekday :ordinal entry.ordinal})
+      (validate-day entry)))
+
 (fn validate-month [month]
-  (when (not (and (= (type month) :number)
-                  (= month (math.floor month))
-                  (>= month 1)
-                  (<= month 12)))
-    (error "invalid temporal recurrence BYMONTH"))
-  month)
+  (validate-integer-range month "BYMONTH" 1 12))
+
+(fn validate-second [second]
+  (validate-integer-range second "BYSECOND" 0 59))
+
+(fn validate-minute [minute]
+  (validate-integer-range minute "BYMINUTE" 0 59))
+
+(fn validate-hour [hour]
+  (validate-integer-range hour "BYHOUR" 0 23))
+
+(fn validate-month-day [day]
+  (validate-nonzero-integer-range day "BYMONTHDAY" -31 31))
+
+(fn validate-year-day [day]
+  (validate-nonzero-integer-range day "BYYEARDAY" -366 366))
+
+(fn validate-week-no [week]
+  (validate-nonzero-integer-range week "BYWEEKNO" -53 53))
+
+(fn validate-set-pos [position]
+  (validate-nonzero-integer-range position "BYSETPOS" -366 366))
+
+(fn normalize-integer-list [items name validator]
+  (when (not= items nil)
+    (when (not= (type items) :table)
+      (error (.. "invalid temporal recurrence " name)))
+    (local normalized [])
+    (each [_ value (ipairs items)]
+      (table.insert normalized (validator value)))
+    (when (= (# normalized) 0)
+      (error (.. "invalid temporal recurrence " name)))
+    normalized))
 
 (fn normalize-by-day [days]
   (when (not= days nil)
@@ -52,7 +121,7 @@
       (error "invalid temporal recurrence BYDAY"))
     (local normalized [])
     (each [_ day (ipairs days)]
-      (table.insert normalized (validate-day day)))
+      (table.insert normalized (validate-by-day-entry day)))
     (when (= (# normalized) 0)
       (error "invalid temporal recurrence BYDAY"))
     normalized))
@@ -68,24 +137,8 @@
       (error "invalid temporal recurrence BYMONTH"))
     normalized))
 
-(fn validate-month-day [day]
-  (when (not (and (= (type day) :number)
-                  (= day (math.floor day))
-                  (>= day 1)
-                  (<= day 31)))
-    (error "invalid temporal recurrence BYMONTHDAY"))
-  day)
-
 (fn normalize-by-month-day [days]
-  (when (not= days nil)
-    (when (not= (type days) :table)
-      (error "invalid temporal recurrence BYMONTHDAY"))
-    (local normalized [])
-    (each [_ day (ipairs days)]
-      (table.insert normalized (validate-month-day day)))
-    (when (= (# normalized) 0)
-      (error "invalid temporal recurrence BYMONTHDAY"))
-    normalized))
+  (normalize-integer-list days "BYMONTHDAY" validate-month-day))
 
 (fn from [options]
   (when (not= (type options) :table)
@@ -96,15 +149,27 @@
   (when (not (. valid-freq options.freq))
     (error "invalid temporal recurrence frequency"))
   (local interval (if (= options.interval nil)
-                      1
-                      (validate-positive-integer options.interval "interval")))
-  (local rule {:freq options.freq :interval interval})
+                       1
+                       (validate-positive-integer options.interval "interval")))
+  (local week-start (if (= options.week-start nil)
+                        :mo
+                        (validate-week-start options.week-start)))
+  (local rule {:freq options.freq :interval interval :week-start week-start})
   (when (not= options.count nil)
     (set rule.count (validate-positive-integer options.count "count")))
   (when (not= options.until nil)
     (when (not= (type options.until) :string)
       (error "invalid temporal recurrence UNTIL"))
     (set rule.until options.until))
+  (local by-second (normalize-integer-list options.by-second "BYSECOND" validate-second))
+  (when by-second
+    (set rule.by-second by-second))
+  (local by-minute (normalize-integer-list options.by-minute "BYMINUTE" validate-minute))
+  (when by-minute
+    (set rule.by-minute by-minute))
+  (local by-hour (normalize-integer-list options.by-hour "BYHOUR" validate-hour))
+  (when by-hour
+    (set rule.by-hour by-hour))
   (local by-day (normalize-by-day options.by-day))
   (when by-day
     (set rule.by-day by-day))
@@ -114,6 +179,15 @@
   (local by-month-day (normalize-by-month-day options.by-month-day))
   (when by-month-day
     (set rule.by-month-day by-month-day))
+  (local by-year-day (normalize-integer-list options.by-year-day "BYYEARDAY" validate-year-day))
+  (when by-year-day
+    (set rule.by-year-day by-year-day))
+  (local by-week-no (normalize-integer-list options.by-week-no "BYWEEKNO" validate-week-no))
+  (when by-week-no
+    (set rule.by-week-no by-week-no))
+  (local by-set-pos (normalize-integer-list options.by-set-pos "BYSETPOS" validate-set-pos))
+  (when by-set-pos
+    (set rule.by-set-pos by-set-pos))
   rule)
 
 (fn split-nonempty [text separator]
@@ -138,13 +212,36 @@
     (error (.. "invalid RRULE " name)))
   (validate-positive-integer (tonumber text) name))
 
+(fn parse-signed-integer [text name]
+  (when (or (= text "") (not (text:match "^[+-]?%d+$")))
+    (error (.. "invalid RRULE " name)))
+  (tonumber text))
+
+(fn parse-integer-list [text name validator]
+  (local parsed [])
+  (each [_ item (ipairs (split-nonempty text ","))]
+    (table.insert parsed (validator (parse-signed-integer item name))))
+  parsed)
+
+(fn parse-by-day-token [item]
+  (local simple (. rrule-to-day item))
+  (if simple
+      simple
+      (do
+        (local ordinal-text (item:match "^([+-]?%d+)[A-Z][A-Z]$"))
+        (local weekday-text (item:match "^[+-]?%d+([A-Z][A-Z])$"))
+        (when (or (not ordinal-text) (not weekday-text))
+          (error "invalid RRULE BYDAY"))
+        (local weekday (. rrule-to-day weekday-text))
+        (when (not weekday)
+          (error "invalid RRULE BYDAY"))
+        {:weekday weekday
+         :ordinal (validate-nonzero-integer-range (parse-signed-integer ordinal-text "BYDAY") "BYDAY" -53 53)})))
+
 (fn parse-by-day [text]
   (local days [])
   (each [_ item (ipairs (split-nonempty text ","))]
-    (local day (. rrule-to-day item))
-    (when (not day)
-      (error "invalid RRULE BYDAY"))
-    (table.insert days day))
+    (table.insert days (parse-by-day-token item)))
   days)
 
 (fn parse-by-month [text]
@@ -154,10 +251,7 @@
   months)
 
 (fn parse-by-month-day [text]
-  (local days [])
-  (each [_ item (ipairs (split-nonempty text ","))]
-    (table.insert days (validate-month-day (parse-positive-integer item "BYMONTHDAY"))))
-  days)
+  (parse-integer-list text "BYMONTHDAY" validate-month-day))
 
 (fn compact-local-until? [text]
   (and (= (type text) :string)
@@ -225,12 +319,30 @@
         (set options.count (parse-positive-integer value "COUNT"))
         (= key "UNTIL")
         (set options.until value)
+        (= key "BYSECOND")
+        (set options.by-second (parse-integer-list value "BYSECOND" validate-second))
+        (= key "BYMINUTE")
+        (set options.by-minute (parse-integer-list value "BYMINUTE" validate-minute))
+        (= key "BYHOUR")
+        (set options.by-hour (parse-integer-list value "BYHOUR" validate-hour))
         (= key "BYDAY")
         (set options.by-day (parse-by-day value))
         (= key "BYMONTH")
         (set options.by-month (parse-by-month value))
         (= key "BYMONTHDAY")
         (set options.by-month-day (parse-by-month-day value))
+        (= key "BYYEARDAY")
+        (set options.by-year-day (parse-integer-list value "BYYEARDAY" validate-year-day))
+        (= key "BYWEEKNO")
+        (set options.by-week-no (parse-integer-list value "BYWEEKNO" validate-week-no))
+        (= key "BYSETPOS")
+        (set options.by-set-pos (parse-integer-list value "BYSETPOS" validate-set-pos))
+        (= key "WKST")
+        (do
+          (local week-start (. rrule-to-day value))
+          (when (not week-start)
+            (error "invalid RRULE WKST"))
+          (set options.week-start week-start))
         (error "unknown RRULE key")))
   (from options))
 
@@ -244,21 +356,24 @@
 
 (fn serialize-by-day [days]
   (local parts [])
-  (each [_ day (ipairs days)]
-    (table.insert parts (. day-to-rrule (validate-day day))))
+  (each [_ entry (ipairs days)]
+    (local day (validate-by-day-entry entry))
+    (if (= (type day) :table)
+        (table.insert parts (.. day.ordinal (. day-to-rrule day.weekday)))
+        (table.insert parts (. day-to-rrule day))))
+  (join parts ","))
+
+(fn serialize-integer-list [items validator]
+  (local parts [])
+  (each [_ value (ipairs items)]
+    (table.insert parts (tostring (validator value))))
   (join parts ","))
 
 (fn serialize-by-month [months]
-  (local parts [])
-  (each [_ month (ipairs months)]
-    (table.insert parts (tostring (validate-month month))))
-  (join parts ","))
+  (serialize-integer-list months validate-month))
 
 (fn serialize-by-month-day [days]
-  (local parts [])
-  (each [_ day (ipairs days)]
-    (table.insert parts (tostring (validate-month-day day))))
-  (join parts ","))
+  (serialize-integer-list days validate-month-day))
 
 (fn to-rrule [rule]
   (local normalized (from rule))
@@ -269,12 +384,26 @@
     (table.insert parts (.. "COUNT=" normalized.count)))
   (when normalized.until
     (table.insert parts (.. "UNTIL=" normalized.until)))
-  (when normalized.by-month
-    (table.insert parts (.. "BYMONTH=" (serialize-by-month normalized.by-month))))
-  (when normalized.by-month-day
-    (table.insert parts (.. "BYMONTHDAY=" (serialize-by-month-day normalized.by-month-day))))
+  (when normalized.by-second
+    (table.insert parts (.. "BYSECOND=" (serialize-integer-list normalized.by-second validate-second))))
+  (when normalized.by-minute
+    (table.insert parts (.. "BYMINUTE=" (serialize-integer-list normalized.by-minute validate-minute))))
+  (when normalized.by-hour
+    (table.insert parts (.. "BYHOUR=" (serialize-integer-list normalized.by-hour validate-hour))))
   (when normalized.by-day
     (table.insert parts (.. "BYDAY=" (serialize-by-day normalized.by-day))))
+  (when normalized.by-month-day
+    (table.insert parts (.. "BYMONTHDAY=" (serialize-by-month-day normalized.by-month-day))))
+  (when normalized.by-year-day
+    (table.insert parts (.. "BYYEARDAY=" (serialize-integer-list normalized.by-year-day validate-year-day))))
+  (when normalized.by-week-no
+    (table.insert parts (.. "BYWEEKNO=" (serialize-integer-list normalized.by-week-no validate-week-no))))
+  (when normalized.by-month
+    (table.insert parts (.. "BYMONTH=" (serialize-by-month normalized.by-month))))
+  (when normalized.by-set-pos
+    (table.insert parts (.. "BYSETPOS=" (serialize-integer-list normalized.by-set-pos validate-set-pos))))
+  (when (not= normalized.week-start :mo)
+    (table.insert parts (.. "WKST=" (. day-to-rrule (validate-week-start normalized.week-start)))))
   (.. "RRULE:" (join parts ";")))
 
 (fn normalize-occurrence-options [options]
