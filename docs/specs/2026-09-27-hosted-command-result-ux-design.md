@@ -5,8 +5,8 @@
 Hosted app command controls can render command metadata, payload forms, and inline
 confirmations. Running a command currently calls
 `descriptor/session:run-command(command-id, payload)` synchronously and writes a
-single latest result string such as `<command> succeeded` or `<command> failed:
-<error>`. That is enough for plumbing, but not production-quality feedback:
+single latest result string such as `&lt;command&gt; succeeded` or `&lt;command&gt; failed:
+&lt;error&gt;`. That is enough for plumbing, but not production-quality feedback:
 successful command values are invisible, error state is text-only, and repeated
 clicks are not guarded by a clear running state.
 
