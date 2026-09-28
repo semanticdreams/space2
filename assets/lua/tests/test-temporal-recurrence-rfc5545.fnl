@@ -9,6 +9,12 @@
   (assert (not ok) message)
   err)
 
+(fn assert-strings [actual expected]
+  (assert= (# actual) (# expected))
+  (each [index value (ipairs expected)]
+    (local occurrence (. actual index))
+    (assert= (occurrence:to-string) value)))
+
 (fn parses-sub-daily-frequencies []
   (assert= (. (Temporal.recurrence.parse-rrule "RRULE:FREQ=SECONDLY;COUNT=2") :freq) :secondly)
   (assert= (. (Temporal.recurrence.parse-rrule "RRULE:FREQ=MINUTELY;COUNT=2") :freq) :minutely)
@@ -54,21 +60,47 @@
 (fn rejects-unsupported-rfc5545-occurrence-selectors []
   (local dtstart (Temporal.plain-date-time.parse "2026-09-22T09:00:00"))
   (each [_ rrule (ipairs ["RRULE:FREQ=DAILY;COUNT=1;BYSECOND=30"
-                         "RRULE:FREQ=DAILY;COUNT=1;BYMINUTE=30"
-                         "RRULE:FREQ=DAILY;COUNT=1;BYHOUR=17"
-                         "RRULE:FREQ=YEARLY;COUNT=1;BYYEARDAY=1"
-                         "RRULE:FREQ=YEARLY;COUNT=1;BYWEEKNO=1"
-                         "RRULE:FREQ=MONTHLY;COUNT=1;BYSETPOS=1"
-                         "RRULE:FREQ=WEEKLY;COUNT=1;WKST=SU"
-                         "RRULE:FREQ=MONTHLY;COUNT=1;BYDAY=1MO"
-                         "RRULE:FREQ=MONTHLY;COUNT=1;BYMONTHDAY=-1"])]
+                          "RRULE:FREQ=DAILY;COUNT=1;BYMINUTE=30"
+                          "RRULE:FREQ=DAILY;COUNT=1;BYHOUR=17"])]
     (local err
       (assert-error #(Temporal.recurrence.occurrences
                        (Temporal.recurrence.parse-rrule rrule)
                        dtstart
                        {})
-                    (.. rrule " should throw during occurrence expansion")))
+                     (.. rrule " should throw during occurrence expansion")))
     (assert (tostring err):find "unsupported temporal recurrence expansion" 1 true)))
+
+(fn expands-last-friday-of-month []
+  (local dtstart (Temporal.plain-date-time.parse "2026-01-01T09:00:00"))
+  (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;BYDAY=-1FR;COUNT=3"))
+  (assert-strings (Temporal.recurrence.occurrences rule dtstart) ["2026-01-30T09:00:00" "2026-02-27T09:00:00" "2026-03-27T09:00:00"]))
+
+(fn expands-negative-month-day []
+  (local dtstart (Temporal.plain-date-time.parse "2026-01-01T09:00:00"))
+  (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;BYMONTHDAY=-1;COUNT=3"))
+  (assert-strings (Temporal.recurrence.occurrences rule dtstart) ["2026-01-31T09:00:00" "2026-02-28T09:00:00" "2026-03-31T09:00:00"]))
+
+(fn applies-bysetpos-after-sorting []
+  (local dtstart (Temporal.plain-date-time.parse "2026-01-01T09:00:00"))
+  (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=1,-1;COUNT=4"))
+  (assert-strings (Temporal.recurrence.occurrences rule dtstart) ["2026-01-01T09:00:00" "2026-01-30T09:00:00" "2026-02-02T09:00:00" "2026-02-27T09:00:00"]))
+
+(fn expands-year-day-selectors []
+  (local dtstart (Temporal.plain-date-time.parse "2026-01-01T09:00:00"))
+  (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=YEARLY;BYYEARDAY=1,-1;COUNT=4"))
+  (assert-strings (Temporal.recurrence.occurrences rule dtstart) ["2026-01-01T09:00:00" "2026-12-31T09:00:00" "2027-01-01T09:00:00" "2027-12-31T09:00:00"]))
+
+(fn expands-negative-week-number-selectors []
+  (local dtstart (Temporal.plain-date-time.parse "2026-01-01T09:00:00"))
+  (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=YEARLY;BYWEEKNO=-1;BYDAY=MO;COUNT=2"))
+  (assert-strings (Temporal.recurrence.occurrences rule dtstart) ["2026-12-28T09:00:00" "2027-12-27T09:00:00"]))
+
+(fn applies-week-start-to-weekly-intervals []
+  (local dtstart (Temporal.plain-date-time.parse "2026-01-07T09:00:00"))
+  (local monday-rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=SU;COUNT=3"))
+  (local sunday-rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=SU;COUNT=3;WKST=SU"))
+  (assert-strings (Temporal.recurrence.occurrences monday-rule dtstart) ["2026-01-11T09:00:00" "2026-01-25T09:00:00" "2026-02-08T09:00:00"])
+  (assert-strings (Temporal.recurrence.occurrences sunday-rule dtstart) ["2026-01-18T09:00:00" "2026-02-01T09:00:00" "2026-02-15T09:00:00"]))
 
 (table.insert tests {:name "parses sub daily frequencies" :fn parses-sub-daily-frequencies})
 (table.insert tests {:name "parses new selector lists" :fn parses-new-selector-lists})
@@ -76,6 +108,12 @@
 (table.insert tests {:name "serializes full field order" :fn serializes-full-field-order})
 (table.insert tests {:name "rejects invalid RFC5545 rule fields" :fn rejects-invalid-rfc5545-rule-fields})
 (table.insert tests {:name "rejects unsupported RFC5545 occurrence selectors" :fn rejects-unsupported-rfc5545-occurrence-selectors})
+(table.insert tests {:name "expands last Friday of month" :fn expands-last-friday-of-month})
+(table.insert tests {:name "expands negative month day" :fn expands-negative-month-day})
+(table.insert tests {:name "applies BYSETPOS after sorting" :fn applies-bysetpos-after-sorting})
+(table.insert tests {:name "expands year day selectors" :fn expands-year-day-selectors})
+(table.insert tests {:name "expands negative week number selectors" :fn expands-negative-week-number-selectors})
+(table.insert tests {:name "applies week start to weekly intervals" :fn applies-week-start-to-weekly-intervals})
 
 (local main
   (fn []
