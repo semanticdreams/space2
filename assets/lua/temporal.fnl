@@ -71,7 +71,7 @@
 
 (local standard (create-standard base))
 (local period (create-period base))
-(local recurrence (create-recurrence {:period period :standard standard :plain-date-time base.plain-date-time}))
+(local recurrence (create-recurrence {:period period :standard standard :plain-date-time base.plain-date-time :duration base.duration}))
 (local natural (create-natural {:recurrence recurrence}))
 (local providers (create-provider-registry {}))
 (local interval (create-interval {:standard standard :period period}))

@@ -62,7 +62,23 @@ Supported field tokens are `yyyy`, `MM`, `dd`, `HH`, `mm`, and `ss`; quoted lite
                                 {})
 ```
 
-The bounded RRULE subset supports `FREQ` values `DAILY`, `WEEKLY`, `MONTHLY`, and `YEARLY`, plus `INTERVAL`, `COUNT`, `UNTIL`, simple non-ordinal `BYDAY`, `BYMONTH`, and positive `BYMONTHDAY`. `BYDAY` accepts weekday values `MO`, `TU`, `WE`, `TH`, `FR`, `SA`, and `SU`: daily and weekly rules keep their existing scan/filter semantics, while monthly and yearly rules generate matching weekdays inside selected period buckets. `BYMONTH` accepts integer months `1..12`. `BYMONTHDAY` accepts positive integer month days `1..31`: daily and weekly rules use it as an inclusion filter over existing candidates, while monthly and yearly rules generate requested valid month days inside selected period buckets. Monthly/yearly `BYDAY` and `BYMONTHDAY` combine by intersection. Invalid generated dates such as February 31 are skipped, not clamped. Generated candidates before `DTSTART` are skipped. Yearly `BYDAY` and `BYMONTHDAY` use `BYMONTH` months when present and otherwise use the `DTSTART` anchor month; monthly `BYMONTH` filters the monthly anchor grid rather than generating extra months. Compact local `UNTIL=YYYYMMDDTHHMMSS` bounds occurrence expansion inclusively and can satisfy the finite-bound requirement without `COUNT` or `options.limit`; `COUNT`, `options.limit`, and `UNTIL` stop expansion at the earliest reached bound.
+The in-scope RFC5545 RRULE engine supports `FREQ` values `SECONDLY`, `MINUTELY`, `HOURLY`, `DAILY`, `WEEKLY`, `MONTHLY`, and `YEARLY`, plus `INTERVAL`, `COUNT`, compact local `UNTIL=YYYYMMDDTHHMMSS`, `BYSECOND`, `BYMINUTE`, `BYHOUR`, `BYDAY`, `BYMONTHDAY`, `BYYEARDAY`, `BYWEEKNO`, `BYMONTH`, `BYSETPOS`, and `WKST`. Expansion is `PlainDateTime`-only: rules expand from a caller-supplied `PlainDateTime` `DTSTART`; compact local `UNTIL` is inclusive; `COUNT`, `options.limit`, and local `UNTIL` stop at the first reached bound.
+
+Rules use RFC5545 candidate-set ordering. Each frequency bucket generates date and time candidates, sorts the full bucket by plain date-time, applies `BYSETPOS` to that sorted bucket, then applies bounds including `DTSTART`, compact local `UNTIL`, `COUNT`, and `options.limit`. For example, `RRULE:FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=1,-1` selects the first and last weekday in each month. `WKST` controls week bucket starts and week-number calculations for weekly interval rules and `BYWEEKNO`.
+
+Selector examples:
+
+```text
+RRULE:FREQ=MONTHLY;BYDAY=1MO,-1FR;COUNT=4          ; ordinal BYDAY
+RRULE:FREQ=MONTHLY;BYMONTHDAY=-1;COUNT=3           ; negative BYMONTHDAY
+RRULE:FREQ=YEARLY;BYYEARDAY=1,-1;COUNT=4           ; BYYEARDAY
+RRULE:FREQ=YEARLY;BYWEEKNO=-1;BYDAY=MO;COUNT=2     ; BYWEEKNO
+RRULE:FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1;COUNT=3
+RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=SU;WKST=SU;COUNT=3
+RRULE:FREQ=HOURLY;BYMINUTE=0;UNTIL=20260101T101500 ; sub-daily rule
+```
+
+Unsupported continuation areas fail explicitly instead of falling back: recurrence sets (`RDATE`, `EXDATE`, `EXRULE`), ICS/VEVENT parsing, UTC/instant `UNTIL` expansion, explicit-zone/DST expansion, host-local timezone defaults, date-only/fractional `UNTIL`, and leap-second `BYSECOND=60` are outside this `PlainDateTime` recurrence slice.
 
 ## Structured expressions
 
@@ -120,7 +136,7 @@ These items are no longer unowned future ideas; the [Temporal Complete Library R
 
 - **ICU/CLDR localization:** Deferred. Localized parsing and formatting need an explicit ICU/CLDR/data-packaging strategy before implementation.
 - **Broad natural language:** Deferred. Wider language coverage, ambiguous phrases, locales, and product ambiguity UX need their own design.
-- **Full RFC5545:** Deferred. The current RRULE subset is intentionally small; timezone-aware recurrence, UTC/instant `UNTIL` expansion, date-only `UNTIL`, fractional `UNTIL`, negative `BYMONTHDAY`, ordinal `BYDAY`, `BYSETPOS`, `WKST`, `RDATE`, `EXDATE`, recurrence sets, and full RFC5545 candidate-set expansion require separate semantics and compatibility tests.
+- **RFC5545 recurrence continuations:** The in-scope standalone RRULE engine is implemented for `PlainDateTime`. Recurrence sets, ICS/VEVENT, UTC/instant `UNTIL` expansion, date-only/fractional `UNTIL`, explicit-zone/DST expansion, and leap-second support remain deferred follow-up tracks with loud errors in the current API.
 - **ISO intervals/repeating intervals:** Bounded `start/end` intervals and plain date-time `start/period` and `period/end` parsing are covered by [Temporal Intervals](./temporal-intervals). Date-only period endpoint forms are supported only by `Temporal.interval.parse` for plain date-times; repeating interval period endpoints, instant period endpoints, zoned interval period endpoints, time-based `PT...` period text, and full ISO interval grammar beyond those two plain date-time forms remain deferred.
 - **Calendar periods:** Date-only calendar period records and `PlainDateTime` arithmetic are covered by [Temporal Calendar Periods](./temporal-calendar-periods). Business days and locale calendar policy remain deferred. Exact `Duration` remains separate from calendar periods such as months and years.
 - **Non-Gregorian calendars:** Deferred. The current foundation uses ISO proleptic Gregorian civil fields only.
@@ -135,6 +151,7 @@ make build
 ctest --test-dir build -R 'test_temporal_core|test_lua_temporal_core_binding' --output-on-failure
 SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m tools.fennel-check:main -- --target files --file assets/lua/temporal.fnl --file assets/lua/temporal/standard.fnl --file assets/lua/temporal/pattern.fnl --file assets/lua/temporal/recurrence.fnl --file assets/lua/temporal/expression.fnl --file assets/lua/temporal/natural.fnl --file assets/lua/tests/test-temporal-parsing-recurrence.fnl --file assets/lua/tests/fast.fnl
 make constraints
+SPACE_NATIVE_LIFECYCLE_DIAGNOSTICS=0 SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets FENNEL_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" FENNEL_MACRO_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" ./build/space -m tests.test-temporal-recurrence-rfc5545:main
 SPACE_NATIVE_LIFECYCLE_DIAGNOSTICS=0 SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets FENNEL_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" FENNEL_MACRO_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" ./build/space -m tests.test-temporal-parsing-recurrence:main
 SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test
 ```

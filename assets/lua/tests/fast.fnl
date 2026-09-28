@@ -103,9 +103,10 @@
      :tests.test-random
      :tests.test-temporal
      :tests.test-temporal-provider-registry
-     :tests.test-temporal-period
-     :tests.test-temporal-intervals
+    :tests.test-temporal-period
+    :tests.test-temporal-intervals
     :tests.test-temporal-parsing-recurrence
+    :tests.test-temporal-recurrence-rfc5545
     :tests.test-tempfile
     :tests.test-graph-loaders
     :tests.test-sysinfo
