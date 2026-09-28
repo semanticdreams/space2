@@ -102,6 +102,22 @@
   (assert-strings (Temporal.recurrence.occurrences monday-rule dtstart) ["2026-01-11T09:00:00" "2026-01-25T09:00:00" "2026-02-08T09:00:00"])
   (assert-strings (Temporal.recurrence.occurrences sunday-rule dtstart) ["2026-01-18T09:00:00" "2026-02-01T09:00:00" "2026-02-15T09:00:00"]))
 
+(fn applies-default-week-start-to-weekly-byday-intervals []
+  (local dtstart (Temporal.plain-date-time.parse "2026-01-07T09:00:00"))
+  (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO;COUNT=3"))
+  (assert-strings (Temporal.recurrence.occurrences rule dtstart) ["2026-01-19T09:00:00" "2026-02-02T09:00:00" "2026-02-16T09:00:00"]))
+
+(fn applies-yearly-ordinal-byday-within-bymonth []
+  (local dtstart (Temporal.plain-date-time.parse "2026-01-01T09:00:00"))
+  (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU;COUNT=1"))
+  (assert-strings (Temporal.recurrence.occurrences rule dtstart) ["2026-03-08T09:00:00"]))
+
+(fn rejects-unsatisfiable-count-only-selector-intersections []
+  (local dtstart (Temporal.plain-date-time.parse "2026-01-01T09:00:00"))
+  (local rule (Temporal.recurrence.parse-rrule "RRULE:FREQ=DAILY;BYYEARDAY=366;BYMONTH=2;COUNT=1"))
+  (local err (assert-error #(Temporal.recurrence.occurrences rule dtstart)))
+  (assert (tostring err):find "unsupported temporal recurrence expansion" 1 true))
+
 (table.insert tests {:name "parses sub daily frequencies" :fn parses-sub-daily-frequencies})
 (table.insert tests {:name "parses new selector lists" :fn parses-new-selector-lists})
 (table.insert tests {:name "parses ordinal BYDAY" :fn parses-ordinal-byday})
@@ -114,6 +130,9 @@
 (table.insert tests {:name "expands year day selectors" :fn expands-year-day-selectors})
 (table.insert tests {:name "expands negative week number selectors" :fn expands-negative-week-number-selectors})
 (table.insert tests {:name "applies week start to weekly intervals" :fn applies-week-start-to-weekly-intervals})
+(table.insert tests {:name "applies default week start to weekly BYDAY intervals" :fn applies-default-week-start-to-weekly-byday-intervals})
+(table.insert tests {:name "applies yearly ordinal BYDAY within BYMONTH" :fn applies-yearly-ordinal-byday-within-bymonth})
+(table.insert tests {:name "rejects unsatisfiable count-only selector intersections" :fn rejects-unsatisfiable-count-only-selector-intersections})
 
 (local main
   (fn []

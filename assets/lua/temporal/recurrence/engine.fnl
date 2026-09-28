@@ -587,7 +587,7 @@
        (if recurrence-rule.by-week-no
            (resolved-week-no-allowed? plain-date-time recurrence-rule.by-week-no candidate recurrence-rule.week-start dtstart)
            true)
-       (date-by-day-allowed? plain-date-time recurrence-rule candidate dtstart yearly?)))
+        (date-by-day-allowed? plain-date-time recurrence-rule candidate dtstart (and yearly? (not recurrence-rule.by-month)))))
 
 (fn apply-by-set-pos [recurrence-rule candidates]
   (sort-candidates candidates)
@@ -611,7 +611,54 @@
     (set offset (+ offset 1)))
   (apply-by-set-pos recurrence-rule candidates))
 
+(fn candidate-engine-cycle [recurrence-rule]
+  (if (= recurrence-rule.freq :daily)
+      (/ 146097 (gcd recurrence-rule.interval 146097))
+      (= recurrence-rule.freq :weekly)
+      (/ 20871 (gcd recurrence-rule.interval 20871))
+      (= recurrence-rule.freq :monthly)
+      (/ 4800 (gcd recurrence-rule.interval 4800))
+      (= recurrence-rule.freq :yearly)
+      (/ 400 (gcd recurrence-rule.interval 400))
+      (error "unsupported temporal recurrence expansion")))
+
+(fn candidate-bucket-candidates [period plain-date-time recurrence-rule dtstart index]
+  (if (= recurrence-rule.freq :daily)
+      (do
+        (local start (dtstart:add-days (* index recurrence-rule.interval)))
+        (build-day-candidates plain-date-time recurrence-rule dtstart start 1 false))
+      (= recurrence-rule.freq :weekly)
+      (do
+        (local base-start (start-of-week dtstart recurrence-rule.week-start))
+        (local start (base-start:add-days (* index recurrence-rule.interval 7)))
+        (build-day-candidates plain-date-time recurrence-rule dtstart start 7 false))
+      (= recurrence-rule.freq :monthly)
+      (do
+        (local anchor (period.add-to-plain-date-time dtstart {:months (* index recurrence-rule.interval)}))
+        (local fields (plain-fields anchor))
+        (local start (build-generated-candidate plain-date-time dtstart fields.year fields.month 1))
+        (build-day-candidates plain-date-time recurrence-rule dtstart start (days-in-month plain-date-time fields.year fields.month) false))
+      (= recurrence-rule.freq :yearly)
+      (do
+        (local anchor (period.add-to-plain-date-time dtstart {:years (* index recurrence-rule.interval)}))
+        (local fields (plain-fields anchor))
+        (local start (build-generated-candidate plain-date-time dtstart fields.year 1 1))
+        (build-day-candidates plain-date-time recurrence-rule dtstart start (days-in-year fields.year) true))
+      []))
+
+(fn assert-candidate-selectors-satisfiable [period plain-date-time recurrence-rule dtstart]
+  (local cycle (candidate-engine-cycle recurrence-rule))
+  (var index 0)
+  (var satisfiable false)
+  (while (and (< index cycle) (not satisfiable))
+    (when (> (# (candidate-bucket-candidates period plain-date-time recurrence-rule dtstart index)) 0)
+      (set satisfiable true))
+    (set index (+ index 1)))
+  (when (not satisfiable)
+    (error "unsupported temporal recurrence expansion")))
+
 (fn expand-daily-candidates [plain-date-time recurrence-rule dtstart bounds]
+  (assert-candidate-selectors-satisfiable nil plain-date-time recurrence-rule dtstart)
   (local results [])
   (var current dtstart)
   (while (and (not (limit-reached? results bounds)) (within-until? current bounds.until))
@@ -620,6 +667,7 @@
   results)
 
 (fn expand-weekly-candidates [plain-date-time recurrence-rule dtstart bounds]
+  (assert-candidate-selectors-satisfiable nil plain-date-time recurrence-rule dtstart)
   (local results [])
   (var start (start-of-week dtstart recurrence-rule.week-start))
   (var done false)
@@ -631,6 +679,7 @@
   results)
 
 (fn expand-monthly-candidates [period plain-date-time recurrence-rule dtstart bounds]
+  (assert-candidate-selectors-satisfiable period plain-date-time recurrence-rule dtstart)
   (local results [])
   (var index 0)
   (var done false)
@@ -645,6 +694,7 @@
   results)
 
 (fn expand-yearly-candidates [period plain-date-time recurrence-rule dtstart bounds]
+  (assert-candidate-selectors-satisfiable period plain-date-time recurrence-rule dtstart)
   (local results [])
   (var index 0)
   (var done false)
@@ -666,6 +716,8 @@
       recurrence-rule.by-set-pos
       true
       (not= recurrence-rule.week-start :mo)
+      true
+      (and (= recurrence-rule.freq :weekly) recurrence-rule.by-day)
       true
       (has-ordinal-by-day? recurrence-rule.by-day)
       true
