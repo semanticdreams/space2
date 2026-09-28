@@ -14,7 +14,7 @@
 
 ## What It Provides
 
-`engine` creates and controls the Space engine instance used by app hosts. The instance starts with lifecycle, asset path, event, and timing helpers; `start()` initializes SDL/window or headless runtime state and attaches the frame loop controls, input/audio/physics objects, callback/job/keyring helpers, mouse constants, dial-type hooks, and browser surface helpers used by apps.
+`engine` creates and controls the Space engine instance used by app hosts. The instance starts with lifecycle, asset path, event, and timing helpers; `start()` initializes SDL/window or headless runtime state and attaches the frame loop controls, input/audio/physics objects, callback/job helpers, mouse constants, dial-type hooks, and browser surface helpers used by apps.
 
 ## API Summary
 
@@ -32,7 +32,7 @@
   - Cursor/text input: `set-system-cursor(name)` with built-in cursor names `arrow`, `hand`, and `ibeam`; `set-text-input-enabled(bool)` for SDL text input events.
   - Power/screensaver/video helpers: `set-screen-locked(bool)`, `is-on-battery()`, `has-active-video-playback()`, `set-screensaver-inhibited(bool)`, `screensaver-enabled()`, and `screensaver-inhibited`.
   - Engine-owned objects: `physics`, `audio`, and `input`.
-  - Engine-bound helper tables from related modules: `callbacks`, `jobs`, `keyring`, and `mouse-buttons` (`left`, `middle`, `right`, `x1`, `x2`).
+  - Engine-bound helper tables from related modules: `callbacks`, `jobs`, and `mouse-buttons` (`left`, `middle`, `right`, `x1`, `x2`).
   - Dial-type hooks: `dial-type-activate(instance-id)`, `dial-type-deactivate(instance-id)`, `dial-type-on-input(instance-id callback)`, and `dial-type-off-input(callback-id)`.
   - `browser` subtable for CEF-backed offscreen surfaces, with `create-surface(options)`, `destroy-surface(id)`, `set-url(id url)`, `set-visible(id bool)`, `set-focus(id bool)`, `send-mouse-move(id x y [leave?])`, `send-mouse-click(id x y button mouse-up [click-count])`, `send-mouse-wheel(id x y dx dy)`, `texture-name(id)`, `texture-info(id)`, `surface-stats(id)`, and `list-surfaces()`.
 - `events` contains signals including `engine-tick`, `updated`, keyboard/mouse/touch/pen/gamepad/text events, window mode/size/focus/minimize/visibility/occlusion events, app suspension, screen lock, battery, and video playback activity changes.
@@ -90,6 +90,7 @@ Invalid `options.title`, `options.window-mode`, or invalid browser surface optio
 ## Related Modules
 
 - [`runtime`](/sdk/modules/runtime) for Lua/Fennel runtime paths.
+- [`keyring`](/sdk/modules/keyring) for secrets storage registered for `require` by engine startup.
 - [`input-state`](/sdk/modules/input-state) for input state objects used by engine-facing code.
 
 ## Aliases and Search Terms
