@@ -778,7 +778,9 @@
   (local candidates [])
   (each [_ second (ipairs (selected-values recurrence-rule.by-second (. (plain-fields dtstart) :second)))]
     (local candidate (build-time-candidate plain-date-time dtstart fields.year fields.month fields.day fields.hour fields.minute second))
-    (when (and candidate (time-selectors-allowed? recurrence-rule candidate))
+    (when (and candidate
+               (date-selectors-allowed? plain-date-time recurrence-rule candidate dtstart false)
+               (time-selectors-allowed? recurrence-rule candidate))
       (insert-candidate-once candidates candidate)))
   (apply-by-set-pos recurrence-rule candidates))
 
@@ -789,13 +791,16 @@
   (each [_ minute (ipairs (selected-values recurrence-rule.by-minute start-fields.minute))]
     (each [_ second (ipairs (selected-values recurrence-rule.by-second start-fields.second))]
       (local candidate (build-time-candidate plain-date-time dtstart fields.year fields.month fields.day fields.hour minute second))
-      (when (and candidate (time-selectors-allowed? recurrence-rule candidate))
+      (when (and candidate
+                 (date-selectors-allowed? plain-date-time recurrence-rule candidate dtstart false)
+                 (time-selectors-allowed? recurrence-rule candidate))
         (insert-candidate-once candidates candidate))))
   (apply-by-set-pos recurrence-rule candidates))
 
 (fn build-sub-daily-candidates [plain-date-time recurrence-rule dtstart anchor]
   (if (= recurrence-rule.freq :secondly)
-      (if (time-selectors-allowed? recurrence-rule anchor)
+      (if (and (date-selectors-allowed? plain-date-time recurrence-rule anchor dtstart false)
+               (time-selectors-allowed? recurrence-rule anchor))
           (apply-by-set-pos recurrence-rule [anchor])
           [])
       (= recurrence-rule.freq :minutely)
@@ -804,8 +809,36 @@
       (build-hour-candidates plain-date-time recurrence-rule dtstart anchor)
       []))
 
+(fn has-sub-daily-by-day-selector? [recurrence-rule]
+  (if recurrence-rule.by-day
+      true
+      false))
+
+(fn has-unsupported-sub-daily-date-selectors? [recurrence-rule]
+  (if recurrence-rule.by-month
+      true
+      recurrence-rule.by-month-day
+      true
+      recurrence-rule.by-year-day
+      true
+      recurrence-rule.by-week-no
+      true
+      (has-ordinal-by-day? recurrence-rule.by-day)
+      true
+      false))
+
+(fn assert-sub-daily-date-selectors-supported [recurrence-rule]
+  (when (has-unsupported-sub-daily-date-selectors? recurrence-rule)
+    (error "unsupported temporal recurrence expansion")))
+
+(fn sub-daily-satisfiability-seconds [recurrence-rule]
+  (if (has-sub-daily-by-day-selector? recurrence-rule)
+      604800
+      86400))
+
 (fn assert-sub-daily-satisfiable [duration plain-date-time recurrence-rule dtstart]
-  (local cycle (/ 86400 (gcd (sub-daily-step-seconds recurrence-rule) 86400)))
+  (local cycle-seconds (sub-daily-satisfiability-seconds recurrence-rule))
+  (local cycle (/ cycle-seconds (gcd (sub-daily-step-seconds recurrence-rule) cycle-seconds)))
   (var index 0)
   (var satisfiable false)
   (while (and (< index cycle) (not satisfiable))
@@ -817,6 +850,7 @@
     (error "unsupported temporal recurrence expansion")))
 
 (fn expand-sub-daily [duration plain-date-time recurrence-rule dtstart bounds]
+  (assert-sub-daily-date-selectors-supported recurrence-rule)
   (assert-sub-daily-satisfiable duration plain-date-time recurrence-rule dtstart)
   (local results [])
   (local step-seconds (sub-daily-step-seconds recurrence-rule))
@@ -824,15 +858,14 @@
   (var done false)
   (while (and (not done) (not (limit-reached? results bounds)))
     (local anchor (exact-add-seconds duration dtstart (* index step-seconds)))
-    (if (not (within-until? anchor bounds.until))
+    (append-generated-candidates
+      results
+      bounds
+      dtstart
+      (build-sub-daily-candidates plain-date-time recurrence-rule dtstart anchor))
+    (if (and bounds.until (> (anchor:compare bounds.until) 0))
         (set done true)
-        (do
-          (append-generated-candidates
-            results
-            bounds
-            dtstart
-            (build-sub-daily-candidates plain-date-time recurrence-rule dtstart anchor))
-          (set index (+ index 1)))))
+        (set index (+ index 1))))
   results)
 
 (fn needs-candidate-selector-engine? [recurrence-rule]
