@@ -2,11 +2,11 @@
 
 SDK docs are for people building apps, extensions, widgets, worlds, workflows, and independent applications with Space.
 
-## Which Docs Do I Need?
+## Who This Is For
 
-- **User Docs** are for installing Space, launching it, and using built-in workflows as an end user.
-- **SDK Docs** are for builders who want to create apps, hosts, capabilities, runtime facets, extensions, commands, packages, widgets, worlds, workflows, or standalone applications that run with Space.
-- **Developer Docs** are for maintainers working on Space internals, architecture, debugging tools, and project workflows.
+Use these docs when you want to build on Space rather than only run the built-in experience. The SDK pages focus on builder-facing contracts for apps, hosts, capabilities, runtime facets, extensions, commands, packages, widgets, worlds, workflows, and standalone applications that run with Space.
+
+When an SDK topic depends on project internals, this section links deeper to Developer Docs instead of duplicating maintainer workflows here.
 
 ## Start Here
 
