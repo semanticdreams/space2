@@ -116,6 +116,8 @@ Unsupported phrases throw. Natural-language recurrence is only a frontend that e
 
 ## Deferred continuation map
 
+These items are no longer unowned future ideas; the [Temporal Complete Library Roadmap](./temporal-complete-library) schedules them as follow-up tracks while current APIs continue to reject unsupported inputs loudly until those track PRs land.
+
 - **ICU/CLDR localization:** Deferred. Localized parsing and formatting need an explicit ICU/CLDR/data-packaging strategy before implementation.
 - **Broad natural language:** Deferred. Wider language coverage, ambiguous phrases, locales, and product ambiguity UX need their own design.
 - **Full RFC5545:** Deferred. The current RRULE subset is intentionally small; timezone-aware recurrence, UTC/instant `UNTIL` expansion, date-only `UNTIL`, fractional `UNTIL`, negative `BYMONTHDAY`, ordinal `BYDAY`, `BYSETPOS`, `WKST`, `RDATE`, `EXDATE`, recurrence sets, and full RFC5545 candidate-set expansion require separate semantics and compatibility tests.

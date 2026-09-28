@@ -50,6 +50,8 @@ Examples:
 
 ## Unsupported forms and deferred scope
 
+Business calendars, non-Gregorian calendars, localization, and timezone-aware period arithmetic are scheduled by the [Temporal Complete Library Roadmap](./temporal-complete-library), while current period APIs remain bounded to `PlainDateTime` and fail loudly outside that scope.
+
 Current APIs fail loudly for unsupported forms. Deferred scope includes:
 
 - native Period userdata in the C++ temporal core.

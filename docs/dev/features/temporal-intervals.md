@@ -97,6 +97,8 @@ Each next occurrence starts by shifting the previous interval by its exact durat
 
 ## Unsupported forms and deferred scope
 
+Full ISO, zoned, and DST-aware interval support is scheduled by the [Temporal Complete Library Roadmap](./temporal-complete-library), while current interval APIs preserve loud failures for unsupported forms.
+
 The interval layer intentionally supports bounded `start/end` intervals, date-only `start/period` and `period/end` forms for plain date-time interval parsing, and bounded expansion of repeating intervals in this slice. The following remain deferred and must fail loudly when presented to current APIs:
 
 - native interval userdata in the C++ temporal core.

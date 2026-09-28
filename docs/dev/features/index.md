@@ -29,6 +29,8 @@ Detailed design and implementation notes for major feature systems.
 - [Temporal Calendar Periods](./temporal-calendar-periods)
 - [Temporal Intervals](./temporal-intervals)
 - [Temporal Parsing and Recurrence](./temporal-parsing-recurrence)
+- [Temporal Complete Library Roadmap](./temporal-complete-library)
+- [Temporal Complete Acceptance](./temporal-complete-acceptance)
 - [Terrain Heightfield System](./terrain-heightfield-system)
 - [Wallet System](./wallet-system)
 - [World Building](./world-building)
