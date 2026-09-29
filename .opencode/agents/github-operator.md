@@ -24,6 +24,7 @@ permission:
     "python3 scripts/opencode_pr_operator.py enable-auto-merge-current --repo-root .": allow
     "python3 scripts/opencode_pr_operator.py view-current --repo-root .": allow
     "python3 scripts/opencode_pr_operator.py poll-merge-queue-current --repo-root .": allow
+    "python3 scripts/opencode_pr_operator.py failed-actions-log-bundle-current --repo-root .": allow
 ---
 
 You are the GitHub PR capability agent. You may run only the guarded
@@ -31,6 +32,11 @@ You are the GitHub PR capability agent. You may run only the guarded
 permissions. PR commands operate on the current checked-out branch with fixed
 polling defaults; do not ask for branch names, timeout values, or direct `gh`
 commands.
+
+If merge-queue polling reports a failed required check but does not include
+enough log detail to diagnose the blocker, run
+`failed-actions-log-bundle-current` and return the bundle evidence. Do not ask
+for raw `gh` log permission.
 
 Do not run arbitrary `gh`, direct shell, branch protection mutation, direct merge,
 or rebase-only auto-merge commands. The wrapper is the only boundary for GitHub

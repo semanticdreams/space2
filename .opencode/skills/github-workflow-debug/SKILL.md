@@ -56,8 +56,12 @@ If the workflow target is ambiguous, ask once before doing any branch work.
 - Keep the throwaway branch isolated from `main` until the final squash.
 - Do not leave the throwaway branch in workflow triggers on the final landed commit.
 - Use `wait-run` to poll every 100s — the helper handles the loop.
-- Prefer `gh run` for status/log inspection.
+- Use guarded helper commands for status inspection and dispatch
+  `github-operator` for failed-log bundles; do not use raw `gh run`
+  status/log commands as workflow steps.
 - Always identify workflow runs by throwaway branch and, when possible, by the pushed commit SHA. Do not assume the latest run in the repo is the right one.
+- Restart OpenCode after `.opencode/**` changes before relying on updated
+  agents, permissions, or skill instructions.
 
 ## Trigger enablement
 
@@ -114,9 +118,15 @@ The throwaway-branch trigger change is temporary and must not survive the final 
       `build-windows-installer` and is not obviously CI infrastructure-only,
       dispatch `windows-ci-reproducer` before the next push; obtain local Linux
       cross-build + Wine reproduction evidence before pushing another fix
-    - if `windows-ci-reproducer` evidence says prerequisites are missing, run
-      guarded `setup-host` once through `windows-ci-reproducer`, then rerun
+    - if `windows-ci-reproducer` evidence says `missing_local_vcpkg`, run the
+      guarded `bootstrap-vcpkg` path through `windows-ci-reproducer` before
+      `setup-host`, then rerun preflight and reproduction
+    - if `windows-ci-reproducer` evidence says system prerequisites are missing,
+      run guarded `setup-host` once through `windows-ci-reproducer`, then rerun
       reproduction; do not use raw setup commands
+    - if guarded polling or status evidence lacks enough failed-log detail,
+      dispatch `github-operator` to run `failed-actions-log-bundle-current` and
+      use the returned bundle paths/excerpts before changing code
     - identify the first real blocker
     - dispatch the **implementer** subagent with a focused fix instruction for any required file change, including workflow files, source, tests, config, package/build files, or scripts. After implementer commits, verify (`git log --oneline -1`). For Windows non-infrastructure failures, rerun `windows-ci-reproducer` before pushing so the fixed commit has local Linux cross-build + Wine evidence. Only push when reproduction passes; if reproduction cannot run safely, report HUMAN_DECISION_REQUIRED with wrapper evidence. For other failures, push and go to step 4.
 6. If it passes:
@@ -193,9 +203,7 @@ Typical commands:
 .opencode/skills/github-workflow-debug/scripts/gh-workflow-debug.sh latest-run-id --workflow test.yml --branch <branch> --sha <sha>
 .opencode/skills/github-workflow-debug/scripts/gh-workflow-debug.sh first-failed-job-id --run-id <run-id>
 .opencode/skills/github-workflow-debug/scripts/gh-workflow-debug.sh wait-run --workflow test.yml --branch <branch> --sha <sha> --json
-gh run list --workflow <workflow-file> --limit 5
-gh run view <run-id> --json jobs
-gh run view <run-id> --job <job-id> --log
+python3 scripts/opencode_pr_operator.py failed-actions-log-bundle-current --repo-root .
 ```
 
 Bias toward:

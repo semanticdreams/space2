@@ -400,11 +400,153 @@ def _failed_rollup_checks(data: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _bounded_log_excerpt(log_text: str) -> str:
-    lines = log_text.replace("\x00", "").splitlines()
+    lines = _clean_log_text(log_text).splitlines()
     excerpt = "\n".join(lines[-MAX_FAILED_CHECK_LOG_LINES:])
     if len(excerpt) > MAX_FAILED_CHECK_LOG_CHARS:
         return excerpt[-MAX_FAILED_CHECK_LOG_CHARS:]
     return excerpt
+
+
+def _valid_numeric_id(value: str) -> bool:
+    return isinstance(value, str) and value.isdigit()
+
+
+def _clean_log_text(text: str) -> str:
+    return text.replace("\x00", "")
+
+
+def _bounded_log_text(text: str) -> str:
+    if len(text) > MAX_FAILED_CHECK_LOG_CHARS:
+        return text[-MAX_FAILED_CHECK_LOG_CHARS:]
+    return text
+
+
+def _truncate_around_literal(text: str, literal: str, budget: int) -> str:
+    if budget < 1:
+        return ""
+    if len(text) <= budget:
+        return text
+    if not literal or literal not in text:
+        return text[:budget]
+
+    prefix = "...[truncated]"
+    suffix = "[truncated]..."
+    if budget <= len(prefix) + len(suffix) + len(literal):
+        start = text.index(literal)
+        return text[start : start + budget]
+
+    content_budget = budget - len(prefix) - len(suffix)
+    literal_index = text.index(literal)
+    start = max(0, literal_index - ((content_budget - len(literal)) // 2))
+    end = min(len(text), start + content_budget)
+    start = max(0, end - content_budget)
+    bounded = text[start:end]
+    if start > 0:
+        bounded = f"{prefix}{bounded}"
+    if end < len(text):
+        bounded = f"{bounded}{suffix}"
+    return bounded[:budget]
+
+
+def _line_slice(lines: list[str], start_line: int, line_count: int) -> tuple[str, int, int]:
+    start_index = start_line - 1
+    bounded_count = min(line_count, MAX_FAILED_CHECK_LOG_LINES)
+    selected = lines[start_index : start_index + bounded_count]
+    end_line = start_line + len(selected) - 1 if selected else start_line - 1
+    return _bounded_log_text("\n".join(selected)), start_line, end_line
+
+
+def _search_log_lines(lines: list[str], contains: str, context_lines: int, max_matches: int) -> list[dict[str, object]]:
+    bounded_context = min(context_lines, MAX_FAILED_CHECK_LOG_LINES)
+    bounded_matches = min(max_matches, MAX_FAILED_CHECK_LOG_LINES)
+    matches: list[dict[str, object]] = []
+    for index, line in enumerate(lines):
+        if contains not in line:
+            continue
+        start = max(0, index - bounded_context)
+        end = min(len(lines), index + bounded_context + 1)
+        raw_context = lines[start:end]
+        text_budget = MAX_FAILED_CHECK_LOG_CHARS - 1024
+        match_budget = max(1, text_budget // 2)
+        context_item_budget = max(1, (text_budget - match_budget) // max(1, len(raw_context)))
+        candidate = {
+            "line": index + 1,
+            "match": _truncate_around_literal(line, contains, match_budget),
+            "context": [_truncate_around_literal(context, contains, context_item_budget) for context in raw_context],
+        }
+        if len(json.dumps([*matches, candidate])) > MAX_FAILED_CHECK_LOG_CHARS and matches:
+            break
+        matches.append(candidate)
+        if len(matches) >= bounded_matches:
+            break
+    return matches
+
+
+def _fail_markers(log_text: str) -> list[dict[str, object]]:
+    lines = _clean_log_text(log_text).splitlines()
+    return _search_log_lines(lines, "[FAIL]", 1, MAX_FAILED_CHECK_LOG_LINES)
+
+
+def _fetch_actions_log(repo: Path, run_id: str, job_id: str) -> tuple[str | None, dict[str, object] | None]:
+    result = run_command(["gh", "run", "view", run_id, "--job", job_id, "--log"], repo, check=False)
+    if result.returncode == 0:
+        return _clean_log_text(result.stdout), None
+    return None, {"args": result.args, "returncode": result.returncode, "stderr": result.stderr.strip()}
+
+
+def _invalid_log_request(action: str, code: str, **details: object) -> dict[str, object]:
+    evidence = {"code": code}
+    evidence.update(details)
+    return failure(action, "Invalid GitHub Actions log request", evidence)
+
+
+def _validate_actions_log_bounds(
+    action: str,
+    run_id: str,
+    job_id: str,
+    tail_lines: int | None,
+    start_line: int | None,
+    line_count: int | None,
+    context_lines: int,
+    max_matches: int,
+) -> dict[str, object] | None:
+    if not _valid_numeric_id(run_id):
+        return _invalid_log_request(action, "invalid_run_id", run_id=run_id)
+    if not _valid_numeric_id(job_id):
+        return _invalid_log_request(action, "invalid_job_id", job_id=job_id)
+    if tail_lines is not None and tail_lines < 1:
+        return _invalid_log_request(action, "invalid_tail_lines", tail_lines=tail_lines)
+    if start_line is not None and start_line < 1:
+        return _invalid_log_request(action, "invalid_start_line", start_line=start_line)
+    if line_count is not None and line_count < 1:
+        return _invalid_log_request(action, "invalid_line_count", line_count=line_count)
+    if context_lines < 0:
+        return _invalid_log_request(action, "invalid_context_lines", context_lines=context_lines)
+    if max_matches < 1:
+        return _invalid_log_request(action, "invalid_max_matches", max_matches=max_matches)
+    return None
+
+
+def _validate_actions_log_combinations(
+    action: str,
+    *,
+    tail_lines: int | None,
+    start_line: int | None,
+    line_count: int | None,
+    contains: str | None,
+    full: bool,
+) -> dict[str, object] | None:
+    if full and any(value is not None for value in (tail_lines, start_line, line_count, contains)):
+        return _invalid_log_request(action, "invalid_mode_combination")
+    if contains is not None and any(value is not None for value in (tail_lines, start_line, line_count)):
+        return _invalid_log_request(action, "invalid_mode_combination")
+    if tail_lines is not None and any(value is not None for value in (start_line, line_count)):
+        return _invalid_log_request(action, "invalid_mode_combination")
+    if start_line is not None and line_count is None:
+        return _invalid_log_request(action, "missing_line_count")
+    if line_count is not None and start_line is None:
+        return _invalid_log_request(action, "missing_start_line")
+    return None
 
 
 def _failed_check_metadata(check: dict[str, Any]) -> dict[str, object]:
@@ -435,12 +577,15 @@ def _failed_check_evidence(check: dict[str, Any], repo: Path) -> dict[str, objec
     run_id, job_id = run_job_ids
     evidence["run_id"] = run_id
     evidence["job_id"] = job_id
-    log_result = run_command(["gh", "run", "view", run_id, "--job", job_id, "--log"], repo, check=False)
-    if log_result.returncode == 0:
-        evidence["log_excerpt"] = _bounded_log_excerpt(log_result.stdout)
+    log_text, log_error = _fetch_actions_log(repo, run_id, job_id)
+    if log_text is not None:
+        evidence["log_excerpt"] = _bounded_log_excerpt(log_text)
+        markers = _fail_markers(log_text)
+        if markers:
+            evidence["failure_markers"] = markers
         return evidence
     evidence["log_unavailable"] = "gh run view --job failed"
-    evidence["log_command"] = {"args": log_result.args, "returncode": log_result.returncode, "stderr": log_result.stderr.strip()}
+    evidence["log_command"] = log_error or {}
     return evidence
 
 
@@ -565,6 +710,98 @@ def poll_current_merge_queue(repo_root: Path) -> dict[str, object]:
         return failure(action, error.message, {"code": error.code, "details": error.details})
 
 
+def actions_log(
+    repo_root: Path,
+    run_id: str,
+    job_id: str,
+    *,
+    tail_lines: int | None,
+    start_line: int | None,
+    line_count: int | None,
+    contains: str | None,
+    context_lines: int,
+    max_matches: int,
+    full: bool,
+) -> dict[str, object]:
+    action = "actions_log"
+    invalid = _validate_actions_log_bounds(action, run_id, job_id, tail_lines, start_line, line_count, context_lines, max_matches)
+    if invalid is not None:
+        return invalid
+    invalid_combination = _validate_actions_log_combinations(
+        action,
+        tail_lines=tail_lines,
+        start_line=start_line,
+        line_count=line_count,
+        contains=contains,
+        full=full,
+    )
+    if invalid_combination is not None:
+        return invalid_combination
+    try:
+        repo = ensure_space_repo(repo_root)
+        log_text, log_error = _fetch_actions_log(repo, run_id, job_id)
+    except CapabilityError as error:
+        return failure(action, error.message, {"code": error.code, "details": error.details})
+    if log_text is None:
+        return human_decision(action, "Could not retrieve GitHub Actions log", log_error or {})
+
+    lines = log_text.splitlines()
+    common: dict[str, object] = {"run_id": run_id, "job_id": job_id}
+    if full:
+        evidence = {**common, "mode": "full", "log": log_text}
+    elif contains is not None:
+        evidence = {**common, "mode": "search", "contains": contains, "matches": _search_log_lines(lines, contains, context_lines, max_matches)}
+    elif start_line is not None and line_count is not None:
+        sliced, actual_start, end_line = _line_slice(lines, start_line, line_count)
+        evidence = {**common, "mode": "slice", "start_line": actual_start, "end_line": end_line, "log": sliced}
+    else:
+        requested_tail = tail_lines or MAX_FAILED_CHECK_LOG_LINES
+        bounded_tail = min(requested_tail, MAX_FAILED_CHECK_LOG_LINES)
+        evidence = {**common, "mode": "tail", "tail_lines": bounded_tail, "log": _bounded_log_text("\n".join(lines[-bounded_tail:]))}
+    return success(action, "Retrieved GitHub Actions log", evidence)
+
+
+def failed_actions_log_bundle_current(repo_root: Path) -> dict[str, object]:
+    action = "failed_actions_log_bundle_current"
+    try:
+        repo = ensure_space_repo(repo_root)
+        branch, unsafe = _safe_current_branch(action, repo)
+        if unsafe is not None:
+            return unsafe
+        view_result = run_command(["gh", "pr", "view", branch, "--json", PR_VIEW_FIELDS], repo, check=False)
+        if view_result.returncode != 0:
+            return human_decision(action, "Could not load current pull request status", _command_result_evidence(view_result, branch))
+        data = _json_loads(view_result.stdout)
+        if not isinstance(data, dict):
+            return human_decision(action, "GitHub PR view response was ambiguous", _command_result_evidence(view_result, branch))
+        output_dir = repo / "build" / "opencode" / "actions-logs"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logs: list[dict[str, object]] = []
+        for check in _failed_rollup_checks(data):
+            run_job_ids = _actions_run_job_ids(check.get("detailsUrl"))
+            if run_job_ids is None:
+                continue
+            run_id, job_id = run_job_ids
+            log_text, log_error = _fetch_actions_log(repo, run_id, job_id)
+            if log_text is None:
+                logs.append({"run_id": run_id, "job_id": job_id, "log_unavailable": "gh run view --job failed", "log_command": log_error or {}})
+                continue
+            path = output_dir / f"{run_id}-{job_id}.log"
+            path.write_text(log_text)
+            entry = {
+                "run_id": run_id,
+                "job_id": job_id,
+                "path": str(path.relative_to(repo)),
+                "failure_markers": _fail_markers(log_text),
+            }
+            logs.append(entry)
+        return success(action, "Wrote failed GitHub Actions logs", {"branch": branch, "logs": logs})
+    except (CapabilityError, json.JSONDecodeError, OSError) as error:
+        if isinstance(error, CapabilityError):
+            return failure(action, error.message, {"code": error.code, "details": error.details})
+        return failure(action, "Could not write failed GitHub Actions log bundle", {"error_type": type(error).__name__, "error": str(error)})
+
+
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -583,6 +820,19 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     poll.add_argument("--branch", required=True)
     poll.add_argument("--timeout-seconds", required=True, type=int)
     poll.add_argument("--interval-seconds", required=True, type=int)
+    actions = subparsers.add_parser("actions-log")
+    actions.add_argument("--repo-root", required=True, type=Path)
+    actions.add_argument("--run-id", required=True)
+    actions.add_argument("--job-id", required=True)
+    actions.add_argument("--tail-lines", type=int)
+    actions.add_argument("--start-line", type=int)
+    actions.add_argument("--line-count", type=int)
+    actions.add_argument("--contains")
+    actions.add_argument("--context-lines", type=int, default=2)
+    actions.add_argument("--max-matches", type=int, default=20)
+    actions.add_argument("--full", action="store_true")
+    bundle = subparsers.add_parser("failed-actions-log-bundle-current")
+    bundle.add_argument("--repo-root", required=True, type=Path)
     return parser.parse_args(argv)
 
 
@@ -607,8 +857,23 @@ def main(argv: list[str] | None = None) -> int:
             result = enable_auto_merge(args.repo_root, args.branch)
         elif args.command == "view":
             result = view_pr(args.repo_root, args.branch)
-        else:
+        elif args.command == "poll-merge-queue":
             result = poll_merge_queue(args.repo_root, args.branch, args.timeout_seconds, args.interval_seconds)
+        elif args.command == "actions-log":
+            result = actions_log(
+                args.repo_root,
+                args.run_id,
+                args.job_id,
+                tail_lines=args.tail_lines,
+                start_line=args.start_line,
+                line_count=args.line_count,
+                contains=args.contains,
+                context_lines=args.context_lines,
+                max_matches=args.max_matches,
+                full=args.full,
+            )
+        else:
+            result = failed_actions_log_bundle_current(args.repo_root)
     except Exception as error:  # noqa: BLE001 - CLIs must fail closed with structured JSON.
         result = failure(args.command.replace("-", "_"), "Local GitHub capability wrapper failed unexpectedly", {"error_type": type(error).__name__, "error": str(error)})
     print(json.dumps(result, indent=2, sort_keys=True))

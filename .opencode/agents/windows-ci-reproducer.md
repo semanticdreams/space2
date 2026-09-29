@@ -20,6 +20,7 @@ permission:
     "*": deny
     "python3 scripts/opencode_windows_ci_repro.py preflight --repo-root .": allow
     "python3 scripts/opencode_windows_ci_repro.py setup-host --repo-root .": allow
+    "python3 scripts/opencode_windows_ci_repro.py bootstrap-vcpkg --repo-root .": allow
     "python3 scripts/opencode_windows_ci_repro.py reproduce --repo-root .": allow
 ---
 
@@ -29,9 +30,10 @@ allowed in your permissions.
 
 Return wrapper JSON evidence verbatim. For normal reproduction requests, run
 `preflight` first, then `reproduce` when preflight passes. If reproduction or
-preflight reports missing prerequisites, run `setup-host` at most once when the
-supervisor requested setup permission through this capability, then rerun
-`preflight` and `reproduce`.
+preflight reports `missing_local_vcpkg`, run `bootstrap-vcpkg` before
+`setup-host`, then rerun `preflight` and `reproduce`. For missing system host
+prerequisites, run `setup-host` at most once when the supervisor requested setup
+permission through this capability, then rerun `preflight` and `reproduce`.
 
 Do not run raw `sudo`, package-manager, Wine, GitHub, Git, or broad shell
 commands. The wrapper is the only boundary for Windows CI local reproduction.
