@@ -1107,6 +1107,73 @@ def test_actions_log_returns_tail_slice_search_and_full_modes(monkeypatch, trust
     assert result["evidence"]["log"] == "line1\nline2\nline3\n[FAIL] bad test\nline4\nline5"
 
 
+def test_actions_log_search_bounds_oversized_matching_line(monkeypatch, trusted_repo: Path) -> None:
+    oversized_match = "[FAIL] " + ("x" * (pr_operator.MAX_FAILED_CHECK_LOG_CHARS * 2))
+    full_log = f"setup\n{oversized_match}\nexpected true\n"
+    runner = GhRunner({("gh", "run", "view", "123", "--job", "456", "--log"): full_log})
+    monkeypatch.setattr(pr_operator, "run_command", runner)
+
+    result = pr_operator.actions_log(
+        trusted_repo,
+        "123",
+        "456",
+        tail_lines=None,
+        start_line=None,
+        line_count=None,
+        contains="[FAIL]",
+        context_lines=1,
+        max_matches=20,
+        full=False,
+    )
+
+    match = result["evidence"]["matches"][0]
+    serialized_match = json.dumps(match)
+    assert result["status"] == "pass"
+    assert match["line"] == 2
+    assert "[FAIL]" in match["match"]
+    assert len(serialized_match) <= pr_operator.MAX_FAILED_CHECK_LOG_CHARS
+    assert oversized_match not in serialized_match
+
+
+def test_poll_merge_queue_failure_markers_bound_oversized_matching_line(monkeypatch, trusted_repo: Path) -> None:
+    details_url = "https://github.com/semanticdreams/space2/actions/runs/35993871852/job/107614091892"
+    oversized_match = "[FAIL] " + ("x" * (pr_operator.MAX_FAILED_CHECK_LOG_CHARS * 2))
+    log = f"setup\n{oversized_match}\nexpected true\n"
+    runner = GhRunner(
+        {
+            ("gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS): json.dumps(
+                {
+                    "mergedAt": None,
+                    "state": "OPEN",
+                    "mergeStateStatus": "pending",
+                    "statusCheckRollup": [
+                        {
+                            "__typename": "CheckRun",
+                            "name": "test",
+                            "workflowName": "test",
+                            "status": "COMPLETED",
+                            "conclusion": "FAILURE",
+                            "detailsUrl": details_url,
+                        }
+                    ],
+                }
+            ),
+            ("gh", "run", "view", "35993871852", "--job", "107614091892", "--log"): log,
+        }
+    )
+    monkeypatch.setattr(pr_operator, "run_command", runner)
+
+    result = pr_operator.poll_merge_queue(trusted_repo, "feature/opencode-capabilities", 0, 1)
+
+    marker = result["evidence"]["failed_checks"][0]["failure_markers"][0]
+    serialized_marker = json.dumps(marker)
+    assert result["status"] == "human_decision_required"
+    assert marker["line"] == 2
+    assert "[FAIL]" in marker["match"]
+    assert len(serialized_marker) <= pr_operator.MAX_FAILED_CHECK_LOG_CHARS
+    assert oversized_match not in serialized_marker
+
+
 @pytest.mark.parametrize(
     ("kwargs", "code"),
     [
@@ -1137,6 +1204,24 @@ def test_actions_log_invalid_bounds_return_structured_failures(trusted_repo: Pat
 
     assert result["status"] == "fail"
     assert result["evidence"]["code"] == code
+
+
+def test_actions_log_rejects_tail_plus_slice_combination(trusted_repo: Path) -> None:
+    result = pr_operator.actions_log(
+        trusted_repo,
+        "123",
+        "456",
+        tail_lines=20,
+        start_line=100,
+        line_count=5,
+        contains=None,
+        context_lines=2,
+        max_matches=20,
+        full=False,
+    )
+
+    assert result["status"] == "fail"
+    assert result["evidence"]["code"] == "invalid_mode_combination"
 
 
 def test_failed_actions_log_bundle_current_writes_full_logs_and_markers(monkeypatch, trusted_repo: Path) -> None:

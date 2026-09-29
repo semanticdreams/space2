@@ -421,6 +421,33 @@ def _bounded_log_text(text: str) -> str:
     return text
 
 
+def _truncate_around_literal(text: str, literal: str, budget: int) -> str:
+    if budget < 1:
+        return ""
+    if len(text) <= budget:
+        return text
+    if not literal or literal not in text:
+        return text[:budget]
+
+    prefix = "...[truncated]"
+    suffix = "[truncated]..."
+    if budget <= len(prefix) + len(suffix) + len(literal):
+        start = text.index(literal)
+        return text[start : start + budget]
+
+    content_budget = budget - len(prefix) - len(suffix)
+    literal_index = text.index(literal)
+    start = max(0, literal_index - ((content_budget - len(literal)) // 2))
+    end = min(len(text), start + content_budget)
+    start = max(0, end - content_budget)
+    bounded = text[start:end]
+    if start > 0:
+        bounded = f"{prefix}{bounded}"
+    if end < len(text):
+        bounded = f"{bounded}{suffix}"
+    return bounded[:budget]
+
+
 def _line_slice(lines: list[str], start_line: int, line_count: int) -> tuple[str, int, int]:
     start_index = start_line - 1
     bounded_count = min(line_count, MAX_FAILED_CHECK_LOG_LINES)
@@ -438,7 +465,18 @@ def _search_log_lines(lines: list[str], contains: str, context_lines: int, max_m
             continue
         start = max(0, index - bounded_context)
         end = min(len(lines), index + bounded_context + 1)
-        matches.append({"line": index + 1, "match": line, "context": lines[start:end]})
+        raw_context = lines[start:end]
+        text_budget = MAX_FAILED_CHECK_LOG_CHARS - 1024
+        match_budget = max(1, text_budget // 2)
+        context_item_budget = max(1, (text_budget - match_budget) // max(1, len(raw_context)))
+        candidate = {
+            "line": index + 1,
+            "match": _truncate_around_literal(line, contains, match_budget),
+            "context": [_truncate_around_literal(context, contains, context_item_budget) for context in raw_context],
+        }
+        if len(json.dumps([*matches, candidate])) > MAX_FAILED_CHECK_LOG_CHARS and matches:
+            break
+        matches.append(candidate)
         if len(matches) >= bounded_matches:
             break
     return matches
@@ -501,6 +539,8 @@ def _validate_actions_log_combinations(
     if full and any(value is not None for value in (tail_lines, start_line, line_count, contains)):
         return _invalid_log_request(action, "invalid_mode_combination")
     if contains is not None and any(value is not None for value in (tail_lines, start_line, line_count)):
+        return _invalid_log_request(action, "invalid_mode_combination")
+    if tail_lines is not None and any(value is not None for value in (start_line, line_count)):
         return _invalid_log_request(action, "invalid_mode_combination")
     if start_line is not None and line_count is None:
         return _invalid_log_request(action, "missing_line_count")
@@ -684,6 +724,9 @@ def actions_log(
     full: bool,
 ) -> dict[str, object]:
     action = "actions_log"
+    invalid = _validate_actions_log_bounds(action, run_id, job_id, tail_lines, start_line, line_count, context_lines, max_matches)
+    if invalid is not None:
+        return invalid
     invalid_combination = _validate_actions_log_combinations(
         action,
         tail_lines=tail_lines,
@@ -694,9 +737,6 @@ def actions_log(
     )
     if invalid_combination is not None:
         return invalid_combination
-    invalid = _validate_actions_log_bounds(action, run_id, job_id, tail_lines, start_line, line_count, context_lines, max_matches)
-    if invalid is not None:
-        return invalid
     try:
         repo = ensure_space_repo(repo_root)
         log_text, log_error = _fetch_actions_log(repo, run_id, job_id)
