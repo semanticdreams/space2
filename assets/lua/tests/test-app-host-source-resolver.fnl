@@ -151,23 +151,27 @@
                        :module-name "widget"
                        :entry-path entry}))))
 
-(fn assert-directory-entry [entry-relative expected-lua-root expected-module-name]
+(fn assert-directory-entry [entry-relative expected-lua-root expected-module-name expected-entry-path]
   (with-temp-dir (.. "dir-entry-" (string.gsub entry-relative "/" "-"))
     (fn [root]
       (local entry (write-file (fs.join-path root entry-relative)))
+      (local resolved-entry (if expected-entry-path
+                                (expected-entry-path root)
+                                entry))
       (local result (resolve [(.. "fs:" root)] {}))
       (assert-success result
                       {:source-kind :directory
                        :selection-key (.. "fs:" root)
                        :path root
-                       :entry-path entry
+                       :entry-path resolved-entry
                        :lua-root (expected-lua-root root)
                        :module-name expected-module-name}))))
 
 (fn test-directory-assets-lua-main []
   (assert-directory-entry "assets/lua/main.fnl"
-                          (fn [root] (fs.join-path root "assets" "lua"))
-                          "main"))
+                           (fn [root] (fs.join-path root "assets" "lua"))
+                           "main"
+                           (fn [root] (fs.join-path root "assets" "lua" "main.fnl"))))
 
 (fn test-directory-main []
   (assert-directory-entry "main.fnl" (fn [root] root) "main"))
