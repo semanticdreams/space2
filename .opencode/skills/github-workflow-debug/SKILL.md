@@ -56,7 +56,9 @@ If the workflow target is ambiguous, ask once before doing any branch work.
 - Keep the throwaway branch isolated from `main` until the final squash.
 - Do not leave the throwaway branch in workflow triggers on the final landed commit.
 - Use `wait-run` to poll every 100s — the helper handles the loop.
-- Prefer `gh run` for status/log inspection.
+- Use guarded helper commands for status inspection and dispatch
+  `github-operator` for failed-log bundles; do not use raw `gh run`
+  status/log commands as workflow steps.
 - Always identify workflow runs by throwaway branch and, when possible, by the pushed commit SHA. Do not assume the latest run in the repo is the right one.
 - Restart OpenCode after `.opencode/**` changes before relying on updated
   agents, permissions, or skill instructions.
@@ -201,9 +203,7 @@ Typical commands:
 .opencode/skills/github-workflow-debug/scripts/gh-workflow-debug.sh latest-run-id --workflow test.yml --branch <branch> --sha <sha>
 .opencode/skills/github-workflow-debug/scripts/gh-workflow-debug.sh first-failed-job-id --run-id <run-id>
 .opencode/skills/github-workflow-debug/scripts/gh-workflow-debug.sh wait-run --workflow test.yml --branch <branch> --sha <sha> --json
-gh run list --workflow <workflow-file> --limit 5
-gh run view <run-id> --json jobs
-gh run view <run-id> --job <job-id> --log
+python3 scripts/opencode_pr_operator.py failed-actions-log-bundle-current --repo-root .
 ```
 
 Bias toward:
