@@ -3,6 +3,11 @@ import sys
 from pathlib import Path
 
 import pytest
+
+pytest.importorskip("PySide6")
+pytest.importorskip("pytestqt")
+pytest.importorskip("appdirs")
+
 from PySide6 import QtCore
 
 SCRIPT_ROOT = Path(__file__).resolve().parents[1]
