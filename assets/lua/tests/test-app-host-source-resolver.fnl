@@ -15,6 +15,16 @@
               ": expected " (tostring expected)
               ", got " (tostring actual))))
 
+(local path-like-success-fields {:path true :entry-path true :lua-root true})
+
+(fn normalize-test-path [path]
+  (if (= (type path) :string)
+      (string.gsub path "\\" "/")
+      path))
+
+(fn path-like-success-field? [key]
+  (. path-like-success-fields key))
+
 (fn assert-failure [result reason]
   (assert-equals result.ok? false "resolver should fail")
   (assert-equals result.reason reason "failure reason should match")
@@ -23,7 +33,11 @@
 (fn assert-success [result expected]
   (assert-equals result.ok? true "resolver should succeed")
   (each [key value (pairs expected)]
-    (assert-equals (. result key) value (.. "success field " (tostring key) " should match"))))
+    (if (path-like-success-field? key)
+        (assert-equals (normalize-test-path (. result key))
+                       (normalize-test-path value)
+                       (.. "success field " (tostring key) " should match"))
+        (assert-equals (. result key) value (.. "success field " (tostring key) " should match")))))
 
 (fn graph-map [nodes]
   {:nodes (or nodes {})
