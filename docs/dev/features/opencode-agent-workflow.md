@@ -211,7 +211,7 @@ until a later live MCP reload or smoke check succeeds.
 Space uses guarded capabilities to reduce routine OpenCode permission friction without broadening normal agent authority.
 
 - **Routine project-scoped operations** stay with normal agents when they are already part of the assigned role and repository workflow, such as focused validation commands and local Git inspection (`git status`, `git diff`).
-- **Privileged bounded operations** go through capability agents instead of broad direct permissions. `git-integrator` handles reviewed Git integration boundaries, `github-operator` handles bounded GitHub PR/check/merge-queue operations, `pr-recovery-operator` handles the single stale merged PR recovery wrapper, and `config-auditor` verifies repo-local OpenCode policy and configuration.
+- **Privileged bounded operations** go through capability agents instead of broad direct permissions. `git-integrator` handles reviewed Git integration boundaries, `github-operator` handles bounded GitHub PR/check/merge-queue operations and guarded failed-CI log bundles, `pr-recovery-operator` handles the single stale merged PR recovery wrapper, `windows-ci-reproducer` handles bounded Windows CI local reproduction, and `config-auditor` verifies repo-local OpenCode policy and configuration.
 - **Role-breaking or destructive/ambiguous operations** remain denied. Reviewer edit/bash, implementer push or external-directory access, web-researcher local read/bash, force-push, reset/clean, direct `origin/main` pushes, credential access, and similarly unsafe requests surface as `HUMAN_DECISION_REQUIRED` rather than being auto-approved.
 - **Wrapper JSON evidence is the reviewable handoff.** Capability wrappers emit structured JSON with `status`, `action`, `message`, and `evidence` so supervisors, reviewers, and weekly automation can inspect what happened without granting a broad shell or GitHub capability.
 - **OpenCode must be restarted after `.opencode/**` changes.** Agent definitions, skill instructions, and permission rules are startup-loaded, so restart OpenCode before relying on changed capability agents or policy rules.
@@ -263,18 +263,37 @@ The wrapper command sequence is:
 
 ```bash
 python3 scripts/opencode_windows_ci_repro.py preflight --repo-root .
+python3 scripts/opencode_windows_ci_repro.py bootstrap-vcpkg --repo-root .
 python3 scripts/opencode_windows_ci_repro.py setup-host --repo-root .
 python3 scripts/opencode_windows_ci_repro.py reproduce --repo-root .
 ```
 
-Use `preflight` first to collect prerequisite evidence. On first-time machines,
-if preflight or reproduce evidence reports missing host prerequisites, run
-`setup-host` once through `windows-ci-reproducer`, then rerun reproduction. The
-expected handoff before pushing another fix is structured wrapper evidence with
-`status`, `action`, `message`, and `evidence` covering either a successful local
-Linux cross-build + Wine reproduction or a bounded `HUMAN_DECISION_REQUIRED`
-reason. Native Windows CI remains authoritative for Windows-host-only behavior,
-installer behavior, and final integration.
+Use `preflight` first to collect prerequisite evidence. If it reports
+`missing_local_vcpkg`, run the guarded `bootstrap-vcpkg` command through
+`windows-ci-reproducer`; this bootstraps the repo-local `vcpkg/` checkout without
+sudo when host tools already exist. Use `setup-host` only for missing system host
+prerequisites. The expected handoff before pushing another fix is structured
+wrapper evidence with `status`, `action`, `message`, and `evidence` covering
+either a successful local Linux cross-build + Wine reproduction or a bounded
+`HUMAN_DECISION_REQUIRED` reason. Native Windows CI remains authoritative for
+Windows-host-only behavior, installer behavior, and final integration.
+
+### Guarded CI log diagnostics
+
+When `github-operator poll-merge-queue-current` reports a failed required check
+but its `[FAIL]` evidence is too small to diagnose the blocker, dispatch
+`github-operator` for `failed-actions-log-bundle-current`. The exact guarded
+command is:
+
+```bash
+python3 scripts/opencode_pr_operator.py failed-actions-log-bundle-current --repo-root .
+```
+
+The wrapper downloads failed job logs into repo-local files under
+`build/opencode/actions-logs/` and returns structured JSON evidence with bundle
+paths, failed job metadata, and excerpts. Agents use those repo-local bundle
+paths for diagnosis instead of requesting raw `gh`, wildcard `actions-log`, or
+external-directory permissions.
 
 ### Capability preflight
 

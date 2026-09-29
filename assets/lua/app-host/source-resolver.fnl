@@ -13,15 +13,26 @@
       (string.sub value (+ (string.len prefix) 1))
       nil))
 
+(fn slash-normalized-path [path]
+  (string.gsub path "\\" "/"))
+
+(fn path-separator? [value]
+  (if (= value "/")
+      true
+      (= value "\\")
+      true
+      false))
+
 (fn trim-trailing-separators [path]
   (var trimmed path)
   (while (and (> (string.len trimmed) 1)
-              (= (string.sub trimmed -1) "/"))
+              (path-separator? (string.sub trimmed -1)))
     (set trimmed (string.sub trimmed 1 -2)))
   trimmed)
 
 (fn filename [path]
-  (local trimmed (trim-trailing-separators path))
+  (local normalized (slash-normalized-path path))
+  (local trimmed (trim-trailing-separators normalized))
   (if (= trimmed "/")
       trimmed
       (do
@@ -36,7 +47,8 @@
   base)
 
 (fn module-name-from-relative [relative]
-  (local module-name (string.match relative "^(.*)%.fnl$"))
+  (local normalized (slash-normalized-path relative))
+  (local module-name (string.match normalized "^(.*)%.fnl$"))
   (assert module-name (.. "source resolver expected .fnl module path for " relative))
   module-name)
 
@@ -65,11 +77,12 @@
 
 (fn file-module-info [path]
   (local marker "/assets/lua/")
+  (local normalized (slash-normalized-path path))
   (var search-start 1)
   (var closest-end-index nil)
   (var done? false)
   (while (not done?)
-    (local (_start-index end-index) (string.find path marker search-start true))
+    (local (_start-index end-index) (string.find normalized marker search-start true))
     (if end-index
         (do
           (set closest-end-index end-index)
@@ -78,7 +91,7 @@
   (if closest-end-index
       (do
         (local lua-root (string.sub path 1 (- closest-end-index 1)))
-        (local relative (string.sub path (+ closest-end-index 1)))
+        (local relative (string.sub normalized (+ closest-end-index 1)))
         {:lua-root lua-root
          :module-name (module-name-from-relative relative)})
       (do

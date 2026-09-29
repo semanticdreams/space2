@@ -74,7 +74,7 @@ def write_capability_files(root: Path) -> None:
         root / ".opencode" / "agents" / "github-operator.md",
         agent(
             "github-operator",
-            '  edit: deny\n  task: deny\n  external_directory: deny\n  webfetch: deny\n  websearch: deny\n  question: deny\n  bash:\n    "python3 scripts/opencode_pr_operator.py auth-status --repo-root .": allow\n',
+            '  edit: deny\n  task: deny\n  external_directory: deny\n  webfetch: deny\n  websearch: deny\n  question: deny\n  bash:\n    "python3 scripts/opencode_pr_operator.py auth-status --repo-root .": allow\n    "python3 scripts/opencode_pr_operator.py check-main-protection --repo-root .": allow\n    "python3 scripts/opencode_pr_operator.py create-current --repo-root .": allow\n    "python3 scripts/opencode_pr_operator.py enable-auto-merge-current --repo-root .": allow\n    "python3 scripts/opencode_pr_operator.py view-current --repo-root .": allow\n    "python3 scripts/opencode_pr_operator.py poll-merge-queue-current --repo-root .": allow\n    "python3 scripts/opencode_pr_operator.py failed-actions-log-bundle-current --repo-root .": allow\n',
         ),
     )
     write_file(
@@ -95,7 +95,7 @@ def write_capability_files(root: Path) -> None:
         root / ".opencode" / "agents" / "windows-ci-reproducer.md",
         agent(
             "windows-ci-reproducer",
-            '  edit: deny\n  task: deny\n  external_directory: deny\n  webfetch: deny\n  websearch: deny\n  question: deny\n  bash:\n    "python3 scripts/opencode_windows_ci_repro.py preflight --repo-root .": allow\n    "python3 scripts/opencode_windows_ci_repro.py setup-host --repo-root .": allow\n    "python3 scripts/opencode_windows_ci_repro.py reproduce --repo-root .": allow\n',
+            '  edit: deny\n  task: deny\n  external_directory: deny\n  webfetch: deny\n  websearch: deny\n  question: deny\n  bash:\n    "python3 scripts/opencode_windows_ci_repro.py preflight --repo-root .": allow\n    "python3 scripts/opencode_windows_ci_repro.py setup-host --repo-root .": allow\n    "python3 scripts/opencode_windows_ci_repro.py bootstrap-vcpkg --repo-root .": allow\n    "python3 scripts/opencode_windows_ci_repro.py reproduce --repo-root .": allow\n',
         ),
     )
     for script in [
@@ -158,6 +158,21 @@ def test_pr_recovery_operator_allows_only_exact_guarded_recovery_command():
     }
 
 
+def test_github_operator_allows_exact_guarded_wrapper_commands():
+    bash_entries = permission_entries(REPO_ROOT, "github-operator", "bash")
+
+    allowed_entries = {pattern for pattern, action in bash_entries.items() if action == "allow"}
+    assert allowed_entries == {
+        "python3 scripts/opencode_pr_operator.py auth-status --repo-root .",
+        "python3 scripts/opencode_pr_operator.py check-main-protection --repo-root .",
+        "python3 scripts/opencode_pr_operator.py create-current --repo-root .",
+        "python3 scripts/opencode_pr_operator.py enable-auto-merge-current --repo-root .",
+        "python3 scripts/opencode_pr_operator.py view-current --repo-root .",
+        "python3 scripts/opencode_pr_operator.py poll-merge-queue-current --repo-root .",
+        "python3 scripts/opencode_pr_operator.py failed-actions-log-bundle-current --repo-root .",
+    }
+
+
 def test_windows_ci_reproducer_allows_exact_guarded_wrapper_commands():
     bash_entries = permission_entries(REPO_ROOT, "windows-ci-reproducer", "bash")
 
@@ -165,6 +180,7 @@ def test_windows_ci_reproducer_allows_exact_guarded_wrapper_commands():
     assert allowed_entries == {
         "python3 scripts/opencode_windows_ci_repro.py preflight --repo-root .",
         "python3 scripts/opencode_windows_ci_repro.py setup-host --repo-root .",
+        "python3 scripts/opencode_windows_ci_repro.py bootstrap-vcpkg --repo-root .",
         "python3 scripts/opencode_windows_ci_repro.py reproduce --repo-root .",
     }
 
@@ -196,6 +212,7 @@ def test_windows_ci_reproducer_allows_only_wrapper_commands(tmp_path: Path):
         '  bash:\n'
         '    "python3 scripts/opencode_windows_ci_repro.py preflight --repo-root .": allow\n'
         '    "python3 scripts/opencode_windows_ci_repro.py setup-host --repo-root .": allow\n'
+        '    "python3 scripts/opencode_windows_ci_repro.py bootstrap-vcpkg --repo-root .": allow\n'
         '    "python3 scripts/opencode_windows_ci_repro.py reproduce --repo-root .": allow\n'
         '    "gh *": allow\n'
     )
@@ -585,3 +602,30 @@ def test_github_operator_rejects_wrapper_bash_permissions_with_untrusted_suffix_
     codes = violation_codes(repo)
 
     assert "capability-boundary" in codes
+
+
+def test_github_operator_rejects_actions_log_wildcard_permission(tmp_path: Path):
+    repo = make_repo(tmp_path)
+    github_permissions = (
+        '  edit: deny\n'
+        '  task: deny\n'
+        '  external_directory: deny\n'
+        '  webfetch: deny\n'
+        '  websearch: deny\n'
+        '  question: deny\n'
+        '  bash:\n'
+        '    "python3 scripts/opencode_pr_operator.py auth-status --repo-root .": allow\n'
+        '    "python3 scripts/opencode_pr_operator.py check-main-protection --repo-root .": allow\n'
+        '    "python3 scripts/opencode_pr_operator.py create-current --repo-root .": allow\n'
+        '    "python3 scripts/opencode_pr_operator.py enable-auto-merge-current --repo-root .": allow\n'
+        '    "python3 scripts/opencode_pr_operator.py view-current --repo-root .": allow\n'
+        '    "python3 scripts/opencode_pr_operator.py poll-merge-queue-current --repo-root .": allow\n'
+        '    "python3 scripts/opencode_pr_operator.py failed-actions-log-bundle-current --repo-root .": allow\n'
+        '    "python3 scripts/opencode_pr_operator.py actions-log --repo-root . --run-id * --job-id * --full": allow\n'
+    )
+    write_file(
+        repo / ".opencode" / "agents" / "github-operator.md",
+        agent("github-operator", github_permissions),
+    )
+
+    assert "capability-boundary" in violation_codes(repo)

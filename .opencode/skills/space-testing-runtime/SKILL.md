@@ -45,9 +45,15 @@ directly. The capability's underlying/manual wrapper command sequence is:
 
 ```bash
 python3 scripts/opencode_windows_ci_repro.py preflight --repo-root .
+python3 scripts/opencode_windows_ci_repro.py bootstrap-vcpkg --repo-root .
 python3 scripts/opencode_windows_ci_repro.py setup-host --repo-root .
 python3 scripts/opencode_windows_ci_repro.py reproduce --repo-root .
 ```
+
+If preflight returns `missing_local_vcpkg`, dispatch `windows-ci-reproducer` to
+run the guarded `bootstrap-vcpkg` command before escalating to `setup-host`.
+Use `setup-host` only for missing system prerequisites. After any `.opencode/**`
+change, restart OpenCode before relying on the changed capability instructions.
 
 See `docs/dev/notes/windows-wine-build-and-test.md` for the Windows-from-Linux
 build and Wine validation flow. Wine evidence helps reproduce CI failures, but

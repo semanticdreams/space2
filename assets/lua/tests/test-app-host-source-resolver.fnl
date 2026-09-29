@@ -93,8 +93,41 @@
       (assert-success (resolve [(.. "fs:" entry)] {})
                       {:source-kind :file
                        :lua-root lua-root
-                        :module-name "snake/app"
-                        :entry-path entry}))))
+                       :module-name "snake/app"
+                       :entry-path entry}))))
+
+(fn test-windows-file-under-assets-lua-main []
+  (with-temp-dir "windows-assets-main"
+    (fn [root]
+      (local lua-root (.. root "\\assets\\lua"))
+      (local entry (write-file (.. lua-root "\\main.fnl")))
+      (assert-success (resolve [(.. "fs:" entry)] {})
+                      {:source-kind :file
+                       :selection-key (.. "fs:" entry)
+                       :path entry
+                       :entry-path entry
+                       :lua-root lua-root
+                       :module-name "main"}))))
+
+(fn test-windows-file-under-assets-lua-nested-module []
+  (with-temp-dir "windows-assets-nested"
+    (fn [root]
+      (local lua-root (.. root "\\assets\\lua"))
+      (local entry (write-file (.. lua-root "\\snake\\app.fnl")))
+      (assert-success (resolve [(.. "fs:" entry)] {})
+                      {:source-kind :file
+                       :entry-path entry
+                       :lua-root lua-root
+                       :module-name "snake/app"}))))
+
+(fn test-windows-standalone-file-module-name []
+  (with-temp-dir "windows-standalone"
+    (fn [root]
+      (local entry (write-file (.. root "\\nested\\widget.fnl")))
+      (assert-success (resolve [(.. "fs:" entry)] {})
+                      {:source-kind :file
+                       :entry-path entry
+                       :module-name "widget"}))))
 
 (fn test-file-under-nested-assets-lua-uses-nearest-root []
   (with-temp-dir "assets-nested-root"
@@ -183,6 +216,9 @@
 (add-test "unsupported file extension returns unsupported-file" test-unsupported-file-extension)
 (add-test "file under assets lua main resolves module" test-file-under-assets-lua-main)
 (add-test "file under assets lua nested resolves slash module" test-file-under_assets_lua_nested_module)
+(add-test "windows file under assets lua main resolves module" test-windows-file-under-assets-lua-main)
+(add-test "windows file under assets lua nested resolves slash module" test-windows-file-under-assets-lua-nested-module)
+(add-test "windows standalone file resolves basename module" test-windows-standalone-file-module-name)
 (add-test "file under nested assets lua uses nearest root" test-file-under-nested-assets-lua-uses-nearest-root)
 (add-test "standalone file resolves from parent" test-standalone-file)
 (add-test "directory assets lua main resolves" test-directory-assets-lua-main)

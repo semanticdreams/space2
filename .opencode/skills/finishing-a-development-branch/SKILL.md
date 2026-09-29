@@ -27,8 +27,16 @@ For Windows CI failures in `build-windows`, `test-windows`, or
 `build-windows-installer` that are not obviously CI infrastructure-only,
 dispatch `windows-ci-reproducer` and obtain local Linux cross-build + Wine
 reproduction evidence before pushing another fix or requeueing. If prerequisites
-are missing, run guarded `setup-host` once through `windows-ci-reproducer`, then
-rerun reproduction. Native Windows PR CI remains authoritative.
+are missing because preflight reports `missing_local_vcpkg`, run guarded
+`bootstrap-vcpkg` through `windows-ci-reproducer` before `setup-host`, then rerun
+preflight and reproduction. Use guarded `setup-host` once only for missing system
+host prerequisites. Native Windows PR CI remains authoritative.
+
+If `github-operator poll-merge-queue-current` reports a failed required check
+but lacks enough log detail, dispatch `github-operator` to run
+`failed-actions-log-bundle-current`. Use its structured JSON evidence and
+repo-local bundle paths before changing code. After `.opencode/**` changes,
+restart OpenCode before relying on updated permissions or workflow text.
 
 ## Step 0: Verify Clean Working Tree
 
