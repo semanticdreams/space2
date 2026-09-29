@@ -282,16 +282,20 @@ For OpenCode Windows CI failure reproduction, use the guarded wrapper sequence:
 
 ```bash
 python3 scripts/opencode_windows_ci_repro.py preflight --repo-root .
+python3 scripts/opencode_windows_ci_repro.py bootstrap-vcpkg --repo-root .
 python3 scripts/opencode_windows_ci_repro.py setup-host --repo-root .
 python3 scripts/opencode_windows_ci_repro.py reproduce --repo-root .
 ```
 
-Run `setup-host` only when prerequisite evidence says the host needs it. The
-wrapper is intended to reproduce `build-windows`, `test-windows`, and
-`build-windows-installer` failures locally with a Linux cross-build + Wine loop
-before another push. Wine validation is not a substitute for native Windows CI;
-native Windows CI remains authoritative for Windows-host-only behavior,
-installer behavior, and final integration.
+Run `bootstrap-vcpkg` when `preflight` reports `missing_local_vcpkg`; it is safe
+when the repository-local `vcpkg/` checkout is missing or unbootstrapped and host
+tools already exist, because it stays inside the repo-local vcpkg path and does
+not use sudo. Run `setup-host` only when prerequisite evidence says system host
+tools are missing or require provisioning. The wrapper is intended to reproduce
+`build-windows`, `test-windows`, and `build-windows-installer` failures locally
+with a Linux cross-build + Wine loop before another push. Wine validation is not
+a substitute for native Windows CI; native Windows CI remains authoritative for
+Windows-host-only behavior, installer behavior, and final integration.
 
 Host setup:
 

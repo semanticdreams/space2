@@ -28,10 +28,20 @@ GIT_INTEGRATOR_ALLOWED_WRAPPER_COMMANDS = {
     "python3 scripts/opencode_git_integrate.py push-current --repo-root .",
     "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .",
 }
+GITHUB_OPERATOR_ALLOWED_WRAPPER_COMMANDS = {
+    "python3 scripts/opencode_pr_operator.py auth-status --repo-root .",
+    "python3 scripts/opencode_pr_operator.py check-main-protection --repo-root .",
+    "python3 scripts/opencode_pr_operator.py create-current --repo-root .",
+    "python3 scripts/opencode_pr_operator.py enable-auto-merge-current --repo-root .",
+    "python3 scripts/opencode_pr_operator.py view-current --repo-root .",
+    "python3 scripts/opencode_pr_operator.py poll-merge-queue-current --repo-root .",
+    "python3 scripts/opencode_pr_operator.py failed-actions-log-bundle-current --repo-root .",
+}
 PR_RECOVERY_ALLOWED_WRAPPER_COMMAND = "python3 scripts/opencode_pr_recovery.py create-current-with-followup-recovery --repo-root ."
 WINDOWS_CI_REPRODUCER_ALLOWED_WRAPPER_COMMANDS = {
     "python3 scripts/opencode_windows_ci_repro.py preflight --repo-root .",
     "python3 scripts/opencode_windows_ci_repro.py setup-host --repo-root .",
+    "python3 scripts/opencode_windows_ci_repro.py bootstrap-vcpkg --repo-root .",
     "python3 scripts/opencode_windows_ci_repro.py reproduce --repo-root .",
 }
 REQUIRED_CAPABILITY_FILES = (
@@ -298,9 +308,30 @@ def _check_capability_boundary(path: Path, repo_root: Path, name: str, raw: str)
             if secret not in raw:
                 violations.append(_violation(path, repo_root, "capability-boundary", f"config-auditor must deny {secret}-looking OpenCode home paths"))
     if name == "github-operator":
-        for pattern, action in _mapping_entries(raw, "bash"):
+        bash_entries = _mapping_entries(raw, "bash")
+        bash_actions = dict(bash_entries)
+        for command in sorted(GITHUB_OPERATOR_ALLOWED_WRAPPER_COMMANDS):
+            if bash_actions.get(command) != "allow":
+                violations.append(
+                    _violation(
+                        path,
+                        repo_root,
+                        "capability-boundary",
+                        f"github-operator must allow guarded wrapper command exactly: {command}",
+                    )
+                )
+        for pattern, action in bash_entries:
             if action in BLOCKED_ACTIONS and _has_untrusted_suffix_wildcard(pattern):
                 violations.append(_violation(path, repo_root, "capability-boundary", f"github-operator wrapper permission must not end in an untrusted wildcard: {pattern}: {action}"))
+            if action in BLOCKED_ACTIONS and pattern not in GITHUB_OPERATOR_ALLOWED_WRAPPER_COMMANDS:
+                violations.append(
+                    _violation(
+                        path,
+                        repo_root,
+                        "capability-boundary",
+                        f"github-operator bash permission must be limited to approved wrapper commands: {pattern}: {action}",
+                    )
+                )
     if name == "git-integrator":
         bash_entries = _mapping_entries(raw, "bash")
         bash_actions = dict(bash_entries)
