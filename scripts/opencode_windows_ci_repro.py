@@ -67,6 +67,18 @@ def _command_evidence(result: CommandResult) -> dict[str, object]:
     }
 
 
+def _command_start_failure(args: Sequence[str], error: OSError) -> CommandResult:
+    return CommandResult(list(args), 127, "", f"{type(error).__name__}: {error}")
+
+
+def _missing_executable_failure(args: Sequence[str], path: Path) -> CommandResult:
+    return CommandResult(list(args), 127, "", f"Executable file is missing or not executable: {path}")
+
+
+def _is_executable_file(path: Path) -> bool:
+    return path.is_file() and os.access(path, os.X_OK)
+
+
 def _script_exists(repo: Path, relative: str) -> bool:
     return (repo / relative).is_file()
 
@@ -149,7 +161,7 @@ def preflight(repo_root: Path) -> dict[str, object]:
     missing_by_category["system_tools"].extend(tool for tool in REQUIRED_TOOLS if shutil.which(tool) is None)
     missing_by_category["scripts"].extend(script for script in REQUIRED_SCRIPTS if not _script_exists(repo, script))
     vcpkg_binary = _vcpkg_binary(repo)
-    if not vcpkg_binary.is_file():
+    if not _is_executable_file(vcpkg_binary):
         missing_by_category["vcpkg"].append(_display_path(repo, vcpkg_binary))
     if not _wine_available():
         missing_by_category["wine"].append("wine")
@@ -222,7 +234,7 @@ def bootstrap_vcpkg(repo_root: Path) -> dict[str, object]:
         )
 
     binary = root / "vcpkg"
-    if binary.exists():
+    if _is_executable_file(binary):
         return success(
             "bootstrap-vcpkg",
             "Repository-local vcpkg is already bootstrapped",
@@ -239,7 +251,10 @@ def bootstrap_vcpkg(repo_root: Path) -> dict[str, object]:
             "https://github.com/microsoft/vcpkg",
             str(root),
         ]
-        clone_result = run_command(clone_args, repo, check=False)
+        try:
+            clone_result = run_command(clone_args, repo, check=False)
+        except OSError as error:
+            clone_result = _command_start_failure(clone_args, error)
         commands.append(clone_result.args)
         if clone_result.returncode != 0:
             evidence = _command_evidence(clone_result)
@@ -247,9 +262,16 @@ def bootstrap_vcpkg(repo_root: Path) -> dict[str, object]:
             evidence["failing_step"] = "clone-vcpkg"
             return failure("bootstrap-vcpkg", "Repository-local vcpkg clone failed", evidence)
 
-    if not binary.exists():
+    if not _is_executable_file(binary):
         bootstrap_args = [str(root / "bootstrap-vcpkg.sh")]
-        bootstrap_result = run_command(bootstrap_args, repo, check=False)
+        bootstrap_script = root / "bootstrap-vcpkg.sh"
+        if not _is_executable_file(bootstrap_script):
+            bootstrap_result = _missing_executable_failure(bootstrap_args, bootstrap_script)
+        else:
+            try:
+                bootstrap_result = run_command(bootstrap_args, repo, check=False)
+            except OSError as error:
+                bootstrap_result = _command_start_failure(bootstrap_args, error)
         commands.append(bootstrap_result.args)
         if bootstrap_result.returncode != 0:
             evidence = _command_evidence(bootstrap_result)

@@ -36,6 +36,13 @@ def install_fake_vcpkg(repo: Path) -> None:
     path.chmod(0o755)
 
 
+def install_fake_bootstrap_script(repo: Path) -> None:
+    path = repo / "vcpkg" / "bootstrap-vcpkg.sh"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    path.chmod(0o755)
+
+
 def install_fake_windows_outputs(repo: Path) -> None:
     for relative in (
         "build/dist/windows/space.exe",
@@ -129,6 +136,7 @@ def test_preflight_honors_vcpkg_root_override(tmp_path, monkeypatch):
     override_binary = override_root / "vcpkg"
     override_root.mkdir()
     override_binary.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    override_binary.chmod(0o755)
     monkeypatch.setenv("VCPKG_ROOT", str(override_root))
     monkeypatch.delenv("WINE_CMD", raising=False)
     monkeypatch_required_tools_present(monkeypatch)
@@ -247,7 +255,17 @@ def test_preflight_reports_local_vcpkg_bootstrap_when_only_vcpkg_missing(tmp_pat
 def test_bootstrap_vcpkg_clones_missing_repo_local_vcpkg_and_bootstraps(tmp_path, monkeypatch):
     repo = make_space_repo(tmp_path)
     monkeypatch.delenv("VCPKG_ROOT", raising=False)
-    calls = capture_run_command_calls(monkeypatch, windows_ci_repro)
+    calls: list[list[str]] = []
+
+    def fake_run_command(args, cwd: Path, check: bool = True):
+        del cwd, check
+        args = list(args)
+        calls.append(args)
+        if args[:2] == ["git", "clone"]:
+            install_fake_bootstrap_script(repo)
+        return command_result(args)
+
+    monkeypatch.setattr(windows_ci_repro, "run_command", fake_run_command)
 
     result = windows_ci_repro.bootstrap_vcpkg(repo)
 
@@ -267,7 +285,7 @@ def test_bootstrap_vcpkg_clones_missing_repo_local_vcpkg_and_bootstraps(tmp_path
 
 def test_bootstrap_vcpkg_bootstraps_existing_repo_local_vcpkg_without_binary(tmp_path, monkeypatch):
     repo = make_space_repo(tmp_path)
-    (repo / "vcpkg").mkdir()
+    install_fake_bootstrap_script(repo)
     monkeypatch.delenv("VCPKG_ROOT", raising=False)
     calls = capture_run_command_calls(monkeypatch, windows_ci_repro)
 
@@ -275,6 +293,71 @@ def test_bootstrap_vcpkg_bootstraps_existing_repo_local_vcpkg_without_binary(tmp
 
     assert result["status"] == "pass"
     assert calls == [[str(repo / "vcpkg" / "bootstrap-vcpkg.sh")]]
+
+
+def test_bootstrap_vcpkg_does_not_accept_malformed_binary_path(tmp_path, monkeypatch):
+    repo = make_space_repo(tmp_path)
+    install_fake_bootstrap_script(repo)
+    (repo / "vcpkg" / "vcpkg").mkdir()
+    monkeypatch.delenv("VCPKG_ROOT", raising=False)
+    calls = capture_run_command_calls(monkeypatch, windows_ci_repro)
+
+    result = windows_ci_repro.bootstrap_vcpkg(repo)
+
+    assert result["status"] == "pass"
+    assert calls == [[str(repo / "vcpkg" / "bootstrap-vcpkg.sh")]]
+
+
+def test_bootstrap_vcpkg_does_not_accept_non_executable_binary(tmp_path, monkeypatch):
+    repo = make_space_repo(tmp_path)
+    install_fake_bootstrap_script(repo)
+    binary = repo / "vcpkg" / "vcpkg"
+    binary.write_text("placeholder\n", encoding="utf-8")
+    binary.chmod(0o644)
+    monkeypatch.delenv("VCPKG_ROOT", raising=False)
+    calls = capture_run_command_calls(monkeypatch, windows_ci_repro)
+
+    result = windows_ci_repro.bootstrap_vcpkg(repo)
+
+    assert result["status"] == "pass"
+    assert calls == [[str(repo / "vcpkg" / "bootstrap-vcpkg.sh")]]
+
+
+def test_bootstrap_vcpkg_reports_missing_bootstrap_script_with_command_evidence(tmp_path, monkeypatch):
+    repo = make_space_repo(tmp_path)
+    (repo / "vcpkg").mkdir()
+    monkeypatch.delenv("VCPKG_ROOT", raising=False)
+    calls = capture_run_command_calls(monkeypatch, windows_ci_repro)
+
+    result = windows_ci_repro.bootstrap_vcpkg(repo)
+
+    assert result["status"] == "fail"
+    assert result["evidence"]["code"] == "vcpkg_bootstrap_failed"
+    assert result["evidence"]["failing_step"] == "bootstrap-vcpkg"
+    assert result["evidence"]["args"] == [str(repo / "vcpkg" / "bootstrap-vcpkg.sh")]
+    assert result["evidence"]["returncode"] != 0
+    assert "stderr_tail" in result["evidence"]
+    assert calls == []
+
+
+def test_bootstrap_vcpkg_reports_run_command_oserror_as_command_evidence(tmp_path, monkeypatch):
+    repo = make_space_repo(tmp_path)
+    install_fake_bootstrap_script(repo)
+    monkeypatch.delenv("VCPKG_ROOT", raising=False)
+
+    def fake_run_command(args, cwd: Path, check: bool = True):
+        del cwd, check
+        raise PermissionError("permission denied")
+
+    monkeypatch.setattr(windows_ci_repro, "run_command", fake_run_command)
+
+    result = windows_ci_repro.bootstrap_vcpkg(repo)
+
+    assert result["status"] == "fail"
+    assert result["evidence"]["code"] == "vcpkg_bootstrap_failed"
+    assert result["evidence"]["args"] == [str(repo / "vcpkg" / "bootstrap-vcpkg.sh")]
+    assert result["evidence"]["returncode"] != 0
+    assert "permission denied" in result["evidence"]["stderr_tail"]
 
 
 def test_bootstrap_vcpkg_passes_without_commands_when_binary_exists(tmp_path, monkeypatch):
