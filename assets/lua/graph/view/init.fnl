@@ -81,13 +81,13 @@
             clone)
         island))
 
-(fn sync-island-layouts! [runtime graph-map island-host graph-layout]
+(fn sync-island-layouts! [runtime graph-map island-host graph-layout opts]
     (local records [])
     (each [_ island (ipairs (graph-map:list-islands))]
         (local record (island-host:aggregate-layout-record (island-with-runtime-position runtime island)))
         (when record
             (table.insert records record)))
-    (graph-layout:sync-island-layouts records))
+    (graph-layout:sync-island-layouts records opts))
 
 (fn flush-island-layout-positions! [runtime graph-map]
     (when (next runtime.positions)
@@ -603,11 +603,11 @@
                                                   nil))
                                           (graph-layout:set-node-pinned node (. pinned node)))))}))
 
-     (fn reconcile-graph-islands! []
-         (with-island-label-refresh
-             (fn []
-                  (island-host:reconcile-all (icollect [_ island (ipairs (graph-map:list-islands))] (island-with-runtime-position options._island-layout-runtime island)))
-                  (sync-island-layouts! options._island-layout-runtime graph-map island-host graph-layout))))
+     (fn reconcile-graph-islands! [opts]
+          (with-island-label-refresh
+              (fn []
+                   (island-host:reconcile-all (icollect [_ island (ipairs (graph-map:list-islands))] (island-with-runtime-position options._island-layout-runtime island)))
+                   (sync-island-layouts! options._island-layout-runtime graph-map island-host graph-layout opts))))
 
      (fn reconcile-graph-island! [island]
          (with-island-label-refresh
@@ -682,11 +682,11 @@
                                             (set drag-active? true)
                                             (set drag-node (if (Modifiers.alt-held? (and payload payload.mod)) :alt node)))
                           :on-drag-end (fn [node _entry _drag]
-                                           (local alt-drag? (= drag-node :alt)) (set drag-active? false) (set drag-node nil)
+                                           (local alt-drag? (= drag-node :alt)) (local layout-active? (and layout layout.active)) (set drag-active? false) (set drag-node nil)
                                            (when alt-drag? (update-islands-after-member-drag-end! graph-map island-host get-position node))
-                                           (update-labels [node] {:force? true})
-                                           (refresh-label-positions [node])
-                                           (reconcile-graph-islands!))}))
+                                            (update-labels [node] {:force? true})
+                                            (refresh-label-positions [node])
+                                            (reconcile-graph-islands! {:run-force? layout-active?}))}))
 
     (set register-movable
          (fn [node point]
