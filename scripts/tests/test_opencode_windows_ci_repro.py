@@ -33,6 +33,7 @@ def install_fake_vcpkg(repo: Path) -> None:
     path = repo / "vcpkg" / "vcpkg"
     path.parent.mkdir(parents=True)
     path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    path.chmod(0o755)
 
 
 def install_fake_windows_outputs(repo: Path) -> None:
@@ -207,14 +208,97 @@ def test_preflight_fails_with_setup_command_when_prerequisites_missing(tmp_path,
     install_required_scripts(repo)
     monkeypatch.delenv("VCPKG_ROOT", raising=False)
     monkeypatch.delenv("WINE_CMD", raising=False)
-    monkeypatch_required_tools_missing(monkeypatch, missing={"wine", "x86_64-w64-mingw32-gcc-posix"})
+    monkeypatch_required_tools_missing(monkeypatch, missing={"wine", "wine64", "x86_64-w64-mingw32-gcc-posix"})
     monkeypatch_rust_target(monkeypatch, installed=False)
 
     result = windows_ci_repro.preflight(repo)
 
     assert result["status"] == "fail"
     assert result["evidence"]["code"] == "missing_windows_ci_repro_prerequisites"
+    assert result["evidence"]["missing_by_category"]["system_tools"] == ["x86_64-w64-mingw32-gcc-posix"]
+    assert result["evidence"]["missing_by_category"]["vcpkg"] == ["vcpkg/vcpkg"]
+    assert result["evidence"]["missing_by_category"]["wine"] == ["wine"]
+    assert result["evidence"]["missing_by_category"]["rust_targets"] == [
+        f"rust-target:{windows_ci_repro.WINDOWS_RUST_TARGET}"
+    ]
     assert result["evidence"]["setup_capability_command"] == "python3 scripts/opencode_windows_ci_repro.py setup-host --repo-root ."
+
+
+def test_preflight_reports_local_vcpkg_bootstrap_when_only_vcpkg_missing(tmp_path, monkeypatch):
+    repo = make_space_repo(tmp_path)
+    install_required_scripts(repo)
+    monkeypatch.delenv("VCPKG_ROOT", raising=False)
+    monkeypatch.delenv("WINE_CMD", raising=False)
+    monkeypatch_required_tools_present(monkeypatch)
+    monkeypatch_rust_target(monkeypatch, installed=True)
+
+    result = windows_ci_repro.preflight(repo)
+
+    assert result["status"] == "fail"
+    assert result["evidence"]["code"] == "missing_local_vcpkg"
+    assert result["evidence"]["missing_by_category"]["vcpkg"] == ["vcpkg/vcpkg"]
+    assert (
+        result["evidence"]["bootstrap_vcpkg_command"]
+        == "python3 scripts/opencode_windows_ci_repro.py bootstrap-vcpkg --repo-root ."
+    )
+    assert "setup_capability_command" not in result["evidence"]
+
+
+def test_bootstrap_vcpkg_clones_missing_repo_local_vcpkg_and_bootstraps(tmp_path, monkeypatch):
+    repo = make_space_repo(tmp_path)
+    monkeypatch.delenv("VCPKG_ROOT", raising=False)
+    calls = capture_run_command_calls(monkeypatch, windows_ci_repro)
+
+    result = windows_ci_repro.bootstrap_vcpkg(repo)
+
+    assert result["status"] == "pass"
+    assert calls == [
+        [
+            "git",
+            "clone",
+            "--branch",
+            "2025.03.19",
+            "https://github.com/microsoft/vcpkg",
+            str(repo / "vcpkg"),
+        ],
+        [str(repo / "vcpkg" / "bootstrap-vcpkg.sh")],
+    ]
+
+
+def test_bootstrap_vcpkg_bootstraps_existing_repo_local_vcpkg_without_binary(tmp_path, monkeypatch):
+    repo = make_space_repo(tmp_path)
+    (repo / "vcpkg").mkdir()
+    monkeypatch.delenv("VCPKG_ROOT", raising=False)
+    calls = capture_run_command_calls(monkeypatch, windows_ci_repro)
+
+    result = windows_ci_repro.bootstrap_vcpkg(repo)
+
+    assert result["status"] == "pass"
+    assert calls == [[str(repo / "vcpkg" / "bootstrap-vcpkg.sh")]]
+
+
+def test_bootstrap_vcpkg_passes_without_commands_when_binary_exists(tmp_path, monkeypatch):
+    repo = make_space_repo(tmp_path)
+    install_fake_vcpkg(repo)
+    monkeypatch.delenv("VCPKG_ROOT", raising=False)
+    calls = capture_run_command_calls(monkeypatch, windows_ci_repro)
+
+    result = windows_ci_repro.bootstrap_vcpkg(repo)
+
+    assert result["status"] == "pass"
+    assert calls == []
+
+
+def test_bootstrap_vcpkg_requires_human_for_external_vcpkg_root(tmp_path, monkeypatch):
+    repo = make_space_repo(tmp_path)
+    monkeypatch.setenv("VCPKG_ROOT", str(tmp_path / "external-vcpkg"))
+    calls = capture_run_command_calls(monkeypatch, windows_ci_repro)
+
+    result = windows_ci_repro.bootstrap_vcpkg(repo)
+
+    assert result["status"] == "human_decision_required"
+    assert result["evidence"]["code"] == "external_vcpkg_root_not_bootstrapped"
+    assert calls == []
 
 
 def test_setup_host_requires_linux_ubuntu(tmp_path, monkeypatch):
@@ -311,6 +395,7 @@ def test_direct_operations_return_structured_failures_for_invalid_repo(monkeypat
     for action, operation in (
         ("preflight", windows_ci_repro.preflight),
         ("setup-host", windows_ci_repro.setup_host),
+        ("bootstrap-vcpkg", windows_ci_repro.bootstrap_vcpkg),
         ("reproduce", windows_ci_repro.reproduce),
     ):
         result = operation(invalid_repo)

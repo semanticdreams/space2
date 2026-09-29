@@ -35,6 +35,7 @@ REQUIRED_SCRIPTS = (
     "scripts/test-windows-under-wine.sh",
 )
 WINDOWS_RUST_TARGET = "x86_64-pc-windows-gnu"
+VCPKG_BRANCH = "2025.03.19"
 
 _WINDOWS_OUTPUTS = (
     "build/dist/windows/space.exe",
@@ -44,6 +45,7 @@ _WINDOWS_OUTPUTS = (
     "scripts/windows-installer.iss",
 )
 _SETUP_COMMAND = "python3 scripts/opencode_windows_ci_repro.py setup-host --repo-root ."
+_BOOTSTRAP_VCPKG_COMMAND = "python3 scripts/opencode_windows_ci_repro.py bootstrap-vcpkg --repo-root ."
 
 
 def _exit_code_for(status: str) -> int:
@@ -81,6 +83,21 @@ def _vcpkg_binary(repo: Path) -> Path:
     if vcpkg_root:
         return Path(vcpkg_root) / "vcpkg"
     return repo / "vcpkg" / "vcpkg"
+
+
+def _vcpkg_root(repo: Path) -> Path:
+    vcpkg_root = os.environ.get("VCPKG_ROOT")
+    if vcpkg_root:
+        return Path(vcpkg_root)
+    return repo / "vcpkg"
+
+
+def _is_under_repo(path: Path, repo: Path) -> bool:
+    try:
+        path.resolve().relative_to(repo.resolve())
+    except ValueError:
+        return False
+    return True
 
 
 def _display_path(repo: Path, path: Path) -> str:
@@ -121,20 +138,40 @@ def preflight(repo_root: Path) -> dict[str, object]:
     except CapabilityError as error:
         return _failure_for_exception("preflight", error)
     missing: list[str] = []
+    missing_by_category: dict[str, list[str]] = {
+        "system_tools": [],
+        "scripts": [],
+        "vcpkg": [],
+        "wine": [],
+        "rust_targets": [],
+    }
 
-    missing.extend(tool for tool in REQUIRED_TOOLS if shutil.which(tool) is None)
-    missing.extend(script for script in REQUIRED_SCRIPTS if not _script_exists(repo, script))
+    missing_by_category["system_tools"].extend(tool for tool in REQUIRED_TOOLS if shutil.which(tool) is None)
+    missing_by_category["scripts"].extend(script for script in REQUIRED_SCRIPTS if not _script_exists(repo, script))
     vcpkg_binary = _vcpkg_binary(repo)
     if not vcpkg_binary.is_file():
-        missing.append(_display_path(repo, vcpkg_binary))
+        missing_by_category["vcpkg"].append(_display_path(repo, vcpkg_binary))
     if not _wine_available():
-        missing.append("wine")
+        missing_by_category["wine"].append("wine")
     if not _rust_target_installed(repo):
-        missing.append(f"rust-target:{WINDOWS_RUST_TARGET}")
+        missing_by_category["rust_targets"].append(f"rust-target:{WINDOWS_RUST_TARGET}")
 
-    evidence: dict[str, object] = {"repo_root": str(repo), "missing": sorted(missing)}
+    for category_missing in missing_by_category.values():
+        category_missing.sort()
+        missing.extend(category_missing)
+
+    evidence: dict[str, object] = {
+        "repo_root": str(repo),
+        "missing": sorted(missing),
+        "missing_by_category": missing_by_category,
+    }
     if not missing:
         return success("preflight", "Windows CI reproduction prerequisites are available", evidence)
+
+    if evidence["missing"] == ["vcpkg/vcpkg"] and missing_by_category["vcpkg"] == ["vcpkg/vcpkg"]:
+        evidence["code"] = "missing_local_vcpkg"
+        evidence["bootstrap_vcpkg_command"] = _BOOTSTRAP_VCPKG_COMMAND
+        return failure("preflight", "Repository-local vcpkg is missing", evidence)
 
     evidence["code"] = "missing_windows_ci_repro_prerequisites"
     evidence["setup_capability_command"] = _SETUP_COMMAND
@@ -164,6 +201,67 @@ def setup_host(repo_root: Path) -> dict[str, object]:
         return success("setup-host", "Windows CI reproduction host setup completed", evidence)
     evidence["code"] = "windows_ci_setup_host_failed"
     return human_decision("setup-host", "Windows CI reproduction host setup failed", evidence)
+
+
+def bootstrap_vcpkg(repo_root: Path) -> dict[str, object]:
+    try:
+        repo = ensure_space_repo(repo_root)
+    except CapabilityError as error:
+        return _failure_for_exception("bootstrap-vcpkg", error)
+
+    root = _vcpkg_root(repo).expanduser()
+    if os.environ.get("VCPKG_ROOT") and not _is_under_repo(root, repo):
+        return human_decision(
+            "bootstrap-vcpkg",
+            "External VCPKG_ROOT cannot be bootstrapped by this repo-local capability",
+            {
+                "code": "external_vcpkg_root_not_bootstrapped",
+                "repo_root": str(repo),
+                "vcpkg_root": str(root.resolve()),
+            },
+        )
+
+    binary = root / "vcpkg"
+    if binary.exists():
+        return success(
+            "bootstrap-vcpkg",
+            "Repository-local vcpkg is already bootstrapped",
+            {"repo_root": str(repo), "vcpkg_root": str(root.resolve()), "commands": []},
+        )
+
+    commands: list[list[str]] = []
+    if not root.exists():
+        clone_args = [
+            "git",
+            "clone",
+            "--branch",
+            VCPKG_BRANCH,
+            "https://github.com/microsoft/vcpkg",
+            str(root),
+        ]
+        clone_result = run_command(clone_args, repo, check=False)
+        commands.append(clone_result.args)
+        if clone_result.returncode != 0:
+            evidence = _command_evidence(clone_result)
+            evidence["code"] = "vcpkg_clone_failed"
+            evidence["failing_step"] = "clone-vcpkg"
+            return failure("bootstrap-vcpkg", "Repository-local vcpkg clone failed", evidence)
+
+    if not binary.exists():
+        bootstrap_args = [str(root / "bootstrap-vcpkg.sh")]
+        bootstrap_result = run_command(bootstrap_args, repo, check=False)
+        commands.append(bootstrap_result.args)
+        if bootstrap_result.returncode != 0:
+            evidence = _command_evidence(bootstrap_result)
+            evidence["code"] = "vcpkg_bootstrap_failed"
+            evidence["failing_step"] = "bootstrap-vcpkg"
+            return failure("bootstrap-vcpkg", "Repository-local vcpkg bootstrap failed", evidence)
+
+    return success(
+        "bootstrap-vcpkg",
+        "Repository-local vcpkg bootstrap completed",
+        {"repo_root": str(repo), "vcpkg_root": str(root.resolve()), "commands": commands},
+    )
 
 
 def _fail_for_command(action: str, step: str, result: CommandResult) -> dict[str, object]:
@@ -224,7 +322,7 @@ def reproduce(repo_root: Path) -> dict[str, object]:
 def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    for command in ("preflight", "setup-host", "reproduce"):
+    for command in ("preflight", "setup-host", "bootstrap-vcpkg", "reproduce"):
         subparser = subparsers.add_parser(command)
         subparser.add_argument("--repo-root", required=True, type=Path)
     return parser.parse_args(argv)
@@ -247,6 +345,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = preflight(args.repo_root)
         elif args.command == "setup-host":
             result = setup_host(args.repo_root)
+        elif args.command == "bootstrap-vcpkg":
+            result = bootstrap_vcpkg(args.repo_root)
         else:
             result = reproduce(args.repo_root)
     except Exception as error:
