@@ -395,7 +395,7 @@
              (layout:pin-node idx (if pinned? true false)))
          true)
 
-     (fn rebuild []
+     (fn rebuild [opts]
          (layout:clear)
          (clear-force-tables)
          (each [_ node (pairs nodes)]
@@ -414,12 +414,12 @@
              (local edge record.edge)
              (when edge
                  (add-force-edge edge.source edge.target)))
-         (start)
-         (update-labels nil {:force? true})
-         (refresh-label-positions))
+          (if (= (and opts opts.run-force?) false) (update-lines) (start))
+          (update-labels nil {:force? true})
+          (refresh-label-positions))
 
-      (fn sync-island-layouts [_self records]
-          (local should-rebuild? (do (assert (= (type records) :table) "GraphViewLayout.sync-island-layouts requires records table") (or (next island-layouts) (next island-member-layouts) (> (length records) 0))))
+       (fn sync-island-layouts [_self records opts]
+           (local should-rebuild? (do (assert (= (type records) :table) "GraphViewLayout.sync-island-layouts requires records table") (or (next island-layouts) (next island-member-layouts) (> (length records) 0))))
           (each [k _ (pairs island-layouts)]
               (set (. island-layouts k) nil))
           (clear-island-member-layouts)
@@ -437,7 +437,7 @@
               (each [_ member (ipairs record.members)]
                   (when (not (. pinned member))
                       (set (. island-member-layouts member) record))))
-          (when should-rebuild? (rebuild))
+          (when should-rebuild? (rebuild opts))
           true)
 
     (fn update [_self _delta]

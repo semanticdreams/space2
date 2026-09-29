@@ -381,6 +381,32 @@
                       (= reconciled-position.z list-position.z)))
             "first list island member should not be recomputed from current list node position"))
 
+(fn check-drag-end-reconciliation-preserves-inactive-force-layout [fixture]
+    (local map fixture.map)
+    (local view fixture.view)
+    (local movables fixture.movables)
+    (local list-node (map:lookup fixture.list-key))
+    (local item-node (map:lookup fixture.item-key))
+    (local unrelated-node (map:lookup fixture.unrelated-key))
+    (local list-entry (. movables.by-node list-node))
+    (local item-entry (. movables.by-node item-node))
+    (local unrelated-entry (. movables.by-node unrelated-node))
+    (assert list-entry "list node should be movable")
+    (assert item-entry "list item should be movable")
+    (assert unrelated-entry "unrelated node should be movable")
+    (list-entry.target:set-position (glm.vec3 24 0 0))
+    (list-node:expand-items-as-island)
+    (view.layout:stop)
+    (assert (= view.layout.active false) "fixture should stop force layout before drag end")
+    (item-entry.target:set-position (glm.vec3 300 400 0))
+    (assert-vec3 (view:get-position item-node) (glm.vec3 300 400 0)
+                 "drag should perturb island member before reconciliation")
+    (unrelated-entry.on-drag-end unrelated-entry)
+    (assert-vec3 (view:get-position item-node) (glm.vec3 48 0 0)
+                 "drag end should still reconcile island presentation")
+    (assert (= view.layout.active false)
+            "drag-end island reconciliation should preserve inactive force layout"))
+
 (fn check-ordered-list-aggregate-record-exposes-center-force-anchor []
     (local node-a {:key "test:a" :size 10})
     (local node-b {:key "test:b" :size 10})
@@ -1123,6 +1149,9 @@
     (with-list-fixture
         check-list-created-island-preserves-body-position-after-unrelated-drag-end))
 
+(fn graph-view-drag-end-reconciliation-preserves-inactive-force-layout []
+    (with-list-fixture check-drag-end-reconciliation-preserves-inactive-force-layout))
+
 (fn graph-view-ordered-list-aggregate-record-exposes-center-force-anchor []
     (check-ordered-list-aggregate-record-exposes-center-force-anchor))
 
@@ -1203,9 +1232,11 @@
 (table.insert tests {:name "GraphView snaps island member back after drag end"
                      :fn graph-view-snaps-island-member-back-after-drag-end})
 (table.insert tests {:name "GraphView list-created island preserves body position after unrelated drag end"
-                      :fn graph-view-list-created-island-preserves-body-position-after-unrelated-drag-end})
+                       :fn graph-view-list-created-island-preserves-body-position-after-unrelated-drag-end})
+(table.insert tests {:name "GraphView drag-end reconciliation preserves inactive force layout"
+                      :fn graph-view-drag-end-reconciliation-preserves-inactive-force-layout})
 (table.insert tests {:name "GraphView ordered-list aggregate record exposes center force anchor"
-                     :fn graph-view-ordered-list-aggregate-record-exposes-center-force-anchor})
+                      :fn graph-view-ordered-list-aggregate-record-exposes-center-force-anchor})
 (table.insert tests {:name "GraphView list-created island moves as force-layout unit" :fn graph-view-list-created-island-moves-as-force-layout-unit})
 (table.insert tests {:name "GraphView force-moved island keeps runtime position after unrelated drag end" :fn graph-view-force-moved-island-keeps-runtime-position-after-unrelated-drag-end})
 (table.insert tests {:name "GraphView force-moved island flushes body origin not force center" :fn graph-view-force-moved-island-flushes-body-origin-not-force-center})
