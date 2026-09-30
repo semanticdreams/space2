@@ -75,6 +75,41 @@
     "disambiguation"
     "invalid disambiguation should identify disambiguation"))
 
+(fn validates-recurrence-set-list-shapes []
+  (local dtstart (p "2026-01-01T09:00:00"))
+  (assert-error-contains
+    #(Temporal.recurrence-set.from {:dtstart dtstart
+                                    :rrules [(r "RRULE:FREQ=DAILY;COUNT=1")]
+                                    :rdates {:date (p "2026-01-02T09:00:00")}})
+    "rdates"
+    "map-shaped rdates should be rejected")
+  (assert-error-contains
+    #(Temporal.recurrence-set.from {:dtstart dtstart
+                                    :rrules [(r "RRULE:FREQ=DAILY;COUNT=1")]
+                                    :exdates {:date (p "2026-01-02T09:00:00")}})
+    "exdates"
+    "map-shaped exdates should be rejected")
+  (assert-error-contains
+    #(Temporal.recurrence-set.from {:dtstart dtstart
+                                    :rdates [(p "2026-01-02T09:00:00")]
+                                    :rrules {:freq :daily}})
+    "rrules"
+    "map-shaped rrules should be rejected")
+  (assert-error-contains
+    #(Temporal.recurrence-set.from {:dtstart dtstart
+                                    :rdates [(p "2026-01-02T09:00:00")]
+                                    :exrules {:freq :daily}})
+    "exrules"
+    "map-shaped exrules should be rejected")
+  (local sparse [])
+  (set (. sparse 2) (p "2026-01-02T09:00:00"))
+  (assert-error-contains
+    #(Temporal.recurrence-set.from {:dtstart dtstart
+                                    :rrules [(r "RRULE:FREQ=DAILY;COUNT=1")]
+                                    :rdates sparse})
+    "rdates"
+    "sparse rdates should be rejected"))
+
 (fn assembles-inclusions-exclusions-dedupes-and-orders []
   (local recurrence-set
     (Temporal.recurrence-set.from
@@ -119,6 +154,16 @@
   (assert-zoned-strings
     (Temporal.recurrence-set.occurrences recurrence-set {:zone-id "America/New_York" :limit 2})
     ["2026-01-11T09:00:00-05:00[America/New_York]"]))
+
+(fn unbounded-exrule-excludes-later-rdate-before-output-limit []
+  (local recurrence-set
+    (Temporal.recurrence-set.from
+      {:dtstart (p "2026-01-01T09:00:00")
+       :rdates [(p "2026-01-10T09:00:00")]
+       :exrules [(r "RRULE:FREQ=DAILY")]}))
+  (assert-zoned-strings
+    (Temporal.recurrence-set.occurrences recurrence-set {:zone-id "America/New_York" :limit 1})
+    []))
 
 (fn enforces-finite-expansion []
   (local unbounded
@@ -202,7 +247,9 @@
 (table.insert tests {:name "exports recurrence-set and expands RDATE-only"
                      :fn exports-recurrence-set-and-expands-rdate-only})
 (table.insert tests {:name "validates constructor and occurrence options"
-                      :fn validates-constructor-and-occurrence-options})
+                       :fn validates-constructor-and-occurrence-options})
+(table.insert tests {:name "validates recurrence-set list shapes"
+                     :fn validates-recurrence-set-list-shapes})
 (table.insert tests {:name "assembles inclusions, exclusions, dedupes, and orders"
                      :fn assembles-inclusions-exclusions-dedupes-and-orders})
 (table.insert tests {:name "allows empty results after exclusions"
@@ -210,7 +257,9 @@
 (table.insert tests {:name "applies limit without backfill after exclusions"
                       :fn applies-limit-without-backfill-after-exclusions})
 (table.insert tests {:name "bounded EXRULE excludes later RDATE before output limit"
-                     :fn bounded-exrule-excludes-later-rdate-before-output-limit})
+                      :fn bounded-exrule-excludes-later-rdate-before-output-limit})
+(table.insert tests {:name "unbounded EXRULE excludes later RDATE before output limit"
+                     :fn unbounded-exrule-excludes-later-rdate-before-output-limit})
 (table.insert tests {:name "enforces finite expansion"
                        :fn enforces-finite-expansion})
 (table.insert tests {:name "applies DST disambiguation policy"

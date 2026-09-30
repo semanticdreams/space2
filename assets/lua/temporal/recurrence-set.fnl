@@ -23,9 +23,23 @@
       (do
         (when (not= (type value) :table)
           (error (.. "invalid temporal recurrence-set " name)))
+        (var count 0)
+        (var max-index 0)
+        (each [key _item (pairs value)]
+          (when (not (and (= (type key) :number)
+                          (= key (math.floor key))
+                          (> key 0)))
+            (error (.. "invalid temporal recurrence-set " name)))
+          (set count (+ count 1))
+          (when (> key max-index)
+            (set max-index key)))
+        (when (not= count max-index)
+          (error (.. "invalid temporal recurrence-set " name)))
         (local result [])
-        (each [_index item (ipairs value)]
-          (table.insert result (item-validator item)))
+        (var index 1)
+        (while (<= index max-index)
+          (table.insert result (item-validator (. value index)))
+          (set index (+ index 1)))
         result)))
 
 (fn validate-known-keys [value valid-keys context]
@@ -55,6 +69,8 @@
   (if rule.count
       true
       rule.until
+      true
+      options.local-until
       true
       options.limit
       true
@@ -106,15 +122,20 @@
             (error "invalid temporal recurrence UNTIL"))))))
 
 (fn local-rule-for-generation [deps rule options until-instant]
-  (if (= until-instant nil)
-      rule
+  (if until-instant
       (do
         (local zdt (deps.zoned-date-time.from-instant until-instant options.zone-id))
         (local local-until (deps.plain-date-time.from-fields (zdt:fields)))
         (local conservative-until (local-until:add-days 1))
         (local cloned (clone-rule rule))
         (set cloned.until (compact-until-from-plain conservative-until))
-        cloned)))
+        cloned)
+      (and options.local-until (not rule.until))
+      (do
+        (local cloned (clone-rule rule))
+        (set cloned.until (compact-until-from-plain options.local-until))
+        cloned)
+      rule))
 
 (fn candidate-within-utc-until? [deps candidate options until-instant]
   (if (= until-instant nil)
@@ -124,7 +145,7 @@
         (local candidate-instant (zdt:instant))
         (<= (candidate-instant:compare until-instant) 0))))
 
-(fn exrule-occurrence-options [rule options]
+(fn exrule-occurrence-options [rule options latest-candidate]
   (when (not= (type rule) :table)
     (error "invalid temporal recurrence-set exrule occurrence options"))
   (when (not= (type options) :table)
@@ -133,8 +154,8 @@
       {}
       rule.until
       {}
-      options.limit
-      {:limit options.limit}
+      latest-candidate
+      {:local-until latest-candidate}
       {}))
 
 (fn zoned-entry [deps candidate options]
@@ -196,12 +217,22 @@
     (add-local-once result seen candidate "rdates"))
   (sorted-local result))
 
-(fn local-exclusion-map [deps recurrence-set options]
+(fn latest-local-candidate [candidates]
+  (when (not= (type candidates) :table)
+    (error "invalid temporal recurrence-set candidate list"))
+  (var latest nil)
+  (each [_index candidate (ipairs candidates)]
+    (when (or (= latest nil) (> (candidate:compare latest) 0))
+      (set latest candidate)))
+  latest)
+
+(fn local-exclusion-map [deps recurrence-set options inclusion-candidates]
   (when (not (= recurrence-set.kind :temporal-recurrence-set))
     (error "invalid temporal recurrence-set exclusions"))
   (local exclusions {})
+  (local latest-candidate (latest-local-candidate inclusion-candidates))
   (each [_index rule (ipairs recurrence-set.exrules)]
-    (each [_generated-index candidate (ipairs (expand-rule-local deps rule recurrence-set.dtstart (exrule-occurrence-options rule options) "exrules"))]
+    (each [_generated-index candidate (ipairs (expand-rule-local deps rule recurrence-set.dtstart (exrule-occurrence-options rule options latest-candidate) "exrules"))]
       (validate-plain-date-time candidate "exrules")
       (set (. exclusions (local-key candidate)) true)))
   (each [_index candidate (ipairs recurrence-set.exdates)]
@@ -317,12 +348,13 @@
     (local normalized-options {:zone-id options.zone-id
                                :disambiguation disambiguation
                                :limit options.limit})
+    (local inclusion-candidates (local-inclusions deps recurrence-set normalized-options))
     (zoned-results
       deps
       (limited
         (apply-exclusions
-          (local-inclusions deps recurrence-set normalized-options)
-          (local-exclusion-map deps recurrence-set normalized-options))
+          inclusion-candidates
+          (local-exclusion-map deps recurrence-set normalized-options inclusion-candidates))
         normalized-options)
       normalized-options))
   {:from from :occurrences occurrences})
