@@ -87,7 +87,11 @@
                                   :duration base.duration
                                   :plain-date-time base.plain-date-time
                                   :zoned-date-time base.zoned-date-time}))
-(local temporal-with-intervals {:standard standard :interval interval})
+(local temporal-with-intervals {:standard standard
+                                :interval interval
+                                :period period
+                                :plain-date-time base.plain-date-time
+                                :zoned-date-time base.zoned-date-time})
 
 {:duration base.duration
  :instant base.instant

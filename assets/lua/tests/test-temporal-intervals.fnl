@@ -223,6 +223,27 @@
   (assert (= (Temporal.interval.format (. occ 2))
              "2026-03-07T02:30:00-05:00[America/New_York]/2026-03-08T03:00:00-04:00[America/New_York]")))
 
+(fn repeating-interval-calendar-period-shifts-both-endpoints []
+  (local first (Temporal.interval.parse
+                 "2026-10-31T00:30:00-04:00[America/New_York]/2026-10-31T02:30:00-04:00[America/New_York]"
+                 {:type :zoned-date-time}))
+  (local repeating (Temporal.repeating-interval.from
+                     {:interval first :count 2 :step-kind :calendar-period :step (Temporal.period.parse "P1D")}))
+  (local occ (Temporal.repeating-interval.occurrences repeating {:disambiguation :latest}))
+  (assert (= (Temporal.interval.format (. occ 2))
+             "2026-11-01T00:30:00-04:00[America/New_York]/2026-11-01T02:30:00-05:00[America/New_York]")))
+
+(fn repeating-interval-final-occurrence-does-not-resolve-unused-next []
+  (local first (Temporal.interval.parse
+                 "2026-03-07T01:30:00-05:00[America/New_York]/2026-03-07T02:30:00-05:00[America/New_York]"
+                 {:type :zoned-date-time}))
+  (local repeating (Temporal.repeating-interval.from
+                     {:interval first :count 1 :step-kind :calendar-period :step (Temporal.period.parse "P1D")}))
+  (local occ (Temporal.repeating-interval.occurrences repeating {}))
+  (assert (= (# occ) 1))
+  (assert (= (Temporal.interval.format (. occ 1))
+             "2026-03-07T01:30:00-05:00[America/New_York]/2026-03-07T02:30:00-05:00[America/New_York]")))
+
 (fn repeating-interval-from-step-metadata []
   (local first (Temporal.interval.parse "2026-01-31T10:00:00/P1M" {:type :plain-date-time}))
   (local repeating (Temporal.repeating-interval.from
@@ -268,6 +289,8 @@
 (table.insert tests {:name "repeating interval exact duration step metadata" :fn repeating-interval-exact-duration-step-metadata})
 (table.insert tests {:name "repeating interval calendar period step metadata" :fn repeating-interval-calendar-period-step-metadata})
 (table.insert tests {:name "repeating interval calendar period default reject" :fn repeating-interval-calendar-period-default-reject})
+(table.insert tests {:name "repeating interval calendar period shifts both endpoints" :fn repeating-interval-calendar-period-shifts-both-endpoints})
+(table.insert tests {:name "repeating interval final occurrence does not resolve unused next" :fn repeating-interval-final-occurrence-does-not-resolve-unused-next})
 (table.insert tests {:name "repeating interval from step metadata" :fn repeating-interval-from-step-metadata})
 (table.insert tests {:name "repeating interval rejections" :fn repeating-interval-rejections})
 

@@ -70,51 +70,6 @@
         count)
       (error "temporal repeating interval repeat prefix is malformed")))
 
-(fn period-field [period key]
-  (local value (. period key))
-  (if (= value nil)
-      0
-      (= (type value) :number)
-      value
-      (error (.. "temporal repeating interval period step field must be numeric: " (tostring key)))))
-
-(fn period-format [period]
-  (local negative? (if (< (period-field period :years) 0)
-                       true
-                       (< (period-field period :months) 0)
-                       true
-                       (< (period-field period :weeks) 0)
-                       true
-                       (< (period-field period :days) 0)
-                       true
-                       false))
-  (local parts [])
-  (fn append-field [value suffix]
-    (when (not= value 0)
-      (table.insert parts (.. (tostring (math.abs value)) suffix))))
-  (append-field (period-field period :years) "Y")
-  (append-field (period-field period :months) "M")
-  (append-field (period-field period :weeks) "W")
-  (append-field (period-field period :days) "D")
-  (if (= (length parts) 0)
-      "P0D"
-      (.. (if negative? "-" "") "P" (table.concat parts ""))))
-
-(fn interval-end-text [text]
-  (var bracket-depth 0)
-  (var separator-index nil)
-  (for [index 1 (length text)]
-    (local char (text:sub index index))
-    (if (= char "[")
-        (set bracket-depth (+ bracket-depth 1))
-        (= char "]")
-        (set bracket-depth (- bracket-depth 1))
-        (and (= char "/") (= bracket-depth 0))
-        (set separator-index index)))
-  (when (= separator-index nil)
-    (error "temporal repeating interval occurrence could not split interval text"))
-  (text:sub (+ separator-index 1)))
-
 (fn occurrence-step-kind [repeating]
   (if (= repeating.step-kind nil)
       :exact-duration
@@ -130,18 +85,35 @@
       :reject
       options.disambiguation))
 
+(fn zoned-zone-id [endpoint]
+  (local zone-id (. endpoint :zone-id))
+  (if (= (type zone-id) :function)
+      (zone-id endpoint)
+      zone-id))
+
+(fn endpoint-local-plain-date-time [Temporal endpoint]
+  (Temporal.plain-date-time.from-fields (endpoint:fields)))
+
+(fn calendar-shift-endpoint [Temporal endpoint-type endpoint period disambiguation]
+  (if (= endpoint-type :zoned-date-time)
+      (do
+        (local local-start (endpoint-local-plain-date-time Temporal endpoint))
+        (local local-derived (Temporal.period.add-to-plain-date-time local-start period))
+        (Temporal.zoned-date-time.from-plain
+          local-derived
+          (zoned-zone-id endpoint)
+          {:disambiguation disambiguation}))
+      (Temporal.period.add-to-plain-date-time endpoint period)))
+
 (fn calendar-next-interval [Temporal current step options]
   (when (and (not (= current.type :plain-date-time))
-             (not (= current.type :zoned-date-time)))
+              (not (= current.type :zoned-date-time)))
     (error "temporal repeating interval calendar steps require :plain-date-time or :zoned-date-time"))
-  (local parse-options {:type current.type})
-  (when (= current.type :zoned-date-time)
-    (set parse-options.disambiguation (occurrence-disambiguation options)))
-  (Temporal.interval.parse
-    (.. (interval-end-text (Temporal.interval.format current))
-        "/"
-        (period-format step))
-    parse-options))
+  (local disambiguation (occurrence-disambiguation options))
+  (Temporal.interval.from
+    {:type current.type
+     :start (calendar-shift-endpoint Temporal current.type current.start step disambiguation)
+     :end (calendar-shift-endpoint Temporal current.type current.end step disambiguation)}))
 
 (fn next-interval [Temporal current step-kind step options]
   (if (= step-kind :exact-duration)
@@ -201,7 +173,8 @@
     (var current repeating.interval)
     (for [index 1 total]
       (table.insert result current)
-      (set current (next-interval Temporal current step-kind step options)))
+      (when (< index total)
+        (set current (next-interval Temporal current step-kind step options))))
     result)
 
   {:from from
