@@ -134,6 +134,58 @@
     ["2026-01-01T09:00:00-05:00[America/New_York]"
      "2026-01-02T09:00:00-05:00[America/New_York]"]))
 
+(fn applies-dst-disambiguation-policy []
+  (local overlap-set
+    (Temporal.recurrence-set.from
+      {:dtstart (p "2026-11-01T01:30:00")
+       :rdates [(p "2026-11-01T01:30:00")]}))
+  (assert-error-contains
+    #(Temporal.recurrence-set.occurrences overlap-set {:zone-id "America/New_York"})
+    "ambiguous or nonexistent"
+    "default reject should reject overlap")
+  (assert-zoned-strings
+    (Temporal.recurrence-set.occurrences overlap-set {:zone-id "America/New_York" :disambiguation :earliest})
+    ["2026-11-01T01:30:00-04:00[America/New_York]"])
+  (assert-zoned-strings
+    (Temporal.recurrence-set.occurrences overlap-set {:zone-id "America/New_York" :disambiguation :latest})
+    ["2026-11-01T01:30:00-05:00[America/New_York]"])
+  (local gap-set
+    (Temporal.recurrence-set.from
+      {:dtstart (p "2026-03-08T02:30:00")
+       :rdates [(p "2026-03-08T02:30:00")]}))
+  (assert-error-contains
+    #(Temporal.recurrence-set.occurrences gap-set {:zone-id "America/New_York"})
+    "ambiguous or nonexistent"
+    "default reject should reject gap")
+  (assert-zoned-strings
+    (Temporal.recurrence-set.occurrences gap-set {:zone-id "America/New_York" :disambiguation :earliest})
+    ["2026-03-08T03:00:00-04:00[America/New_York]"])
+  (assert-zoned-strings
+    (Temporal.recurrence-set.occurrences gap-set {:zone-id "America/New_York" :disambiguation :latest})
+    ["2026-03-08T01:59:59.999999999-05:00[America/New_York]"]))
+
+(fn supports-compact-utc-until-only-in-recurrence-set []
+  (local dtstart (p "2026-01-01T09:00:00"))
+  (local utc-rule (r "RRULE:FREQ=DAILY;UNTIL=20260103T140000Z"))
+  (local recurrence-set (Temporal.recurrence-set.from {:dtstart dtstart :rrules [utc-rule]}))
+  (assert-zoned-strings
+    (Temporal.recurrence-set.occurrences recurrence-set {:zone-id "America/New_York"})
+    ["2026-01-01T09:00:00-05:00[America/New_York]"
+     "2026-01-02T09:00:00-05:00[America/New_York]"
+     "2026-01-03T09:00:00-05:00[America/New_York]"])
+  (local before-third
+    (Temporal.recurrence-set.from
+      {:dtstart dtstart
+       :rrules [(r "RRULE:FREQ=DAILY;UNTIL=20260103T135959Z")]}))
+  (assert-zoned-strings
+    (Temporal.recurrence-set.occurrences before-third {:zone-id "America/New_York"})
+    ["2026-01-01T09:00:00-05:00[America/New_York]"
+     "2026-01-02T09:00:00-05:00[America/New_York]"])
+  (assert-error-contains
+    #(Temporal.recurrence.occurrences utc-rule dtstart {})
+    "UTC UNTIL"
+    "standalone recurrence must still reject UTC UNTIL"))
+
 (table.insert tests {:name "exports recurrence-set and expands RDATE-only"
                      :fn exports-recurrence-set-and-expands-rdate-only})
 (table.insert tests {:name "validates constructor and occurrence options"
@@ -147,7 +199,11 @@
 (table.insert tests {:name "bounded EXRULE excludes later RDATE before output limit"
                      :fn bounded-exrule-excludes-later-rdate-before-output-limit})
 (table.insert tests {:name "enforces finite expansion"
-                      :fn enforces-finite-expansion})
+                       :fn enforces-finite-expansion})
+(table.insert tests {:name "applies DST disambiguation policy"
+                     :fn applies-dst-disambiguation-policy})
+(table.insert tests {:name "supports compact UTC UNTIL only in recurrence-set"
+                     :fn supports-compact-utc-until-only-in-recurrence-set})
 
 (local main
   (fn []

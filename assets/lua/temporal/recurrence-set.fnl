@@ -1,3 +1,5 @@
+(local rule-utils (require :temporal/recurrence/rule))
+
 (local constructor-keys {:dtstart true :rrules true :rdates true :exdates true :exrules true})
 (local occurrence-option-keys {:zone-id true :disambiguation true :limit true})
 (local valid-disambiguation {:reject true :earliest true :latest true})
@@ -63,6 +65,64 @@
     (error "invalid temporal recurrence-set rule occurrence options"))
   (if options.limit {:limit options.limit} {}))
 
+(fn two-digit [value]
+  (if (< value 10)
+      (.. "0" value)
+      (tostring value)))
+
+(fn compact-until-from-plain [plain]
+  (local fields (plain:fields))
+  (.. fields.year
+      (two-digit fields.month)
+      (two-digit fields.day)
+      "T"
+      (two-digit fields.hour)
+      (two-digit fields.minute)
+      (two-digit fields.second)))
+
+(fn clone-rule [rule]
+  (local cloned {})
+  (each [key value (pairs rule)]
+    (if (= (type value) :table)
+        (do
+          (local copied [])
+          (each [nested-key nested-value (pairs value)]
+            (set (. copied nested-key) nested-value))
+          (set (. cloned key) copied))
+        (set (. cloned key) value)))
+  cloned)
+
+(fn utc-until-instant [deps rule]
+  (when (and rule.until (rule-utils.compact-utc-until? rule.until))
+    (rule-utils.parse-utc-until deps.instant rule.until)))
+
+(fn validate-until-form [deps rule]
+  (when rule.until
+    (if (rule-utils.compact-utc-until? rule.until)
+        true
+        (do
+          (local (ok _value) (pcall rule-utils.parse-until deps.standard rule.until))
+          (when (not ok)
+            (error "invalid temporal recurrence UNTIL"))))))
+
+(fn local-rule-for-generation [deps rule options until-instant]
+  (if (= until-instant nil)
+      rule
+      (do
+        (local zdt (deps.zoned-date-time.from-instant until-instant options.zone-id))
+        (local local-until (deps.plain-date-time.from-fields (zdt:fields)))
+        (local cloned (clone-rule rule))
+        (set cloned.until (compact-until-from-plain local-until))
+        cloned)))
+
+(fn candidate-within-utc-until? [deps candidate options until-instant]
+  (if (= until-instant nil)
+      true
+      (do
+        (local zdt (deps.zoned-date-time.from-plain candidate options.zone-id {:disambiguation options.disambiguation}))
+        (local candidate-instant (zdt:instant))
+        (<= (candidate-instant:compare until-instant) 0))))
+
 (fn exrule-occurrence-options [rule options]
   (when (not= (type rule) :table)
     (error "invalid temporal recurrence-set exrule occurrence options"))
@@ -107,11 +167,21 @@
   rule)
 
 (fn expand-rule-local [deps rule dtstart options name]
-  (assert-finite-rule rule options name)
-  (local generated (deps.recurrence.occurrences rule dtstart (rule-occurrence-options options)))
+  (validate-until-form deps rule)
+  (local until-instant (utc-until-instant deps rule))
+  (local generation-rule (local-rule-for-generation deps rule options until-instant))
+  (assert-finite-rule generation-rule options name)
+  (local generated (deps.recurrence.occurrences generation-rule dtstart (rule-occurrence-options options)))
   (when (not= (type generated) :table)
     (error (.. "invalid temporal recurrence-set " name " expansion")))
-  generated)
+  (if (= until-instant nil)
+      generated
+      (do
+        (local filtered [])
+        (each [_index candidate (ipairs generated)]
+          (when (candidate-within-utc-until? deps candidate options until-instant)
+            (table.insert filtered candidate)))
+        filtered)))
 
 (fn local-inclusions [deps recurrence-set options]
   (when (not (= recurrence-set.kind :temporal-recurrence-set))
@@ -191,6 +261,12 @@
     (error "temporal recurrence-set requires recurrence dependency"))
   (when (not (and deps.zoned-date-time deps.zoned-date-time.from-plain))
     (error "temporal recurrence-set requires zoned-date-time dependency"))
+  (when (not (and deps.instant deps.instant.parse))
+    (error "temporal recurrence-set requires instant dependency"))
+  (when (not (and deps.plain-date-time deps.plain-date-time.from-fields))
+    (error "temporal recurrence-set requires plain-date-time dependency"))
+  (when (not deps.zoned-date-time.from-instant)
+    (error "temporal recurrence-set requires zoned-date-time from-instant dependency"))
   (fn from [options]
     (validate-known-keys options constructor-keys "constructor")
     (local dtstart (validate-plain-date-time options.dtstart "dtstart"))

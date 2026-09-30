@@ -274,8 +274,30 @@
       ":"
       (text:sub 14 15)))
 
+(fn compact-utc-until->iso [text]
+  (.. (text:sub 1 4)
+      "-"
+      (text:sub 5 6)
+      "-"
+      (text:sub 7 8)
+      "T"
+      (text:sub 10 11)
+      ":"
+      (text:sub 12 13)
+      ":"
+      (text:sub 14 15)
+      "Z"))
+
 (fn parse-local-until [standard text]
   (local (ok value) (pcall standard.parse-plain-date-time (compact-local-until->iso text)))
+  (when (not ok)
+    (error "invalid temporal recurrence UNTIL"))
+  value)
+
+(fn parse-utc-until [instant text]
+  (when (not (compact-utc-until? text))
+    (error "invalid temporal recurrence UNTIL"))
+  (local (ok value) (pcall instant.parse (compact-utc-until->iso text)))
   (when (not ok)
     (error "invalid temporal recurrence UNTIL"))
   value)
@@ -446,6 +468,8 @@
  :parse-rrule parse-rrule
  :to-rrule to-rrule
  :parse-until parse-until
+ :parse-utc-until parse-utc-until
+ :compact-utc-until? compact-utc-until?
  :normalize-occurrence-options normalize-occurrence-options
  :occurrence-bounds occurrence-bounds
  :day-to-number day-to-number
