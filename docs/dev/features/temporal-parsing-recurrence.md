@@ -80,6 +80,36 @@ RRULE:FREQ=HOURLY;BYMINUTE=0;UNTIL=20260101T101500 ; sub-daily rule
 
 Unsupported continuation areas fail explicitly instead of falling back: recurrence sets (`RDATE`, `EXDATE`, `EXRULE`), ICS/VEVENT parsing, UTC/instant `UNTIL` expansion, explicit-zone/DST expansion, host-local timezone defaults, date-only/fractional `UNTIL`, and leap-second `BYSECOND=60` are outside this `PlainDateTime` recurrence slice.
 
+## Recurrence sets and zoned expansion
+
+`temporal.recurrence-set` composes finite local recurrence sources and converts the surviving occurrences through an explicit IANA time zone:
+
+```fennel
+(local set
+  (Temporal.recurrence-set.from
+    {:dtstart (Temporal.plain-date-time.parse "2026-03-06T01:30:00")
+     :rrules [(Temporal.recurrence.parse-rrule "RRULE:FREQ=DAILY;COUNT=3")]
+     :rdates [(Temporal.plain-date-time.parse "2026-03-10T01:30:00")]
+     :exdates [(Temporal.plain-date-time.parse "2026-03-07T01:30:00")]
+     :exrules [(Temporal.recurrence.parse-rrule "RRULE:FREQ=WEEKLY;COUNT=1")]}))
+
+(Temporal.recurrence-set.occurrences
+  set
+  {:zone-id "America/New_York"
+   :disambiguation :earliest
+   :limit 10})
+```
+
+Constructor keys are canonical: `:dtstart`, `:rrules`, `:rdates`, `:exdates`, and `:exrules`. Expansion option keys are canonical: `:zone-id`, `:disambiguation`, and `:limit`. Singular aliases, raw ICS property text, host-local timezone defaults, and output-mode switches are rejected.
+
+Local assembly expands each RRULE from `:dtstart`, adds RDATEs, expands EXRULEs from `:dtstart`, adds EXDATEs, deduplicates local inclusions, removes local exclusions, and sorts by local plain date-time. Exclusions win over inclusions. `:limit` caps returned occurrences after exclusions and does not backfill additional generated instances.
+
+Expansion requires `:zone-id` and returns `ZonedDateTime` values. `:disambiguation` defaults to `:reject`; accepted values are `:reject`, `:earliest`, and `:latest`. DST gaps and overlaps use the same core zoned conversion behavior as `Temporal.zoned-date-time.from-plain`.
+
+Standalone `Temporal.recurrence.occurrences` remains PlainDateTime-only and rejects compact UTC `UNTIL`. `Temporal.recurrence-set.occurrences` supports compact UTC `UNTIL=YYYYMMDDTHHMMSSZ` because it has an explicit zone; unsupported date-only, fractional, non-compact offset, and leap-second forms still fail loudly.
+
+Recurrence sets are not ICS parsing. `VEVENT`, `VTIMEZONE`, all-day events, overrides, cancellations, client interoperability, and serialization remain future `Temporal.ics` work.
+
 ## Structured expressions
 
 `temporal.expression` resolves structured expression tables explicitly against caller-provided context:
@@ -136,7 +166,7 @@ These items are no longer unowned future ideas; the [Temporal Complete Library R
 
 - **ICU/CLDR localization:** Deferred. Localized parsing and formatting need an explicit ICU/CLDR/data-packaging strategy before implementation.
 - **Broad natural language:** Deferred. Wider language coverage, ambiguous phrases, locales, and product ambiguity UX need their own design.
-- **RFC5545 recurrence continuations:** The in-scope standalone RRULE engine is implemented for `PlainDateTime`. Recurrence sets, ICS/VEVENT, UTC/instant `UNTIL` expansion, date-only/fractional `UNTIL`, explicit-zone/DST expansion, and leap-second support remain deferred follow-up tracks with loud errors in the current API.
+- **RFC5545 recurrence continuations:** The standalone RRULE engine is implemented for `PlainDateTime`, and `Temporal.recurrence-set` now covers finite recurrence-set assembly with explicit-zone expansion, DST disambiguation, and compact UTC `UNTIL` under an explicit zone. ICS/VEVENT parsing, `VTIMEZONE`, all-day events, overrides, cancellations, client interoperability, serialization, date-only/fractional/non-compact-offset `UNTIL`, and leap-second support remain deferred follow-up tracks with loud errors in the current API.
 - **ISO intervals/repeating intervals:** Bounded `start/end` intervals and plain date-time `start/period` and `period/end` parsing are covered by [Temporal Intervals](./temporal-intervals). Date-only period endpoint forms are supported only by `Temporal.interval.parse` for plain date-times; repeating interval period endpoints, instant period endpoints, zoned interval period endpoints, time-based `PT...` period text, and full ISO interval grammar beyond those two plain date-time forms remain deferred.
 - **Calendar periods:** Date-only calendar period records and `PlainDateTime` arithmetic are covered by [Temporal Calendar Periods](./temporal-calendar-periods). Business days and locale calendar policy remain deferred. Exact `Duration` remains separate from calendar periods such as months and years.
 - **Non-Gregorian calendars:** Deferred. The current foundation uses ISO proleptic Gregorian civil fields only.

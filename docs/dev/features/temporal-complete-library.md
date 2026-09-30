@@ -54,6 +54,6 @@ Track specs must resolve the finite choices they introduce, including initial lo
 
 ## Current implementation status
 
-The current implementation remains the documented subset on the existing temporal pages until each track lands. Unsupported inputs must continue to fail loudly rather than silently guessing behavior.
+The current implementation includes the documented temporal foundation, provider registry, standalone RFC5545 RRULE engine, and `Temporal.recurrence-set` finite recurrence-set assembly with explicit-zone expansion, DST gap/overlap disambiguation, and compact UTC `UNTIL` support under an explicit zone. Later tracks remain unsupported and must continue to fail loudly rather than silently guessing behavior, including ICS/VEVENT parsing, `VTIMEZONE`, all-day events, overrides, cancellations, client interoperability, serialization, localization, non-Gregorian calendars, business calendars, broad natural language, timestamp migrations, and scheduler policy.
 
 The closeout evidence is tracked in [Temporal Complete Acceptance](./temporal-complete-acceptance).
