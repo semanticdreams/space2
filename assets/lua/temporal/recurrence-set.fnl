@@ -36,8 +36,145 @@
 (fn list-nonempty? [items]
   (> (# items) 0))
 
+(fn local-key [plain]
+  (plain:to-string))
+
+(fn sorted-local [items]
+  (when (not= (type items) :table)
+    (error "invalid temporal recurrence-set local list"))
+  (table.sort items #(< ($1:compare $2) 0))
+  items)
+
+(fn bounded-rule? [rule options]
+  (when (not= (type rule) :table)
+    (error "invalid temporal recurrence-set rule"))
+  (when (not= (type options) :table)
+    (error "invalid temporal recurrence-set rule options"))
+  (if rule.count
+      true
+      rule.until
+      true
+      options.limit
+      true
+      false))
+
+(fn rule-occurrence-options [options]
+  (when (not= (type options) :table)
+    (error "invalid temporal recurrence-set rule occurrence options"))
+  (if options.limit {:limit options.limit} {}))
+
+(fn zoned-entry [deps candidate options]
+  (validate-plain-date-time candidate "zoned candidate")
+  (when (not (and deps deps.zoned-date-time deps.zoned-date-time.from-plain))
+    (error "temporal recurrence-set requires zoned-date-time dependency"))
+  (when (not= (type options) :table)
+    (error "invalid temporal recurrence-set zoned options"))
+  (local zdt
+    (deps.zoned-date-time.from-plain
+      candidate
+      options.zone-id
+      {:disambiguation options.disambiguation}))
+  {:local candidate :zoned zdt :instant (zdt:instant)})
+
+(fn add-local-once [items seen candidate name]
+  (when (not= (type items) :table)
+    (error "invalid temporal recurrence-set local list"))
+  (when (not= (type seen) :table)
+    (error "invalid temporal recurrence-set local map"))
+  (validate-plain-date-time candidate name)
+  (local key (local-key candidate))
+  (when (not (. seen key))
+    (set (. seen key) true)
+    (table.insert items candidate))
+  items)
+
+(fn assert-finite-rule [rule options name]
+  (when (not (bounded-rule? rule options))
+    (error (.. "unbounded temporal recurrence-set " name)))
+  rule)
+
+(fn expand-rule-local [deps rule dtstart options name]
+  (assert-finite-rule rule options name)
+  (local generated (deps.recurrence.occurrences rule dtstart (rule-occurrence-options options)))
+  (when (not= (type generated) :table)
+    (error (.. "invalid temporal recurrence-set " name " expansion")))
+  generated)
+
+(fn local-inclusions [deps recurrence-set options]
+  (when (not (= recurrence-set.kind :temporal-recurrence-set))
+    (error "invalid temporal recurrence-set inclusions"))
+  (local result [])
+  (local seen {})
+  (each [_index rule (ipairs recurrence-set.rrules)]
+    (each [_generated-index candidate (ipairs (expand-rule-local deps rule recurrence-set.dtstart options "rrules"))]
+      (add-local-once result seen candidate "rrules")))
+  (each [_index candidate (ipairs recurrence-set.rdates)]
+    (add-local-once result seen candidate "rdates"))
+  (sorted-local result))
+
+(fn local-exclusion-map [deps recurrence-set options]
+  (when (not (= recurrence-set.kind :temporal-recurrence-set))
+    (error "invalid temporal recurrence-set exclusions"))
+  (local exclusions {})
+  (each [_index rule (ipairs recurrence-set.exrules)]
+    (each [_generated-index candidate (ipairs (expand-rule-local deps rule recurrence-set.dtstart options "exrules"))]
+      (validate-plain-date-time candidate "exrules")
+      (set (. exclusions (local-key candidate)) true)))
+  (each [_index candidate (ipairs recurrence-set.exdates)]
+    (validate-plain-date-time candidate "exdates")
+    (set (. exclusions (local-key candidate)) true))
+  exclusions)
+
+(fn apply-exclusions [candidates exclusions]
+  (when (not= (type candidates) :table)
+    (error "invalid temporal recurrence-set candidate list"))
+  (when (not= (type exclusions) :table)
+    (error "invalid temporal recurrence-set exclusion map"))
+  (local result [])
+  (each [_index candidate (ipairs candidates)]
+    (when (not (. exclusions (local-key candidate)))
+      (table.insert result candidate)))
+  result)
+
+(fn limited [items options]
+  (when (not= (type items) :table)
+    (error "invalid temporal recurrence-set limited list"))
+  (if (= options.limit nil)
+      items
+      (do
+        (local result [])
+        (var index 1)
+        (while (and (<= index (# items)) (<= index options.limit))
+          (table.insert result (. items index))
+          (set index (+ index 1)))
+        result)))
+
+(fn sort-zoned-entries [entries]
+  (when (not= (type entries) :table)
+    (error "invalid temporal recurrence-set zoned entry list"))
+  (table.sort
+    entries
+    (fn [left right]
+      (local instant-order (left.instant:compare right.instant))
+      (if (not= instant-order 0)
+          (< instant-order 0)
+          (< (left.local:compare right.local) 0))))
+  entries)
+
+(fn zoned-results [deps candidates options]
+  (when (not= (type candidates) :table)
+    (error "invalid temporal recurrence-set zoned candidates"))
+  (local entries [])
+  (each [_index candidate (ipairs candidates)]
+    (table.insert entries (zoned-entry deps candidate options)))
+  (sort-zoned-entries entries)
+  (local result [])
+  (each [_index entry (ipairs entries)]
+    (table.insert result entry.zoned))
+  result)
+
 (fn create [deps]
-  (when (not (and deps deps.recurrence deps.recurrence.from))
+  (when (not (and deps deps.recurrence deps.recurrence.from deps.recurrence.occurrences))
     (error "temporal recurrence-set requires recurrence dependency"))
   (when (not (and deps.zoned-date-time deps.zoned-date-time.from-plain))
     (error "temporal recurrence-set requires zoned-date-time dependency"))
@@ -87,21 +224,17 @@
       (error "invalid temporal recurrence-set disambiguation"))
     (when (and (not= options.limit nil) (not (positive-integer? options.limit)))
       (error "invalid temporal recurrence-set limit"))
-    (when (or (list-nonempty? recurrence-set.rrules)
-              (list-nonempty? recurrence-set.exdates)
-              (list-nonempty? recurrence-set.exrules))
-      (error "temporal recurrence-set occurrences currently support RDATE-only expansion"))
-    (local result [])
-    (var count 0)
-    (each [_index candidate (ipairs recurrence-set.rdates)]
-      (when (or (= options.limit nil) (< count options.limit))
-        (table.insert result
-                      (deps.zoned-date-time.from-plain
-                        candidate
-                        options.zone-id
-                        {:disambiguation disambiguation}))
-        (set count (+ count 1))))
-    result)
+    (local normalized-options {:zone-id options.zone-id
+                               :disambiguation disambiguation
+                               :limit options.limit})
+    (zoned-results
+      deps
+      (limited
+        (apply-exclusions
+          (local-inclusions deps recurrence-set normalized-options)
+          (local-exclusion-map deps recurrence-set normalized-options))
+        normalized-options)
+      normalized-options))
   {:from from :occurrences occurrences})
 
 create

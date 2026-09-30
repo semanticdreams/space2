@@ -14,6 +14,9 @@
 (fn p [text]
   (Temporal.plain-date-time.parse text))
 
+(fn r [text]
+  (Temporal.recurrence.parse-rrule text))
+
 (fn assert-zoned-strings [actual expected]
   (assert (= (# actual) (# expected)))
   (each [index value (ipairs expected)]
@@ -72,10 +75,67 @@
     "disambiguation"
     "invalid disambiguation should identify disambiguation"))
 
+(fn assembles-inclusions-exclusions-dedupes-and-orders []
+  (local recurrence-set
+    (Temporal.recurrence-set.from
+      {:dtstart (p "2026-01-01T09:00:00")
+       :rrules [(r "RRULE:FREQ=DAILY;COUNT=3")
+                (r "RRULE:FREQ=WEEKLY;COUNT=2")]
+       :rdates [(p "2026-01-03T09:00:00") (p "2026-01-04T09:00:00")]
+       :exdates [(p "2026-01-02T09:00:00")]
+       :exrules [(r "RRULE:FREQ=DAILY;INTERVAL=7;COUNT=1")]}))
+  (assert-zoned-strings
+    (Temporal.recurrence-set.occurrences recurrence-set {:zone-id "America/New_York"})
+    ["2026-01-03T09:00:00-05:00[America/New_York]"
+     "2026-01-04T09:00:00-05:00[America/New_York]"
+     "2026-01-08T09:00:00-05:00[America/New_York]"]))
+
+(fn allows-empty-results-after-exclusions []
+  (local recurrence-set
+    (Temporal.recurrence-set.from
+      {:dtstart (p "2026-01-01T09:00:00")
+       :rdates [(p "2026-01-01T09:00:00")]
+       :exdates [(p "2026-01-01T09:00:00")]}))
+  (assert-zoned-strings
+    (Temporal.recurrence-set.occurrences recurrence-set {:zone-id "America/New_York"})
+    []))
+
+(fn applies-limit-without-backfill-after-exclusions []
+  (local recurrence-set
+    (Temporal.recurrence-set.from
+      {:dtstart (p "2026-01-01T09:00:00")
+       :rrules [(r "RRULE:FREQ=DAILY;COUNT=5")]
+       :exdates [(p "2026-01-01T09:00:00")]}))
+  (assert-zoned-strings
+    (Temporal.recurrence-set.occurrences recurrence-set {:zone-id "America/New_York" :limit 2})
+    ["2026-01-02T09:00:00-05:00[America/New_York]"]))
+
+(fn enforces-finite-expansion []
+  (local unbounded
+    (Temporal.recurrence-set.from
+      {:dtstart (p "2026-01-01T09:00:00")
+       :rrules [(r "RRULE:FREQ=DAILY")]}))
+  (assert-error-contains
+    #(Temporal.recurrence-set.occurrences unbounded {:zone-id "America/New_York"})
+    "unbounded"
+    "unbounded recurrence-set should throw")
+  (assert-zoned-strings
+    (Temporal.recurrence-set.occurrences unbounded {:zone-id "America/New_York" :limit 2})
+    ["2026-01-01T09:00:00-05:00[America/New_York]"
+     "2026-01-02T09:00:00-05:00[America/New_York]"]))
+
 (table.insert tests {:name "exports recurrence-set and expands RDATE-only"
                      :fn exports-recurrence-set-and-expands-rdate-only})
 (table.insert tests {:name "validates constructor and occurrence options"
-                     :fn validates-constructor-and-occurrence-options})
+                      :fn validates-constructor-and-occurrence-options})
+(table.insert tests {:name "assembles inclusions, exclusions, dedupes, and orders"
+                     :fn assembles-inclusions-exclusions-dedupes-and-orders})
+(table.insert tests {:name "allows empty results after exclusions"
+                     :fn allows-empty-results-after-exclusions})
+(table.insert tests {:name "applies limit without backfill after exclusions"
+                     :fn applies-limit-without-backfill-after-exclusions})
+(table.insert tests {:name "enforces finite expansion"
+                     :fn enforces-finite-expansion})
 
 (local main
   (fn []
