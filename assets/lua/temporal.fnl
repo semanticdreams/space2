@@ -82,8 +82,16 @@
      :zoned-date-time base.zoned-date-time}))
 (local natural (create-natural {:recurrence recurrence}))
 (local providers (create-provider-registry {}))
-(local interval (create-interval {:standard standard :period period}))
-(local temporal-with-intervals {:standard standard :interval interval})
+(local interval (create-interval {:standard standard
+                                  :period period
+                                  :duration base.duration
+                                  :plain-date-time base.plain-date-time
+                                  :zoned-date-time base.zoned-date-time}))
+(local temporal-with-intervals {:standard standard
+                                :interval interval
+                                :period period
+                                :plain-date-time base.plain-date-time
+                                :zoned-date-time base.zoned-date-time})
 
 {:duration base.duration
  :instant base.instant
