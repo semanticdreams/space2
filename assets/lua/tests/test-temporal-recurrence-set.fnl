@@ -165,6 +165,16 @@
     (Temporal.recurrence-set.occurrences recurrence-set {:zone-id "America/New_York" :limit 1})
     []))
 
+(fn empty-inclusion-window-skips-unbounded-exrule []
+  (local recurrence-set
+    (Temporal.recurrence-set.from
+      {:dtstart (p "2026-01-10T09:00:00")
+       :rrules [(r "RRULE:FREQ=DAILY;UNTIL=20260101T090000")]
+       :exrules [(r "RRULE:FREQ=DAILY")]}))
+  (assert-zoned-strings
+    (Temporal.recurrence-set.occurrences recurrence-set {:zone-id "America/New_York" :limit 1})
+    []))
+
 (fn enforces-finite-expansion []
   (local unbounded
     (Temporal.recurrence-set.from
@@ -259,9 +269,11 @@
 (table.insert tests {:name "bounded EXRULE excludes later RDATE before output limit"
                       :fn bounded-exrule-excludes-later-rdate-before-output-limit})
 (table.insert tests {:name "unbounded EXRULE excludes later RDATE before output limit"
-                     :fn unbounded-exrule-excludes-later-rdate-before-output-limit})
+                      :fn unbounded-exrule-excludes-later-rdate-before-output-limit})
+(table.insert tests {:name "empty inclusion window skips unbounded EXRULE"
+                     :fn empty-inclusion-window-skips-unbounded-exrule})
 (table.insert tests {:name "enforces finite expansion"
-                       :fn enforces-finite-expansion})
+                        :fn enforces-finite-expansion})
 (table.insert tests {:name "applies DST disambiguation policy"
                      :fn applies-dst-disambiguation-policy})
 (table.insert tests {:name "supports compact UTC UNTIL only in recurrence-set"

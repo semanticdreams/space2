@@ -231,10 +231,11 @@
     (error "invalid temporal recurrence-set exclusions"))
   (local exclusions {})
   (local latest-candidate (latest-local-candidate inclusion-candidates))
-  (each [_index rule (ipairs recurrence-set.exrules)]
-    (each [_generated-index candidate (ipairs (expand-rule-local deps rule recurrence-set.dtstart (exrule-occurrence-options rule options latest-candidate) "exrules"))]
-      (validate-plain-date-time candidate "exrules")
-      (set (. exclusions (local-key candidate)) true)))
+  (when latest-candidate
+    (each [_index rule (ipairs recurrence-set.exrules)]
+      (each [_generated-index candidate (ipairs (expand-rule-local deps rule recurrence-set.dtstart (exrule-occurrence-options rule options latest-candidate) "exrules"))]
+        (validate-plain-date-time candidate "exrules")
+        (set (. exclusions (local-key candidate)) true))))
   (each [_index candidate (ipairs recurrence-set.exdates)]
     (validate-plain-date-time candidate "exdates")
     (set (. exclusions (local-key candidate)) true))
