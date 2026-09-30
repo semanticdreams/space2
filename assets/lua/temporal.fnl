@@ -5,6 +5,7 @@
 (local create-repeating-interval (require :temporal/repeating-interval))
 (local create-pattern (require :temporal/pattern))
 (local create-recurrence (require :temporal/recurrence))
+(local create-recurrence-set (require :temporal/recurrence-set))
 (local expression (require :temporal/expression))
 (local create-natural (require :temporal/natural))
 (local create-provider-registry (require :temporal/provider-registry))
@@ -72,6 +73,13 @@
 (local standard (create-standard base))
 (local period (create-period base))
 (local recurrence (create-recurrence {:period period :standard standard :plain-date-time base.plain-date-time :duration base.duration}))
+(local recurrence-set
+  (create-recurrence-set
+    {:recurrence recurrence
+     :standard standard
+     :plain-date-time base.plain-date-time
+     :instant base.instant
+     :zoned-date-time base.zoned-date-time}))
 (local natural (create-natural {:recurrence recurrence}))
 (local providers (create-provider-registry {}))
 (local interval (create-interval {:standard standard :period period}))
@@ -88,7 +96,8 @@
   :interval interval
   :repeating-interval (create-repeating-interval temporal-with-intervals)
   :pattern (create-pattern base)
- :recurrence recurrence
- :expression expression
+  :recurrence recurrence
+  :recurrence-set recurrence-set
+  :expression expression
  :natural natural
  :providers providers}
