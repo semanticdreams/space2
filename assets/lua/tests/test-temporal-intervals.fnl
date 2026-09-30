@@ -273,8 +273,29 @@
   (assert-error #(Temporal.repeating-interval.occurrences repeating {:limt 2})
                 "unknown occurrence option should throw")
   (assert-error #(Temporal.repeating-interval.occurrences repeating {:limit math.huge})
-                "math.huge limit should throw")
+                 "math.huge limit should throw")
   (assert (= (# (Temporal.repeating-interval.occurrences repeating {:limit 2})) 2)))
+
+(fn temporal-track6-acceptance-smoke []
+  (assert (= (Temporal.interval.format
+               (Temporal.interval.parse "2026-09-25T12:00:00Z/PT1H" {:type :instant}))
+             "2026-09-25T12:00:00Z/2026-09-25T13:00:00Z"))
+  (assert (= (Temporal.interval.format
+               (Temporal.interval.parse "2026-01-31T10:00:00/P1M" {:type :plain-date-time}))
+             "2026-01-31T10:00:00/2026-02-28T10:00:00"))
+  (assert (= (Temporal.interval.format
+               (Temporal.interval.parse
+                 "2026-09-25T09:00:00-04:00[America/New_York]/2026-09-25T10:00:00-04:00[America/New_York]"
+                 {:type :zoned-date-time}))
+             "2026-09-25T09:00:00-04:00[America/New_York]/2026-09-25T10:00:00-04:00[America/New_York]"))
+  (assert-error #(Temporal.interval.parse "2026-09-25T12:00:00Z/P1D" {:type :instant})
+                "calendar period remains invalid for instant intervals")
+  (local repeating (Temporal.repeating-interval.parse
+                     "R2/2026-01-31T10:00:00/P1M"
+                     {:type :plain-date-time}))
+  (assert (= (Temporal.interval.format
+               (. (Temporal.repeating-interval.occurrences repeating {}) 2))
+             "2026-02-28T10:00:00/2026-03-28T10:00:00")))
 
 (table.insert tests {:name "instant interval basic behavior" :fn instant-interval-basic-behavior})
 (table.insert tests {:name "plain interval parse shift" :fn plain-interval-parse-shift})
@@ -293,6 +314,7 @@
 (table.insert tests {:name "repeating interval final occurrence does not resolve unused next" :fn repeating-interval-final-occurrence-does-not-resolve-unused-next})
 (table.insert tests {:name "repeating interval from step metadata" :fn repeating-interval-from-step-metadata})
 (table.insert tests {:name "repeating interval rejections" :fn repeating-interval-rejections})
+(table.insert tests {:name "temporal track6 acceptance smoke" :fn temporal-track6-acceptance-smoke})
 
 (local main
   (fn []

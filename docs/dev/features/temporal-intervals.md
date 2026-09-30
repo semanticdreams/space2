@@ -1,18 +1,18 @@
 # Temporal Intervals
 
-Temporal intervals add half-open bounded interval records and bounded repeating interval expansion above the native temporal core. They are public through `Temporal.interval` and `Temporal.repeating-interval` on `(require :temporal)`. Calendar period endpoint forms are supported only for `Temporal.interval.parse` with `{:type :plain-date-time}`. The supported forms are `start/period` and `period/end`; instant intervals and repeating intervals still reject period endpoint forms.
+Temporal intervals add half-open bounded interval records and repeating interval expansion above the native temporal core. They are public through `Temporal.interval` and `Temporal.repeating-interval` on `(require :temporal)`.
 
 ## Layering model
 
-Intervals are deliberately a Fennel-facing layer, not native core userdata. The native core remains small and dependency-free: it owns temporal value comparison and exact `PlainDateTime`/`Instant` duration arithmetic. Interval parsing, interval records, repeat-prefix parsing, validation policy, formatting, and expansion limits stay above the core beside the other temporal facade modules.
+Intervals are deliberately a Fennel-facing layer, not native core userdata. The native core remains small and dependency-free: it owns temporal value comparison, exact duration arithmetic, plain date-time and zoned date-time primitives, and timezone conversion. Interval grammar, bracket-aware splitting, derived endpoint policy, repeat-prefix parsing, validation, formatting, and expansion limits stay above the core beside the other temporal facade modules.
 
-This keeps the core independent from ISO interval grammar choices, recurrence product policy, natural-language parsing, ICU/CLDR, localization, and scheduler UX. No interval API silently defaults to host-local timezone behavior.
+This keeps the core independent from ISO interval grammar choices, recurrence product policy, natural-language parsing, ICS/iCalendar, ICU/CLDR, localization, business calendars, and scheduler UX. No interval API silently defaults to host-local timezone behavior.
 
 ## Half-open interval semantics
 
 Every interval is half-open: `[start, end)`. The start is included, the end is excluded, and zero-length or reversed ranges throw.
 
-Endpoints must have the same declared type. The initial slice supports only `:instant` and `:plain-date-time` intervals; mixed endpoints and unsupported endpoint types throw. `Temporal.interval.duration` returns an exact `Duration`, and `Temporal.interval.shift` moves both endpoints by an exact duration while preserving the endpoint type and half-open bounds.
+Endpoints must have the same declared type. Track 6 supports `:instant`, `:plain-date-time`, and `:zoned-date-time` interval endpoints. `Temporal.interval.duration` returns an exact `Duration`, and `Temporal.interval.shift` moves both endpoints by an exact duration while preserving the endpoint type and half-open bounds.
 
 ```fennel
 (local Temporal (require :temporal))
@@ -30,31 +30,40 @@ Endpoints must have the same declared type. The initial slice supports only `:in
 ; => false
 ```
 
-## Temporal.interval
+## Supported Track 6 grammar
 
-`Temporal.interval` creates, parses, formats, measures, checks, and shifts bounded start/end intervals.
+`Temporal.interval.parse text {:type type}` supports exactly these bounded forms:
 
-- `Temporal.interval.from {:type type :start start :end end}` builds a record with `:kind :interval` and `:bounds :half-open` after validating endpoint type and ordering.
-- `Temporal.interval.parse text {:type type}` accepts `start/end` text for `:instant` and `:plain-date-time`. For `{:type :plain-date-time}` it also accepts `start/period` and `period/end`, where `period` is date-only `Temporal.period` text. `start/period` computes the end by adding the period to the start; `period/end` computes the start by subtracting the period from the end. The final interval must still be half-open with `start < end`.
-- `Temporal.interval.format interval` returns canonical `start/end` text.
-- `Temporal.interval.duration interval` returns the exact elapsed `Duration` from start to end.
-- `Temporal.interval.contains interval value` applies half-open containment.
-- `Temporal.interval.shift interval duration` returns a new half-open interval shifted by the exact duration.
+- `start/end`
+- `start/P...`
+- `P.../end`
+- `start/PT...`
+- `PT.../end`
+
+Parsing uses one top-level `/` outside bracketed IANA zone ids, so zoned endpoint text such as `America/New_York` does not split the interval. At least one endpoint must be concrete. Anchorless forms such as `P.../PT...`, `PT.../P...`, `P.../P...`, and `PT.../PT...` are unsupported and fail loudly.
+
+Concrete endpoint parsing is selected by the required canonical `:type` option:
+
+- `:instant` uses strict instant text with explicit `Z` or numeric offset.
+- `:plain-date-time` uses strict plain date-time text.
+- `:zoned-date-time` uses strict zoned date-time text with an explicit numeric offset and bracketed IANA zone id, for example `2026-09-25T09:00:00-04:00[America/New_York]`.
+
+Zoned interval endpoints must name the same explicit zone id, their supplied offsets must be valid for their local times, and ordering/containment compare the resolved instants. The parser never infers a zone from the host environment and does not accept a `:zone-id` fallback option for intervals.
+
+## Exact durations versus calendar periods
+
+Exact duration endpoint text is `PT...` and is parsed into a nanosecond `Duration`. It is supported for `:instant`, `:plain-date-time`, and `:zoned-date-time` intervals:
 
 ```fennel
-(local meeting
-  (Temporal.interval.parse "2026-09-25T12:00:00/2026-09-25T13:00:00"
-                           {:type :plain-date-time}))
+(Temporal.interval.format
+  (Temporal.interval.parse "2026-09-25T12:00:00Z/PT1H"
+                           {:type :instant}))
+; => "2026-09-25T12:00:00Z/2026-09-25T13:00:00Z"
+```
 
-(local elapsed (Temporal.interval.duration meeting))
-(elapsed:compare (Temporal.duration.from {:seconds 3600})) ; => 0
+Calendar period endpoint text is `P...` without `T` and remains separate from exact durations. Calendar periods may include years, months, weeks, and days, and are supported only for `:plain-date-time` and `:zoned-date-time` intervals. They are rejected for `:instant` intervals because `P1D` is not an exact 24-hour duration.
 
-(local later
-  (Temporal.interval.shift meeting (Temporal.duration.from {:seconds 7200})))
-
-(Temporal.interval.format later)
-; => "2026-09-25T14:00:00/2026-09-25T15:00:00"
-
+```fennel
 (Temporal.interval.format
   (Temporal.interval.parse "2026-01-31T10:00:00/P1M"
                            {:type :plain-date-time}))
@@ -66,62 +75,67 @@ Endpoints must have the same declared type. The initial slice supports only `:in
 ; => "2026-02-01T09:30:00/2026-02-15T09:30:00"
 ```
 
+`Temporal.interval.format` always emits canonical concrete `start/end` text; it does not preserve the caller's derived endpoint spelling.
+
+## DST policy for zoned calendar periods
+
+Zoned calendar-period derived endpoints resolve local civil results through `Temporal.zoned-date-time.from-plain`. The optional canonical `:disambiguation` key is accepted only for zoned calendar-period endpoint parsing and defaults to `:reject`. Accepted values are `:reject`, `:earliest`, and `:latest`.
+
+- `:reject` throws for DST gaps and overlaps.
+- `:earliest` selects the earliest valid instant when the local time is ambiguous or moves forward to the first valid local time for a gap.
+- `:latest` selects the latest valid instant when the local time is ambiguous or moves forward to the first valid local time for a gap.
+
+Exact `PT...` zoned intervals use instant arithmetic and do not accept `:disambiguation`.
+
 ## Temporal.repeating-interval
 
 `Temporal.repeating-interval` wraps one bounded interval with an ISO-style repeat prefix. `R<count>` means the total number of occurrences returned. `R/` creates an unbounded repeating interval record, but expansion requires a canonical positive integer `{:limit n}` option.
 
-- `Temporal.repeating-interval.from {:interval interval :count count}` builds a repeating interval record. `:count` may be omitted for an unbounded record.
-- `Temporal.repeating-interval.parse text {:type type}` parses `R<count>/start/end` or `R/start/end`, delegating the bounded `start/end` portion to `Temporal.interval.parse`.
+- `Temporal.repeating-interval.from {:interval interval :count count :step-kind kind :step step}` builds a repeating interval record. `:count` may be omitted for an unbounded record. Existing records without explicit step metadata remain valid and expand by the interval's exact duration.
+- `Temporal.repeating-interval.parse text {:type type}` parses `R<count>/...` or `R/...`, delegating the bounded interval portion to `Temporal.interval.parse` and preserving derived endpoint step metadata.
 - `Temporal.repeating-interval.format repeating` returns canonical repeat text.
 - `Temporal.repeating-interval.occurrences repeating options` returns concrete half-open intervals. If both record `:count` and `{:limit n}` are present, expansion returns the smaller number.
 
-Each next occurrence starts by shifting the previous interval by its exact duration. This is exact elapsed-time expansion for `Instant` and exact plain-date-time duration expansion for `PlainDateTime`; it is not DST-aware zoned expansion.
+Repeating intervals preserve the parsed step semantics:
+
+- Concrete `start/end` and exact `PT...` endpoint forms use `:step-kind :exact-duration`; each occurrence advances by exact elapsed duration.
+- Calendar `P...` endpoint forms use `:step-kind :calendar-period`; each occurrence advances local endpoint fields by the calendar period. For zoned date-times, occurrence expansion resolves shifted local fields with `:disambiguation`, defaulting to `:reject`.
 
 ```fennel
 (local repeating
   (Temporal.repeating-interval.parse
-    "R3/2026-09-25T12:00:00Z/2026-09-25T13:00:00Z"
-    {:type :instant}))
-
-(local occurrences (Temporal.repeating-interval.occurrences repeating {}))
-(Temporal.interval.format (. occurrences 2))
-; => "2026-09-25T13:00:00Z/2026-09-25T14:00:00Z"
-
-(local unbounded
-  (Temporal.repeating-interval.parse
-    "R/2026-09-25T12:00:00/2026-09-25T13:00:00"
+    "R2/2026-01-31T10:00:00/P1M"
     {:type :plain-date-time}))
 
-(# (Temporal.repeating-interval.occurrences unbounded {:limit 2})) ; => 2
+(Temporal.interval.format
+  (. (Temporal.repeating-interval.occurrences repeating {}) 2))
+; => "2026-02-28T10:00:00/2026-03-28T10:00:00"
 ```
 
-## Unsupported forms and deferred scope
+## Unsupported forms and non-goals
 
-Full ISO, zoned, and DST-aware interval support is scheduled by the [Temporal Complete Library Roadmap](./temporal-complete-library), while current interval APIs preserve loud failures for unsupported forms.
-
-The interval layer intentionally supports bounded `start/end` intervals, date-only `start/period` and `period/end` forms for plain date-time interval parsing, and bounded expansion of repeating intervals in this slice. The following remain deferred and must fail loudly when presented to current APIs:
+The Track 6 interval layer is intentionally not exhaustive ISO 8601-1/-2 conformance. Unsupported grammar and invalid temporal data fail loudly instead of being guessed. Out-of-scope forms include:
 
 - native interval userdata in the C++ temporal core.
-- full ISO interval grammar beyond the two supported plain date-time period endpoint forms.
-- instant period endpoints.
-- repeating interval period endpoints.
-- `Temporal.interval.from` period endpoints.
-- time-based `PT...` period text in interval endpoint forms.
-- zoned intervals.
-- DST-aware interval expansion.
-- calendar-period-driven interval expansion, business days, or locale calendars.
-- Localization, ICU/CLDR formatting, and locale data.
-- Broad natural-language intervals.
-- interval algebra such as set operations, overlap merging, and gap queries.
-
-These deferrals preserve the native core layering boundary and leave product-specific grammar, calendar, localization, and scheduler semantics for separately designed layers.
+- open intervals and anchorless interval expansion.
+- date-only or all-day intervals.
+- week-date or ordinal-date endpoints.
+- offset-only zoned intervals and host-local or implicit UTC zone fallback.
+- non-Gregorian calendars, business-day intervals, natural-language intervals, localization, ICS/VEVENT/VTIMEZONE parsing, scheduler behavior, and interval algebra.
+- option-key aliases or compatibility shims beyond the documented canonical keys.
 
 ## Validation
 
-For docs-only interval changes, run the focused term check required by the implementation plan:
+For interval behavior changes, validate the Fennel surface with the project-native compile check, constraints, focused temporal interval tests, and broader suite when public parsing/repeating behavior changed:
 
 ```bash
-rg "start/period|period/end|Temporal.period|repeating interval period endpoint|instant period endpoint|Temporal.interval.parse" docs/dev/features/temporal-intervals.md docs/dev/features/temporal-calendar-periods.md docs/dev/features/temporal-parsing-recurrence.md
+make fennel-check
+make constraints
+SPACE_DISABLE_AUDIO=1 SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data \
+SPACE_ASSETS_PATH=$(pwd)/assets \
+FENNEL_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" \
+FENNEL_MACRO_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" \
+./build/space -m tests.test-temporal-intervals:main
+SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data \
+SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test
 ```
-
-If interval behavior changes, validate the Fennel surface with the project-native compile check, constraints, and focused temporal interval tests in that order.
