@@ -63,6 +63,19 @@
     (error "invalid temporal recurrence-set rule occurrence options"))
   (if options.limit {:limit options.limit} {}))
 
+(fn exrule-occurrence-options [rule options]
+  (when (not= (type rule) :table)
+    (error "invalid temporal recurrence-set exrule occurrence options"))
+  (when (not= (type options) :table)
+    (error "invalid temporal recurrence-set exrule occurrence options"))
+  (if rule.count
+      {}
+      rule.until
+      {}
+      options.limit
+      {:limit options.limit}
+      {}))
+
 (fn zoned-entry [deps candidate options]
   (validate-plain-date-time candidate "zoned candidate")
   (when (not (and deps deps.zoned-date-time deps.zoned-date-time.from-plain))
@@ -117,7 +130,7 @@
     (error "invalid temporal recurrence-set exclusions"))
   (local exclusions {})
   (each [_index rule (ipairs recurrence-set.exrules)]
-    (each [_generated-index candidate (ipairs (expand-rule-local deps rule recurrence-set.dtstart options "exrules"))]
+    (each [_generated-index candidate (ipairs (expand-rule-local deps rule recurrence-set.dtstart (exrule-occurrence-options rule options) "exrules"))]
       (validate-plain-date-time candidate "exrules")
       (set (. exclusions (local-key candidate)) true)))
   (each [_index candidate (ipairs recurrence-set.exdates)]

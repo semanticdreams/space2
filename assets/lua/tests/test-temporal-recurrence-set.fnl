@@ -110,6 +110,16 @@
     (Temporal.recurrence-set.occurrences recurrence-set {:zone-id "America/New_York" :limit 2})
     ["2026-01-02T09:00:00-05:00[America/New_York]"]))
 
+(fn bounded-exrule-excludes-later-rdate-before-output-limit []
+  (local recurrence-set
+    (Temporal.recurrence-set.from
+      {:dtstart (p "2026-01-01T09:00:00")
+       :rdates [(p "2026-01-10T09:00:00") (p "2026-01-11T09:00:00")]
+       :exrules [(r "RRULE:FREQ=DAILY;COUNT=10")]}))
+  (assert-zoned-strings
+    (Temporal.recurrence-set.occurrences recurrence-set {:zone-id "America/New_York" :limit 2})
+    ["2026-01-11T09:00:00-05:00[America/New_York]"]))
+
 (fn enforces-finite-expansion []
   (local unbounded
     (Temporal.recurrence-set.from
@@ -133,9 +143,11 @@
 (table.insert tests {:name "allows empty results after exclusions"
                      :fn allows-empty-results-after-exclusions})
 (table.insert tests {:name "applies limit without backfill after exclusions"
-                     :fn applies-limit-without-backfill-after-exclusions})
+                      :fn applies-limit-without-backfill-after-exclusions})
+(table.insert tests {:name "bounded EXRULE excludes later RDATE before output limit"
+                     :fn bounded-exrule-excludes-later-rdate-before-output-limit})
 (table.insert tests {:name "enforces finite expansion"
-                     :fn enforces-finite-expansion})
+                      :fn enforces-finite-expansion})
 
 (local main
   (fn []
