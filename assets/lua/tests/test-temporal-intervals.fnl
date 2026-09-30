@@ -185,6 +185,56 @@
   (assert (= (Temporal.interval.format (. occ 2))
              "2026-09-25T13:00:00/2026-09-25T14:00:00")))
 
+(fn repeating-interval-exact-duration-step-metadata []
+  (local repeating (Temporal.repeating-interval.parse
+                     "R3/2026-03-08T01:30:00-05:00[America/New_York]/PT1H"
+                     {:type :zoned-date-time}))
+  (assert (= repeating.step-kind :exact-duration))
+  (assert (= (repeating.step:compare (Temporal.duration.from {:seconds 3600})) 0))
+  (local occ (Temporal.repeating-interval.occurrences repeating {}))
+  (assert (= (Temporal.interval.format (. occ 1))
+             "2026-03-08T01:30:00-05:00[America/New_York]/2026-03-08T03:30:00-04:00[America/New_York]"))
+  (assert (= (Temporal.interval.format (. occ 2))
+             "2026-03-08T03:30:00-04:00[America/New_York]/2026-03-08T04:30:00-04:00[America/New_York]"))
+  (assert (= (Temporal.interval.format (. occ 3))
+             "2026-03-08T04:30:00-04:00[America/New_York]/2026-03-08T05:30:00-04:00[America/New_York]")))
+
+(fn repeating-interval-calendar-period-step-metadata []
+  (local repeating (Temporal.repeating-interval.parse
+                     "R3/2026-10-31T01:30:00-04:00[America/New_York]/P1D"
+                     {:type :zoned-date-time :disambiguation :latest}))
+  (assert (= repeating.step-kind :calendar-period))
+  (assert (= (Temporal.period.format repeating.step) "P1D"))
+  (local occ (Temporal.repeating-interval.occurrences repeating {:disambiguation :latest}))
+  (assert (= (Temporal.interval.format (. occ 1))
+             "2026-10-31T01:30:00-04:00[America/New_York]/2026-11-01T01:30:00-05:00[America/New_York]"))
+  (assert (= (Temporal.interval.format (. occ 2))
+             "2026-11-01T01:30:00-05:00[America/New_York]/2026-11-02T01:30:00-05:00[America/New_York]"))
+  (assert (= (Temporal.interval.format (. occ 3))
+             "2026-11-02T01:30:00-05:00[America/New_York]/2026-11-03T01:30:00-05:00[America/New_York]")))
+
+(fn repeating-interval-calendar-period-default-reject []
+  (local repeating (Temporal.repeating-interval.parse
+                     "R2/2026-03-06T02:30:00-05:00[America/New_York]/P1D"
+                     {:type :zoned-date-time}))
+  (assert-error #(Temporal.repeating-interval.occurrences repeating {})
+                "calendar repeating occurrences should reject DST gaps by default")
+  (local occ (Temporal.repeating-interval.occurrences repeating {:disambiguation :earliest}))
+  (assert (= (Temporal.interval.format (. occ 2))
+             "2026-03-07T02:30:00-05:00[America/New_York]/2026-03-08T03:00:00-04:00[America/New_York]")))
+
+(fn repeating-interval-from-step-metadata []
+  (local first (Temporal.interval.parse "2026-01-31T10:00:00/P1M" {:type :plain-date-time}))
+  (local repeating (Temporal.repeating-interval.from
+                     {:interval first :count 2 :step-kind :calendar-period :step (Temporal.period.parse "P1M")}))
+  (local occ (Temporal.repeating-interval.occurrences repeating {}))
+  (assert (= (Temporal.interval.format (. occ 2))
+             "2026-02-28T10:00:00/2026-03-28T10:00:00"))
+  (assert-error #(Temporal.repeating-interval.from {:interval first :count 2 :step-kind :calendar-period})
+                "missing calendar step should throw")
+  (assert-error #(Temporal.repeating-interval.occurrences repeating {:disambiguation :compatible})
+                "invalid occurrence disambiguation should throw"))
+
 (fn repeating-interval-rejections []
   (assert-error #(Temporal.repeating-interval.parse
                    "R0/2026-09-25T12:00:00Z/2026-09-25T13:00:00Z"
@@ -194,14 +244,6 @@
                    "RX/2026-09-25T12:00:00Z/2026-09-25T13:00:00Z"
                    {:type :instant})
                 "malformed repeat prefix should throw")
-  (assert-error #(Temporal.repeating-interval.parse
-                   "R3/2026-01-01T00:00:00/P1D"
-                   {:type :plain-date-time})
-                "repeating start/period form should throw")
-  (assert-error #(Temporal.repeating-interval.parse
-                   "R3/P1D/2026-01-02T00:00:00"
-                   {:type :plain-date-time})
-                "repeating period/end form should throw")
   (local repeating (Temporal.repeating-interval.parse
                      "R3/2026-09-25T12:00:00Z/2026-09-25T13:00:00Z"
                      {:type :instant}))
@@ -223,6 +265,10 @@
 (table.insert tests {:name "interval disambiguation option boundaries" :fn interval-disambiguation-option-boundaries})
 (table.insert tests {:name "repeating interval counted occurrences" :fn repeating-interval-counted-occurrences})
 (table.insert tests {:name "repeating interval unbounded limit" :fn repeating-interval-unbounded-limit})
+(table.insert tests {:name "repeating interval exact duration step metadata" :fn repeating-interval-exact-duration-step-metadata})
+(table.insert tests {:name "repeating interval calendar period step metadata" :fn repeating-interval-calendar-period-step-metadata})
+(table.insert tests {:name "repeating interval calendar period default reject" :fn repeating-interval-calendar-period-default-reject})
+(table.insert tests {:name "repeating interval from step metadata" :fn repeating-interval-from-step-metadata})
 (table.insert tests {:name "repeating interval rejections" :fn repeating-interval-rejections})
 
 (local main
