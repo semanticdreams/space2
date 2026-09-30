@@ -111,8 +111,9 @@
       (do
         (local zdt (deps.zoned-date-time.from-instant until-instant options.zone-id))
         (local local-until (deps.plain-date-time.from-fields (zdt:fields)))
+        (local conservative-until (local-until:add-days 1))
         (local cloned (clone-rule rule))
-        (set cloned.until (compact-until-from-plain local-until))
+        (set cloned.until (compact-until-from-plain conservative-until))
         cloned)))
 
 (fn candidate-within-utc-until? [deps candidate options until-instant]

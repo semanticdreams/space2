@@ -186,6 +186,19 @@
     "UTC UNTIL"
     "standalone recurrence must still reject UTC UNTIL"))
 
+(fn keeps-fall-back-candidates-before-utc-until []
+  (local dtstart (p "2026-11-01T00:30:00"))
+  (local utc-rule (r "RRULE:FREQ=HOURLY;UNTIL=20261101T060000Z"))
+  (local recurrence-set (Temporal.recurrence-set.from {:dtstart dtstart :rrules [utc-rule]}))
+  (assert-zoned-strings
+    (Temporal.recurrence-set.occurrences recurrence-set {:zone-id "America/New_York" :disambiguation :earliest})
+    ["2026-11-01T00:30:00-04:00[America/New_York]"
+     "2026-11-01T01:30:00-04:00[America/New_York]"])
+  (assert-error-contains
+    #(Temporal.recurrence-set.occurrences recurrence-set {:zone-id "America/New_York"})
+    "ambiguous or nonexistent"
+    "default reject should still resolve UTC UNTIL candidates"))
+
 (table.insert tests {:name "exports recurrence-set and expands RDATE-only"
                      :fn exports-recurrence-set-and-expands-rdate-only})
 (table.insert tests {:name "validates constructor and occurrence options"
@@ -203,7 +216,9 @@
 (table.insert tests {:name "applies DST disambiguation policy"
                      :fn applies-dst-disambiguation-policy})
 (table.insert tests {:name "supports compact UTC UNTIL only in recurrence-set"
-                     :fn supports-compact-utc-until-only-in-recurrence-set})
+                      :fn supports-compact-utc-until-only-in-recurrence-set})
+(table.insert tests {:name "keeps fall-back candidates before UTC UNTIL"
+                     :fn keeps-fall-back-candidates-before-utc-until})
 
 (local main
   (fn []
