@@ -65,10 +65,51 @@
                 "endpoint type mismatch should throw")
   (assert-error #(Temporal.interval.from {:type :instant :start start})
                 "missing end should throw")
-  (assert-error #(Temporal.interval.parse "2026-09-25T12:00:00Z/PT1H" {:type :instant})
-                "start/duration form should throw")
   (assert-error #(Temporal.interval.parse "2026-09-25T12:00:00Z/2026-09-25T13:00:00Z" {:kind :instant})
                 "unknown option key should throw"))
+
+(fn zoned-interval-concrete-start-end []
+  (local text "2026-09-25T09:00:00-04:00[America/New_York]/2026-09-25T10:00:00-04:00[America/New_York]")
+  (local interval (Temporal.interval.parse text {:type :zoned-date-time}))
+  (assert (= interval.type :zoned-date-time))
+  (assert (= (Temporal.interval.format interval) text))
+  (local elapsed (Temporal.interval.duration interval))
+  (assert (= (elapsed:compare (Temporal.duration.from {:seconds 3600})) 0))
+  (assert (Temporal.interval.contains interval
+                                      (Temporal.standard.parse-zoned-date-time
+                                        "2026-09-25T09:30:00-04:00[America/New_York]")))
+  (assert-error #(Temporal.interval.parse
+                   "2026-09-25T09:00:00-05:00[America/New_York]/2026-09-25T10:00:00-04:00[America/New_York]"
+                   {:type :zoned-date-time})
+                "zoned offset mismatch should throw")
+  (assert-error #(Temporal.interval.parse
+                   "2026-09-25T09:00:00-04:00[America/New_York]/2026-09-25T10:00:00-05:00[America/Chicago]"
+                   {:type :zoned-date-time})
+                "zoned endpoints with different zones should throw"))
+
+(fn interval-exact-duration-endpoints []
+  (assert (= (Temporal.interval.format
+               (Temporal.interval.parse "2026-09-25T12:00:00Z/PT1H" {:type :instant}))
+             "2026-09-25T12:00:00Z/2026-09-25T13:00:00Z"))
+  (assert (= (Temporal.interval.format
+               (Temporal.interval.parse "PT30M/2026-09-25T13:00:00Z" {:type :instant}))
+             "2026-09-25T12:30:00Z/2026-09-25T13:00:00Z"))
+  (assert (= (Temporal.interval.format
+               (Temporal.interval.parse "2026-09-25T12:00:00/PT0.5S" {:type :plain-date-time}))
+             "2026-09-25T12:00:00/2026-09-25T12:00:00.5"))
+  (assert (= (Temporal.interval.format
+               (Temporal.interval.parse
+                 "2026-03-08T01:30:00-05:00[America/New_York]/PT1H"
+                 {:type :zoned-date-time}))
+             "2026-03-08T01:30:00-05:00[America/New_York]/2026-03-08T03:30:00-04:00[America/New_York]"))
+  (assert-error #(Temporal.interval.parse "2026-09-25T12:00:00Z/P1D" {:type :instant})
+                "calendar period endpoint for instant should throw")
+  (assert-error #(Temporal.interval.parse "2026-09-25T12:00:00Z/PT" {:type :instant})
+                "empty exact duration should throw")
+  (assert-error #(Temporal.interval.parse "2026-09-25T12:00:00Z/PT0.5H" {:type :instant})
+                "fractional hours should throw")
+  (assert-error #(Temporal.interval.parse "P1D/PT1H" {:type :instant})
+                "two derived endpoints should throw"))
 
 (fn repeating-interval-counted-occurrences []
   (local repeating (Temporal.repeating-interval.parse
@@ -131,6 +172,8 @@
 (table.insert tests {:name "plain interval parse shift" :fn plain-interval-parse-shift})
 (table.insert tests {:name "plain interval period endpoint forms" :fn plain-interval-period-endpoint-forms})
 (table.insert tests {:name "invalid intervals throw" :fn invalid-intervals-throw})
+(table.insert tests {:name "zoned interval concrete start end" :fn zoned-interval-concrete-start-end})
+(table.insert tests {:name "interval exact duration endpoints" :fn interval-exact-duration-endpoints})
 (table.insert tests {:name "repeating interval counted occurrences" :fn repeating-interval-counted-occurrences})
 (table.insert tests {:name "repeating interval unbounded limit" :fn repeating-interval-unbounded-limit})
 (table.insert tests {:name "repeating interval rejections" :fn repeating-interval-rejections})
