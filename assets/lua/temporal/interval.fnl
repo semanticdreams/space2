@@ -27,11 +27,26 @@
 (fn validate-parse-options [options]
   (assert (= (type options) :table) "temporal interval parse options must be a table")
   (each [key _value (pairs options)]
-    (when (not (= key :type))
+    (when (and (not (= key :type))
+               (not (= key :disambiguation)))
       (error (.. "invalid temporal interval parse option: " (tostring key)))))
   (when (not (has-key? options :type))
     (error "temporal interval parse requires type"))
   (validate-endpoint-type options.type))
+
+(fn valid-disambiguation? [value]
+  (if (= value :reject)
+      true
+      (= value :earliest)
+      true
+      (= value :latest)
+      true
+      false))
+
+(fn option-disambiguation [options]
+  (if (= options.disambiguation nil)
+      :reject
+      options.disambiguation))
 
 (fn compare [left right]
   (assert (and left left.compare) "temporal interval endpoint must support compare")
@@ -107,6 +122,114 @@
         (end-instant:since start-instant))
       (end:since start)))
 
+(fn parse-endpoint [Temporal endpoint-type text]
+  (if (= endpoint-type :instant)
+      (Temporal.standard.parse-instant text)
+      (= endpoint-type :plain-date-time)
+      (Temporal.standard.parse-plain-date-time text)
+      (Temporal.standard.parse-zoned-date-time text)))
+
+(fn exact-shift [Temporal endpoint-type endpoint duration]
+  (if (= endpoint-type :zoned-date-time)
+      (do
+        (local instant (zoned-instant endpoint))
+        (local shifted-instant (instant:add duration))
+        (Temporal.zoned-date-time.from-instant shifted-instant (zoned-zone-id endpoint)))
+      (endpoint:add duration)))
+
+(fn endpoint-local-plain-date-time [Temporal endpoint]
+  (Temporal.plain-date-time.from-fields (endpoint:fields)))
+
+(fn zoned-period-shift [Temporal endpoint period direction disambiguation]
+  (local local-start (endpoint-local-plain-date-time Temporal endpoint))
+  (local local-derived
+    (if (= direction :forward)
+        (Temporal.period.add-to-plain-date-time local-start period)
+        (Temporal.period.subtract-from-plain-date-time local-start period)))
+  (Temporal.zoned-date-time.from-plain
+    local-derived
+    (zoned-zone-id endpoint)
+    {:disambiguation disambiguation}))
+
+(fn period-shift [Temporal endpoint-type endpoint period direction disambiguation]
+  (if (= endpoint-type :zoned-date-time)
+      (zoned-period-shift Temporal endpoint period direction disambiguation)
+      (= direction :forward)
+      (Temporal.period.add-to-plain-date-time endpoint period)
+      (Temporal.period.subtract-from-plain-date-time endpoint period)))
+
+(fn uses-calendar-period? [start-kind end-kind]
+  (if (= start-kind :calendar-period)
+      true
+      (= end-kind :calendar-period)
+      true
+      false))
+
+(fn disambiguation-form-allowed? [endpoint-type calendar-period?]
+  (if (= endpoint-type :zoned-date-time)
+      calendar-period?
+      false))
+
+(fn validate-disambiguation-for-endpoint-form [endpoint-type start-kind end-kind options]
+  (local has-disambiguation? (not (= options.disambiguation nil)))
+  (local calendar-period? (uses-calendar-period? start-kind end-kind))
+  (if (and has-disambiguation? (not (valid-disambiguation? options.disambiguation)))
+      (error "invalid temporal interval disambiguation")
+      (and has-disambiguation?
+           (not (disambiguation-form-allowed? endpoint-type calendar-period?)))
+      (error "temporal interval disambiguation is only valid for zoned calendar-period endpoints")))
+
+(fn validate-calendar-period-endpoint-type [endpoint-type start-kind end-kind]
+  (when (and (uses-calendar-period? start-kind end-kind)
+             (not (if (= endpoint-type :plain-date-time)
+                      true
+                      (= endpoint-type :zoned-date-time)
+                      true
+                      false)))
+    (error "temporal interval period endpoint forms require :plain-date-time or :zoned-date-time")))
+
+(fn resolve-parse-endpoints [Temporal endpoint-type start-text end-text options]
+  (local start-kind (grammar.endpoint-kind start-text))
+  (local end-kind (grammar.endpoint-kind end-text))
+  (validate-disambiguation-for-endpoint-form endpoint-type start-kind end-kind options)
+  (local start-derived? (not (= start-kind :concrete)))
+  (local end-derived? (not (= end-kind :concrete)))
+  (when (and start-derived? end-derived?)
+    (error "temporal interval requires one concrete endpoint when using a derived endpoint"))
+  (validate-calendar-period-endpoint-type endpoint-type start-kind end-kind)
+  (if (= end-kind :calendar-period)
+      (do
+        (local start (parse-endpoint Temporal endpoint-type start-text))
+        (local period (Temporal.period.parse end-text))
+        (values start
+                (period-shift Temporal endpoint-type start period :forward (option-disambiguation options))
+                :calendar-period
+                period))
+      (= start-kind :calendar-period)
+      (do
+        (local end (parse-endpoint Temporal endpoint-type end-text))
+        (local period (Temporal.period.parse start-text))
+        (values (period-shift Temporal endpoint-type end period :backward (option-disambiguation options))
+                end
+                :calendar-period
+                period))
+      (= end-kind :exact-duration)
+      (do
+        (local start (parse-endpoint Temporal endpoint-type start-text))
+        (local duration (grammar.parse-exact-duration Temporal.duration end-text))
+        (values start (exact-shift Temporal endpoint-type start duration) :exact-duration duration))
+      (= start-kind :exact-duration)
+      (do
+        (local end (parse-endpoint Temporal endpoint-type end-text))
+        (local duration (grammar.parse-exact-duration Temporal.duration start-text))
+        (local inverse-duration
+          (grammar.parse-exact-duration Temporal.duration (negated-exact-duration-text start-text)))
+        (values (exact-shift Temporal endpoint-type end inverse-duration) end :exact-duration duration))
+      (do
+        (local start (parse-endpoint Temporal endpoint-type start-text))
+        (local end (parse-endpoint Temporal endpoint-type end-text))
+        (values start end :exact-duration (endpoint-duration endpoint-type start end)))))
+
 (fn create [Temporal]
   (fn from [options]
     (validate-from-options options)
@@ -119,62 +242,10 @@
      :end options.end
      :bounds :half-open})
 
-  (fn parse-endpoint [endpoint-type text]
-    (if (= endpoint-type :instant)
-        (Temporal.standard.parse-instant text)
-        (= endpoint-type :plain-date-time)
-        (Temporal.standard.parse-plain-date-time text)
-        (Temporal.standard.parse-zoned-date-time text)))
-
-  (fn exact-shift [endpoint-type endpoint duration]
-    (if (= endpoint-type :zoned-date-time)
-        (do
-          (local instant (zoned-instant endpoint))
-          (local shifted-instant (instant:add duration))
-          (Temporal.zoned-date-time.from-instant shifted-instant (zoned-zone-id endpoint)))
-        (endpoint:add duration)))
-
-  (fn resolve-parse-endpoints [endpoint-type start-text end-text]
-    (local start-kind (grammar.endpoint-kind start-text))
-    (local end-kind (grammar.endpoint-kind end-text))
-    (local start-derived? (not (= start-kind :concrete)))
-    (local end-derived? (not (= end-kind :concrete)))
-    (when (and start-derived? end-derived?)
-      (error "temporal interval requires one concrete endpoint when using a derived endpoint"))
-    (when (and (if (= start-kind :calendar-period) true (= end-kind :calendar-period))
-                (not (= endpoint-type :plain-date-time)))
-      (error "temporal interval period endpoint forms require :plain-date-time"))
-    (if (= end-kind :calendar-period)
-        (do
-          (local start (parse-endpoint endpoint-type start-text))
-          (local period (Temporal.period.parse end-text))
-          (values start (Temporal.period.add-to-plain-date-time start period) :calendar-period period))
-        (= start-kind :calendar-period)
-        (do
-          (local end (parse-endpoint endpoint-type end-text))
-          (local period (Temporal.period.parse start-text))
-          (values (Temporal.period.subtract-from-plain-date-time end period) end :calendar-period period))
-        (= end-kind :exact-duration)
-        (do
-          (local start (parse-endpoint endpoint-type start-text))
-          (local duration (grammar.parse-exact-duration Temporal.duration end-text))
-          (values start (exact-shift endpoint-type start duration) :exact-duration duration))
-        (= start-kind :exact-duration)
-        (do
-          (local end (parse-endpoint endpoint-type end-text))
-          (local duration (grammar.parse-exact-duration Temporal.duration start-text))
-          (local inverse-duration
-            (grammar.parse-exact-duration Temporal.duration (negated-exact-duration-text start-text)))
-          (values (exact-shift endpoint-type end inverse-duration) end :exact-duration duration))
-        (do
-          (local start (parse-endpoint endpoint-type start-text))
-          (local end (parse-endpoint endpoint-type end-text))
-          (values start end :exact-duration (endpoint-duration endpoint-type start end)))))
-
   (fn _parse-with-step [text options]
     (validate-parse-options options)
     (local (start-text end-text) (grammar.split-interval-text text))
-    (local (start end step-kind step) (resolve-parse-endpoints options.type start-text end-text))
+    (local (start end step-kind step) (resolve-parse-endpoints Temporal options.type start-text end-text options))
     (values (from {:type options.type
                    :start start
                    :end end})
@@ -214,8 +285,8 @@
 
   (fn shift [interval duration]
     (from {:type interval.type
-            :start (exact-shift interval.type interval.start duration)
-            :end (exact-shift interval.type interval.end duration)}))
+           :start (exact-shift Temporal interval.type interval.start duration)
+           :end (exact-shift Temporal interval.type interval.end duration)}))
 
   {:from from
    :parse parse

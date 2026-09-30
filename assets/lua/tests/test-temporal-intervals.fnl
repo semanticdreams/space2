@@ -111,6 +111,51 @@
   (assert-error #(Temporal.interval.parse "P1D/PT1H" {:type :instant})
                 "two derived endpoints should throw"))
 
+(fn zoned-calendar-period-endpoints []
+  (assert (= (Temporal.interval.format
+               (Temporal.interval.parse
+                 "2026-01-31T10:00:00-05:00[America/New_York]/P1M"
+                 {:type :zoned-date-time}))
+             "2026-01-31T10:00:00-05:00[America/New_York]/2026-02-28T10:00:00-05:00[America/New_York]"))
+  (assert (= (Temporal.interval.format
+               (Temporal.interval.parse
+                 "P2W/2026-02-15T09:30:00-05:00[America/New_York]"
+                 {:type :zoned-date-time}))
+             "2026-02-01T09:30:00-05:00[America/New_York]/2026-02-15T09:30:00-05:00[America/New_York]"))
+  (assert-error #(Temporal.interval.parse
+                   "2026-03-07T02:30:00-05:00[America/New_York]/P1D"
+                   {:type :zoned-date-time})
+                "default reject should throw for DST gap")
+  (assert (= (Temporal.interval.format
+               (Temporal.interval.parse
+                 "2026-03-07T02:30:00-05:00[America/New_York]/P1D"
+                 {:type :zoned-date-time :disambiguation :earliest}))
+             "2026-03-07T02:30:00-05:00[America/New_York]/2026-03-08T03:00:00-04:00[America/New_York]"))
+  (assert (= (Temporal.interval.format
+               (Temporal.interval.parse
+                 "2026-10-31T01:30:00-04:00[America/New_York]/P1D"
+                 {:type :zoned-date-time :disambiguation :earliest}))
+             "2026-10-31T01:30:00-04:00[America/New_York]/2026-11-01T01:30:00-04:00[America/New_York]"))
+  (assert (= (Temporal.interval.format
+               (Temporal.interval.parse
+                 "2026-10-31T01:30:00-04:00[America/New_York]/P1D"
+                 {:type :zoned-date-time :disambiguation :latest}))
+             "2026-10-31T01:30:00-04:00[America/New_York]/2026-11-01T01:30:00-05:00[America/New_York]")))
+
+(fn interval-disambiguation-option-boundaries []
+  (assert-error #(Temporal.interval.parse
+                   "2026-09-25T12:00:00/2026-09-25T13:00:00"
+                   {:type :plain-date-time :disambiguation :earliest})
+                "plain intervals should reject disambiguation")
+  (assert-error #(Temporal.interval.parse
+                   "2026-09-25T09:00:00-04:00[America/New_York]/PT1H"
+                   {:type :zoned-date-time :disambiguation :earliest})
+                "exact-duration zoned intervals should reject disambiguation")
+  (assert-error #(Temporal.interval.parse
+                   "2026-09-25T09:00:00-04:00[America/New_York]/P1D"
+                   {:type :zoned-date-time :disambiguation :compatible})
+                "unknown disambiguation value should throw"))
+
 (fn repeating-interval-counted-occurrences []
   (local repeating (Temporal.repeating-interval.parse
                      "R3/2026-09-25T12:00:00Z/2026-09-25T13:00:00Z"
@@ -174,6 +219,8 @@
 (table.insert tests {:name "invalid intervals throw" :fn invalid-intervals-throw})
 (table.insert tests {:name "zoned interval concrete start end" :fn zoned-interval-concrete-start-end})
 (table.insert tests {:name "interval exact duration endpoints" :fn interval-exact-duration-endpoints})
+(table.insert tests {:name "zoned calendar period endpoints" :fn zoned-calendar-period-endpoints})
+(table.insert tests {:name "interval disambiguation option boundaries" :fn interval-disambiguation-option-boundaries})
 (table.insert tests {:name "repeating interval counted occurrences" :fn repeating-interval-counted-occurrences})
 (table.insert tests {:name "repeating interval unbounded limit" :fn repeating-interval-unbounded-limit})
 (table.insert tests {:name "repeating interval rejections" :fn repeating-interval-rejections})
