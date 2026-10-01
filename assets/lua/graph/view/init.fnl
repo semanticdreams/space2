@@ -171,10 +171,6 @@
                                            (and graph-theme graph-theme.label-target-pixels)))
     (local resolved-label-min-scale (or options.label-min-scale
                                         (and graph-theme graph-theme.label-min-scale)))
-    (local resolved-edge-color (or options.edge-color (and graph-theme graph-theme.edge-color)))
-    (local resolved-edge-thickness (or options.edge-thickness
-                                      (and graph-theme graph-theme.edge-thickness)
-                                      2.0))
     (local selection-border-color (or options.selection-border-color
                                       (and graph-theme graph-theme.selection-border-color)))
     (assert selection-border-color "GraphView requires theme graph.selection-border-color")
@@ -346,26 +342,27 @@
                                   (bounds-for-presentation (. registry.points node)))})))
 
     (fn bind-focus-node-activate [node focus-node]
-        (when focus-node
-            (set focus-node.activate
-                 (fn [_node opts]
-                     (local mod (and opts opts.event opts.event.mod))
-                     (if (Modifiers.alt-held? mod)
-                         (do
-                             (local ts (or (and opts opts.event opts.event.payload
-                                                opts.event.payload.timestamp) 0))
-                             (local continuing?
-                                 (and (> (length expand-seq-frontier) 0)
-                                      (> ts 0)
-                                      (<= (- ts expand-seq-timestamp) expand-seq-timeout)))
-                             (local frontier
-                                 (if continuing?
-                                     expand-seq-frontier
-                                     [(tostring node.key)]))
-                             (set expand-seq-frontier (expand-linked-frontier graph-map frontier))
-                             (set expand-seq-timestamp ts)
-                             true)
-                         (do (views:open node) true))))))
+        (set focus-node.activate
+             (fn [_node opts]
+                 (local mod (and opts opts.event opts.event.mod))
+                 (if (Modifiers.alt-held? mod)
+                     (do
+                         (local ts (or (and opts opts.event opts.event.payload
+                                            opts.event.payload.timestamp) 0))
+                         (local continuing?
+                             (and (> (length expand-seq-frontier) 0)
+                                  (> ts 0)
+                                  (<= (- ts expand-seq-timestamp) expand-seq-timeout)))
+                         (local frontier
+                             (if continuing?
+                                 expand-seq-frontier
+                                 [(tostring node.key)]))
+                         (set expand-seq-frontier (expand-linked-frontier graph-map frontier))
+                         (set expand-seq-timestamp ts)
+                         true)
+                      (or (. expanded-nodes node)
+                          (toggle-node-presentation node)
+                          true)))))
 
     (fn update-selection-set [nodes]
         (local next {})
@@ -515,8 +512,10 @@
                         :pinned pinned
                         :make-line new-triangle-line
                         :ctx ctx
-                        :edge-color resolved-edge-color
-                        :edge-thickness resolved-edge-thickness
+                         :edge-color (or options.edge-color (and graph-theme graph-theme.edge-color))
+                         :edge-thickness (or options.edge-thickness
+                                             (and graph-theme graph-theme.edge-thickness)
+                                             2.0)
                         :label-color (or resolved-label-color (glm.vec4 0.8 0.8 0.8 1))
                         :label-depth-offset (or options.label-depth-offset 1.0)
                         :set-point-position set-point-position
@@ -1027,8 +1026,8 @@
               (set (. pinned-before-expand node) (. pinned node))
               (set (. pinned node) true)
               (set (. expanded-nodes node) true)
-              (persistence:set-presentation node :expanded)
-              (graph-layout:rebuild)))))
+               (persistence:set-presentation node :expanded)
+               (graph-layout:rebuild)))))
 
     (fn handle-node-replaced [payload]
         (assert-not-dropped "handle-node-replaced")
@@ -1587,10 +1586,16 @@
              (views:open node)
              true))
     (set view.open-focused-node (fn [_self]
-                                    (assert-not-dropped "open-focused-node")
-                                   (when focused-node
-                                       (views:open focused-node)
-                                       true)))
+                                     (assert-not-dropped "open-focused-node")
+                                    (when focused-node
+                                        (views:open focused-node)
+                                        true)))
+    (set view.expand-focused-node (fn [_self]
+                                      (assert-not-dropped "expand-focused-node")
+                                      (when focused-node
+                                          (when (not (. expanded-nodes focused-node))
+                                              (toggle-node-presentation focused-node))
+                                          true)))
     (set view.update update)
     (set view.get-position get-position)
     (set view.start-layout (fn [_self]

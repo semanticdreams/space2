@@ -122,8 +122,8 @@
 (fn activate-focused-node []
   (local graph-view app.graph-view)
   (and graph-view
-       graph-view.open-focused-node
-       (graph-view:open-focused-node)))
+       graph-view.expand-focused-node
+       (graph-view:expand-focused-node)))
 
 (fn delete-selection []
   (local graph-view app.graph-view)

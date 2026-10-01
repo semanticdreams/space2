@@ -51,6 +51,8 @@ island reconciliation.
 
 Previews expose compact state, high-frequency local actions, and short search/list controls. They are appropriate for status summaries, small action rows, revealing one selected related node, opening a focused UX node, or opening a full view/panel.
 
+In graph view, double-clicking a compact node point and pressing Enter on a focused graph node both expand the inline preview card. Enter expansion is idempotent: once the compact point has been replaced by an expanded card, another Enter leaves the preview expanded rather than collapsing it or opening the full view. Full views remain explicit actions through context-menu `Open` and expanded-card header controls.
+
 UX-purpose graph nodes expose one focused operation/detail surface and own no domain records. They are graph-addressable adapters over owning stores or systems, such as workflow step explorers or run timelines, and they materialize related topology only through explicit user actions.
 
 - Filesystem file content follows the same exposure-layer rule: `fs:<path>` remains the generic path adapter, regular files expose explicit interaction rows, and `fs-file-viewer:<absolute-path>` is a UX-purpose node that reads only bounded windows. See [Graph Filesystem File Interactions](/dev/features/graph-filesystem-file-interactions).
