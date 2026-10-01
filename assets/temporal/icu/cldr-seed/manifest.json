@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "id": "cldr-seed",
+  "provider_id": "space.temporal.cldr-seed",
+  "version": "CLDR-46-selected-seed",
+  "source_url": "https://unicode.org/Public/cldr/46/",
+  "license": "Unicode License v3",
+  "runtime_network_fetch_allowed": false,
+  "supported_locales": ["en-US", "fr-FR", "ja-JP"],
+  "supported_calendars": ["gregory", "buddhist", "japanese"],
+  "reproducible_provenance": "Hand-curated selected corpus derived from CLDR 46 locale date patterns, month names, and era identifiers; every supported value is represented in focused Temporal.localization and Temporal.calendar tests.",
+  "files": [
+    {"path": "locales.json", "kind": "locale-date-patterns"},
+    {"path": "calendars.json", "kind": "calendar-era-data"}
+  ]
+}

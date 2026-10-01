@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "provider_id": "space.temporal.cldr-seed",
+  "calendar_order": ["gregory", "buddhist", "japanese"],
+  "calendars": {
+    "gregory": {"eras": [{"id": "ce", "start_iso": "0001-01-01", "year_offset": 0}]},
+    "buddhist": {"eras": [{"id": "be", "start_iso": "0001-01-01", "year_offset": 543}]},
+    "japanese": {"eras": [
+      {"id": "showa", "code": "S", "name_ja": "昭和", "start_iso": "1926-12-25", "end_iso": "1989-01-07", "iso_start_year": 1926},
+      {"id": "heisei", "code": "H", "name_ja": "平成", "start_iso": "1989-01-08", "end_iso": "2019-04-30", "iso_start_year": 1989},
+      {"id": "reiwa", "code": "R", "name_ja": "令和", "start_iso": "2019-05-01", "iso_start_year": 2019}
+    ]}
+  }
+}

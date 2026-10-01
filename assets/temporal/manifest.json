@@ -1,5 +1,15 @@
 {
   "schema_version": 1,
   "runtime_network_fetch_allowed": false,
-  "packaged_data_sets": []
+  "packaged_data_sets": [
+    {
+      "id": "cldr-seed",
+      "provider_id": "space.temporal.cldr-seed",
+      "version": "CLDR-46-selected-seed",
+      "root": "assets/temporal/icu/cldr-seed",
+      "manifest": "assets/temporal/icu/cldr-seed/manifest.json",
+      "runtime_network_fetch_allowed": false,
+      "files": ["locales.json", "calendars.json"]
+    }
+  ]
 }

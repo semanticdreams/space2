@@ -1,0 +1,173 @@
+{
+  "schema_version": 1,
+  "provider_id": "space.temporal.cldr-seed",
+  "locale_order": ["en-US", "fr-FR", "ja-JP"],
+  "month_names": {
+    "en-US": [
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December"
+    ],
+    "fr-FR": [
+      "janvier",
+      "février",
+      "mars",
+      "avril",
+      "mai",
+      "juin",
+      "juillet",
+      "août",
+      "septembre",
+      "octobre",
+      "novembre",
+      "décembre"
+    ]
+  },
+  "combinations": [
+    {
+      "locale": "en-US",
+      "calendar": "gregory",
+      "styles": {
+        "short": {
+          "pattern": "MM/DD/YYYY",
+          "tokens": [
+            {"field": "month", "width": 2},
+            {"literal": "/"},
+            {"field": "day", "width": 2},
+            {"literal": "/"},
+            {"field": "year", "width": 4}
+          ]
+        },
+        "long": {
+          "pattern": "Month D, YYYY",
+          "tokens": [
+            {"field": "month-name", "locale": "en-US"},
+            {"literal": " "},
+            {"field": "day"},
+            {"literal": ", "},
+            {"field": "year", "width": 4}
+          ]
+        }
+      }
+    },
+    {
+      "locale": "fr-FR",
+      "calendar": "gregory",
+      "styles": {
+        "short": {
+          "pattern": "DD/MM/YYYY",
+          "tokens": [
+            {"field": "day", "width": 2},
+            {"literal": "/"},
+            {"field": "month", "width": 2},
+            {"literal": "/"},
+            {"field": "year", "width": 4}
+          ]
+        },
+        "long": {
+          "pattern": "D month YYYY",
+          "tokens": [
+            {"field": "day"},
+            {"literal": " "},
+            {"field": "month-name", "locale": "fr-FR"},
+            {"literal": " "},
+            {"field": "year", "width": 4}
+          ]
+        }
+      }
+    },
+    {
+      "locale": "ja-JP",
+      "calendar": "gregory",
+      "styles": {
+        "short": {
+          "pattern": "YYYY/MM/DD",
+          "tokens": [
+            {"field": "year", "width": 4},
+            {"literal": "/"},
+            {"field": "month", "width": 2},
+            {"literal": "/"},
+            {"field": "day", "width": 2}
+          ]
+        },
+        "long": {
+          "pattern": "YYYY年M月D日",
+          "tokens": [
+            {"field": "year", "width": 4},
+            {"literal": "年"},
+            {"field": "month"},
+            {"literal": "月"},
+            {"field": "day"},
+            {"literal": "日"}
+          ]
+        }
+      }
+    },
+    {
+      "locale": "en-US",
+      "calendar": "buddhist",
+      "styles": {
+        "short": {
+          "pattern": "MM/DD/YYYY BE",
+          "tokens": [
+            {"field": "month", "width": 2},
+            {"literal": "/"},
+            {"field": "day", "width": 2},
+            {"literal": "/"},
+            {"field": "year", "width": 4},
+            {"literal": " BE"}
+          ]
+        },
+        "long": {
+          "pattern": "Month D, YYYY BE",
+          "tokens": [
+            {"field": "month-name", "locale": "en-US"},
+            {"literal": " "},
+            {"field": "day"},
+            {"literal": ", "},
+            {"field": "year", "width": 4},
+            {"literal": " BE"}
+          ]
+        }
+      }
+    },
+    {
+      "locale": "ja-JP",
+      "calendar": "japanese",
+      "styles": {
+        "short": {
+          "pattern": "era-code year/MM/DD",
+          "tokens": [
+            {"field": "era-code"},
+            {"field": "year"},
+            {"literal": "/"},
+            {"field": "month", "width": 2},
+            {"literal": "/"},
+            {"field": "day", "width": 2}
+          ]
+        },
+        "long": {
+          "pattern": "era-name year年M月D日",
+          "tokens": [
+            {"field": "era-name"},
+            {"field": "year"},
+            {"literal": "年"},
+            {"field": "month"},
+            {"literal": "月"},
+            {"field": "day"},
+            {"literal": "日"}
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -12,7 +12,16 @@
   (assert Temporal.plain-date-time)
   (assert Temporal.zoned-date-time)
   (assert Temporal.clock)
-  (assert Temporal.tzdb))
+  (assert Temporal.tzdb)
+  (assert Temporal.calendar)
+  (assert Temporal.calendar.supported-calendars)
+  (assert Temporal.calendar.from-iso)
+  (assert Temporal.calendar.to-iso)
+  (assert Temporal.localization)
+  (assert Temporal.localization.supported-locales)
+  (assert Temporal.localization.supported-combinations)
+  (assert Temporal.localization.format-plain-date-time)
+  (assert Temporal.localization.parse-plain-date-time))
 
 (fn instant-parse-and-format-require-explicit-offset []
   (local Temporal (require :temporal))

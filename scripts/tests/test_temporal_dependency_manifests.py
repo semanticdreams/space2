@@ -76,6 +76,7 @@ def test_planned_manifest_may_omit_version_and_checksum(tmp_path):
     root = copy_foundation(tmp_path)
     path = root / "external/temporal/icu/DEPENDENCY_MANIFEST.json"
     data = json.loads(path.read_text())
+    data["status"] = "planned"
     data.pop("version", None)
     data.pop("checksum_sha256", None)
     data.pop("reproducible_provenance", None)
@@ -97,3 +98,72 @@ def test_packaged_manifest_requires_provenance(tmp_path):
     path.write_text(json.dumps(data, indent=2) + "\n")
     errors = checker.validate_repo(root)
     assert any("checksum_sha256 or reproducible_provenance" in error for error in errors)
+
+
+def test_runtime_manifest_requires_packaged_seed_files(tmp_path):
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    (root / "assets/temporal/icu/cldr-seed/locales.json").unlink()
+    errors = checker.validate_repo(root)
+    assert any(
+        "packaged data file does not exist" in error and "locales.json" in error
+        for error in errors
+    )
+
+
+def test_runtime_manifest_requires_seed_files_even_when_file_list_omits_them(tmp_path):
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    path = root / "assets/temporal/manifest.json"
+    data = json.loads(path.read_text())
+    data["packaged_data_sets"][0]["files"] = ["calendars.json"]
+    path.write_text(json.dumps(data, indent=2) + "\n")
+    (root / "assets/temporal/icu/cldr-seed/locales.json").unlink()
+    errors = checker.validate_repo(root)
+    assert any(
+        "packaged data file does not exist" in error and "locales.json" in error
+        for error in errors
+    )
+
+
+def test_runtime_packaged_data_set_network_fetch_is_forbidden(tmp_path):
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    path = root / "assets/temporal/manifest.json"
+    data = json.loads(path.read_text())
+    data["packaged_data_sets"][0]["runtime_network_fetch_allowed"] = True
+    path.write_text(json.dumps(data, indent=2) + "\n")
+    errors = checker.validate_repo(root)
+    assert any(
+        "packaged_data_sets[0].runtime_network_fetch_allowed must be false" in error
+        for error in errors
+    )
+
+
+def test_cldr_seed_manifest_supported_lists_match_data(tmp_path):
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    path = root / "assets/temporal/icu/cldr-seed/manifest.json"
+    data = json.loads(path.read_text())
+    data["supported_locales"] = ["en-US"]
+    path.write_text(json.dumps(data, indent=2) + "\n")
+    errors = checker.validate_repo(root)
+    assert any(
+        "cldr-seed supported_locales must match locales.json locale_order" in error
+        for error in errors
+    )
+
+
+def test_icu_manifest_is_packaged_for_cldr_seed():
+    path = REPO_ROOT / "external/temporal/icu/DEPENDENCY_MANIFEST.json"
+    data = json.loads(path.read_text())
+    assert data["status"] == "packaged"
+    assert data["version"] == "CLDR-46-selected-seed"
+    assert data["source_url"] == "https://unicode.org/Public/cldr/46/"
+    assert data["license"] == "Unicode License v3"
+    assert data["runtime"]["network_fetch_allowed"] is False
+    assert data["follow_up_gate"] == (
+        "Full ICU4C source, generated CLDR data, license notice handling, and adapter "
+        "build strategy remain future work before enabling temporal_localization native "
+        "adapter support."
+    )
