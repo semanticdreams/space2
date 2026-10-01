@@ -1,5 +1,7 @@
 (local tests [])
 (local grammar (require :temporal/ics/grammar))
+(local value (require :temporal/ics/value))
+(local Temporal (require :temporal))
 
 (fn assert= [actual expected message]
   (assert (= actual expected) (or message (.. "expected " (tostring expected) ", got " (tostring actual)))))
@@ -13,6 +15,13 @@
   (local err (assert-error f message))
   (assert (tostring err):find fragment 1 true)
   err)
+
+(fn assert-no-param [params key]
+  (assert (= nil (. params key)) (.. "expected no " key " parameter")))
+
+(fn assert-duration-seconds [duration seconds]
+  (assert= (duration:compare (Temporal.duration.from-seconds seconds)) 0
+           (.. "expected duration of " (tostring seconds) " seconds")))
 
 (fn grammar-unfolds-crlf-and-lf-lines []
   (local crlf-lines (grammar.unfold-lines "SUMMARY:Alpha\r\n beta\r\nDTSTART:20261001T090000\r\n"))
@@ -57,6 +66,70 @@
   (assert (folded:find "\r\n " 1 true))
   (assert (= (folded:sub 1 12) "DESCRIPTION:")))
 
+(fn value-parses-date-time-modes []
+  (local date (value.parse-date-time Temporal {:VALUE "DATE"} "20261001"))
+  (assert= date.kind :temporal-ics-date-time)
+  (assert= date.value-type :date)
+  (assert= date.date.year 2026)
+  (assert= date.date.month 10)
+  (assert= date.date.day 1)
+  (local floating (value.parse-date-time Temporal {} "20261001T090000"))
+  (assert= floating.value-type :date-time)
+  (assert= floating.time-mode :floating)
+  (assert= (floating.plain:to-string) "2026-10-01T09:00:00")
+  (local utc (value.parse-date-time Temporal {} "20261001T130000Z"))
+  (assert= utc.value-type :date-time)
+  (assert= utc.time-mode :utc)
+  (assert= (utc.instant:to-string) "2026-10-01T13:00:00Z")
+  (local zoned (value.parse-date-time Temporal {:TZID "America/New_York"} "20261001T090000"))
+  (assert= zoned.value-type :date-time)
+  (assert= zoned.time-mode :zoned)
+  (assert= zoned.zone-id "America/New_York")
+  (assert= (zoned.plain:to-string) "2026-10-01T09:00:00"))
+
+(fn value-formats-date-time-modes []
+  (local date (value.parse-date-time Temporal {:VALUE "DATE"} "20261001"))
+  (local (date-params date-text) (value.format-date-time date))
+  (assert= date-params.VALUE "DATE")
+  (assert= date-text "20261001")
+  (local utc (value.parse-date-time Temporal {} "20261001T130000Z"))
+  (local (utc-params utc-text) (value.format-date-time utc))
+  (assert-no-param utc-params "VALUE")
+  (assert= utc-text "20261001T130000Z")
+  (local floating (value.parse-date-time Temporal {} "20261001T090000"))
+  (local (floating-params floating-text) (value.format-date-time floating))
+  (assert-no-param floating-params "TZID")
+  (assert= floating-text "20261001T090000")
+  (local zoned (value.parse-date-time Temporal {:TZID "America/New_York"} "20261001T090000"))
+  (local (zoned-params zoned-text) (value.format-date-time zoned))
+  (assert= zoned-params.TZID "America/New_York")
+  (assert= zoned-text "20261001T090000"))
+
+(fn value-parses-and-formats-supported-durations []
+  (local timed (value.parse-duration Temporal "PT1H30M" false))
+  (assert-duration-seconds timed 5400)
+  (assert= (value.format-duration timed false) "PT1H30M")
+  (local all-day (value.parse-duration Temporal "P2D" true))
+  (assert= (Temporal.period.format all-day) "P2D")
+  (assert= (value.format-duration all-day true) "P2D"))
+
+(fn value-rejects-unsupported-date-time-boundaries []
+  (assert-error-contains #(value.parse-date-time Temporal {:TZID "Custom/Local"} "20261001T090000")
+                         "TZID"
+                         "custom TZID should fail loudly")
+  (assert-error-contains #(value.parse-date-time Temporal {:VALUE "DATE-TIME"} "20261001T090000")
+                         "VALUE"
+                         "explicit DATE-TIME value should fail")
+  (assert-error-contains #(value.parse-date-time Temporal {:VALUE "DATE" :TZID "America/New_York"} "20261001")
+                         "TZID"
+                         "TZID on DATE should fail")
+  (assert-error-contains #(value.parse-duration Temporal "P1DT2H" false)
+                         "mixed"
+                         "mixed duration should fail")
+  (assert-error-contains #(value.parse-duration Temporal "PT1H" true)
+                         "all-day"
+                         "timed duration for all-day should fail"))
+
 (table.insert tests {:name "grammar unfolds CRLF and LF lines"
                      :fn grammar-unfolds-crlf-and-lf-lines})
 (table.insert tests {:name "grammar parses names params and values"
@@ -64,7 +137,15 @@
 (table.insert tests {:name "grammar rejects malformed lines and escapes"
                      :fn grammar-rejects-malformed-lines-and-escapes})
 (table.insert tests {:name "grammar emits folded content lines"
-                     :fn grammar-emits-folded-content-lines})
+                      :fn grammar-emits-folded-content-lines})
+(table.insert tests {:name "value parses date time modes"
+                     :fn value-parses-date-time-modes})
+(table.insert tests {:name "value formats date time modes"
+                     :fn value-formats-date-time-modes})
+(table.insert tests {:name "value parses and formats supported durations"
+                     :fn value-parses-and-formats-supported-durations})
+(table.insert tests {:name "value rejects unsupported date time boundaries"
+                     :fn value-rejects-unsupported-date-time-boundaries})
 
 (local main
   (fn []
