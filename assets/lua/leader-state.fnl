@@ -37,8 +37,9 @@
   result)
 
 (fn handle-resolved-command [ctx resolved composed reset-sequence!]
-  (local ran? (Commands.run composed resolved.command-id ctx))
-  (when ran?
+  (local available? (Commands.available? composed resolved.command-id ctx))
+  (when available?
+    (Commands.run composed resolved.command-id ctx)
     ((. ctx :mark-command-executed!)))
   (reset-sequence!)
   (when (not (core-command? resolved.command-id))

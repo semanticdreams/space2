@@ -2712,6 +2712,53 @@
       (assert (= result.last-transition :normal)
               "Unavailable graph preview command should return to normal without running"))))
 
+(fn leader-state-graph-preview-idempotent-command-closes-hints []
+  (local GraphCommands (require :graph/commands))
+  (local original-states app.states)
+  (local original-providers app.activity-leader-command-providers)
+  (local transitions [])
+  (local calls {:close 0 :expand 0})
+  (local hud {:command-hints {:handle-toggle-key (fn [_self _payload] true)
+                              :close-on-handled-event (fn [_self _route-key _payload]
+                                                        (set calls.close (+ calls.close 1))
+                                                        true)}})
+  (local states
+    (States {:hud_provider (fn [_self] hud)
+             :focus_manager_provider (fn [_self]
+                                       app.focus)}))
+  (local original-set-state states.set-state)
+  (set states.set-state
+       (fn [_self name]
+         (when (not (states:get-state name))
+           (states:add-state name {}))
+         (table.insert transitions name)
+         (original-set-state states name)))
+  (local graph-view {:selected-node-count (fn [_self] 1)
+                     :expand-selected-previews (fn [_self]
+                                                 (set calls.expand (+ calls.expand 1))
+                                                 0)})
+  (local (ok err)
+         (pcall
+           (fn []
+             (set-app-states! states)
+             (set app.activity-leader-command-providers
+                  [(GraphCommands.provider {:graph-view (fn [] graph-view)})])
+             (local state (LeaderState))
+             (states:add-state :leader state)
+             (state.on-key-down {:key KEY_G})
+             (state.on-key-down {:key KEY_P})
+             (state.on-key-down {:key KEY_E})
+             (assert (= calls.expand 1)
+                     "Available idempotent SPC g p e should call graph expand")
+             (assert (= (. transitions (# transitions)) :normal)
+                     "Available idempotent graph command should return to normal")
+             (assert (= calls.close 3)
+                     "Prefixes and handled idempotent command should close command hints"))))
+  (set app.activity-leader-command-providers original-providers)
+  (set-app-states! original-states)
+  (when (not ok)
+    (error err)))
+
 (table.insert tests {:name "Normal state leader key enters leader state" :fn normal-state-leader-enters-leader-state})
 (table.insert tests {:name "Leader state C enters camera state" :fn leader-state-c-enters-camera-state})
 (table.insert tests {:name "Leader state P opens launcher" :fn leader-state-p-opens-launcher})
@@ -2722,7 +2769,9 @@
 (table.insert tests {:name "Leader state graph preview command uses selection provider"
                       :fn leader-state-graph-preview-command-uses-selection-provider})
 (table.insert tests {:name "Leader state graph preview command requires selection"
-                      :fn leader-state-graph-preview-command-requires-selection})
+                       :fn leader-state-graph-preview-command-requires-selection})
+(table.insert tests {:name "Leader state graph preview idempotent command closes hints"
+                       :fn leader-state-graph-preview-idempotent-command-closes-hints})
 (table.insert tests {:name "Camera state F enters fpc state" :fn camera-state-f-enters-fpc-state})
 (table.insert tests {:name "Camera state escape exits to normal" :fn camera-state-escape-exits-to-normal})
 (table.insert tests {:name "Camera state 0 resets camera transform" :fn camera-state-zero-resets-camera})
