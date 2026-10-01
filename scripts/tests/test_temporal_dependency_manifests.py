@@ -100,6 +100,69 @@ def install_valid_holiday_seed(root: Path) -> None:
     runtime_path.write_text(json.dumps(runtime, indent=2) + "\n", encoding="utf-8")
 
 
+def install_valid_natural_seed(root: Path) -> None:
+    seed_root = root / "assets/temporal/natural/seed"
+    seed_root.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "schema_version": 1,
+        "id": "natural-phrase-seed",
+        "provider_id": "space.temporal.natural-seed",
+        "version": "natural-phrase-seed-2026-10-track10",
+        "supported_locales": ["en-US", "fr-FR", "ja-JP"],
+        "runtime_network_fetch_allowed": False,
+        "source": "Hand-authored Space temporal natural-language seed corpus",
+        "license": "Project license",
+        "update_process": (
+            "Update phrases.json and this manifest in the same reviewed change; runtime parsing must "
+            "remain deterministic and offline."
+        ),
+    }
+    phrases = {
+        "schema_version": 1,
+        "provider_id": "space.temporal.natural-seed",
+        "version": "natural-phrase-seed-2026-10-track10",
+        "locale_order": ["en-US", "fr-FR", "ja-JP"],
+        "weekday_symbols": ["mo", "tu", "we", "th", "fr", "sa", "su"],
+        "locales": {
+            locale: {
+                "relative_literals": [{"phrase_id": f"{locale}-today", "text": "today", "offset_days": 0}],
+                "relative_count_offsets": [
+                    {"phrase_id": f"{locale}-in-count-days", "pattern": "in {count} days", "unit": "day"}
+                ],
+                "next_weekday": [{"phrase_id": f"{locale}-next-monday", "text": "next monday", "weekday": "mo"}],
+                "weekly_weekday_recurrence": [
+                    {"phrase_id": f"{locale}-every-monday", "text": "every monday", "weekday": "mo"}
+                ],
+                "bare_weekday_ambiguity": [
+                    {"phrase_id": f"{locale}-bare-monday", "text": "monday", "weekday": "mo"}
+                ],
+            }
+            for locale in ["en-US", "fr-FR", "ja-JP"]
+        },
+    }
+    (seed_root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    (seed_root / "phrases.json").write_text(json.dumps(phrases, indent=2) + "\n", encoding="utf-8")
+    runtime_path = root / "assets/temporal/manifest.json"
+    runtime = json.loads(runtime_path.read_text())
+    runtime["packaged_data_sets"] = [
+        dataset
+        for dataset in runtime["packaged_data_sets"]
+        if dataset.get("id") != "natural-phrase-seed"
+    ]
+    runtime["packaged_data_sets"].append(
+        {
+            "id": "natural-phrase-seed",
+            "provider_id": "space.temporal.natural-seed",
+            "version": "natural-phrase-seed-2026-10-track10",
+            "root": "assets/temporal/natural/seed",
+            "manifest": "assets/temporal/natural/seed/manifest.json",
+            "runtime_network_fetch_allowed": False,
+            "files": ["phrases.json"],
+        }
+    )
+    runtime_path.write_text(json.dumps(runtime, indent=2) + "\n", encoding="utf-8")
+
+
 def test_current_repo_manifests_are_valid():
     checker = load_checker()
     assert checker.validate_repo(REPO_ROOT) == []
@@ -435,6 +498,72 @@ def test_holiday_seed_rejects_duplicate_observed_dates(tmp_path: Path) -> None:
     holidays_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     errors = checker.validate_repo(root)
     assert any("duplicate observed_date" in error for error in errors)
+
+
+def test_natural_seed_requires_phrases_file(tmp_path: Path) -> None:
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    install_valid_natural_seed(root)
+    (root / "assets/temporal/natural/seed/phrases.json").unlink()
+    errors = checker.validate_repo(root)
+    assert any("natural-phrase-seed" in error and "phrases.json" in error for error in errors)
+
+
+def test_natural_seed_supported_locales_match_phrase_locale_order(tmp_path: Path) -> None:
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    install_valid_natural_seed(root)
+    phrases_path = root / "assets/temporal/natural/seed/phrases.json"
+    phrases = json.loads(phrases_path.read_text())
+    phrases["locale_order"] = ["en-US", "ja-JP", "fr-FR"]
+    phrases_path.write_text(json.dumps(phrases, indent=2) + "\n", encoding="utf-8")
+    errors = checker.validate_repo(root)
+    assert any("natural-phrase-seed" in error and "supported_locales" in error for error in errors)
+
+
+def test_natural_seed_rejects_runtime_network_fetch(tmp_path: Path) -> None:
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    install_valid_natural_seed(root)
+    manifest_path = root / "assets/temporal/natural/seed/manifest.json"
+    data = json.loads(manifest_path.read_text())
+    data["runtime_network_fetch_allowed"] = True
+    manifest_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    errors = checker.validate_repo(root)
+    assert any("natural-phrase-seed" in error and "runtime_network_fetch_allowed" in error for error in errors)
+
+
+def test_runtime_manifest_requires_natural_seed_dataset_entry(tmp_path: Path) -> None:
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    install_valid_natural_seed(root)
+    runtime_path = root / "assets/temporal/manifest.json"
+    data = json.loads(runtime_path.read_text())
+    data["packaged_data_sets"] = [
+        dataset
+        for dataset in data["packaged_data_sets"]
+        if dataset.get("id") != "natural-phrase-seed"
+    ]
+    runtime_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    errors = checker.validate_repo(root)
+    assert any("natural-phrase-seed" in error and "exactly one" in error for error in errors)
+
+
+def test_runtime_manifest_rejects_duplicate_natural_seed_dataset_entries(tmp_path: Path) -> None:
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    install_valid_natural_seed(root)
+    runtime_path = root / "assets/temporal/manifest.json"
+    data = json.loads(runtime_path.read_text())
+    natural_dataset = next(
+        dataset
+        for dataset in data["packaged_data_sets"]
+        if dataset.get("id") == "natural-phrase-seed"
+    )
+    data["packaged_data_sets"].append(dict(natural_dataset))
+    runtime_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    errors = checker.validate_repo(root)
+    assert any("natural-phrase-seed" in error and "exactly one" in error for error in errors)
 
 
 def test_icu_manifest_is_packaged_for_cldr_seed():

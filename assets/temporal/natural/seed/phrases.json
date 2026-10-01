@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "provider_id": "space.temporal.natural-seed",
+  "version": "natural-phrase-seed-2026-10-track10",
+  "locale_order": ["en-US", "fr-FR", "ja-JP"],
+  "weekday_symbols": ["mo", "tu", "we", "th", "fr", "sa", "su"],
+  "locales": {
+    "en-US": {
+      "relative_literals": [
+        {"phrase_id": "en-us-today", "text": "today", "offset_days": 0},
+        {"phrase_id": "en-us-tomorrow", "text": "tomorrow", "offset_days": 1}
+      ],
+      "relative_count_offsets": [
+        {"phrase_id": "en-us-in-count-day", "pattern": "in {count} day", "unit": "day", "direction": 1},
+        {"phrase_id": "en-us-in-count-days", "pattern": "in {count} days", "unit": "day", "direction": 1},
+        {"phrase_id": "en-us-in-count-week", "pattern": "in {count} week", "unit": "week", "direction": 1},
+        {"phrase_id": "en-us-in-count-weeks", "pattern": "in {count} weeks", "unit": "week", "direction": 1}
+      ],
+      "next_weekday": [
+        {"phrase_id": "en-us-next-monday", "text": "next monday", "weekday": "mo"},
+        {"phrase_id": "en-us-next-tuesday", "text": "next tuesday", "weekday": "tu"},
+        {"phrase_id": "en-us-next-wednesday", "text": "next wednesday", "weekday": "we"},
+        {"phrase_id": "en-us-next-thursday", "text": "next thursday", "weekday": "th"},
+        {"phrase_id": "en-us-next-friday", "text": "next friday", "weekday": "fr"},
+        {"phrase_id": "en-us-next-saturday", "text": "next saturday", "weekday": "sa"},
+        {"phrase_id": "en-us-next-sunday", "text": "next sunday", "weekday": "su"}
+      ],
+      "weekly_weekday_recurrence": [
+        {"phrase_id": "en-us-every-monday", "text": "every monday", "weekday": "mo"},
+        {"phrase_id": "en-us-every-tuesday", "text": "every tuesday", "weekday": "tu"},
+        {"phrase_id": "en-us-every-wednesday", "text": "every wednesday", "weekday": "we"},
+        {"phrase_id": "en-us-every-thursday", "text": "every thursday", "weekday": "th"},
+        {"phrase_id": "en-us-every-friday", "text": "every friday", "weekday": "fr"},
+        {"phrase_id": "en-us-every-saturday", "text": "every saturday", "weekday": "sa"},
+        {"phrase_id": "en-us-every-sunday", "text": "every sunday", "weekday": "su"}
+      ],
+      "bare_weekday_ambiguity": [
+        {"phrase_id": "en-us-bare-monday", "text": "monday", "weekday": "mo"},
+        {"phrase_id": "en-us-bare-tuesday", "text": "tuesday", "weekday": "tu"},
+        {"phrase_id": "en-us-bare-wednesday", "text": "wednesday", "weekday": "we"},
+        {"phrase_id": "en-us-bare-thursday", "text": "thursday", "weekday": "th"},
+        {"phrase_id": "en-us-bare-friday", "text": "friday", "weekday": "fr"},
+        {"phrase_id": "en-us-bare-saturday", "text": "saturday", "weekday": "sa"},
+        {"phrase_id": "en-us-bare-sunday", "text": "sunday", "weekday": "su"}
+      ]
+    },
+    "fr-FR": {
+      "relative_literals": [
+        {"phrase_id": "fr-fr-aujourdhui", "text": "aujourd'hui", "offset_days": 0},
+        {"phrase_id": "fr-fr-demain", "text": "demain", "offset_days": 1}
+      ],
+      "relative_count_offsets": [
+        {"phrase_id": "fr-fr-dans-count-jour", "pattern": "dans {count} jour", "unit": "day", "direction": 1},
+        {"phrase_id": "fr-fr-dans-count-jours", "pattern": "dans {count} jours", "unit": "day", "direction": 1},
+        {"phrase_id": "fr-fr-dans-count-semaine", "pattern": "dans {count} semaine", "unit": "week", "direction": 1},
+        {"phrase_id": "fr-fr-dans-count-semaines", "pattern": "dans {count} semaines", "unit": "week", "direction": 1}
+      ],
+      "next_weekday": [
+        {"phrase_id": "fr-fr-lundi-prochain", "text": "lundi prochain", "weekday": "mo"},
+        {"phrase_id": "fr-fr-mardi-prochain", "text": "mardi prochain", "weekday": "tu"},
+        {"phrase_id": "fr-fr-mercredi-prochain", "text": "mercredi prochain", "weekday": "we"},
+        {"phrase_id": "fr-fr-jeudi-prochain", "text": "jeudi prochain", "weekday": "th"},
+        {"phrase_id": "fr-fr-vendredi-prochain", "text": "vendredi prochain", "weekday": "fr"},
+        {"phrase_id": "fr-fr-samedi-prochain", "text": "samedi prochain", "weekday": "sa"},
+        {"phrase_id": "fr-fr-dimanche-prochain", "text": "dimanche prochain", "weekday": "su"}
+      ],
+      "weekly_weekday_recurrence": [
+        {"phrase_id": "fr-fr-chaque-lundi", "text": "chaque lundi", "weekday": "mo"},
+        {"phrase_id": "fr-fr-chaque-mardi", "text": "chaque mardi", "weekday": "tu"},
+        {"phrase_id": "fr-fr-chaque-mercredi", "text": "chaque mercredi", "weekday": "we"},
+        {"phrase_id": "fr-fr-chaque-jeudi", "text": "chaque jeudi", "weekday": "th"},
+        {"phrase_id": "fr-fr-chaque-vendredi", "text": "chaque vendredi", "weekday": "fr"},
+        {"phrase_id": "fr-fr-chaque-samedi", "text": "chaque samedi", "weekday": "sa"},
+        {"phrase_id": "fr-fr-chaque-dimanche", "text": "chaque dimanche", "weekday": "su"}
+      ],
+      "bare_weekday_ambiguity": [
+        {"phrase_id": "fr-fr-bare-lundi", "text": "lundi", "weekday": "mo"},
+        {"phrase_id": "fr-fr-bare-mardi", "text": "mardi", "weekday": "tu"},
+        {"phrase_id": "fr-fr-bare-mercredi", "text": "mercredi", "weekday": "we"},
+        {"phrase_id": "fr-fr-bare-jeudi", "text": "jeudi", "weekday": "th"},
+        {"phrase_id": "fr-fr-bare-vendredi", "text": "vendredi", "weekday": "fr"},
+        {"phrase_id": "fr-fr-bare-samedi", "text": "samedi", "weekday": "sa"},
+        {"phrase_id": "fr-fr-bare-dimanche", "text": "dimanche", "weekday": "su"}
+      ]
+    },
+    "ja-JP": {
+      "relative_literals": [
+        {"phrase_id": "ja-jp-kyou", "text": "今日", "offset_days": 0},
+        {"phrase_id": "ja-jp-ashita", "text": "明日", "offset_days": 1}
+      ],
+      "relative_count_offsets": [
+        {"phrase_id": "ja-jp-count-nichigo", "pattern": "{count}日後", "unit": "day", "direction": 1},
+        {"phrase_id": "ja-jp-count-shukanngo", "pattern": "{count}週間後", "unit": "week", "direction": 1}
+      ],
+      "next_weekday": [
+        {"phrase_id": "ja-jp-next-monday", "text": "次の月曜日", "weekday": "mo"},
+        {"phrase_id": "ja-jp-next-tuesday", "text": "次の火曜日", "weekday": "tu"},
+        {"phrase_id": "ja-jp-next-wednesday", "text": "次の水曜日", "weekday": "we"},
+        {"phrase_id": "ja-jp-next-thursday", "text": "次の木曜日", "weekday": "th"},
+        {"phrase_id": "ja-jp-next-friday", "text": "次の金曜日", "weekday": "fr"},
+        {"phrase_id": "ja-jp-next-saturday", "text": "次の土曜日", "weekday": "sa"},
+        {"phrase_id": "ja-jp-next-sunday", "text": "次の日曜日", "weekday": "su"}
+      ],
+      "weekly_weekday_recurrence": [
+        {"phrase_id": "ja-jp-every-monday", "text": "毎週月曜日", "weekday": "mo"},
+        {"phrase_id": "ja-jp-every-tuesday", "text": "毎週火曜日", "weekday": "tu"},
+        {"phrase_id": "ja-jp-every-wednesday", "text": "毎週水曜日", "weekday": "we"},
+        {"phrase_id": "ja-jp-every-thursday", "text": "毎週木曜日", "weekday": "th"},
+        {"phrase_id": "ja-jp-every-friday", "text": "毎週金曜日", "weekday": "fr"},
+        {"phrase_id": "ja-jp-every-saturday", "text": "毎週土曜日", "weekday": "sa"},
+        {"phrase_id": "ja-jp-every-sunday", "text": "毎週日曜日", "weekday": "su"}
+      ],
+      "bare_weekday_ambiguity": [
+        {"phrase_id": "ja-jp-bare-monday", "text": "月曜日", "weekday": "mo"},
+        {"phrase_id": "ja-jp-bare-tuesday", "text": "火曜日", "weekday": "tu"},
+        {"phrase_id": "ja-jp-bare-wednesday", "text": "水曜日", "weekday": "we"},
+        {"phrase_id": "ja-jp-bare-thursday", "text": "木曜日", "weekday": "th"},
+        {"phrase_id": "ja-jp-bare-friday", "text": "金曜日", "weekday": "fr"},
+        {"phrase_id": "ja-jp-bare-saturday", "text": "土曜日", "weekday": "sa"},
+        {"phrase_id": "ja-jp-bare-sunday", "text": "日曜日", "weekday": "su"}
+      ]
+    }
+  }
+}

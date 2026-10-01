@@ -19,6 +19,15 @@
       "manifest": "assets/temporal/holidays/us-federal-seed/manifest.json",
       "runtime_network_fetch_allowed": false,
       "files": ["holidays.json"]
+    },
+    {
+      "id": "natural-phrase-seed",
+      "provider_id": "space.temporal.natural-seed",
+      "version": "natural-phrase-seed-2026-10-track10",
+      "root": "assets/temporal/natural/seed",
+      "manifest": "assets/temporal/natural/seed/manifest.json",
+      "runtime_network_fetch_allowed": false,
+      "files": ["phrases.json"]
     }
   ]
 }

@@ -16,8 +16,21 @@ REQUIRED_DEPENDENCY_MANIFESTS = [
 RUNTIME_MANIFEST = Path("assets/temporal/manifest.json")
 REQUIRED_CLDR_SEED_FILES = ["locales.json", "calendars.json"]
 REQUIRED_HOLIDAY_SEED_FILES = ["holidays.json"]
+REQUIRED_NATURAL_SEED_FILES = ["phrases.json"]
 HOLIDAY_SEED_ID = "us-federal-holidays-seed"
 HOLIDAY_PROVIDER_ID = "space.temporal.us-federal-holidays"
+NATURAL_SEED_ID = "natural-phrase-seed"
+NATURAL_PROVIDER_ID = "space.temporal.natural-seed"
+NATURAL_VERSION = "natural-phrase-seed-2026-10-track10"
+NATURAL_LOCALES = ["en-US", "fr-FR", "ja-JP"]
+NATURAL_WEEKDAY_SYMBOLS = ["mo", "tu", "we", "th", "fr", "sa", "su"]
+NATURAL_REQUIRED_FAMILIES = [
+    "relative_literals",
+    "relative_count_offsets",
+    "next_weekday",
+    "weekly_weekday_recurrence",
+    "bare_weekday_ambiguity",
+]
 HOLIDAY_JURISDICTIONS = ["US-FED"]
 HOLIDAY_YEAR_START = 2026
 HOLIDAY_YEAR_END = 2027
@@ -391,6 +404,99 @@ def validate_holiday_seed(repo_root: Path, dataset: dict, index: int, errors: li
     validate_holiday_records(holidays_path, holidays, errors)
 
 
+def validate_natural_phrase_families(phrases_path: Path, phrases: dict, errors: list[str]) -> None:
+    locales = phrases.get("locales")
+    if not isinstance(locales, dict):
+        errors.append(f"{phrases_path}: natural-phrase-seed locales must be an object")
+        return
+    if list(locales.keys()) != NATURAL_LOCALES:
+        errors.append(f"{phrases_path}: natural-phrase-seed locales keys must be exactly {NATURAL_LOCALES!r}")
+    for locale in NATURAL_LOCALES:
+        locale_data = locales.get(locale)
+        if not isinstance(locale_data, dict):
+            errors.append(f"{phrases_path}: natural-phrase-seed locales.{locale} must be an object")
+            continue
+        for family in NATURAL_REQUIRED_FAMILIES:
+            entries = locale_data.get(family)
+            if not isinstance(entries, list) or len(entries) == 0:
+                errors.append(
+                    f"{phrases_path}: natural-phrase-seed locales.{locale}.{family} "
+                    "must be a non-empty array"
+                )
+
+
+def validate_natural_seed(repo_root: Path, dataset: dict, index: int, errors: list[str]) -> None:
+    runtime_path = RUNTIME_MANIFEST
+    prefix = f"packaged_data_sets[{index}]"
+    provider_id = dataset.get("provider_id")
+    if provider_id != NATURAL_PROVIDER_ID:
+        errors.append(f"{runtime_path}: {prefix}.provider_id must be {NATURAL_PROVIDER_ID}")
+    version = dataset.get("version")
+    if version != NATURAL_VERSION:
+        errors.append(f"{runtime_path}: {prefix}.version must be {NATURAL_VERSION}")
+    root = dataset.get("root")
+    if root != "assets/temporal/natural/seed":
+        errors.append(f"{runtime_path}: {prefix}.root must be assets/temporal/natural/seed")
+    manifest = dataset.get("manifest")
+    if manifest != "assets/temporal/natural/seed/manifest.json":
+        errors.append(f"{runtime_path}: {prefix}.manifest must be assets/temporal/natural/seed/manifest.json")
+    root_path, manifest_path, _ = validate_common_packaged_paths(
+        repo_root, dataset, index, REQUIRED_NATURAL_SEED_FILES, errors
+    )
+    supported_locales: list[str] | None = None
+    if manifest_path is not None and manifest_path.exists():
+        seed_manifest = load_json(manifest_path, errors)
+        if seed_manifest is not None:
+            require_exact_int(seed_manifest, "schema_version", 1, manifest_path, errors)
+            seed_id = require_string(seed_manifest, "id", manifest_path, errors)
+            if seed_id is not None and seed_id != NATURAL_SEED_ID:
+                errors.append(f"{manifest_path}: id must be {NATURAL_SEED_ID}")
+            seed_provider_id = require_string(seed_manifest, "provider_id", manifest_path, errors)
+            if seed_provider_id is not None and seed_provider_id != NATURAL_PROVIDER_ID:
+                errors.append(f"{manifest_path}: provider_id must be {NATURAL_PROVIDER_ID}")
+            seed_version = require_string(seed_manifest, "version", manifest_path, errors)
+            if seed_version is not None and seed_version != NATURAL_VERSION:
+                errors.append(f"{manifest_path}: version must be {NATURAL_VERSION}")
+            supported_locales = require_exact_array(
+                seed_manifest, "supported_locales", NATURAL_LOCALES, manifest_path, errors
+            )
+            require_false(
+                seed_manifest.get("runtime_network_fetch_allowed"),
+                manifest_path,
+                "runtime_network_fetch_allowed",
+                errors,
+            )
+            if seed_manifest.get("runtime_network_fetch_allowed") is not False:
+                errors.append(f"{manifest_path}: {NATURAL_SEED_ID} runtime_network_fetch_allowed must be false")
+            require_string(seed_manifest, "source", manifest_path, errors)
+            require_string(seed_manifest, "license", manifest_path, errors)
+            require_string(seed_manifest, "update_process", manifest_path, errors)
+    if root_path is None or not root_path.is_dir():
+        return
+    phrases_path = root_path / "phrases.json"
+    if not phrases_path.exists():
+        errors.append(f"{phrases_path}: {NATURAL_SEED_ID} phrases.json must exist")
+        return
+    phrases = load_json(phrases_path, errors)
+    if phrases is None:
+        return
+    require_exact_int(phrases, "schema_version", 1, phrases_path, errors)
+    phrases_provider_id = require_string(phrases, "provider_id", phrases_path, errors)
+    if phrases_provider_id is not None and phrases_provider_id != NATURAL_PROVIDER_ID:
+        errors.append(f"{phrases_path}: provider_id must be {NATURAL_PROVIDER_ID}")
+    phrases_version = require_string(phrases, "version", phrases_path, errors)
+    if phrases_version is not None and phrases_version != NATURAL_VERSION:
+        errors.append(f"{phrases_path}: version must be {NATURAL_VERSION}")
+    raw_locale_order = phrases.get("locale_order")
+    locale_order = require_exact_array(phrases, "locale_order", NATURAL_LOCALES, phrases_path, errors)
+    if supported_locales is not None and locale_order is not None and supported_locales != locale_order:
+        errors.append(f"{manifest_path}: natural-phrase-seed supported_locales must match phrases.json locale_order")
+    elif supported_locales is not None and raw_locale_order != supported_locales:
+        errors.append(f"{manifest_path}: natural-phrase-seed supported_locales must match phrases.json locale_order")
+    require_exact_array(phrases, "weekday_symbols", NATURAL_WEEKDAY_SYMBOLS, phrases_path, errors)
+    validate_natural_phrase_families(phrases_path, phrases, errors)
+
+
 def validate_runtime_manifest(repo_root: Path, errors: list[str]) -> None:
     path = repo_root / RUNTIME_MANIFEST
     if not path.exists():
@@ -404,6 +510,7 @@ def validate_runtime_manifest(repo_root: Path, errors: list[str]) -> None:
         errors.append(f"{RUNTIME_MANIFEST}: packaged_data_sets must be an array")
         return
     holiday_seed_count = 0
+    natural_seed_count = 0
     for index, dataset in enumerate(data["packaged_data_sets"]):
         prefix = f"packaged_data_sets[{index}]"
         if not isinstance(dataset, dict):
@@ -426,8 +533,13 @@ def validate_runtime_manifest(repo_root: Path, errors: list[str]) -> None:
         elif dataset_id == HOLIDAY_SEED_ID:
             holiday_seed_count += 1
             validate_holiday_seed(repo_root, dataset, index, errors)
+        elif dataset_id == NATURAL_SEED_ID:
+            natural_seed_count += 1
+            validate_natural_seed(repo_root, dataset, index, errors)
     if holiday_seed_count != 1:
         errors.append(f"{RUNTIME_MANIFEST}: packaged_data_sets must contain exactly one {HOLIDAY_SEED_ID} entry")
+    if natural_seed_count != 1:
+        errors.append(f"{RUNTIME_MANIFEST}: packaged_data_sets must contain exactly one {NATURAL_SEED_ID} entry")
 
 
 def validate_repo(repo_root: Path) -> list[str]:
