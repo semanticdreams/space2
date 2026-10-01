@@ -189,12 +189,108 @@
   (with-temp-seed {:observed-date "2028-01-01"}
     assert-out-of-bucket-load-rejected))
 
+(fn plain [iso]
+  (local Temporal (require :temporal))
+  (Temporal.plain-date-time.parse iso))
+
+(fn business-calendar-exported []
+  (local Temporal (require :temporal))
+  (assert Temporal.business-calendar "Temporal.business-calendar should be exported")
+  (assert (= (type Temporal.business-calendar.supported-jurisdictions) :function)
+          "business calendar should expose supported-jurisdictions"))
+
+(fn business-calendar-supported-jurisdictions-defensive []
+  (local Temporal (require :temporal))
+  (local jurisdictions (Temporal.business-calendar.supported-jurisdictions))
+  (assert= (length jurisdictions) 1 "business calendar should expose exactly one jurisdiction")
+  (assert= (. jurisdictions 1) "US-FED" "business calendar jurisdiction should be US-FED")
+  (tset jurisdictions 1 "mutated")
+  (assert= (. (Temporal.business-calendar.supported-jurisdictions) 1)
+           "US-FED"
+           "business calendar jurisdictions should be defensive copies"))
+
+(fn business-calendar-holidays-return-public-records []
+  (local Temporal (require :temporal))
+  (local holidays (Temporal.business-calendar.holidays {:jurisdiction "US-FED" :year 2026}))
+  (assert= (length holidays) 11 "2026 should expose US federal holiday records")
+  (local new-year (. holidays 1))
+  (assert= new-year.id "new-years-day" "New Year's Day should be first in 2026")
+  (assert= new-year.date "2026-01-01" "New Year's Day statutory date should match")
+  (assert= new-year.observed-date "2026-01-01" "New Year's Day observed date should match")
+  (var independence nil)
+  (each [_ holiday (ipairs holidays)]
+    (when (= holiday.id "independence-day")
+      (set independence holiday)))
+  (assert independence "Independence Day should be present")
+  (assert= independence.id "independence-day" "Independence Day should be present")
+  (assert= independence.date "2026-07-04" "Independence Day statutory date should match")
+  (assert= independence.observed-date "2026-07-03" "Independence Day observed date should match"))
+
+(fn business-calendar-holiday-predicate-uses-observed-dates []
+  (local Temporal (require :temporal))
+  (assert (Temporal.business-calendar.is-holiday (plain "2026-07-03T09:00:00") {:jurisdiction "US-FED"})
+          "observed Independence Day should be a holiday")
+  (assert (not (Temporal.business-calendar.is-holiday (plain "2026-07-06T09:00:00") {:jurisdiction "US-FED"}))
+          "following Monday should not be a holiday"))
+
+(fn business-calendar-business-day-predicate-excludes-weekends-and-holidays []
+  (local Temporal (require :temporal))
+  (assert (not (Temporal.business-calendar.is-business-day (plain "2026-07-04T09:00:00") {:jurisdiction "US-FED"}))
+          "Saturday should not be a business day")
+  (assert (not (Temporal.business-calendar.is-business-day (plain "2026-07-05T09:00:00") {:jurisdiction "US-FED"}))
+          "Sunday should not be a business day")
+  (assert (not (Temporal.business-calendar.is-business-day (plain "2026-07-03T09:00:00") {:jurisdiction "US-FED"}))
+          "observed holiday should not be a business day")
+  (assert (Temporal.business-calendar.is-business-day (plain "2026-07-06T09:00:00") {:jurisdiction "US-FED"})
+          "Monday after observed holiday should be a business day"))
+
+(fn business-calendar-add-business-days-steps-over-non-business-days []
+  (local Temporal (require :temporal))
+  (local start (plain "2026-07-02T09:15:30"))
+  (local same (Temporal.business-calendar.add-business-days start 0 {:jurisdiction "US-FED"}))
+  (local next-business-day (Temporal.business-calendar.add-business-days start 1 {:jurisdiction "US-FED"}))
+  (local previous-business-day (Temporal.business-calendar.add-business-days (plain "2026-07-06T09:15:30") -1 {:jurisdiction "US-FED"}))
+  (assert= (same:to-string)
+           "2026-07-02T09:15:30"
+           "adding zero business days should preserve date and time")
+  (assert= (next-business-day:to-string)
+           "2026-07-06T09:15:30"
+           "positive addition should skip observed holiday and weekend")
+  (assert= (previous-business-day:to-string)
+           "2026-07-02T09:15:30"
+           "negative addition should skip observed holiday and weekend"))
+
+(fn business-calendar-days-between-is-half-open-and-rejects-descending []
+  (local Temporal (require :temporal))
+  (assert= (Temporal.business-calendar.business-days-between (plain "2026-07-02T09:00:00")
+                                                             (plain "2026-07-07T09:00:00")
+                                                             {:jurisdiction "US-FED"})
+           2
+           "business days between should count half-open range business days")
+  (assert= (Temporal.business-calendar.business-days-between (plain "2026-07-02T09:00:00")
+                                                             (plain "2026-07-02T17:00:00")
+                                                             {:jurisdiction "US-FED"})
+           0
+           "same date half-open range should count zero days")
+  (assert-error-contains #(Temporal.business-calendar.business-days-between (plain "2026-07-07T09:00:00")
+                                                                            (plain "2026-07-02T09:00:00")
+                                                                            {:jurisdiction "US-FED"})
+                         "descending temporal business"
+                         "descending ranges should fail loudly"))
+
 (table.insert tests {:name "seed exposes supported jurisdictions defensively" :fn seed-exposes-supported-jurisdictions-defensively})
 (table.insert tests {:name "seed rejects unsupported jurisdiction loudly" :fn seed-rejects-unsupported-jurisdiction-loudly})
 (table.insert tests {:name "seed returns holidays for supported year" :fn seed-returns-holidays-for-supported-year})
 (table.insert tests {:name "seed finds observed holiday by date" :fn seed-finds-observed-holiday-by-date})
 (table.insert tests {:name "seed rejects extra supported year buckets" :fn seed-rejects-extra-supported-year-buckets})
 (table.insert tests {:name "seed rejects observed dates outside year bucket" :fn seed-rejects-observed-dates-outside-year-bucket})
+(table.insert tests {:name "business calendar exported" :fn business-calendar-exported})
+(table.insert tests {:name "business calendar supported jurisdictions defensive" :fn business-calendar-supported-jurisdictions-defensive})
+(table.insert tests {:name "business calendar holidays return public records" :fn business-calendar-holidays-return-public-records})
+(table.insert tests {:name "business calendar holiday predicate uses observed dates" :fn business-calendar-holiday-predicate-uses-observed-dates})
+(table.insert tests {:name "business calendar business day predicate excludes weekends and holidays" :fn business-calendar-business-day-predicate-excludes-weekends-and-holidays})
+(table.insert tests {:name "business calendar add business days steps over non-business days" :fn business-calendar-add-business-days-steps-over-non-business-days})
+(table.insert tests {:name "business calendar days between is half-open and rejects descending" :fn business-calendar-days-between-is-half-open-and-rejects-descending})
 
 (local main
   (fn []

@@ -21,7 +21,8 @@
   (assert Temporal.localization.supported-locales)
   (assert Temporal.localization.supported-combinations)
   (assert Temporal.localization.format-plain-date-time)
-  (assert Temporal.localization.parse-plain-date-time))
+  (assert Temporal.localization.parse-plain-date-time)
+  (assert (= (type Temporal.business-calendar.supported-jurisdictions) :function)))
 
 (fn instant-parse-and-format-require-explicit-offset []
   (local Temporal (require :temporal))
