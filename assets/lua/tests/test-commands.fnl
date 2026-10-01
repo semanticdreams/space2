@@ -73,12 +73,29 @@
   (assert (= (. section.entries 1 :key) "a"))
   (assert (= (. section.entries 1 :label) "alpha")))
 
+(fn command-hints-hide-prefixes-without-available-descendants []
+  (local provider {:commands {"demo.deep" {:id "demo.deep"
+                                            :label "deep"
+                                            :available? unavailable?
+                                            :run always-run}}
+                   :bindings [{:keys ["g" "p" "e"]
+                               :command "demo.deep"
+                               :label "deep"
+                               :priority 10}]})
+  (local composed (Commands.compose [provider] {}))
+  (local root-section (Commands.hint-section composed [] {} {:id :mode :title "MODE"}))
+  (local graph-section (Commands.hint-section composed ["g"] {} {:id :mode :title "MODE"}))
+  (assert (not root-section) "Root prefix with only unavailable descendants should be hidden")
+  (assert (not graph-section) "Nested prefix with only unavailable descendants should be hidden"))
+
 (add-test "Keymap resolves prefix command and missing sequences"
           keymap-resolves-prefix-command-and-missing-sequences)
 (add-test "Commands execute only available commands"
           commands-execute-only-available-commands)
 (add-test "Command hints derive from availability and prefix"
           command-hints-derive-from-availability-and-prefix)
+(add-test "Command hints hide prefixes without available descendants"
+          command-hints-hide-prefixes-without-available-descendants)
 
 (local main
   (fn []

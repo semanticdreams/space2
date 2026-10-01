@@ -52,10 +52,18 @@
       command-id
       item.token))
 
+(fn node-has-available-command? [composed node ctx]
+  (if (and node node.command-id (M.available? composed node.command-id ctx))
+      true
+      (do
+        (var visible? false)
+        (each [_ child (pairs (list-or-empty (and node node.nodes)))]
+          (when (node-has-available-command? composed child ctx)
+            (set visible? true)))
+        visible?)))
+
 (fn child-visible? [composed item ctx]
-  (if item.command-id
-      (M.available? composed item.command-id ctx)
-      true))
+  (node-has-available-command? composed item.node ctx))
 
 (fn M.hint-section [composed prefix ctx opts]
   (local options (options-or-empty opts))
