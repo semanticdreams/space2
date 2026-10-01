@@ -11,7 +11,7 @@
 (local GraphViewLabels (require :graph/view/labels))
 (local GraphViewSelection (require :graph/view/selection))
 (local GraphViewNodeViews (require :graph/view/node-views))
-(local GraphViewPersistence (require :graph/view/persistence)) (local ActivityCameraState (require :activity-camera-state))
+(local GraphViewPersistence (require :graph/view/persistence)) (local ActivityCameraState (require :activity-camera-state)) (local SelectedPreviewCommands (require :graph/view/selected-preview-commands))
 (local NodeBase (require :graph/node-base))
 (local GraphNodePresentation (require :graph/view/presentation))
 (local IslandHost (require :graph/view/island-host))
@@ -1025,9 +1025,9 @@
               (labels:drop-node node)
               (set (. pinned-before-expand node) (. pinned node))
               (set (. pinned node) true)
-              (set (. expanded-nodes node) true)
-               (persistence:set-presentation node :expanded)
-               (graph-layout:rebuild)))))
+                (set (. expanded-nodes node) true)
+                 (persistence:set-presentation node :expanded)
+                 (graph-layout:rebuild)))))
 
     (fn handle-node-replaced [payload]
         (assert-not-dropped "handle-node-replaced")
@@ -1303,10 +1303,10 @@
                  :selected-nodes-changed selected-nodes-changed
                  :focus-nodes focus-nodes
                  :node-by-focus node-by-focus
-                 :labels labels
-                 :views views
-                 :pinned pinned
-                 :persistence persistence
+                  :labels labels
+                  :views views
+                  :pinned pinned
+                  :persistence persistence
                   :selection selection
                   :graph-layout graph-layout
                   :island-host island-host
@@ -1563,8 +1563,9 @@
                                 (assert-not-dropped "remove-nodes")
                                 (graph-map:remove-nodes nodes-to-remove)))
     (set view.remove-selected-nodes (fn [_self]
-                                         (assert-not-dropped "remove-selected-nodes")
-                                         (graph-map:remove-nodes selected-nodes)))
+                                          (assert-not-dropped "remove-selected-nodes")
+                                          (graph-map:remove-nodes selected-nodes)))
+    (SelectedPreviewCommands.install! view assert-not-dropped toggle-node-presentation expanded-nodes)
     (set view.reveal-node
          (fn [_self node-or-key opts]
              (assert-not-dropped "reveal-node")

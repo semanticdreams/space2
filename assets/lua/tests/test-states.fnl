@@ -2679,13 +2679,50 @@
       (local gpe-section (. (state.command_hints_provider state {}) 1))
       (assert (= (. gpe-section.entries 1 :key) "e") "g p prefix should expose e command"))))
 
+(fn run-graph-preview-expand-leader [transitions install-state selected-count]
+  (local GraphCommands (require :graph/commands))
+  (local calls {:expand 0})
+  (local graph-view {:selected-node-count (fn [_self] selected-count)
+                     :expand-selected-previews (fn [_self]
+                                                 (set calls.expand (+ calls.expand 1))
+                                                 1)})
+  (with-activity-leader-providers
+    [(GraphCommands.provider {:graph-view (fn [] graph-view)})]
+    (fn []
+      (local state (install-state :leader (LeaderState)))
+      (state.on-key-down {:key KEY_G})
+      (state.on-key-down {:key KEY_P})
+      (state.on-key-down {:key KEY_E})))
+  {:expand-calls calls.expand
+   :last-transition (. transitions (# transitions))})
+
+(fn leader-state-graph-preview-command-uses-selection-provider []
+  (with-state-recorder
+    (fn [transitions install-state]
+      (local result (run-graph-preview-expand-leader transitions install-state 1))
+      (assert (= result.expand-calls 1) "SPC g p e should expand selected previews")
+      (assert (= result.last-transition :normal)
+              "Graph preview command should return to normal"))))
+
+(fn leader-state-graph-preview-command-requires-selection []
+  (with-state-recorder
+    (fn [transitions install-state]
+      (local result (run-graph-preview-expand-leader transitions install-state 0))
+      (assert (= result.expand-calls 0) "SPC g p e should not run without selection")
+      (assert (= result.last-transition :normal)
+              "Unavailable graph preview command should return to normal without running"))))
+
 (table.insert tests {:name "Normal state leader key enters leader state" :fn normal-state-leader-enters-leader-state})
 (table.insert tests {:name "Leader state C enters camera state" :fn leader-state-c-enters-camera-state})
 (table.insert tests {:name "Leader state P opens launcher" :fn leader-state-p-opens-launcher})
 (table.insert tests {:name "Leader state supports nested activity provider command"
                      :fn leader-state-supports-nested-activity-provider-command})
 (table.insert tests {:name "Leader state hints show active prefix commands"
-                     :fn leader-state-hints-show-active-prefix-commands})
+                      :fn leader-state-hints-show-active-prefix-commands})
+(table.insert tests {:name "Leader state graph preview command uses selection provider"
+                      :fn leader-state-graph-preview-command-uses-selection-provider})
+(table.insert tests {:name "Leader state graph preview command requires selection"
+                      :fn leader-state-graph-preview-command-requires-selection})
 (table.insert tests {:name "Camera state F enters fpc state" :fn camera-state-f-enters-fpc-state})
 (table.insert tests {:name "Camera state escape exits to normal" :fn camera-state-escape-exits-to-normal})
 (table.insert tests {:name "Camera state 0 resets camera transform" :fn camera-state-zero-resets-camera})

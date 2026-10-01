@@ -4,7 +4,7 @@
 (local fs (require :fs))
 (local runtime (require :runtime))
 (local Activities (require :activities))
-(local GraphView (require :graph/view))
+(local GraphView (require :graph/view)) (local GraphCommands (require :graph/commands))
 (local GraphActivityActions (require :graph-activity-actions))
 (local GraphMapSidebar (require :graph/map-sidebar))
 (local HomeWorldCanvasRuntime (require :home-world-canvas-runtime))
@@ -73,9 +73,6 @@
 (fn graph-left-dock-builder [ctx] (local world-runtime (assert app.active-world-runtime "Graph sidebar requires app.active-world-runtime"))
   (local manager (assert world-runtime.graph-map-manager "Graph sidebar requires runtime.graph-map-manager"))
   ((GraphMapSidebar.GraphMapSidebar (graph-sidebar-options manager)) ctx))
-
-
-
 (fn active-graph-map []
   (local world-runtime app.active-world-runtime)
   (or (and world-runtime world-runtime.graph-map-manager
@@ -130,6 +127,9 @@
   (and graph-view
        graph-view.remove-selected-nodes
        (> (graph-view:remove-selected-nodes) 0)))
+
+(fn current-graph-view [] app.graph-view)
+(fn graph-leader-command-providers [] [(GraphCommands.provider {:graph-view current-graph-view})])
 
 (fn graph-selection-count []
   (local graph-view app.graph-view)
@@ -369,7 +369,7 @@
   (ctx:set-selection-actions! nil)
   (ctx:set-activate-focused! activate-focused-node)
   (ctx:set-delete-selection! delete-selection)
-  (ctx:set-command-hints-provider! graph-command-hints)
+  (ctx:set-command-hints-provider! graph-command-hints) (ctx:set-leader-command-providers! (graph-leader-command-providers))
   (ctx:set-context-enricher! enrich-graph-context!)
   (ctx:set-target-enabled! graph-target-enabled?)
   (ctx:set-update! graph-activity-update)
