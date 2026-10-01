@@ -415,6 +415,43 @@
                          "unbounded recurrence should require limit")
   (assert= (# (Temporal.ics.expand calendar {:zone-id "America/New_York" :limit 2})) 2))
 
+(fn expand-unbounded-recurrence-error-mentions-limit []
+  (local text "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VEVENT\nUID:unbounded-message@example.test\nDTSTART:20261001T090000\nRRULE:FREQ=DAILY\nEXDATE:20261001T090000\nSUMMARY:Unbounded daily with exclusion\nEND:VEVENT\nEND:VCALENDAR\n")
+  (local calendar (Temporal.ics.parse text))
+  (assert-error-contains #(Temporal.ics.expand calendar {:zone-id "America/New_York"})
+                         "limit"
+                         "ICS expander should rethrow unbounded recurrence errors with limit guidance"))
+
+(fn expand-zoned-duration-honors-disambiguation []
+  (local overlap-text "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VEVENT\nUID:overlap-duration@example.test\nDTSTART;TZID=America/New_York:20261101T013000\nDURATION:PT1H\nSUMMARY:Overlap duration\nEND:VEVENT\nEND:VCALENDAR\n")
+  (local overlap (. (Temporal.ics.expand (Temporal.ics.parse overlap-text) {:disambiguation :latest}) 1))
+  (assert= overlap.start.time-mode :zoned)
+  (assert= (overlap.end.plain:to-string) "2026-11-01T02:30:00")
+  (local gap-text "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VEVENT\nUID:gap-duration@example.test\nDTSTART;TZID=America/New_York:20260308T023000\nDURATION:PT1H\nSUMMARY:Gap duration\nEND:VEVENT\nEND:VCALENDAR\n")
+  (local gap (. (Temporal.ics.expand (Temporal.ics.parse gap-text) {:disambiguation :earliest}) 1))
+  (assert= gap.start.time-mode :zoned)
+  (assert= (gap.end.plain:to-string) "2026-03-08T04:00:00"))
+
+(fn expand-limit-applies-after-exrule-exclusions []
+  (local occurrences (expand-fixture "exrule" {:zone-id "America/New_York" :limit 3}))
+  (assert= (# occurrences) 3)
+  (local first-start (. (. (. occurrences 1) :start) :plain))
+  (local third-start (. (. (. occurrences 3) :start) :plain))
+  (assert= (first-start:to-string) "2026-10-03T09:00:00")
+  (assert= (third-start:to-string) "2026-10-05T09:00:00"))
+
+(fn expand-recurrence-includes-dtstart-with-rdate-and-exdate []
+  (local rdate-text "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VEVENT\nUID:rdate-only@example.test\nDTSTART:20261001T090000\nRDATE:20261003T090000\nSUMMARY:RDATE only\nEND:VEVENT\nEND:VCALENDAR\n")
+  (local rdate-occurrences (Temporal.ics.expand (Temporal.ics.parse rdate-text) {:zone-id "America/New_York"}))
+  (assert= (# rdate-occurrences) 2)
+  (local rdate-first-start (. (. (. rdate-occurrences 1) :start) :plain))
+  (local rdate-second-start (. (. (. rdate-occurrences 2) :start) :plain))
+  (assert= (rdate-first-start:to-string) "2026-10-01T09:00:00")
+  (assert= (rdate-second-start:to-string) "2026-10-03T09:00:00")
+  (local exdate-text "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VEVENT\nUID:exdate-only@example.test\nDTSTART:20261001T090000\nEXDATE:20261001T090000\nSUMMARY:EXDATE only\nEND:VEVENT\nEND:VCALENDAR\n")
+  (local exdate-occurrences (Temporal.ics.expand (Temporal.ics.parse exdate-text) {:zone-id "America/New_York"}))
+  (assert= (# exdate-occurrences) 0))
+
 (table.insert tests {:name "grammar unfolds CRLF and LF lines"
                      :fn grammar-unfolds-crlf-and-lf-lines})
 (table.insert tests {:name "grammar parses names params and values"
@@ -477,6 +514,14 @@
                      :fn expand-recurrence-fixtures})
 (table.insert tests {:name "expand unbounded recurrence requires limit"
                      :fn expand-unbounded-recurrence-requires-limit})
+(table.insert tests {:name "expand unbounded recurrence error mentions limit"
+                     :fn expand-unbounded-recurrence-error-mentions-limit})
+(table.insert tests {:name "expand zoned duration honors disambiguation"
+                     :fn expand-zoned-duration-honors-disambiguation})
+(table.insert tests {:name "expand limit applies after exrule exclusions"
+                     :fn expand-limit-applies-after-exrule-exclusions})
+(table.insert tests {:name "expand recurrence includes dtstart with rdate and exdate"
+                     :fn expand-recurrence-includes-dtstart-with-rdate-and-exdate})
 
 (local main
   (fn []
