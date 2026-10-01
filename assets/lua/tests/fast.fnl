@@ -106,9 +106,10 @@
     :tests.test-temporal-period
     :tests.test-temporal-intervals
      :tests.test-temporal-parsing-recurrence
-     :tests.test-temporal-recurrence-set
-     :tests.test-temporal-recurrence-rfc5545
-    :tests.test-tempfile
+      :tests.test-temporal-recurrence-set
+      :tests.test-temporal-recurrence-rfc5545
+      :tests.test-temporal-ics
+     :tests.test-tempfile
     :tests.test-graph-loaders
     :tests.test-sysinfo
     :tests.test-flamegraph
