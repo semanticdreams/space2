@@ -13,6 +13,7 @@ REQUIRED_DEPENDENCY_MANIFESTS = [
     Path("external/temporal/holidays/DEPENDENCY_MANIFEST.json"),
 ]
 RUNTIME_MANIFEST = Path("assets/temporal/manifest.json")
+REQUIRED_CLDR_SEED_FILES = ["locales.json", "calendars.json"]
 REQUIRED_PLANNED_FIELDS = [
     "schema_version",
     "id",
@@ -127,6 +128,19 @@ def validate_cldr_seed(repo_root: Path, dataset: dict, index: int, errors: list[
             if not file_path.exists():
                 errors.append(
                     f"{runtime_path}: {prefix}.files[{file_index}] packaged data file does not exist: "
+                    f"{root}/{filename}"
+                )
+        if files != REQUIRED_CLDR_SEED_FILES:
+            errors.append(
+                f"{runtime_path}: {prefix}.files must be exactly "
+                f"{REQUIRED_CLDR_SEED_FILES!r} for cldr-seed"
+            )
+        listed_files = set(files)
+        for filename in REQUIRED_CLDR_SEED_FILES:
+            file_path = root_path / filename
+            if filename not in listed_files and not file_path.exists():
+                errors.append(
+                    f"{runtime_path}: {prefix} required packaged data file does not exist: "
                     f"{root}/{filename}"
                 )
 

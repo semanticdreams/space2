@@ -111,6 +111,21 @@ def test_runtime_manifest_requires_packaged_seed_files(tmp_path):
     )
 
 
+def test_runtime_manifest_requires_seed_files_even_when_file_list_omits_them(tmp_path):
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    path = root / "assets/temporal/manifest.json"
+    data = json.loads(path.read_text())
+    data["packaged_data_sets"][0]["files"] = ["calendars.json"]
+    path.write_text(json.dumps(data, indent=2) + "\n")
+    (root / "assets/temporal/icu/cldr-seed/locales.json").unlink()
+    errors = checker.validate_repo(root)
+    assert any(
+        "packaged data file does not exist" in error and "locales.json" in error
+        for error in errors
+    )
+
+
 def test_runtime_packaged_data_set_network_fetch_is_forbidden(tmp_path):
     checker = load_checker()
     root = copy_foundation(tmp_path)
