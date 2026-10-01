@@ -4,7 +4,7 @@ The temporal core is Space's first production date/time layer. Correctness-criti
 
 ## Public modules
 
-- `require :temporal` is the public Fennel/Lua API for application and feature code (written as `(require :temporal)` in Fennel). It exposes `duration`, `instant`, `plain-date-time`, `zoned-date-time`, `period`, `interval`, `repeating-interval`, `recurrence`, `recurrence-set`, `ics`, `localization`, `calendar`, `business-calendar`, `clock`, and `tzdb` namespaces.
+- `require :temporal` is the public Fennel/Lua API for application and feature code (written as `(require :temporal)` in Fennel). It exposes `duration`, `instant`, `plain-date-time`, `zoned-date-time`, `period`, `interval`, `repeating-interval`, `recurrence`, `recurrence-set`, `ics`, `localization`, `calendar`, `business-calendar`, `natural`, `providers`, `clock`, and `tzdb` namespaces.
 - `require "temporal-core"` is the lower-level native Lua binding. Use it when testing or extending the binding layer directly; prefer `:temporal` elsewhere.
 
 The public wrapper intentionally keeps timezone and calendar rules in C++ instead of reimplementing them in Fennel.
@@ -50,7 +50,7 @@ This feature does not change existing `engine.now-ms`, `sysinfo.now-ms`, media c
 
 ## Future layers
 
-The temporal core intentionally excludes higher-level product features. Future layers include natural-language parsing, recurrence, localization, ICU formatting, CLDR data, non-Gregorian calendars, persisted timestamp migrations, and runtime timer redesign, and must be designed separately. Future timezone-related layers must preserve the invariant that zoned conversion never silently defaults to the host-local timezone.
+The temporal core intentionally excludes higher-level product features. Higher layers now include recurrence, localization, selected calendars, business calendars, and deterministic natural-language parsing; persisted timestamp migrations and runtime timer redesign remain future work and must be designed separately. Future timezone-related layers must preserve the invariant that zoned conversion never silently defaults to the host-local timezone.
 
 The [Temporal Complete Library Roadmap](./temporal-complete-library) owns the complete localization, recurrence, non-Gregorian calendar, persisted timestamp migration, and runtime scheduler redesign work beyond this core subset.
 
@@ -67,6 +67,8 @@ Selected-corpus iCalendar interoperability lives above recurrence and intervals 
 Selected-corpus CLDR seed localization and non-Gregorian calendar presentation live in `Temporal.localization` and `Temporal.calendar`. See [Temporal Localization and Calendar Seed](./temporal-localization-calendar) for supported locale/calendar/style combinations, calendar conversion rules, packaged seed provenance, and the native ICU4C adapter boundary.
 
 Deterministic business and holiday calendar behavior lives in `Temporal.business-calendar`. See [Temporal Business Calendars](./temporal-business-calendar) for the exact `US-FED` 2026-2027 seed scope, observed holiday policy, business-day arithmetic, packaged-data provenance, and provider extension path.
+
+Deterministic corpus-backed natural-language parsing lives in `Temporal.natural` and integrates with `Temporal.providers`. See [Temporal Natural Language](./temporal-natural-language) for supported locales, phrase families, candidate records, ambiguity/context diagnostics, and the no-network/no-host-default invariants.
 
 ## Validation
 

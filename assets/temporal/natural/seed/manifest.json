@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "natural-phrase-seed",
+  "provider_id": "space.temporal.natural-seed",
+  "version": "natural-phrase-seed-2026-10-track10",
+  "supported_locales": ["en-US", "fr-FR", "ja-JP"],
+  "runtime_network_fetch_allowed": false,
+  "source": "Hand-authored Space temporal natural-language seed corpus",
+  "license": "Project license",
+  "update_process": "Update phrases.json and this manifest in the same reviewed change; runtime parsing must remain deterministic and offline."
+}
