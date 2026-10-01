@@ -185,3 +185,23 @@ def test_windows_temporal_tzdata_is_bundled_and_packaged() -> None:
         assert required_file in package_script
         assert required_file in temporal_core
     assert (tzdata_dir / "version").read_text(encoding="utf-8").strip() == "2025b"
+
+
+def test_windows_package_includes_temporal_dependency_metadata() -> None:
+    package_script = read_repo_text("scripts/package-windows-runtime.sh")
+    temporal_metadata_dir = REPO_ROOT / "external/temporal"
+
+    assert 'TEMPORAL_METADATA_SOURCE="${ROOT_DIR}/external/temporal"' in package_script
+    assert 'cp -r "${TEMPORAL_METADATA_SOURCE}" "${DIST_DIR}/external/temporal"' in package_script
+    assert 'mkdir -p "${DIST_DIR}/external"' in package_script
+    assert "Missing Windows temporal dependency metadata" in package_script
+    assert "Missing Windows temporal dependency manifest" in package_script
+
+    required_manifests = [
+        "icu/DEPENDENCY_MANIFEST.json",
+        "libical/DEPENDENCY_MANIFEST.json",
+        "holidays/DEPENDENCY_MANIFEST.json",
+    ]
+    for required_manifest in required_manifests:
+        assert (temporal_metadata_dir / required_manifest).is_file()
+        assert required_manifest in package_script
