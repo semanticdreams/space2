@@ -1,4 +1,5 @@
 (local Temporal (require :temporal))
+(local NaturalCorpus (require :temporal/natural-corpus))
 
 (local tests [])
 
@@ -13,6 +14,61 @@
   (assert (= expr.kind :relative-date))
   (assert (= expr.amount amount))
   (assert (= expr.unit unit)))
+
+(fn assert-supported-locales [locales]
+  (assert (= (# locales) 3))
+  (assert (= (. locales 1) "en-US"))
+  (assert (= (. locales 2) "fr-FR"))
+  (assert (= (. locales 3) "ja-JP")))
+
+(fn assert-locale-data-shape [locale data]
+  (assert data)
+  (assert (> (# data.relative_literals) 0))
+  (assert (> (# data.relative_count_offsets) 0))
+  (assert (= (# data.next_weekday) 7))
+  (assert (= (# data.weekly_weekday_recurrence) 7))
+  (assert (= (# data.bare_weekday_ambiguity) 7))
+  (assert (= (type (. data.relative_literals 1 :phrase_id)) :string))
+  (assert (= (type (. data.relative_literals 1 :text)) :string))
+  (assert (= (type (. data.relative_literals 1 :offset_days)) :number))
+  (assert (= (type locale) :string)))
+
+(fn corpus-supported-locales-are-exact []
+  (assert-supported-locales (NaturalCorpus.supported-locales)))
+
+(fn corpus-load-exposes-packaged-metadata []
+  (local corpus (NaturalCorpus.load))
+  (assert (= corpus.manifest.id "natural-phrase-seed"))
+  (assert (= corpus.manifest.provider_id "space.temporal.natural-seed"))
+  (assert (= corpus.manifest.version "natural-phrase-seed-2026-10-track10"))
+  (assert (= corpus.manifest.runtime_network_fetch_allowed false))
+  (assert-supported-locales corpus.manifest.supported_locales)
+  (assert-supported-locales corpus.phrases.locale_order))
+
+(fn corpus-locale-data-loads-supported-locales []
+  (each [_ locale (ipairs ["en-US" "fr-FR" "ja-JP"])]
+    (assert-locale-data-shape locale (NaturalCorpus.locale-data locale))))
+
+(fn corpus-locale-data-rejects-unsupported-locale []
+  (assert-error #(NaturalCorpus.locale-data "es-ES")
+                "unsupported temporal natural locale"))
+
+(fn corpus-public-helpers-return-defensive-copies []
+  (local first-locales (NaturalCorpus.supported-locales))
+  (tset first-locales 1 "mutated")
+  (assert-supported-locales (NaturalCorpus.supported-locales))
+
+  (local first-load (NaturalCorpus.load))
+  (tset first-load.manifest.supported_locales 1 "mutated")
+  (tset (. first-load.phrases.locales "en-US" :relative_literals 1) :text "mutated")
+  (local second-load (NaturalCorpus.load))
+  (assert-supported-locales second-load.manifest.supported_locales)
+  (assert (= (. second-load.phrases.locales "en-US" :relative_literals 1 :text) "today"))
+
+  (local first-data (NaturalCorpus.locale-data "fr-FR"))
+  (tset (. first-data.relative_literals 1) :text "mutated")
+  (local second-data (NaturalCorpus.locale-data "fr-FR"))
+  (assert (= (. second-data.relative_literals 1 :text) "aujourd'hui")))
 
 (fn parse-preserves-today []
   (assert-relative (Temporal.natural.parse "today") 0 :day))
@@ -57,6 +113,11 @@
                 "temporal natural resolve context is required"))
 
 (table.insert tests {:name "parse preserves today" :fn parse-preserves-today})
+(table.insert tests {:name "corpus supported locales are exact" :fn corpus-supported-locales-are-exact})
+(table.insert tests {:name "corpus load exposes packaged metadata" :fn corpus-load-exposes-packaged-metadata})
+(table.insert tests {:name "corpus locale data loads supported locales" :fn corpus-locale-data-loads-supported-locales})
+(table.insert tests {:name "corpus locale data rejects unsupported locale" :fn corpus-locale-data-rejects-unsupported-locale})
+(table.insert tests {:name "corpus public helpers return defensive copies" :fn corpus-public-helpers-return-defensive-copies})
 (table.insert tests {:name "parse preserves relative count weeks" :fn parse-preserves-relative-count-weeks})
 (table.insert tests {:name "candidates include schema" :fn candidates-include-schema})
 (table.insert tests {:name "candidates handle packaged locales" :fn candidates-handle-packaged-locales})
