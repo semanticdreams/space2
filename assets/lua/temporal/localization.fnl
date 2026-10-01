@@ -125,9 +125,7 @@
   (values (tonumber (text:sub pos stop)) (+ stop 1)))
 
 (fn read-number-token [text pos width]
-  (if (and width (not (= width 2)))
-      (read-fixed-digits text pos width)
-      (= width 2)
+  (if (= width 2)
       (read-fixed-digits text pos 2)
       (read-variable-digits text pos)))
 

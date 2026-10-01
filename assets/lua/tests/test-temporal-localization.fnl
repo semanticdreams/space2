@@ -28,6 +28,37 @@
 (fn plain [Temporal]
   (Temporal.plain-date-time.parse "2026-10-01T09:30:00"))
 
+(fn pre-1000-from-iso [_plain options]
+  {:kind :temporal-calendar-date-time
+   :calendar options.calendar
+   :era "ce"
+   :year 1
+   :month 1
+   :day 1
+   :hour 9
+   :minute 30
+   :second 0
+   :nanosecond 0})
+
+(fn pre-1000-to-string [_self]
+  "0001-01-01T00:00:00")
+
+(fn pre-1000-to-iso [fields]
+  (assert (= fields.calendar "gregory") "parser should preserve calendar")
+  (assert (= fields.era "ce") "parser should preserve era")
+  (assert (= fields.year 1) "parser should parse variable-width year")
+  (assert (= fields.month 1) "parser should parse month")
+  (assert (= fields.day 1) "parser should parse day")
+  (assert (= fields.hour 0) "parser should return midnight hour")
+  (assert (= fields.minute 0) "parser should return midnight minute")
+  (assert (= fields.second 0) "parser should return midnight second")
+  (assert (= fields.nanosecond 0) "parser should return midnight nanosecond")
+  {:to-string pre-1000-to-string})
+
+(fn pre-1000-calendar []
+  {:from-iso pre-1000-from-iso
+   :to-iso pre-1000-to-iso})
+
 (fn supported-locales-are-exact []
   (local Temporal (require :temporal))
   (assert Temporal.localization "Temporal.localization should be exported")
@@ -83,6 +114,20 @@
     (assert (iso-midnight? parsed "2026-10-01")
             (.. "parsed localized text should return ISO midnight for " text))))
 
+(fn pre-1000-emitted-string-parses-to-iso-midnight []
+  (local create-localization (require :temporal/localization))
+  (local seed (require :temporal/cldr-seed))
+  (local localization
+    (create-localization
+      {:calendar (pre-1000-calendar)
+       :seed seed}))
+  (local options {:locale "en-US" :calendar "gregory" :date-style :short})
+  (local text (localization.format-plain-date-time {} options))
+  (assert (= text "01/01/1") "format should only pad width-2 fields")
+  (local parsed (localization.parse-plain-date-time text options))
+  (assert (iso-midnight? parsed "0001-01-01")
+          "parser should accept its emitted pre-1000 Gregorian text"))
+
 (fn validation-errors-are-loud []
   (local Temporal (require :temporal))
   (local iso (plain Temporal))
@@ -130,6 +175,7 @@
 (table.insert tests {:name "supported combinations are exact" :fn supported-combinations-are-exact})
 (table.insert tests {:name "format examples match seed patterns" :fn format-examples-match-seed-patterns})
 (table.insert tests {:name "emitted strings parse to ISO midnight" :fn emitted-strings-parse-to-iso-midnight})
+(table.insert tests {:name "pre-1000 emitted string parses to ISO midnight" :fn pre-1000-emitted-string-parses-to-iso-midnight})
 (table.insert tests {:name "validation errors are loud" :fn validation-errors-are-loud})
 (table.insert tests {:name "parse errors are loud" :fn parse-errors-are-loud})
 
