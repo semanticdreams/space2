@@ -64,6 +64,8 @@ Bounded half-open intervals and repeating intervals also live above the core. Se
 
 Selected-corpus iCalendar interoperability lives above recurrence and intervals in `Temporal.ics`. See [Temporal ICS/iCalendar](./temporal-ics) for `Temporal.ics.parse`, `Temporal.ics.format`, `Temporal.ics.expand`, supported `VEVENT` value modes, `VTIMEZONE` metadata handling, and the libical-planned boundary. The native core remains independent from ICS grammar and calendar-client policy.
 
+Selected-corpus CLDR seed localization and non-Gregorian calendar presentation live in `Temporal.localization` and `Temporal.calendar`. See [Temporal Localization and Calendar Seed](./temporal-localization-calendar) for supported locale/calendar/style combinations, calendar conversion rules, packaged seed provenance, and the native ICU4C adapter boundary.
+
 ## Validation
 
 Use these commands when changing the temporal core, its Fennel wrapper, or its tests:
