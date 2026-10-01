@@ -44,6 +44,28 @@ def require_false(value: object, path: Path, field: str, errors: list[str]) -> N
         errors.append(f"{path}: {field} must be false")
 
 
+def require_string(data: dict, key: str, path: Path, errors: list[str]) -> str | None:
+    value = data.get(key)
+    if not isinstance(value, str) or value == "":
+        errors.append(f"{path}: {key} must be a non-empty string")
+        return None
+    return value
+
+
+def require_string_array(data: dict, key: str, path: Path, errors: list[str]) -> list[str] | None:
+    value = data.get(key)
+    if not isinstance(value, list):
+        errors.append(f"{path}: {key} must be an array of non-empty strings")
+        return None
+    strings: list[str] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, str) or item == "":
+            errors.append(f"{path}: {key}[{index}] must be a non-empty string")
+            return None
+        strings.append(item)
+    return strings
+
+
 def validate_dependency_manifest(repo_root: Path, rel_path: Path, errors: list[str]) -> None:
     path = repo_root / rel_path
     if not path.exists():
@@ -78,6 +100,75 @@ def validate_dependency_manifest(repo_root: Path, rel_path: Path, errors: list[s
             errors.append(f"{rel_path}: {status} manifest requires checksum_sha256 or reproducible_provenance")
 
 
+def validate_cldr_seed(repo_root: Path, dataset: dict, index: int, errors: list[str]) -> None:
+    runtime_path = RUNTIME_MANIFEST
+    prefix = f"packaged_data_sets[{index}]"
+    root = require_string(dataset, "root", runtime_path, errors)
+    manifest = require_string(dataset, "manifest", runtime_path, errors)
+    files = require_string_array(dataset, "files", runtime_path, errors)
+
+    root_path: Path | None = None
+    if root is not None:
+        root_path = repo_root / root
+        if not root_path.exists():
+            errors.append(f"{runtime_path}: {prefix}.root does not exist: {root}")
+        elif not root_path.is_dir():
+            errors.append(f"{runtime_path}: {prefix}.root must be a directory: {root}")
+
+    manifest_path: Path | None = None
+    if manifest is not None:
+        manifest_path = repo_root / manifest
+        if not manifest_path.exists():
+            errors.append(f"{runtime_path}: {prefix}.manifest does not exist: {manifest}")
+
+    if root_path is not None and root_path.is_dir() and files is not None:
+        for file_index, filename in enumerate(files):
+            file_path = root_path / filename
+            if not file_path.exists():
+                errors.append(
+                    f"{runtime_path}: {prefix}.files[{file_index}] packaged data file does not exist: "
+                    f"{root}/{filename}"
+                )
+
+    if manifest_path is None or not manifest_path.exists():
+        return
+    seed_manifest = load_json(manifest_path, errors)
+    if seed_manifest is None:
+        return
+
+    require_false(
+        seed_manifest.get("runtime_network_fetch_allowed"),
+        manifest_path,
+        "runtime_network_fetch_allowed",
+        errors,
+    )
+    seed_id = require_string(seed_manifest, "id", manifest_path, errors)
+    if seed_id is not None and seed_id != "cldr-seed":
+        errors.append(f"{manifest_path}: id must be cldr-seed")
+    provider_id = require_string(seed_manifest, "provider_id", manifest_path, errors)
+    if provider_id is not None and provider_id != "space.temporal.cldr-seed":
+        errors.append(f"{manifest_path}: provider_id must be space.temporal.cldr-seed")
+
+    supported_locales = require_string_array(seed_manifest, "supported_locales", manifest_path, errors)
+    supported_calendars = require_string_array(seed_manifest, "supported_calendars", manifest_path, errors)
+
+    if root_path is None or not root_path.is_dir():
+        return
+    locales_path = root_path / "locales.json"
+    calendars_path = root_path / "calendars.json"
+    locales = load_json(locales_path, errors) if locales_path.exists() else None
+    calendars = load_json(calendars_path, errors) if calendars_path.exists() else None
+
+    if locales is not None and supported_locales is not None:
+        locale_order = require_string_array(locales, "locale_order", locales_path, errors)
+        if locale_order is not None and supported_locales != locale_order:
+            errors.append(f"{manifest_path}: cldr-seed supported_locales must match locales.json locale_order")
+    if calendars is not None and supported_calendars is not None:
+        calendar_order = require_string_array(calendars, "calendar_order", calendars_path, errors)
+        if calendar_order is not None and supported_calendars != calendar_order:
+            errors.append(f"{manifest_path}: cldr-seed supported_calendars must match calendars.json calendar_order")
+
+
 def validate_runtime_manifest(repo_root: Path, errors: list[str]) -> None:
     path = repo_root / RUNTIME_MANIFEST
     if not path.exists():
@@ -89,6 +180,26 @@ def validate_runtime_manifest(repo_root: Path, errors: list[str]) -> None:
     require_false(data.get("runtime_network_fetch_allowed"), RUNTIME_MANIFEST, "runtime_network_fetch_allowed", errors)
     if "packaged_data_sets" not in data or not isinstance(data.get("packaged_data_sets"), list):
         errors.append(f"{RUNTIME_MANIFEST}: packaged_data_sets must be an array")
+        return
+    for index, dataset in enumerate(data["packaged_data_sets"]):
+        prefix = f"packaged_data_sets[{index}]"
+        if not isinstance(dataset, dict):
+            errors.append(f"{RUNTIME_MANIFEST}: {prefix} must be an object")
+            continue
+        require_false(
+            dataset.get("runtime_network_fetch_allowed"),
+            RUNTIME_MANIFEST,
+            f"{prefix}.runtime_network_fetch_allowed",
+            errors,
+        )
+        dataset_id = require_string(dataset, "id", RUNTIME_MANIFEST, errors)
+        require_string(dataset, "provider_id", RUNTIME_MANIFEST, errors)
+        require_string(dataset, "version", RUNTIME_MANIFEST, errors)
+        require_string(dataset, "root", RUNTIME_MANIFEST, errors)
+        require_string(dataset, "manifest", RUNTIME_MANIFEST, errors)
+        require_string_array(dataset, "files", RUNTIME_MANIFEST, errors)
+        if dataset_id == "cldr-seed":
+            validate_cldr_seed(repo_root, dataset, index, errors)
 
 
 def validate_repo(repo_root: Path) -> list[str]:
