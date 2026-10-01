@@ -110,6 +110,13 @@
        (>= year expected-year-start)
        (<= year expected-year-end)))
 
+(fn supported-year-key? [year-key]
+  (var found? false)
+  (each [_ year (ipairs [expected-year-start expected-year-end])]
+    (when (= year-key (tostring year))
+      (set found? true)))
+  found?)
+
 (fn require-provider! [record context]
   (when (not (= (require-field record :provider_id :string context) provider-id))
     (fail-missing (.. context ".provider_id"))))
@@ -143,7 +150,10 @@
   (and (= (type value) :string)
        (not (= (value:match "^%d%d%d%d%-%d%d%-%d%d$") nil))))
 
-(fn validate-record! [record context]
+(fn observed-date-in-year? [observed-date year]
+  (= (observed-date:sub 1 4) (tostring year)))
+
+(fn validate-record! [record year context]
   (when (not (= (type record) :table))
     (fail-missing context))
   (require-field record :id :string context)
@@ -155,17 +165,28 @@
     (fail-missing (.. context ".date")))
   (when (not (valid-iso-date? observed-date))
     (fail-missing (.. context ".observed_date")))
+  (when (not (observed-date-in-year? observed-date year))
+    (error "observed date outside temporal holiday year"))
   record)
 
-(fn validate-year-records! [records context]
+(fn validate-year-records! [records year context]
   (when (= (array-length-or-nil records) nil)
     (fail-missing context))
   (local observed-dates {})
   (each [index record (ipairs records)]
-    (validate-record! record (.. context "." (tostring index)))
+    (validate-record! record year (.. context "." (tostring index)))
     (when (. observed-dates record.observed_date)
       (error "temporal holiday seed duplicate observed date"))
     (tset observed-dates record.observed_date true)))
+
+(fn validate-year-keys! [years context]
+  (each [year-key _ (pairs years)]
+    (when (not (supported-year-key? year-key))
+      (error "unsupported temporal holiday year")))
+  (each [_ year (ipairs [expected-year-start expected-year-end])]
+    (local year-key (tostring year))
+    (when (= (. years year-key) nil)
+      (fail-missing (.. context "." year-key)))))
 
 (fn validate-holidays! [holidays]
   (when (not (= (type holidays) :table))
@@ -189,9 +210,11 @@
       (fail-missing (.. "holidays.jurisdictions." jurisdiction)))
     (require-field data :name :string (.. "holidays.jurisdictions." jurisdiction))
     (local years (require-field data :years :table (.. "holidays.jurisdictions." jurisdiction)))
+    (validate-year-keys! years (.. "holidays.jurisdictions." jurisdiction ".years"))
     (each [_ year (ipairs [expected-year-start expected-year-end])]
       (local year-key (tostring year))
       (validate-year-records! (. years year-key)
+                              year
                               (.. "holidays.jurisdictions." jurisdiction ".years." year-key))))
   holidays)
 
