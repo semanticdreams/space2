@@ -493,6 +493,13 @@
                          "duplicate override"
                          "duplicate overrides should fail loudly"))
 
+(fn expand-rejects-override-recurrence-id-mode-mismatch []
+  (local mismatched-override "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VEVENT\nUID:mismatched-override@example.test\nDTSTART:20261001T090000\nRRULE:FREQ=DAILY;COUNT=2\nSUMMARY:Floating master\nEND:VEVENT\nBEGIN:VEVENT\nUID:mismatched-override@example.test\nRECURRENCE-ID:20261002T090000Z\nDTSTART:20261002T110000Z\nSUMMARY:UTC override\nEND:VEVENT\nEND:VCALENDAR\n")
+  (local err (assert-error #(expand-text mismatched-override {:zone-id "America/New_York"})
+                           "override recurrence id mode should match master DTSTART mode"))
+  (assert (tostring err):find "RECURRENCE-ID" 1 true)
+  (assert (tostring err):find "master DTSTART mode" 1 true))
+
 (fn temporal-ics-acceptance-smoke []
   (local folded (Temporal.ics.parse (read-fixture "folded-escaped")))
   (local reparsed (Temporal.ics.parse (Temporal.ics.format folded)))
@@ -580,6 +587,8 @@
                      :fn expand-applies-overrides-and-cancellations})
 (table.insert tests {:name "expand rejects ambiguous duplicate events"
                      :fn expand-rejects-ambiguous-duplicate-events})
+(table.insert tests {:name "expand rejects override recurrence id mode mismatch"
+                     :fn expand-rejects-override-recurrence-id-mode-mismatch})
 (table.insert tests {:name "temporal ics acceptance smoke"
                      :fn temporal-ics-acceptance-smoke})
 
