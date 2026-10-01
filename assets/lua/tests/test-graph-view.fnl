@@ -1200,7 +1200,9 @@
 
 (fn tracked-full-view [state]
     (fn [_node _opts]
-        (set state.opened (+ (or state.opened 0) 1))
+        (when (= state.opened nil)
+            (set state.opened 0))
+        (set state.opened (+ state.opened 1))
         (fn [_ctx]
             (local layout (Layout {:name "tracked-full-graph-view"}))
             {:layout layout
@@ -1536,8 +1538,8 @@
             (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :view-target target}))
-            (local first-state {})
-            (local second-state {})
+            (local first-state {:opened 0})
+            (local second-state {:opened 0})
             (local first (Graph.GraphNode {:key "focus-swap"
                                            :preview (tracked-preview first-state)
                                            :view (tracked-full-view first-state)}))
@@ -1561,9 +1563,9 @@
                     "Replacement focus activation should expand replacement preview")
             (assert (= second-state.built-node second)
                     "Replacement focus activation should build replacement preview")
-            (assert (= (or first-state.opened 0) 0)
+            (assert (= first-state.opened 0)
                     "Replacement focus activation should not open stale original node")
-            (assert (= (or second-state.opened 0) 0)
+            (assert (= second-state.opened 0)
                     "Replacement focus activation should not open replacement full view")
             (view:drop)
             (graph:drop))))
