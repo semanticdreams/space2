@@ -4,7 +4,7 @@ The temporal core is Space's first production date/time layer. Correctness-criti
 
 ## Public modules
 
-- `require :temporal` is the public Fennel/Lua API for application and feature code (written as `(require :temporal)` in Fennel). It exposes `duration`, `instant`, `plain-date-time`, `zoned-date-time`, `period`, `interval`, `repeating-interval`, `recurrence`, `recurrence-set`, `ics`, `clock`, and `tzdb` namespaces.
+- `require :temporal` is the public Fennel/Lua API for application and feature code (written as `(require :temporal)` in Fennel). It exposes `duration`, `instant`, `plain-date-time`, `zoned-date-time`, `period`, `interval`, `repeating-interval`, `recurrence`, `recurrence-set`, `ics`, `localization`, `calendar`, `business-calendar`, `clock`, and `tzdb` namespaces.
 - `require "temporal-core"` is the lower-level native Lua binding. Use it when testing or extending the binding layer directly; prefer `:temporal` elsewhere.
 
 The public wrapper intentionally keeps timezone and calendar rules in C++ instead of reimplementing them in Fennel.
@@ -65,6 +65,8 @@ Bounded half-open intervals and repeating intervals also live above the core. Se
 Selected-corpus iCalendar interoperability lives above recurrence and intervals in `Temporal.ics`. See [Temporal ICS/iCalendar](./temporal-ics) for `Temporal.ics.parse`, `Temporal.ics.format`, `Temporal.ics.expand`, supported `VEVENT` value modes, `VTIMEZONE` metadata handling, and the libical-planned boundary. The native core remains independent from ICS grammar and calendar-client policy.
 
 Selected-corpus CLDR seed localization and non-Gregorian calendar presentation live in `Temporal.localization` and `Temporal.calendar`. See [Temporal Localization and Calendar Seed](./temporal-localization-calendar) for supported locale/calendar/style combinations, calendar conversion rules, packaged seed provenance, and the native ICU4C adapter boundary.
+
+Deterministic business and holiday calendar behavior lives in `Temporal.business-calendar`. See [Temporal Business Calendars](./temporal-business-calendar) for the exact `US-FED` 2026-2027 seed scope, observed holiday policy, business-day arithmetic, packaged-data provenance, and provider extension path.
 
 ## Validation
 

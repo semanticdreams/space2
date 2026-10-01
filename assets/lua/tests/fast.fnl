@@ -104,6 +104,7 @@
      :tests.test-random
        :tests.test-temporal
        :tests.test-temporal-provider-registry
+       :tests.test-temporal-business-calendar
        :tests.test-temporal-calendar
        :tests.test-temporal-localization
       :tests.test-temporal-period
