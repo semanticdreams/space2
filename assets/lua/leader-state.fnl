@@ -8,46 +8,85 @@
 (local PenPointer (require :state-handlers/pen-pointer))
 (local GamepadHandlers (require :state-handlers/gamepad))
 (local CameraHandlers (require :state-handlers/camera))
-(local LauncherLaunchable (require :launchables/launcher))
-(local {: entry : section} (require :command-hints))
+(local Commands (require :commands/core))
+(local Keymap (require :commands/keymap))
+(local CoreLeader (require :commands/providers/core-leader))
 
 (local KEY
-  {:escape 27
-   :q (string.byte "q")
-   :c (string.byte "c")
-   :p (string.byte "p")})
+  {:escape 27})
 
-(fn open-launcher [ctx]
-  (local hud ((. ctx :hud)))
-  (assert hud "LeaderState launcher requires a HUD host")
-  (LauncherLaunchable.open-panel {:hud hud}))
+(fn list-or-empty [items]
+  (if (= items nil) [] items))
+
+(fn active-providers []
+  (local providers [(CoreLeader.provider)])
+  (each [_ provider (ipairs (list-or-empty app.activity-leader-command-providers))]
+    (table.insert providers provider))
+  providers)
+
+(fn compose-active [ctx]
+  (Commands.compose (active-providers) ctx))
+
+(fn core-command? [command-id]
+  (and (= (type command-id) :string)
+       (= (string.sub command-id 1 5) "core.")))
+
+(fn exit-leader [ctx reset-sequence! result]
+  (reset-sequence!)
+  ((. ctx :set-state) :normal)
+  result)
+
+(fn handle-resolved-command [ctx resolved composed reset-sequence!]
+  (local ran? (Commands.run composed resolved.command-id ctx))
+  (when ran?
+    ((. ctx :mark-command-executed!)))
+  (reset-sequence!)
+  (when (not (core-command? resolved.command-id))
+    ((. ctx :set-state) :normal))
+  true)
+
+(fn handle-resolved-sequence [ctx resolved composed reset-sequence!]
+  (if (= resolved.kind :prefix)
+      (do
+        ((. ctx :mark-command-executed!))
+        true)
+      (= resolved.kind :command)
+      (handle-resolved-command ctx resolved composed reset-sequence!)
+      (exit-leader ctx reset-sequence! false)))
 
 (fn LeaderState []
   (local PenHandlers (PenPointer.PenPointerHandlers {}))
+  (var sequence [])
+  (fn reset-sequence! []
+    (set sequence []))
   (local LeaderCommands
     {:key-down (fn [ctx payload]
                  (local key (and payload payload.key))
-                 (local set-state (. ctx :set-state))
                  (if (= key KEY.escape)
-                     (do ((. ctx :mark-command-executed!)) (set-state :normal) true)
-                     (= key KEY.c) (do ((. ctx :mark-command-executed!)) (set-state :camera) true)
-                     (= key KEY.q) (do ((. ctx :mark-command-executed!)) (set-state :quit) true)
-                     (= key KEY.p) (do
-                                     ((. ctx :mark-command-executed!))
-                                     (open-launcher ctx)
-                                     true)
-                     false))})
+                     (do
+                       (reset-sequence!)
+                       ((. ctx :mark-command-executed!))
+                       ((. ctx :set-state) :normal)
+                       true)
+                     (do
+                       (local token (Keymap.key-token payload))
+                       (local composed (compose-active ctx))
+                       (table.insert sequence token)
+                       (local resolved (Keymap.resolve composed.tree sequence))
+                       (handle-resolved-sequence ctx resolved composed reset-sequence!))))})
+  (fn leader-hints-provider [self _payload]
+    (local ctx (assert (and self self.ctx) "LeaderState command hints require state ctx"))
+    (local composed (compose-active ctx))
+    (local section (Commands.hint-section composed sequence ctx {:id :mode :title "MODE"}))
+    (if section [section] []))
+  (local LeaderLifecycle
+    {:enter (fn [_ctx]
+              (reset-sequence!))})
   (local state
     (State
       {:name :leader
        :route-wrappers [Routes.CommandHints]
-       :command_hints_provider (fn [_ctx]
-                                 [(section :mode
-                                           "MODE"
-                                           [(entry "esc" "normal-mode" {:priority 10})
-                                            (entry "q" "quit-mode" {:priority 20})
-                                            (entry "c" "camera-mode" {:priority 30})
-                                            (entry "p" "launcher" {:priority 40})])])
+       :command_hints_provider leader-hints-provider
        :routes {:touch-down (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseDown])
                 :touch-motion (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseMotion])
                 :touch-up (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseUp])
@@ -93,7 +132,8 @@
                 :gamepad-removed (Routes.FirstHandlerWins [GamepadHandlers.GamepadRemoved])
                 :updated (Routes.Chain [CameraHandlers.CameraUpdated
                                         HoverHandlers.HoverUpdated])}
-       :enter [PenHandlers.PenLifecycle
+       :enter [LeaderLifecycle
+               PenHandlers.PenLifecycle
                TouchHandlers.TouchLifecycle
                HoverHandlers.HoverLifecycle]
        :leave [PenHandlers.PenLifecycle

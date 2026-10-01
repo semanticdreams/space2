@@ -59,8 +59,8 @@
 (local KEY_BACKQUOTE (string.byte "`"))
 (local KEY_DELETE 127)
 (local KEY_RETURN 13)
-(local KEY_C (string.byte "c"))
-(local KEY_F (string.byte "f"))
+(local KEY_C (string.byte "c")) (local KEY_E (string.byte "e"))
+(local KEY_F (string.byte "f")) (local KEY_G (string.byte "g"))
 (local KEY_H (string.byte "h"))
 (local KEY_J (string.byte "j"))
 (local KEY_K (string.byte "k"))
@@ -2625,9 +2625,67 @@
       (assert (= (# transitions) 0))
       (InputState.disconnect-input input))))
 
+(fn nested-demo-leader-provider [run]
+  {:commands {"demo.nested" {:id "demo.nested" :label "nested-demo" :run run}}
+   :bindings [{:keys ["g" "p" "e"] :command "demo.nested" :label "nested-demo" :priority 10}]})
+
+(fn with-activity-leader-providers [providers body]
+  (local original app.activity-leader-command-providers)
+  (set app.activity-leader-command-providers providers)
+  (local (ok result) (pcall body))
+  (set app.activity-leader-command-providers original)
+  (if ok result (error result)))
+
+(fn exercise-nested-leader-command [transitions install-state ran]
+  (local state (install-state :leader (LeaderState)))
+  (state.on-key-down {:key KEY_G})
+  (assert (= ran.count 0) "Prefix should not run command")
+  (assert (= (# transitions) 0) "Prefix should remain in leader state")
+  (state.on-key-down {:key KEY_P})
+  (assert (= ran.count 0) "Second prefix should not run command")
+  (state.on-key-down {:key KEY_E})
+  (assert (= ran.count 1) "Nested command should run after full sequence")
+  (assert (= (. transitions (# transitions)) :normal)
+          "Completed leader command should return to normal"))
+
+(fn leader-state-supports-nested-activity-provider-command []
+  (local ran {:count 0})
+  (local provider (nested-demo-leader-provider (fn [_ctx]
+                                                (set ran.count (+ ran.count 1))
+                                                true)))
+  (with-activity-leader-providers
+    [provider]
+    (fn []
+      (with-state-recorder
+        (fn [transitions install-state]
+          (exercise-nested-leader-command transitions install-state ran))))))
+
+(fn leader-state-hints-show-active-prefix-commands []
+  (with-activity-leader-providers
+    [(nested-demo-leader-provider (fn [_ctx] true))]
+    (fn []
+      (local state (LeaderState))
+      (own-test-state! :leader state)
+      (local root-section (. (state.command_hints_provider state {}) 1))
+      (assert root-section "Leader root hints should exist")
+      (var found-g false)
+      (each [_ item (ipairs root-section.entries)]
+        (when (= item.key "g") (set found-g true)))
+      (assert found-g "Leader root hints should include graph prefix")
+      (state.on-key-down {:key KEY_G})
+      (local gp-section (. (state.command_hints_provider state {}) 1))
+      (assert (= (. gp-section.entries 1 :key) "p") "g prefix should expose p child")
+      (state.on-key-down {:key KEY_P})
+      (local gpe-section (. (state.command_hints_provider state {}) 1))
+      (assert (= (. gpe-section.entries 1 :key) "e") "g p prefix should expose e command"))))
+
 (table.insert tests {:name "Normal state leader key enters leader state" :fn normal-state-leader-enters-leader-state})
 (table.insert tests {:name "Leader state C enters camera state" :fn leader-state-c-enters-camera-state})
 (table.insert tests {:name "Leader state P opens launcher" :fn leader-state-p-opens-launcher})
+(table.insert tests {:name "Leader state supports nested activity provider command"
+                     :fn leader-state-supports-nested-activity-provider-command})
+(table.insert tests {:name "Leader state hints show active prefix commands"
+                     :fn leader-state-hints-show-active-prefix-commands})
 (table.insert tests {:name "Camera state F enters fpc state" :fn camera-state-f-enters-fpc-state})
 (table.insert tests {:name "Camera state escape exits to normal" :fn camera-state-escape-exits-to-normal})
 (table.insert tests {:name "Camera state 0 resets camera transform" :fn camera-state-zero-resets-camera})
