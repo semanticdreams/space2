@@ -4,6 +4,7 @@
 (local provider-id "space.temporal.cldr-seed")
 (local expected-locales ["en-US" "fr-FR" "ja-JP"])
 (local expected-calendars ["gregory" "buddhist" "japanese"])
+(local expected-styles {:short true :long true})
 (local missing-data-message "missing or malformed CLDR seed data")
 (local no-assets-message "Temporal CLDR seed requires SPACE_ASSETS_PATH or runtime assets-path")
 
@@ -90,6 +91,17 @@
       (set found? true)))
   found?)
 
+(fn exact-style-surface? [styles]
+  (and (= (type styles) :table)
+       (= (type styles.short) :table)
+       (= (type styles.long) :table)
+       (do
+         (var exact? true)
+         (each [style _ (pairs styles)]
+           (when (not (. expected-styles style))
+             (set exact? false)))
+         exact?)))
+
 (fn require-provider! [record context]
   (when (not (= (require-field record :provider_id :string context) provider-id))
     (fail-missing (.. context ".provider_id"))))
@@ -121,6 +133,9 @@
                                  expected-calendars))
     (error "CLDR seed supported calendar mismatch"))
   (local records (require-field calendars :calendars :table "calendars"))
+  (each [calendar _ (pairs records)]
+    (when (not (supported-calendar? calendar))
+      (error "CLDR seed supported calendar mismatch")))
   (each [_ calendar (ipairs expected-calendars)]
     (when (not (= (type (. records calendar)) :table))
       (fail-missing (.. "calendars.calendars." calendar))))
@@ -135,7 +150,8 @@
     (error "CLDR seed supported locale mismatch"))
   (when (not (supported-calendar? calendar))
     (error "CLDR seed supported calendar mismatch"))
-  (require-field combination :styles :table "locales.combinations")
+  (when (not (exact-style-surface? (require-field combination :styles :table "locales.combinations")))
+    (fail-missing "locales.combinations.styles"))
   combination)
 
 (fn validate-locales! [locales]
@@ -192,7 +208,9 @@
 
 (fn calendar-data [calendar]
   (local loaded (load))
-  (. loaded.calendars.calendars calendar))
+  (if (supported-calendar? calendar)
+      (. loaded.calendars.calendars calendar)
+      nil))
 
 (fn find-combination [locale calendar]
   (local loaded (load))
