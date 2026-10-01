@@ -41,6 +41,9 @@
   (file:close)
   text)
 
+(fn expand-fixture [name options]
+  (Temporal.ics.expand (Temporal.ics.parse (read-fixture name)) (if (= options nil) {} options)))
+
 (fn grammar-unfolds-crlf-and-lf-lines []
   (local crlf-lines (grammar.unfold-lines "SUMMARY:Alpha\r\n beta\r\nDTSTART:20261001T090000\r\n"))
   (assert= (# crlf-lines) 2 "CRLF input should produce two unfolded lines")
@@ -358,8 +361,59 @@
   (local bad-exdate (Temporal.ics.parse (read-fixture "single-floating")))
   (table.insert (. (. bad-exdate.events 1) :exdates) utc-date)
   (assert-error-contains #(Temporal.ics.format bad-exdate {:line-ending :lf})
-                         "EXDATE"
-                         "formatter should reject EXDATE mode mismatch"))
+                          "EXDATE"
+                          "formatter should reject EXDATE mode mismatch"))
+
+(fn expand-single-event-modes []
+  (local utc (. (expand-fixture "single-utc") 1))
+  (assert= utc.kind :temporal-ics-occurrence)
+  (assert= utc.start.time-mode :utc)
+  (assert= (utc.start.instant:to-string) "2026-10-01T13:00:00Z")
+  (assert= utc.instant-interval.type :instant)
+  (local floating (. (expand-fixture "single-floating" {:zone-id "America/New_York"}) 1))
+  (assert= floating.start.time-mode :floating)
+  (assert= (floating.start.plain:to-string) "2026-10-01T09:00:00")
+  (assert= floating.instant-interval nil "floating occurrences should not expose exact interval fields")
+  (local zoned (. (expand-fixture "single-zoned") 1))
+  (assert= zoned.start.time-mode :zoned)
+  (assert= zoned.start.zone-id "America/New_York")
+  (assert= zoned.zoned-interval.type :zoned-date-time)
+  (local all-day (. (expand-fixture "single-all-day") 1))
+  (assert= all-day.start.value-type :date)
+  (assert= all-day.start.date.day 1)
+  (assert= all-day.end.value-type :date)
+  (assert= all-day.end.date.day 2)
+  (assert= all-day.instant-interval nil)
+  (assert= all-day.zoned-interval nil))
+
+(fn expand-requires-zone-for-floating-events []
+  (assert-error-contains #(expand-fixture "single-floating")
+                         "zone-id"
+                         "floating expansion without zone-id should fail")
+  (assert-error-contains #(expand-fixture "single-floating" {:timezone "America/New_York"})
+                         "timezone"
+                         "timezone alias should be rejected"))
+
+(fn expand-duration-events []
+  (local timed (. (expand-fixture "timed-duration" {:zone-id "America/New_York"}) 1))
+  (assert= (timed.end.plain:to-string) "2026-10-01T10:30:00")
+  (local all-day (. (expand-fixture "all-day-duration") 1))
+  (assert= all-day.end.value-type :date)
+  (assert= all-day.end.date.day 3))
+
+(fn expand-recurrence-fixtures []
+  (assert= (# (expand-fixture "weekly-rrule" {:zone-id "America/New_York"})) 3)
+  (assert= (# (expand-fixture "rrule-rdate-exdate" {:zone-id "America/New_York"})) 3)
+  (assert= (# (expand-fixture "exrule" {:zone-id "America/New_York"})) 3)
+  (assert= (# (expand-fixture "utc-until")) 3))
+
+(fn expand-unbounded-recurrence-requires-limit []
+  (local text "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VEVENT\nUID:unbounded@example.test\nDTSTART:20261001T090000\nRRULE:FREQ=DAILY\nSUMMARY:Unbounded daily\nEND:VEVENT\nEND:VCALENDAR\n")
+  (local calendar (Temporal.ics.parse text))
+  (assert-error-contains #(Temporal.ics.expand calendar {:zone-id "America/New_York"})
+                         "limit"
+                         "unbounded recurrence should require limit")
+  (assert= (# (Temporal.ics.expand calendar {:zone-id "America/New_York" :limit 2})) 2))
 
 (table.insert tests {:name "grammar unfolds CRLF and LF lines"
                      :fn grammar-unfolds-crlf-and-lf-lines})
@@ -412,7 +466,17 @@
 (table.insert tests {:name "formatter rejects constructed vtimezone records"
                      :fn formatter-rejects-constructed-vtimezone-records})
 (table.insert tests {:name "formatter rejects mixed date time modes"
-                     :fn formatter-rejects-mixed-date-time-modes})
+                      :fn formatter-rejects-mixed-date-time-modes})
+(table.insert tests {:name "expand single event modes"
+                     :fn expand-single-event-modes})
+(table.insert tests {:name "expand requires zone for floating events"
+                     :fn expand-requires-zone-for-floating-events})
+(table.insert tests {:name "expand duration events"
+                     :fn expand-duration-events})
+(table.insert tests {:name "expand recurrence fixtures"
+                     :fn expand-recurrence-fixtures})
+(table.insert tests {:name "expand unbounded recurrence requires limit"
+                     :fn expand-unbounded-recurrence-requires-limit})
 
 (local main
   (fn []

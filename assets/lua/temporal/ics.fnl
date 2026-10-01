@@ -1,5 +1,6 @@
 (local parser (require :temporal/ics/parser))
 (local formatter (require :temporal/ics/formatter))
+(local expand (require :temporal/ics/expand))
 
 (fn create [Temporal]
   (when (= Temporal nil)
@@ -8,10 +9,10 @@
     (parser.parse-calendar Temporal text options))
   (fn format [calendar options]
     (formatter.format-calendar Temporal calendar options))
-  (fn expand [_calendar _options]
-    (error "Temporal.ics.expand is not implemented"))
+  (fn expand-calendar [calendar options]
+    (expand.expand-calendar Temporal calendar (if (= options nil) {} options)))
   {:parse parse
    :format format
-   :expand expand})
+   :expand expand-calendar})
 
 create
