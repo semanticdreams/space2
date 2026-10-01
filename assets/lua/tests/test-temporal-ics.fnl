@@ -130,6 +130,37 @@
                          "all-day"
                          "timed duration for all-day should fail"))
 
+(fn value-adds-zoned-durations-on-instant-timeline []
+  (local start (value.parse-date-time Temporal {:TZID "America/New_York"} "20260308T013000"))
+  (local shifted (value.start-plus-duration Temporal start (Temporal.duration.from-seconds 3600)))
+  (assert= shifted.value-type :date-time)
+  (assert= shifted.time-mode :zoned)
+  (assert= shifted.zone-id "America/New_York")
+  (assert= (shifted.plain:to-string) "2026-03-08T03:30:00"))
+
+(fn value-rejects-fractional-second-date-time-formatting []
+  (local fractional-plain (Temporal.plain-date-time.parse "2026-10-01T09:00:00.5"))
+  (assert-error-contains #(value.format-date-time {:kind :temporal-ics-date-time
+                                                   :value-type :date-time
+                                                   :time-mode :floating
+                                                   :plain fractional-plain})
+                         "whole seconds"
+                         "floating fractional seconds should fail")
+  (assert-error-contains #(value.format-date-time {:kind :temporal-ics-date-time
+                                                   :value-type :date-time
+                                                   :time-mode :zoned
+                                                   :zone-id "America/New_York"
+                                                   :plain fractional-plain})
+                         "whole seconds"
+                         "zoned fractional seconds should fail")
+  (local fractional-instant (Temporal.instant.parse "2026-10-01T13:00:00.5Z"))
+  (assert-error-contains #(value.format-date-time {:kind :temporal-ics-date-time
+                                                   :value-type :date-time
+                                                   :time-mode :utc
+                                                   :instant fractional-instant})
+                         "whole seconds"
+                         "UTC fractional seconds should fail"))
+
 (table.insert tests {:name "grammar unfolds CRLF and LF lines"
                      :fn grammar-unfolds-crlf-and-lf-lines})
 (table.insert tests {:name "grammar parses names params and values"
@@ -146,6 +177,10 @@
                      :fn value-parses-and-formats-supported-durations})
 (table.insert tests {:name "value rejects unsupported date time boundaries"
                      :fn value-rejects-unsupported-date-time-boundaries})
+(table.insert tests {:name "value adds zoned durations on instant timeline"
+                     :fn value-adds-zoned-durations-on-instant-timeline})
+(table.insert tests {:name "value rejects fractional second date time formatting"
+                     :fn value-rejects-fractional-second-date-time-formatting})
 
 (local main
   (fn []

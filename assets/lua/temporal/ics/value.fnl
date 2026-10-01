@@ -24,6 +24,23 @@
   (local fields (plain:fields))
   (.. (date-text fields) "T" (pad2 fields.hour) (pad2 fields.minute) (pad2 fields.second)))
 
+(fn assert-whole-second-plain [plain label]
+  (local fields (plain:fields))
+  (when (not= fields.nanosecond 0)
+    (error (.. "temporal ICS " label " must use whole seconds")))
+  plain)
+
+(fn instant-nanosecond [instant]
+  (local nanosecond (. instant :nanosecond))
+  (if (= (type nanosecond) :function)
+      (nanosecond instant)
+      nanosecond))
+
+(fn assert-whole-second-instant [instant label]
+  (when (not= (instant-nanosecond instant) 0)
+    (error (.. "temporal ICS " label " must use whole seconds")))
+  instant)
+
 (fn plain-iso-text [year month day hour minute second]
   (.. (pad4 year) "-" (pad2 month) "-" (pad2 day)
       "T" (pad2 hour) ":" (pad2 minute) ":" (pad2 second)))
@@ -114,14 +131,16 @@
   (if (= wrapper.value-type :date)
       (values {:VALUE "DATE"} (date-text wrapper.date))
       (= wrapper.time-mode :floating)
-      (values {} (plain-text wrapper.plain))
+      (values {} (plain-text (assert-whole-second-plain wrapper.plain "floating date-time")))
       (= wrapper.time-mode :utc)
       (do
-        (local instant-text (wrapper.instant:to-string))
+        (local whole-instant (assert-whole-second-instant wrapper.instant "UTC date-time"))
+        (local instant-text (whole-instant:to-string))
         (local formatted (instant-text:gsub "[-:]" ""))
         (values {} formatted))
       (= wrapper.time-mode :zoned)
-      (values {:TZID wrapper.zone-id} (plain-text wrapper.plain))
+      (values {:TZID wrapper.zone-id}
+              (plain-text (assert-whole-second-plain wrapper.plain "zoned date-time")))
       (error "unsupported temporal ICS date-time wrapper mode")))
 
 (fn parse-exact-duration [Temporal text]
@@ -266,7 +285,12 @@
        :value-type :date-time
        :time-mode :zoned
        :zone-id start.zone-id
-       :plain (start.plain:add duration)}
+       :plain (do
+                (local zoned-start (Temporal.zoned-date-time.from-plain start.plain start.zone-id))
+                (local start-instant (zoned-start:instant))
+                (local shifted-instant (start-instant:add duration))
+                (local shifted-zoned (Temporal.zoned-date-time.from-instant shifted-instant start.zone-id))
+                (Temporal.plain-date-time.from-fields (shifted-zoned:fields)))}
       (error "unsupported temporal ICS date-time wrapper mode")))
 
 (fn default-end [Temporal start]
