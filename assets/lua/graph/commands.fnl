@@ -32,8 +32,10 @@
               (make-selected-preview-command options "graph.preview.collapse-selected" "collapse-preview" :collapse-selected-previews)
               "graph.preview.toggle-selected"
               (make-selected-preview-command options "graph.preview.toggle-selected" "toggle-preview" :toggle-selected-previews)}
-   :bindings [{:keys ["g" "p" "e"] :command "graph.preview.expand-selected" :label "expand-preview" :priority 10}
-              {:keys ["g" "p" "c"] :command "graph.preview.collapse-selected" :label "collapse-preview" :priority 20}
-              {:keys ["g" "p" "t"] :command "graph.preview.toggle-selected" :label "toggle-preview" :priority 30}]})
+    :prefixes [{:keys ["g"] :label "graph" :priority 10}
+               {:keys ["g" "p"] :label "preview" :priority 10}]
+    :bindings [{:keys ["g" "p" "e"] :command "graph.preview.expand-selected" :label "expand-preview" :priority 10}
+               {:keys ["g" "p" "c"] :command "graph.preview.collapse-selected" :label "collapse-preview" :priority 20}
+               {:keys ["g" "p" "t"] :command "graph.preview.toggle-selected" :label "toggle-preview" :priority 30}]})
 
 {:provider M.provider}

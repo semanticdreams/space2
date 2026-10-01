@@ -56,22 +56,45 @@
 (fn unavailable? [_ctx]
   false)
 
+(local graph-provider-test-view {:selected-node-count (fn [_self] 1)})
+
+(fn selected-graph-view []
+  graph-provider-test-view)
+
 (fn command-hints-derive-from-availability-and-prefix []
   (local provider {:commands {"demo.a" {:id "demo.a"
-                                         :label "alpha"
-                                         :run always-run}
+                                          :label "alpha"
+                                          :run always-run}
                              "demo.b" {:id "demo.b"
                                          :label "beta"
                                          :available? unavailable?
                                          :run always-run}}
-                   :bindings [{:keys ["g" "a"] :command "demo.a" :label "alpha" :priority 20}
-                              {:keys ["g" "b"] :command "demo.b" :label "beta" :priority 10}]})
+                    :prefixes [{:keys ["g"] :label "graph" :priority 10}]
+                    :bindings [{:keys ["g" "a"] :command "demo.a" :label "alpha" :priority 20}
+                               {:keys ["g" "b"] :command "demo.b" :label "beta" :priority 10}]})
   (local composed (Commands.compose [provider] {}))
+  (local root-section (Commands.hint-section composed [] {} {:id :mode :title "MODE"}))
+  (assert root-section "Root hint section should exist")
+  (assert (= (. root-section.entries 1 :key) "g"))
+  (assert (= (. root-section.entries 1 :label) "graph"))
   (local section (Commands.hint-section composed ["g"] {} {:id :mode :title "MODE"}))
   (assert section "Prefix hint section should exist")
   (assert (= (length section.entries) 1) "Unavailable command should be hidden")
   (assert (= (. section.entries 1 :key) "a"))
   (assert (= (. section.entries 1 :label) "alpha")))
+
+(fn graph-provider-prefix-hints-use-prefix-labels []
+  (local GraphCommands (require :graph/commands))
+  (local provider (GraphCommands.provider {:graph-view selected-graph-view}))
+  (local composed (Commands.compose [provider] {}))
+  (local root-section (Commands.hint-section composed [] {} {:id :mode :title "MODE"}))
+  (assert root-section "Graph provider root hint section should exist")
+  (assert (= (. root-section.entries 1 :key) "g"))
+  (assert (= (. root-section.entries 1 :label) "graph"))
+  (local graph-section (Commands.hint-section composed ["g"] {} {:id :mode :title "MODE"}))
+  (assert graph-section "Graph provider nested hint section should exist")
+  (assert (= (. graph-section.entries 1 :key) "p"))
+  (assert (= (. graph-section.entries 1 :label) "preview")))
 
 (fn command-hints-hide-prefixes-without-available-descendants []
   (local provider {:commands {"demo.deep" {:id "demo.deep"
@@ -94,6 +117,8 @@
           commands-execute-only-available-commands)
 (add-test "Command hints derive from availability and prefix"
           command-hints-derive-from-availability-and-prefix)
+(add-test "Graph provider prefix hints use prefix labels"
+          graph-provider-prefix-hints-use-prefix-labels)
 (add-test "Command hints hide prefixes without available descendants"
           command-hints-hide-prefixes-without-available-descendants)
 

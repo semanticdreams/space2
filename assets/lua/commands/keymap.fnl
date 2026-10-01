@@ -19,8 +19,18 @@
     (set (. node.nodes token) {:token token :nodes {}}))
   (. node.nodes token))
 
-(fn M.build [bindings]
+(fn attach-prefix [root prefix]
+  (local keys (assert prefix.keys "Command prefix metadata requires :keys"))
+  (assert prefix.label "Command prefix metadata requires :label")
+  (var node root)
+  (each [_ key (ipairs keys)]
+    (set node (ensure-child node key)))
+  (set node.prefix prefix))
+
+(fn M.build [bindings prefixes]
   (local root {:nodes {}})
+  (each [_ prefix (ipairs (list-or-empty prefixes))]
+    (attach-prefix root prefix))
   (each [_ binding (ipairs (list-or-empty bindings))]
     (local keys (assert binding.keys "Command key binding requires :keys"))
     (assert binding.command "Command key binding requires :command")
@@ -52,10 +62,18 @@
       (do
         (local items [])
         (each [token item-node (pairs (list-or-empty resolved.node.nodes))]
-          (table.insert items {:token token :node item-node :binding item-node.binding :command-id item-node.command-id}))
+          (table.insert items {:token token
+                               :node item-node
+                               :prefix item-node.prefix
+                               :binding item-node.binding
+                               :command-id item-node.command-id}))
         (table.sort items (fn [a b]
-                            (< (or (and a.binding a.binding.priority) 50)
-                               (or (and b.binding b.binding.priority) 50))))
+                            (< (or (and a.prefix a.prefix.priority)
+                                   (and a.binding a.binding.priority)
+                                   50)
+                               (or (and b.prefix b.prefix.priority)
+                                   (and b.binding b.binding.priority)
+                                   50))))
         items)
       []))
 
