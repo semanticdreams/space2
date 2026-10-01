@@ -181,6 +181,45 @@
   (local holiday-again (seed.holiday-on-date "US-FED" "2026-07-03"))
   (assert= holiday-again.id "independence-day" "holiday lookup should return defensive copies"))
 
+(fn seed-rejects-unsupported-holiday-lookup-years []
+  (local seed (require :temporal/holiday-seed))
+  (assert-error-contains #(seed.holiday-on-date "US-FED" "2028-01-01")
+                         "unsupported temporal holiday year"
+                         "holiday date lookup should reject unsupported years loudly"))
+
+(fn find-holiday-by-id [holidays id]
+  (var found nil)
+  (each [_ holiday (ipairs holidays)]
+    (when (= holiday.id id)
+      (set found holiday)))
+  found)
+
+(fn seed-returns-holidays-for-2027-fixture []
+  (local seed (require :temporal/holiday-seed))
+  (local holidays (seed.holidays-for-year "US-FED" 2027))
+  (assert= (length holidays) 12 "2027 should include federal observed holiday records")
+  (local first (. holidays 1))
+  (assert= first.jurisdiction "US-FED" "2027 holiday record should include jurisdiction")
+  (assert= first.year 2027 "2027 holiday record should include observed year")
+  (assert= first.id "new-years-day" "first 2027 holiday id should match seed")
+  (assert= first.date "2027-01-01" "first 2027 statutory date should match seed")
+  (assert= first.observed-date "2027-01-01" "first 2027 observed date should match seed")
+  (local juneteenth (find-holiday-by-id holidays "juneteenth-national-independence-day"))
+  (assert juneteenth "Juneteenth should be present in 2027 fixture")
+  (assert= juneteenth.date "2027-06-19" "Juneteenth statutory date should match")
+  (assert= juneteenth.observed-date "2027-06-18" "Juneteenth observed date should match")
+  (assert= juneteenth.observed? true "Juneteenth 2027 should be shifted")
+  (local independence (find-holiday-by-id holidays "independence-day"))
+  (assert independence "Independence Day should be present in 2027 fixture")
+  (assert= independence.date "2027-07-04" "Independence Day 2027 statutory date should match")
+  (assert= independence.observed-date "2027-07-05" "Independence Day 2027 observed date should match")
+  (assert= independence.observed? true "Independence Day 2027 should be shifted")
+  (local christmas (find-holiday-by-id holidays "christmas-day"))
+  (assert christmas "Christmas Day should be present in 2027 fixture")
+  (assert= christmas.date "2027-12-25" "Christmas 2027 statutory date should match")
+  (assert= christmas.observed-date "2027-12-24" "Christmas 2027 observed date should match")
+  (assert= christmas.observed? true "Christmas 2027 should be shifted"))
+
 (fn seed-rejects-extra-supported-year-buckets []
   (with-temp-seed {:extra-year? true}
     assert-extra-year-load-rejected))
@@ -229,7 +268,13 @@
 (fn business-calendar-holiday-predicate-uses-observed-dates []
   (local Temporal (require :temporal))
   (assert (Temporal.business-calendar.is-holiday (plain "2026-07-03T09:00:00") {:jurisdiction "US-FED"})
-          "observed Independence Day should be a holiday")
+           "observed Independence Day should be a holiday")
+  (assert (Temporal.business-calendar.is-holiday (plain "2027-06-18T09:00:00") {:jurisdiction "US-FED"})
+          "observed Juneteenth 2027 should be a holiday")
+  (assert (Temporal.business-calendar.is-holiday (plain "2027-07-05T09:00:00") {:jurisdiction "US-FED"})
+          "observed Independence Day 2027 should be a holiday")
+  (assert (Temporal.business-calendar.is-holiday (plain "2027-12-24T09:00:00") {:jurisdiction "US-FED"})
+          "observed Christmas 2027 should be a holiday")
   (assert (not (Temporal.business-calendar.is-holiday (plain "2026-07-06T09:00:00") {:jurisdiction "US-FED"}))
           "following Monday should not be a holiday"))
 
@@ -240,7 +285,13 @@
   (assert (not (Temporal.business-calendar.is-business-day (plain "2026-07-05T09:00:00") {:jurisdiction "US-FED"}))
           "Sunday should not be a business day")
   (assert (not (Temporal.business-calendar.is-business-day (plain "2026-07-03T09:00:00") {:jurisdiction "US-FED"}))
-          "observed holiday should not be a business day")
+           "observed holiday should not be a business day")
+  (assert (not (Temporal.business-calendar.is-business-day (plain "2027-06-18T09:00:00") {:jurisdiction "US-FED"}))
+          "observed Juneteenth 2027 should not be a business day")
+  (assert (not (Temporal.business-calendar.is-business-day (plain "2027-07-05T09:00:00") {:jurisdiction "US-FED"}))
+          "observed Independence Day 2027 should not be a business day")
+  (assert (not (Temporal.business-calendar.is-business-day (plain "2027-12-24T09:00:00") {:jurisdiction "US-FED"}))
+          "observed Christmas 2027 should not be a business day")
   (assert (Temporal.business-calendar.is-business-day (plain "2026-07-06T09:00:00") {:jurisdiction "US-FED"})
           "Monday after observed holiday should be a business day"))
 
@@ -363,6 +414,8 @@
 (table.insert tests {:name "seed rejects unsupported jurisdiction loudly" :fn seed-rejects-unsupported-jurisdiction-loudly})
 (table.insert tests {:name "seed returns holidays for supported year" :fn seed-returns-holidays-for-supported-year})
 (table.insert tests {:name "seed finds observed holiday by date" :fn seed-finds-observed-holiday-by-date})
+(table.insert tests {:name "seed rejects unsupported holiday lookup years" :fn seed-rejects-unsupported-holiday-lookup-years})
+(table.insert tests {:name "seed returns holidays for 2027 fixture" :fn seed-returns-holidays-for-2027-fixture})
 (table.insert tests {:name "seed rejects extra supported year buckets" :fn seed-rejects-extra-supported-year-buckets})
 (table.insert tests {:name "seed rejects observed dates outside year bucket" :fn seed-rejects-observed-dates-outside-year-bucket})
 (table.insert tests {:name "business calendar exported" :fn business-calendar-exported})

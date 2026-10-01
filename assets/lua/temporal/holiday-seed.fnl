@@ -305,6 +305,8 @@
   (require-supported-jurisdiction! jurisdiction)
   (when (not (valid-iso-date? iso-date))
     (error (.. "invalid temporal holiday ISO date: " (tostring iso-date))))
+  (local year (tonumber (iso-date:sub 1 4)))
+  (require-supported-year! year)
   (local loaded (ensure-loaded))
   (var found nil)
   (each [_ year (ipairs [expected-year-start expected-year-end])]
