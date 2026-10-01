@@ -185,3 +185,14 @@ def test_windows_temporal_tzdata_is_bundled_and_packaged() -> None:
         assert required_file in package_script
         assert required_file in temporal_core
     assert (tzdata_dir / "version").read_text(encoding="utf-8").strip() == "2025b"
+
+
+def test_windows_runtime_package_stages_temporal_dependency_manifests() -> None:
+    package_script = read_repo_text("scripts/package-windows-runtime.sh")
+    libical_manifest = REPO_ROOT / "external/temporal/libical/DEPENDENCY_MANIFEST.json"
+
+    assert libical_manifest.is_file()
+    assert 'TEMPORAL_MANIFEST_SOURCE="${ROOT_DIR}/external/temporal"' in package_script
+    assert 'TEMPORAL_MANIFEST_DEST="${DIST_DIR}/external/temporal"' in package_script
+    assert 'DEPENDENCY_MANIFEST.json' in package_script
+    assert '${TEMPORAL_MANIFEST_DEST}/${dependency_name}/DEPENDENCY_MANIFEST.json' in package_script
