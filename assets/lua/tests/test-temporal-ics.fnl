@@ -44,6 +44,9 @@
 (fn expand-fixture [name options]
   (Temporal.ics.expand (Temporal.ics.parse (read-fixture name)) (if (= options nil) {} options)))
 
+(fn expand-text [text options]
+  (Temporal.ics.expand (Temporal.ics.parse text) (if (= options nil) {} options)))
+
 (fn grammar-unfolds-crlf-and-lf-lines []
   (local crlf-lines (grammar.unfold-lines "SUMMARY:Alpha\r\n beta\r\nDTSTART:20261001T090000\r\n"))
   (assert= (# crlf-lines) 2 "CRLF input should produce two unfolded lines")
@@ -459,6 +462,48 @@
   (local exdate-occurrences (Temporal.ics.expand (Temporal.ics.parse exdate-text) {:zone-id "America/New_York"}))
   (assert= (# exdate-occurrences) 0))
 
+(fn expand-applies-overrides-and-cancellations []
+  (local override-text "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VEVENT\nUID:override-inline@example.test\nDTSTART:20261001T090000\nRRULE:FREQ=DAILY;COUNT=3\nSUMMARY:Recurring master\nEND:VEVENT\nBEGIN:VEVENT\nUID:override-inline@example.test\nRECURRENCE-ID:20261002T090000\nDTSTART:20261002T110000\nDTEND:20261002T120000\nSUMMARY:Moved recurring event\nEND:VEVENT\nEND:VCALENDAR\n")
+  (local overrides (expand-text override-text {:zone-id "America/New_York"}))
+  (assert= (# overrides) 3)
+  (local moved (. overrides 2))
+  (assert= moved.summary "Moved recurring event")
+  (assert= (moved.start.plain:to-string) "2026-10-02T11:00:00")
+  (assert= (moved.recurrence-id.plain:to-string) "2026-10-02T09:00:00")
+  (local cancelled (expand-fixture "cancelled-occurrence" {:zone-id "America/New_York"}))
+  (assert= (# cancelled) 2)
+  (each [_ occurrence (ipairs cancelled)]
+    (assert (not= (occurrence.recurrence-id.plain:to-string) "2026-10-02T09:00:00")
+            "cancelled recurrence id should be absent"))
+  (assert= (# (expand-fixture "cancelled-master" {:zone-id "America/New_York"})) 0)
+  (local outside-text "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VEVENT\nUID:outside-override@example.test\nDTSTART:20261001T090000\nRRULE:FREQ=DAILY;COUNT=2\nSUMMARY:Recurring master\nEND:VEVENT\nBEGIN:VEVENT\nUID:outside-override@example.test\nRECURRENCE-ID:20261005T090000\nDTSTART:20261005T100000\nSUMMARY:Late override\nEND:VEVENT\nEND:VCALENDAR\n")
+  (local outside (expand-text outside-text {:zone-id "America/New_York"}))
+  (assert= (# outside) 3)
+  (assert= (. (. outside 3) :summary) "Late override")
+  (local orphan-text "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VEVENT\nUID:orphan-override@example.test\nRECURRENCE-ID:20261005T090000\nDTSTART:20261005T100000\nSUMMARY:Orphan override\nEND:VEVENT\nEND:VCALENDAR\n")
+  (assert= (# (expand-text orphan-text {:zone-id "America/New_York"})) 0))
+
+(fn expand-rejects-ambiguous-duplicate-events []
+  (local duplicate-master "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VEVENT\nUID:duplicate@example.test\nDTSTART:20261001T090000\nSUMMARY:First\nEND:VEVENT\nBEGIN:VEVENT\nUID:duplicate@example.test\nDTSTART:20261002T090000\nSUMMARY:Second\nEND:VEVENT\nEND:VCALENDAR\n")
+  (assert-error-contains #(expand-text duplicate-master {:zone-id "America/New_York"})
+                         "duplicate master"
+                         "duplicate masters should fail loudly")
+  (local duplicate-override "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VEVENT\nUID:duplicate-override@example.test\nDTSTART:20261001T090000\nRRULE:FREQ=DAILY;COUNT=3\nSUMMARY:Master\nEND:VEVENT\nBEGIN:VEVENT\nUID:duplicate-override@example.test\nRECURRENCE-ID:20261002T090000\nDTSTART:20261002T110000\nSUMMARY:Moved\nEND:VEVENT\nBEGIN:VEVENT\nUID:duplicate-override@example.test\nRECURRENCE-ID:20261002T090000\nDTSTART:20261002T090000\nSTATUS:CANCELLED\nSUMMARY:Cancelled\nEND:VEVENT\nEND:VCALENDAR\n")
+  (assert-error-contains #(expand-text duplicate-override {:zone-id "America/New_York"})
+                         "duplicate override"
+                         "duplicate overrides should fail loudly"))
+
+(fn temporal-ics-acceptance-smoke []
+  (local folded (Temporal.ics.parse (read-fixture "folded-escaped")))
+  (local reparsed (Temporal.ics.parse (Temporal.ics.format folded)))
+  (assert= (. (. reparsed.events 1) :summary)
+           "This summary is deliberately long so it can be folded across a linecontinuation")
+  (assert= (# (expand-fixture "weekly-rrule" {:zone-id "America/New_York"})) 3)
+  (assert= (# (expand-fixture "cancelled-occurrence" {:zone-id "America/New_York"})) 2)
+  (assert-error-contains #(Temporal.ics.parse (read-fixture "unsupported-component"))
+                         "VTODO"
+                         "unsupported component should remain loud"))
+
 (table.insert tests {:name "grammar unfolds CRLF and LF lines"
                      :fn grammar-unfolds-crlf-and-lf-lines})
 (table.insert tests {:name "grammar parses names params and values"
@@ -530,7 +575,13 @@
 (table.insert tests {:name "expand backfills past large exrule exclusions"
                      :fn expand-backfills-past-large-exrule-exclusions})
 (table.insert tests {:name "expand recurrence includes dtstart with rdate and exdate"
-                     :fn expand-recurrence-includes-dtstart-with-rdate-and-exdate})
+                      :fn expand-recurrence-includes-dtstart-with-rdate-and-exdate})
+(table.insert tests {:name "expand applies overrides and cancellations"
+                     :fn expand-applies-overrides-and-cancellations})
+(table.insert tests {:name "expand rejects ambiguous duplicate events"
+                     :fn expand-rejects-ambiguous-duplicate-events})
+(table.insert tests {:name "temporal ics acceptance smoke"
+                     :fn temporal-ics-acceptance-smoke})
 
 (local main
   (fn []

@@ -94,6 +94,21 @@
       (zdt:instant)
       zdt.instant))
 
+(fn wrapper-instant [Temporal wrapper options]
+  (if (= wrapper.value-type :date)
+      nil
+      (= wrapper.time-mode :utc)
+      wrapper.instant
+      (= wrapper.time-mode :zoned)
+      (zoned-instant (zoned-endpoint Temporal wrapper options))
+      (= wrapper.time-mode :floating)
+      (zoned-instant
+        (Temporal.zoned-date-time.from-plain
+          wrapper.plain
+          options.zone-id
+          {:disambiguation options.disambiguation}))
+      nil))
+
 (fn wrapper-precedes? [Temporal start end options]
   (if (= start.value-type :date)
       (< ((value.date->plain Temporal start.date):compare (value.date->plain Temporal end.date)) 0)
@@ -346,26 +361,29 @@
       []
       [(make-occurrence Temporal event (copy-wrapper event.dtstart) options)]))
 
-(fn event-key [event]
-  (if event.recurrence-id
-      (.. event.uid "\n" (value.normalized-key event.recurrence-id))
-      event.uid))
-
-(fn validate-event-groups [calendar]
-  (local masters {})
-  (local recurrence-ids {})
-  (each [_ event (ipairs calendar.events)]
+(fn event-groups [calendar]
+  (local groups {})
+  (each [index event (ipairs calendar.events)]
+    (var group (. groups event.uid))
+    (when (= group nil)
+      (set group {:uid event.uid :master nil :master-source-order 0 :overrides []}))
     (if event.recurrence-id
+        (table.insert group.overrides {:event event :source-order index})
         (do
-          (local key (event-key event))
-          (when (. recurrence-ids key)
-            (error "duplicate temporal ICS RECURRENCE-ID"))
-          (set (. recurrence-ids key) true))
-        (do
-          (when (. masters event.uid)
-            (error "duplicate temporal ICS master UID"))
-          (set (. masters event.uid) event))))
-  masters)
+          (when group.master
+            (error "duplicate master"))
+          (set group.master event)
+          (set group.master-source-order index)))
+    (set (. groups event.uid) group))
+  (each [_ group (pairs groups)]
+    (local seen {})
+    (each [_ entry (ipairs group.overrides)]
+      (local event entry.event)
+      (local key (value.normalized-key event.recurrence-id))
+      (when (. seen key)
+        (error "duplicate override"))
+      (set (. seen key) true)))
+  groups)
 
 (fn expand-event [Temporal event options]
   (validate-floating-zone event options)
@@ -377,16 +395,116 @@
       (expand-recurring-event Temporal event options)
       (expand-simple-event Temporal event options)))
 
+(fn copy-occurrence-with-override [Temporal master override source-order options]
+  (local occurrence (make-occurrence Temporal override (copy-wrapper override.dtstart) options))
+  (set occurrence.recurrence-id override.recurrence-id)
+  (set occurrence.source-order source-order)
+  (when (and (= occurrence.summary nil) master.summary)
+    (set occurrence.summary master.summary))
+  (when (and (= occurrence.description nil) master.description)
+    (set occurrence.description master.description))
+  occurrence)
+
+(fn apply-group-overrides [Temporal group options]
+  (local master group.master)
+  (if (= master nil)
+      []
+      (= master.status :cancelled)
+      []
+      (do
+        (validate-floating-zone master options)
+        (local generated (expand-event Temporal master options))
+        (local by-key {})
+        (local ordered-keys [])
+        (each [_ occurrence (ipairs generated)]
+          (set occurrence.source-order group.master-source-order)
+          (local key (value.normalized-key occurrence.recurrence-id))
+          (table.insert ordered-keys key)
+          (set (. by-key key) occurrence))
+        (local standalone [])
+        (each [_ entry (ipairs group.overrides)]
+          (local override entry.event)
+          (validate-floating-zone override options)
+          (local key (value.normalized-key override.recurrence-id))
+          (if (= override.status :cancelled)
+              (set (. by-key key) nil)
+              (. by-key key)
+              (set (. by-key key) (copy-occurrence-with-override Temporal master override entry.source-order options))
+              (table.insert standalone (copy-occurrence-with-override Temporal master override entry.source-order options))))
+        (local result [])
+        (each [_ key (ipairs ordered-keys)]
+          (local occurrence (. by-key key))
+          (when occurrence
+            (table.insert result occurrence)))
+        (each [_ occurrence (ipairs standalone)]
+          (table.insert result occurrence))
+        result)))
+
+(fn sort-local-key [wrapper]
+  (if (= wrapper.value-type :date)
+      (value.date-key wrapper.date)
+      (= wrapper.time-mode :utc)
+      (wrapper.instant:to-string)
+      (= wrapper.time-mode :floating)
+      (wrapper.plain:to-string)
+      (= wrapper.time-mode :zoned)
+      (wrapper.plain:to-string)
+      ""))
+
+(fn occurrence-source-order [occurrence]
+  (if (= occurrence.source-order nil)
+      0
+      occurrence.source-order))
+
+(fn occurrence-sort-key [Temporal occurrence options]
+  (local instant (wrapper-instant Temporal occurrence.start options))
+  {:instant instant
+   :local-key (sort-local-key occurrence.start)
+   :date-key (if (= occurrence.start.value-type :date) (value.date-key occurrence.start.date) nil)
+   :uid occurrence.uid
+   :source-order (occurrence-source-order occurrence)})
+
+(fn nullable-string< [left right]
+  (if (= left nil)
+      (not= right nil)
+      (= right nil)
+      false
+      (< left right)))
+
+(fn occurrence-precedes? [Temporal options left right]
+  (local left-key (occurrence-sort-key Temporal left options))
+  (local right-key (occurrence-sort-key Temporal right options))
+  (if (and left-key.instant right-key.instant)
+      (do
+        (local comparison (left-key.instant:compare right-key.instant))
+        (if (not= comparison 0)
+            (< comparison 0)
+            (not= left-key.local-key right-key.local-key)
+            (< left-key.local-key right-key.local-key)
+            (not= left-key.uid right-key.uid)
+            (< left-key.uid right-key.uid)
+            (< left-key.source-order right-key.source-order)))
+      (and left-key.instant (not right-key.instant))
+      true
+      (and (not left-key.instant) right-key.instant)
+      false
+      (not= left-key.date-key right-key.date-key)
+      (nullable-string< left-key.date-key right-key.date-key)
+      (not= left-key.uid right-key.uid)
+      (< left-key.uid right-key.uid)
+      (< left-key.source-order right-key.source-order)))
+
 (fn expand-calendar [Temporal calendar options]
   (when (not (and (= (type calendar) :table)
                   (= calendar.kind :temporal-ics-calendar)))
     (error "temporal ICS expand requires parsed calendar"))
   (local normalized-options (validate-options options))
-  (validate-event-groups calendar)
+  (local groups (event-groups calendar))
   (local expanded [])
-  (each [_ event (ipairs calendar.events)]
-    (each [_ occurrence (ipairs (expand-event Temporal event normalized-options))]
+  (each [_ group (pairs groups)]
+    (each [_ occurrence (ipairs (apply-group-overrides Temporal group normalized-options))]
       (table.insert expanded occurrence)))
+  (table.sort expanded #(occurrence-precedes? Temporal normalized-options $1 $2))
   expanded)
 
 {:expand-calendar expand-calendar}
