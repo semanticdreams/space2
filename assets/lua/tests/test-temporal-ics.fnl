@@ -244,8 +244,46 @@
                          "DTEND"
                          "DTEND and DURATION should fail")
   (assert-error-contains #(Temporal.ics.parse "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VEVENT\nUID:location@example.test\nDTSTART:20261001T090000\nLOCATION:Room 1\nEND:VEVENT\nEND:VCALENDAR\n")
-                         "LOCATION"
-                         "unknown LOCATION should fail"))
+                          "LOCATION"
+                          "unknown LOCATION should fail"))
+
+(fn formatter-emits-canonical-single-event []
+  (local calendar (Temporal.ics.parse (read-fixture "single-utc")))
+  (local formatted (Temporal.ics.format calendar {:line-ending :lf}))
+  (assert (= nil (formatted:find "\r" 1 true)) "LF formatting should not contain CR")
+  (assert= formatted
+           "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nCALSCALE:GREGORIAN\nBEGIN:VEVENT\nUID:single-utc@example.test\nSEQUENCE:0\nSTATUS:CONFIRMED\nDTSTART:20261001T130000Z\nDTEND:20261001T140000Z\nSUMMARY:UTC standup\nEND:VEVENT\nEND:VCALENDAR\n"))
+
+(fn formatter-defaults-to-crlf []
+  (local calendar (Temporal.ics.parse (read-fixture "single-utc")))
+  (local formatted (Temporal.ics.format calendar))
+  (assert (formatted:find "\r\n" 1 true) "default formatting should contain CRLF")
+  (assert (= nil (formatted:find "[^\r]\n")) "default formatting should not contain bare LF"))
+
+(fn formatter-round-trips-supported-fixtures []
+  (each [_ name (ipairs successful-fixtures)]
+    (local original (Temporal.ics.parse (read-fixture name)))
+    (local reparsed (Temporal.ics.parse (Temporal.ics.format original)))
+    (assert= reparsed.kind original.kind (.. name " calendar kind should survive"))
+    (assert= (# reparsed.events) (# original.events) (.. name " event count should survive"))
+    (assert= (. (. reparsed.events 1) :uid) (. (. original.events 1) :uid)
+             (.. name " first UID should survive"))))
+
+(fn formatter-rejects-unknown-record-keys []
+  (local calendar (Temporal.ics.parse (read-fixture "single-utc")))
+  (set calendar.timezone {:tzid "America/New_York"})
+  (assert-error-contains #(Temporal.ics.format calendar {:line-ending :lf})
+                         "timezone"
+                         "unknown calendar key should fail loudly"))
+
+(fn formatter-validates-options []
+  (local calendar (Temporal.ics.parse (read-fixture "single-utc")))
+  (assert-error-contains #(Temporal.ics.format calendar {:newline :lf})
+                         "newline"
+                         "newline alias should be rejected")
+  (assert-error-contains #(Temporal.ics.format calendar {:line-ending :native})
+                         "line-ending"
+                         "invalid line-ending should be rejected"))
 
 (table.insert tests {:name "grammar unfolds CRLF and LF lines"
                      :fn grammar-unfolds-crlf-and-lf-lines})
@@ -278,7 +316,17 @@
 (table.insert tests {:name "parser parses nested vtimezone metadata"
                      :fn parser-parses-nested-vtimezone-metadata})
 (table.insert tests {:name "parser rejects invalid calendar and event shapes"
-                     :fn parser-rejects-invalid-calendar-and-event-shapes})
+                      :fn parser-rejects-invalid-calendar-and-event-shapes})
+(table.insert tests {:name "formatter emits canonical single event"
+                     :fn formatter-emits-canonical-single-event})
+(table.insert tests {:name "formatter defaults to crlf"
+                     :fn formatter-defaults-to-crlf})
+(table.insert tests {:name "formatter round trips supported fixtures"
+                     :fn formatter-round-trips-supported-fixtures})
+(table.insert tests {:name "formatter rejects unknown record keys"
+                     :fn formatter-rejects-unknown-record-keys})
+(table.insert tests {:name "formatter validates options"
+                     :fn formatter-validates-options})
 
 (local main
   (fn []
