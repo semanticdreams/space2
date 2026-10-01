@@ -285,6 +285,69 @@
                          "line-ending"
                          "invalid line-ending should be rejected"))
 
+(fn formatter-requires-explicit-version []
+  (local calendar (Temporal.ics.parse (read-fixture "single-utc")))
+  (set calendar.version nil)
+  (assert-error-contains #(Temporal.ics.format calendar {:line-ending :lf})
+                         "VERSION"
+                         "formatter should not default missing VERSION"))
+
+(fn formatter-rejects-unsupported-x-property-names []
+  (local calendar (Temporal.ics.parse (read-fixture "single-utc")))
+  (table.insert (. (. calendar.events 1) :x-properties)
+                {:name "LOCATION" :params {} :value "Room 1" :source-order 99})
+  (assert-error-contains #(Temporal.ics.format calendar {:line-ending :lf})
+                         "LOCATION"
+                         "formatter should reject unsupported event property names")
+  (local calendar-property (Temporal.ics.parse (read-fixture "single-utc")))
+  (set calendar-property.x-properties [{:name "LOCATION" :params {} :value "Room 1" :source-order 3}])
+  (assert-error-contains #(Temporal.ics.format calendar-property {:line-ending :lf})
+                         "LOCATION"
+                         "formatter should reject unsupported calendar property names"))
+
+(fn formatter-rejects-constructed-vtimezone-records []
+  (local calendar (Temporal.ics.parse (read-fixture "single-utc")))
+  (table.insert calendar.timezones {:kind :temporal-ics-timezone
+                                    :tzid "America/New_York"
+                                    :raw-lines []})
+  (assert-error-contains #(Temporal.ics.format calendar {:line-ending :lf})
+                         "VTIMEZONE"
+                         "formatter should reject timezones without preserved raw lines")
+  (local mismatched (Temporal.ics.parse (read-fixture "single-utc")))
+  (table.insert mismatched.timezones {:kind :temporal-ics-timezone
+                                      :tzid "America/Chicago"
+                                      :raw-lines ["TZID:America/New_York"]})
+  (assert-error-contains #(Temporal.ics.format mismatched {:line-ending :lf})
+                         "TZID"
+                         "formatter should reject timezone record/raw TZID mismatch"))
+
+(fn formatter-rejects-mixed-date-time-modes []
+  (local utc-end (value.parse-date-time Temporal {} "20261001T140000Z"))
+  (local utc-id (value.parse-date-time Temporal {} "20261001T130000Z"))
+  (local utc-date (value.parse-date-time Temporal {} "20261002T130000Z"))
+  (local bad-dtend (Temporal.ics.parse (read-fixture "single-floating")))
+  (local bad-dtend-event (. bad-dtend.events 1))
+  (set bad-dtend-event.dtend utc-end)
+  (assert-error-contains #(Temporal.ics.format bad-dtend {:line-ending :lf})
+                         "DTEND"
+                         "formatter should reject DTEND mode mismatch")
+  (local bad-recurrence-id (Temporal.ics.parse (read-fixture "single-floating")))
+  (local bad-recurrence-id-event (. bad-recurrence-id.events 1))
+  (set bad-recurrence-id-event.recurrence-id utc-id)
+  (assert-error-contains #(Temporal.ics.format bad-recurrence-id {:line-ending :lf})
+                         "RECURRENCE-ID"
+                         "formatter should reject RECURRENCE-ID mode mismatch")
+  (local bad-rdate (Temporal.ics.parse (read-fixture "single-floating")))
+  (table.insert (. (. bad-rdate.events 1) :rdates) utc-date)
+  (assert-error-contains #(Temporal.ics.format bad-rdate {:line-ending :lf})
+                         "RDATE"
+                         "formatter should reject RDATE mode mismatch")
+  (local bad-exdate (Temporal.ics.parse (read-fixture "single-floating")))
+  (table.insert (. (. bad-exdate.events 1) :exdates) utc-date)
+  (assert-error-contains #(Temporal.ics.format bad-exdate {:line-ending :lf})
+                         "EXDATE"
+                         "formatter should reject EXDATE mode mismatch"))
+
 (table.insert tests {:name "grammar unfolds CRLF and LF lines"
                      :fn grammar-unfolds-crlf-and-lf-lines})
 (table.insert tests {:name "grammar parses names params and values"
@@ -327,6 +390,14 @@
                      :fn formatter-rejects-unknown-record-keys})
 (table.insert tests {:name "formatter validates options"
                      :fn formatter-validates-options})
+(table.insert tests {:name "formatter requires explicit version"
+                     :fn formatter-requires-explicit-version})
+(table.insert tests {:name "formatter rejects unsupported x property names"
+                     :fn formatter-rejects-unsupported-x-property-names})
+(table.insert tests {:name "formatter rejects constructed vtimezone records"
+                     :fn formatter-rejects-constructed-vtimezone-records})
+(table.insert tests {:name "formatter rejects mixed date time modes"
+                     :fn formatter-rejects-mixed-date-time-modes})
 
 (local main
   (fn []

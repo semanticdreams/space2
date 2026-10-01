@@ -88,8 +88,14 @@
 (fn validate-property [property]
   (validate-keys property "property" property-keys))
 
-(fn emit-property [lines property newline]
+(fn validate-preserved-property-name [property]
   (validate-property property)
+  (local name (assert-string property.name "property name"))
+  (when (not (or (name:match "^X%-") (= name "DTSTAMP")))
+    (error (.. "unsupported temporal ICS preserved property: " name))))
+
+(fn emit-property [lines property newline]
+  (validate-preserved-property-name property)
   (emit-line lines property.name property.params property.value newline true))
 
 (fn validate-date-time [wrapper]
@@ -150,8 +156,31 @@
       "TENTATIVE"
       (error (.. "unsupported temporal ICS STATUS: " (tostring status)))))
 
+(fn raw-timezone-tzid [timezone]
+  (var depth 0)
+  (var tzid nil)
+  (each [index raw (ipairs timezone.raw-lines)]
+    (local line (grammar.parse-content-line raw index))
+    (if (= line.name "BEGIN")
+        (set depth (+ depth 1))
+        (= line.name "END")
+        (set depth (- depth 1))
+        (and (= depth 0) (= line.name "TZID"))
+        (do
+          (when tzid
+            (error "duplicate temporal ICS VTIMEZONE TZID"))
+          (set tzid line.value))))
+  tzid)
+
 (fn emit-timezone [lines timezone newline]
   (validate-keys timezone "timezone" timezone-keys)
+  (when (or (= timezone.raw-lines nil) (= (# timezone.raw-lines) 0))
+    (error "temporal ICS VTIMEZONE requires preserved raw lines"))
+  (local raw-tzid (raw-timezone-tzid timezone))
+  (when (= raw-tzid nil)
+    (error "temporal ICS VTIMEZONE preserved raw lines require TZID"))
+  (when (not= timezone.tzid raw-tzid)
+    (error (.. "temporal ICS VTIMEZONE TZID mismatch: " (tostring timezone.tzid))))
   (table.insert lines "BEGIN:VTIMEZONE")
   (each [_ raw (ipairs (optional-list timezone.raw-lines))]
     (table.insert lines (fold-for-newline (assert-string raw "timezone raw line") newline)))
@@ -160,10 +189,26 @@
 (fn all-day-event? [event]
   (and event.dtstart (= event.dtstart.value-type :date)))
 
+(fn require-same-mode [event property-name wrapper]
+  (when (and wrapper (not (value.same-mode? event.dtstart wrapper)))
+    (error (.. "temporal ICS " property-name " mode must match DTSTART"))))
+
+(fn validate-date-list-modes [event property-name wrappers]
+  (each [_ wrapper (ipairs wrappers)]
+    (require-same-mode event property-name wrapper)))
+
+(fn validate-event-date-modes [event]
+  (require-same-mode event "DTEND" event.dtend)
+  (require-same-mode event "RECURRENCE-ID" event.recurrence-id)
+  (validate-date-list-modes event "RDATE" (optional-list event.rdates))
+  (validate-date-list-modes event "EXDATE" (optional-list event.exdates)))
+
 (fn emit-event [Temporal lines event newline]
   (validate-keys event "event" event-keys)
   (when (and event.dtend event.duration)
     (error "temporal ICS VEVENT DTEND and DURATION are mutually exclusive"))
+  (validate-date-time event.dtstart)
+  (validate-event-date-modes event)
   (table.insert lines "BEGIN:VEVENT")
   (emit-line lines "UID" {} (assert-string event.uid "VEVENT UID") newline false)
   (emit-line lines "SEQUENCE" {} (tostring (optional-number event.sequence 0)) newline false)
@@ -192,23 +237,23 @@
     (error "temporal ICS formatter requires Temporal facade"))
   (local newline (validate-options options))
   (validate-keys calendar "calendar" calendar-keys)
-  (when (not= (if (= calendar.version nil) "2.0" calendar.version) "2.0")
+  (when (not= calendar.version "2.0")
     (error "temporal ICS VCALENDAR requires VERSION:2.0"))
   (when (not= (if (= calendar.calscale nil) "GREGORIAN" calendar.calscale) "GREGORIAN")
     (error (.. "unsupported temporal ICS CALSCALE: " (tostring calendar.calscale))))
   (when (= (# (optional-list calendar.events)) 0)
     (error "temporal ICS VCALENDAR requires VEVENT"))
   (local lines ["BEGIN:VCALENDAR"])
-  (emit-line lines "VERSION" {} (or calendar.version "2.0") newline false)
-  (emit-line lines "PRODID" {} (or calendar.prodid default-prodid) newline false)
-  (emit-line lines "CALSCALE" {} (or calendar.calscale "GREGORIAN") newline false)
+  (emit-line lines "VERSION" {} calendar.version newline false)
+  (emit-line lines "PRODID" {} (if (= calendar.prodid nil) default-prodid calendar.prodid) newline false)
+  (emit-line lines "CALSCALE" {} (if (= calendar.calscale nil) "GREGORIAN" calendar.calscale) newline false)
   (when calendar.method
     (emit-line lines "METHOD" {} calendar.method newline false))
-  (each [_ property (ipairs (or calendar.x-properties []))]
+  (each [_ property (ipairs (optional-list calendar.x-properties))]
     (emit-property lines property newline))
-  (each [_ timezone (ipairs (or calendar.timezones []))]
+  (each [_ timezone (ipairs (optional-list calendar.timezones))]
     (emit-timezone lines timezone newline))
-  (each [_ event (ipairs (or calendar.events []))]
+  (each [_ event (ipairs (optional-list calendar.events))]
     (emit-event Temporal lines event newline))
   (table.insert lines "END:VCALENDAR")
   (.. (table.concat lines newline) newline))
