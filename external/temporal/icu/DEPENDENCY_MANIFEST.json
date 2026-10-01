@@ -1,9 +1,12 @@
 {
   "schema_version": 1,
   "id": "icu-cldr",
-  "status": "planned",
+  "status": "packaged",
   "purpose": "Localization, localized temporal parsing/formatting, and non-Gregorian calendar data",
   "candidate": "ICU4C/CLDR",
+  "version": "CLDR-46-selected-seed",
+  "source_url": "https://unicode.org/Public/cldr/46/",
+  "license": "Unicode License v3",
   "license_policy": "Unicode License v3",
   "adapter_boundary": "temporal_localization",
   "public_surfaces": ["Temporal.localization", "Temporal.calendar"],
@@ -11,5 +14,6 @@
   "runtime": {
     "network_fetch_allowed": false
   },
-  "follow_up_gate": "Choose exact ICU4C/CLDR version, data packaging mode, license notice handling, and adapter build strategy before importing source or data."
+  "reproducible_provenance": "Hand-curated selected CLDR 46 seed corpus checked in under assets/temporal/icu/cldr-seed; full ICU4C source and generated data are not included in this slice.",
+  "follow_up_gate": "Full ICU4C source, generated CLDR data, license notice handling, and adapter build strategy remain future work before enabling temporal_localization native adapter support."
 }
