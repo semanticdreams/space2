@@ -4,7 +4,7 @@ The temporal core is Space's first production date/time layer. Correctness-criti
 
 ## Public modules
 
-- `require :temporal` is the public Fennel/Lua API for application and feature code (written as `(require :temporal)` in Fennel). It exposes `duration`, `instant`, `plain-date-time`, `zoned-date-time`, `period`, `clock`, and `tzdb` namespaces.
+- `require :temporal` is the public Fennel/Lua API for application and feature code (written as `(require :temporal)` in Fennel). It exposes `duration`, `instant`, `plain-date-time`, `zoned-date-time`, `period`, `interval`, `repeating-interval`, `recurrence`, `recurrence-set`, `ics`, `clock`, and `tzdb` namespaces.
 - `require "temporal-core"` is the lower-level native Lua binding. Use it when testing or extending the binding layer directly; prefer `:temporal` elsewhere.
 
 The public wrapper intentionally keeps timezone and calendar rules in C++ instead of reimplementing them in Fennel.
@@ -61,6 +61,8 @@ Higher-level parsing, pattern formatting, natural expressions, and recurrence li
 Calendar period records live in `Temporal.period` above the exact `Duration` layer. See [Temporal Calendar Periods](./temporal-calendar-periods) for date-only period parsing, formatting, validation, and `PlainDateTime` arithmetic.
 
 Bounded half-open intervals and repeating intervals also live above the core. See [Temporal Intervals](./temporal-intervals) for `Temporal.interval` and `Temporal.repeating-interval`; interval parsing remains in that Fennel-facing layer so the native core does not take on interval grammar or product expansion policy.
+
+Selected-corpus iCalendar interoperability lives above recurrence and intervals in `Temporal.ics`. See [Temporal ICS/iCalendar](./temporal-ics) for `Temporal.ics.parse`, `Temporal.ics.format`, `Temporal.ics.expand`, supported `VEVENT` value modes, `VTIMEZONE` metadata handling, and the libical-planned boundary. The native core remains independent from ICS grammar and calendar-client policy.
 
 ## Validation
 

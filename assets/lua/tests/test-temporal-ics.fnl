@@ -41,6 +41,22 @@
   (file:close)
   text)
 
+(fn read-libical-manifest []
+  (local root (os.getenv "SPACE_ASSETS_PATH"))
+  (assert root "SPACE_ASSETS_PATH must be set for temporal ICS dependency manifest tests")
+  (local path (.. root "/../external/temporal/libical/DEPENDENCY_MANIFEST.json"))
+  (local file (assert (io.open path "rb") (.. "failed to open libical dependency manifest: " path)))
+  (local text (file:read "*a"))
+  (file:close)
+  text)
+
+(fn dependency-manifest-keeps-libical-planned []
+  (local text (read-libical-manifest))
+  (assert (text:find "\"status\": \"planned\"" 1 true)
+          "libical dependency manifest should remain planned")
+  (assert (= nil (text:find "\"status\": \"vendored\"" 1 true))
+          "libical dependency manifest should not mark libical vendored"))
+
 (fn expand-fixture [name options]
   (Temporal.ics.expand (Temporal.ics.parse (read-fixture name)) (if (= options nil) {} options)))
 
@@ -537,9 +553,11 @@
 (table.insert tests {:name "value rejects fractional second date time formatting"
                       :fn value-rejects-fractional-second-date-time-formatting})
 (table.insert tests {:name "parser exports public temporal ics"
-                     :fn parser-exports-public-temporal-ics})
+                      :fn parser-exports-public-temporal-ics})
+(table.insert tests {:name "dependency manifest keeps libical planned"
+                     :fn dependency-manifest-keeps-libical-planned})
 (table.insert tests {:name "parser parses supported fixture records"
-                     :fn parser-parses-supported-fixture-records})
+                      :fn parser-parses-supported-fixture-records})
 (table.insert tests {:name "parser parses all required fixture families"
                      :fn parser-parses-all-required-fixture-families})
 (table.insert tests {:name "parser preserves x properties only under preserve policy"
