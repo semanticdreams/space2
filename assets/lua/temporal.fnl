@@ -10,6 +10,7 @@
 (local expression (require :temporal/expression))
 (local create-natural (require :temporal/natural))
 (local create-provider-registry (require :temporal/provider-registry))
+(local natural-corpus (require :temporal/natural-corpus))
 (local cldr-seed (require :temporal/cldr-seed))
 (local holiday-seed (require :temporal/holiday-seed))
 (local create-calendar (require :temporal/calendar))
@@ -86,8 +87,11 @@
      :plain-date-time base.plain-date-time
      :instant base.instant
      :zoned-date-time base.zoned-date-time}))
-(local natural (create-natural {:recurrence recurrence}))
 (local providers (create-provider-registry {}))
+(local natural (create-natural {:recurrence recurrence
+                                :expression expression
+                                :corpus natural-corpus}))
+(providers.register (natural.provider))
 (local calendar (create-calendar {:plain-date-time base.plain-date-time
                                    :seed cldr-seed}))
 (local localization (create-localization {:calendar calendar
