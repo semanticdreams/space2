@@ -498,7 +498,12 @@
   (local err (assert-error #(expand-text mismatched-override {:zone-id "America/New_York"})
                            "override recurrence id mode should match master DTSTART mode"))
   (assert (tostring err):find "RECURRENCE-ID" 1 true)
-  (assert (tostring err):find "master DTSTART mode" 1 true))
+  (assert (tostring err):find "master DTSTART mode" 1 true)
+  (local cancelled-master-mismatch "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VEVENT\nUID:cancelled-master-mismatch@example.test\nDTSTART:20261001T090000\nSTATUS:CANCELLED\nSUMMARY:Cancelled floating master\nEND:VEVENT\nBEGIN:VEVENT\nUID:cancelled-master-mismatch@example.test\nRECURRENCE-ID:20261002T090000Z\nDTSTART:20261002T110000Z\nSUMMARY:UTC override\nEND:VEVENT\nEND:VCALENDAR\n")
+  (local cancelled-err (assert-error #(expand-text cancelled-master-mismatch {:zone-id "America/New_York"})
+                                     "cancelled master override recurrence id mode should match master DTSTART mode"))
+  (assert (tostring cancelled-err):find "RECURRENCE-ID" 1 true)
+  (assert (tostring cancelled-err):find "master DTSTART mode" 1 true))
 
 (fn temporal-ics-acceptance-smoke []
   (local folded (Temporal.ics.parse (read-fixture "folded-escaped")))

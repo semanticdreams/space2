@@ -409,14 +409,21 @@
   (when (not (value.same-mode? master.dtstart override.recurrence-id))
     (error "temporal ICS RECURRENCE-ID must match master DTSTART mode")))
 
+(fn validate-group-override-recurrence-id-modes [master overrides]
+  (each [_ entry (ipairs overrides)]
+    (validate-override-recurrence-id-mode master entry.event)))
+
 (fn apply-group-overrides [Temporal group options]
   (local master group.master)
   (if (= master nil)
       []
       (= master.status :cancelled)
-      []
+      (do
+        (validate-group-override-recurrence-id-modes master group.overrides)
+        [])
       (do
         (validate-floating-zone master options)
+        (validate-group-override-recurrence-id-modes master group.overrides)
         (local generated (expand-event Temporal master options))
         (local by-key {})
         (local ordered-keys [])
@@ -429,7 +436,6 @@
         (each [_ entry (ipairs group.overrides)]
           (local override entry.event)
           (validate-floating-zone override options)
-          (validate-override-recurrence-id-mode master override)
           (local key (value.normalized-key override.recurrence-id))
           (if (= override.status :cancelled)
               (set (. by-key key) nil)
