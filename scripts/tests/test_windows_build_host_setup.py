@@ -1,5 +1,7 @@
+import os
 from pathlib import Path
 import re
+import subprocess
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -185,3 +187,61 @@ def test_windows_temporal_tzdata_is_bundled_and_packaged() -> None:
         assert required_file in package_script
         assert required_file in temporal_core
     assert (tzdata_dir / "version").read_text(encoding="utf-8").strip() == "2025b"
+
+
+def test_windows_runtime_package_stages_temporal_dependency_manifests(tmp_path) -> None:
+    build_dir = tmp_path / "build" / "windows"
+    dist_dir = tmp_path / "dist" / "windows"
+    stub_bin = tmp_path / "bin"
+    build_dir.mkdir(parents=True)
+    stub_bin.mkdir()
+
+    for executable_name in ["space.exe", "space-cli.exe"]:
+        (build_dir / executable_name).write_text("dummy exe\n", encoding="utf-8")
+    (build_dir / "runtime.dll").write_text("dummy dll\n", encoding="utf-8")
+
+    objdump_stub = stub_bin / "x86_64-w64-mingw32-objdump"
+    objdump_stub.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    objdump_stub.chmod(0o755)
+
+    gcc_stub = stub_bin / "x86_64-w64-mingw32-gcc-posix"
+    gcc_stub.write_text(
+        "#!/usr/bin/env bash\n"
+        "case \"${1:-}\" in\n"
+        "  -print-file-name=*) printf '%s\\n' \"${1#-print-file-name=}\" ; exit 0 ;;\n"
+        "esac\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    gcc_stub.chmod(0o755)
+
+    env = os.environ.copy()
+    env["BUILD_DIR"] = str(build_dir)
+    env["PATH"] = f"{stub_bin}{os.pathsep}{env['PATH']}"
+
+    subprocess.run(
+        [str(REPO_ROOT / "scripts/package-windows-runtime.sh"), str(dist_dir)],
+        cwd=REPO_ROOT,
+        env=env,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+    libical_manifest = REPO_ROOT / "external/temporal/libical/DEPENDENCY_MANIFEST.json"
+    packaged_libical_dir = dist_dir / "external/temporal/libical"
+    packaged_libical_files = sorted(
+        path.relative_to(packaged_libical_dir).as_posix()
+        for path in packaged_libical_dir.rglob("*")
+        if path.is_file()
+    )
+
+    assert libical_manifest.is_file()
+    assert (dist_dir / "assets").is_dir()
+    assert (dist_dir / "space.exe").is_file()
+    assert (dist_dir / "space-cli.exe").is_file()
+    assert (dist_dir / "runtime.dll").is_file()
+    assert (packaged_libical_dir / "DEPENDENCY_MANIFEST.json").read_text(
+        encoding="utf-8"
+    ) == libical_manifest.read_text(encoding="utf-8")
+    assert packaged_libical_files == ["DEPENDENCY_MANIFEST.json"]
