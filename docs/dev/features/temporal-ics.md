@@ -20,7 +20,7 @@ Canonical option keys only are accepted. For parsing, `:unknown-property-policy`
 
 ## Supported corpus
 
-The supported selected-corpus shape is `VCALENDAR` with `VERSION:2.0`, optional `CALSCALE:GREGORIAN`, optional preserved `VTIMEZONE` metadata, and `VEVENT` records using the properties covered by the fixture suite. `UID` and `DTSTART` are required. `STATUS` defaults to confirmed, and unsupported statuses fail loudly. Unsupported components, unsupported properties under strict parsing, invalid parameter combinations, non-IANA `TZID` values, and malformed date/time or duration values throw explicit errors.
+The supported selected-corpus shape is `VCALENDAR` with `VERSION:2.0`, canonical `:prod-id`, optional `CALSCALE:GREGORIAN`, optional preserved `VTIMEZONE` metadata, optional preserved calendar `X-...` properties under `{:unknown-property-policy :preserve}`, and `VEVENT` records using the properties covered by the fixture suite. `UID` and `DTSTART` are required. Event records include `:source-order` from the parsed component. `STATUS` defaults to confirmed, and unsupported statuses fail loudly. Unsupported components, unsupported properties under strict parsing, unsupported parameters on supported non-date-time properties, invalid date-time parameter combinations, non-IANA `TZID` values, and malformed date/time or duration values throw explicit errors.
 
 The fixture corpus covers single UTC, floating, zoned, all-day, multi-day all-day, duration, recurrence, `RDATE`, `EXDATE`, `EXRULE`, UTC `UNTIL`, overrides, cancellations, folded lines, and escaped text records.
 
@@ -43,7 +43,7 @@ Recurring event overrides match by `UID` and `RECURRENCE-ID`. Cancelled masters 
 
 ## Formatting contract
 
-Formatting emits canonical `VCALENDAR` text for the supported event model. `:line-ending` defaults to `:crlf`, `:lf` is accepted for tests and fixtures, and long content lines are folded. Parser-supported event properties are emitted in deterministic order. Preserved properties remain context-validated, and constructed or inconsistent `VTIMEZONE` records are rejected rather than guessed.
+Formatting emits canonical `VCALENDAR` text for the supported event model. `:line-ending` defaults to `:crlf`, `:lf` is accepted for tests and fixtures, and long content lines are folded. Parser-supported event properties are emitted in deterministic order. Constructed calendar records use `:prod-id`; legacy `:prodid` is rejected. Preserved properties remain context-validated, unknown constructed record keys are rejected during format and expansion, and constructed or inconsistent `VTIMEZONE` records are rejected rather than guessed.
 
 Round trips are guaranteed for the selected fixture corpus, not for arbitrary calendar-client output.
 

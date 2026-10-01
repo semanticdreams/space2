@@ -3,6 +3,67 @@
 (local option-keys {:zone-id true :disambiguation true :limit true})
 (local valid-disambiguation {:reject true :earliest true :latest true})
 (local max-backfill-raw-limit 1048576)
+(local calendar-keys {:kind true :version true :prod-id true :calscale true :method true
+                      :timezones true :events true :x-properties true})
+(local event-keys {:kind true :uid true :sequence true :status true :recurrence-id true
+                   :dtstart true :dtend true :duration true :rrules true :rdates true
+                   :exdates true :exrules true :summary true :description true
+                   :source-order true :x-properties true})
+(local timezone-keys {:kind true :tzid true :raw-lines true})
+(local property-keys {:name true :params true :value true :source-order true})
+(local date-keys {:kind true :value-type true :date true})
+(local floating-keys {:kind true :value-type true :time-mode true :plain true})
+(local utc-keys {:kind true :value-type true :time-mode true :instant true})
+(local zoned-keys {:kind true :value-type true :time-mode true :zone-id true :plain true})
+
+(fn assert-table [record label]
+  (when (not= (type record) :table)
+    (error (.. "temporal ICS " label " must be a table")))
+  record)
+
+(fn validate-keys [record label allowed]
+  (assert-table record label)
+  (each [key _value (pairs record)]
+    (when (not (. allowed key))
+      (error (.. "unknown temporal ICS " label " key: " (tostring key))))))
+
+(fn validate-date-time-record [wrapper]
+  (validate-keys wrapper "date-time" (if (= wrapper.value-type :date)
+                                         date-keys
+                                         (= wrapper.time-mode :floating)
+                                         floating-keys
+                                         (= wrapper.time-mode :utc)
+                                         utc-keys
+                                         (= wrapper.time-mode :zoned)
+                                         zoned-keys
+                                         {})))
+
+(fn validate-date-time-list [items label]
+  (each [_ wrapper (ipairs (if (= items nil) [] items))]
+    (validate-date-time-record wrapper)))
+
+(fn validate-property-records [properties]
+  (each [_ property (ipairs (if (= properties nil) [] properties))]
+    (validate-keys property "property" property-keys)))
+
+(fn validate-event-record [event]
+  (validate-keys event "event" event-keys)
+  (validate-date-time-record event.dtstart)
+  (when event.dtend
+    (validate-date-time-record event.dtend))
+  (when event.recurrence-id
+    (validate-date-time-record event.recurrence-id))
+  (validate-date-time-list event.rdates "RDATE")
+  (validate-date-time-list event.exdates "EXDATE")
+  (validate-property-records event.x-properties))
+
+(fn validate-calendar-record [calendar]
+  (validate-keys calendar "calendar" calendar-keys)
+  (each [_ timezone (ipairs (if (= calendar.timezones nil) [] calendar.timezones))]
+    (validate-keys timezone "timezone" timezone-keys))
+  (validate-property-records calendar.x-properties)
+  (each [_ event (ipairs (if (= calendar.events nil) [] calendar.events))]
+    (validate-event-record event)))
 
 (fn positive-integer? [candidate]
   (and (= (type candidate) :number)
@@ -364,16 +425,17 @@
 (fn event-groups [calendar]
   (local groups {})
   (each [index event (ipairs calendar.events)]
+    (local event-source-order (if (= event.source-order nil) index event.source-order))
     (var group (. groups event.uid))
     (when (= group nil)
       (set group {:uid event.uid :master nil :master-source-order 0 :overrides []}))
     (if event.recurrence-id
-        (table.insert group.overrides {:event event :source-order index})
+        (table.insert group.overrides {:event event :source-order event-source-order})
         (do
           (when group.master
             (error "duplicate master"))
           (set group.master event)
-          (set group.master-source-order index)))
+          (set group.master-source-order event-source-order)))
     (set (. groups event.uid) group))
   (each [_ group (pairs groups)]
     (local seen {})
@@ -509,6 +571,7 @@
   (when (not (and (= (type calendar) :table)
                   (= calendar.kind :temporal-ics-calendar)))
     (error "temporal ICS expand requires parsed calendar"))
+  (validate-calendar-record calendar)
   (local normalized-options (validate-options options))
   (local groups (event-groups calendar))
   (local expanded [])

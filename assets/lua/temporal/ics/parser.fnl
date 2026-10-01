@@ -28,6 +28,15 @@
 (fn line-record [line]
   {:name line.name :params line.params :value line.value :source-order line.source-order})
 
+(fn reject-params [line]
+  (each [key _value (pairs line.params)]
+    (error (.. "unsupported temporal ICS " line.name " parameter: " (tostring key)))))
+
+(fn reject-unsupported-date-time-params [line]
+  (each [key _value (pairs line.params)]
+    (when (and (not= key "VALUE") (not= key "TZID"))
+      (error (.. "unsupported temporal ICS " line.name " parameter: " (tostring key))))))
+
 (fn split-comma-values [text]
   (local items [])
   (var start 1)
@@ -40,6 +49,7 @@
   items)
 
 (fn parse-date-list [Temporal line dtstart]
+  (reject-unsupported-date-time-params line)
   (local parsed [])
   (each [_ raw (ipairs (split-comma-values line.value))]
     (local wrapper (value.parse-date-time Temporal line.params raw))
@@ -76,8 +86,9 @@
 (fn append-x-property! [event line]
   (table.insert event.x-properties (line-record line)))
 
-(fn parse-event [Temporal lines policy]
+(fn parse-event [Temporal lines policy source-order]
   (local event {:kind :temporal-ics-event
+                :source-order source-order
                 :rrules []
                 :rdates []
                 :exdates []
@@ -89,6 +100,8 @@
     (if (. event-scalar-properties line.name)
         (do
           (remember-scalar! seen line)
+          (when (and (not= line.name "DTSTART") (not= line.name "DTEND") (not= line.name "RECURRENCE-ID"))
+            (reject-params line))
           (if (= line.name "UID")
               (set event.uid line.value)
               (= line.name "SUMMARY")
@@ -100,21 +113,30 @@
               (= line.name "SEQUENCE")
               (set event.sequence (parse-sequence line.value))
               (= line.name "DTSTART")
-              (set event.dtstart (value.parse-date-time Temporal line.params line.value))
+              (do
+                (reject-unsupported-date-time-params line)
+                (set event.dtstart (value.parse-date-time Temporal line.params line.value)))
               (= line.name "DTEND")
-              (set event.dtend (value.parse-date-time Temporal line.params line.value))
+              (do
+                (reject-unsupported-date-time-params line)
+                (set event.dtend (value.parse-date-time Temporal line.params line.value)))
               (= line.name "DURATION")
               (set event.duration-line line)
               (= line.name "RECURRENCE-ID")
-              (set event.recurrence-id (value.parse-date-time Temporal line.params line.value))
+              (do
+                (reject-unsupported-date-time-params line)
+                (set event.recurrence-id (value.parse-date-time Temporal line.params line.value)))
               (= line.name "DTSTAMP")
               (append-x-property! event line)))
         (. event-repeat-properties line.name)
         (if (or (= line.name "RRULE") (= line.name "EXRULE"))
             (do
+              (reject-params line)
               (local parsed (Temporal.recurrence.parse-rrule (.. "RRULE:" line.value)))
               (table.insert (if (= line.name "RRULE") event.rrules event.exrules) parsed))
-            (table.insert date-list-lines line))
+            (do
+              ;; Date-time list properties validate VALUE/TZID in value.parse-date-time.
+              (table.insert date-list-lines line)))
         (line.name:match "^X%-")
         (if (= policy :preserve)
             (append-x-property! event line)
@@ -217,45 +239,57 @@
     (error "temporal ICS input must contain VCALENDAR"))
   (local first (. parsed 1))
   (local last (. parsed (# parsed)))
+  (reject-params first)
+  (reject-params last)
   (when (not (and (= first.name "BEGIN") (= first.value "VCALENDAR")))
     (error "temporal ICS input must begin with VCALENDAR"))
   (when (not (and (= last.name "END") (= last.value "VCALENDAR")))
     (error "temporal ICS input must end with VCALENDAR"))
   (local calendar {:kind :temporal-ics-calendar
-                   :calscale "GREGORIAN"
-                   :timezones []
-                   :events []})
+                    :calscale "GREGORIAN"
+                    :timezones []
+                    :events []
+                    :x-properties []})
   (local seen {})
   (var index 2)
   (while (< index (# parsed))
     (local line (. parsed index))
     (if (= line.name "BEGIN")
-        (if (= line.value "VEVENT")
-            (do
+        (do
+          (reject-params line)
+          (if (= line.value "VEVENT")
+              (do
               (local (component-lines _raw end-index) (collect-component parsed raw-lines index "VEVENT"))
-              (table.insert calendar.events (parse-event Temporal component-lines policy))
+              (table.insert calendar.events (parse-event Temporal component-lines policy line.source-order))
               (set index (- end-index 1)))
-            (= line.value "VTIMEZONE")
-            (do
+              (= line.value "VTIMEZONE")
+              (do
               (local (component-lines component-raw end-index) (collect-metadata-component parsed raw-lines index "VTIMEZONE"))
               (table.insert calendar.timezones (parse-timezone component-lines component-raw))
               (set index (- end-index 1)))
-            (error (.. "unsupported temporal ICS component: " line.value)))
+              (error (.. "unsupported temporal ICS component: " line.value))))
         (= line.name "END")
-        (error (.. "unexpected temporal ICS END:" line.value))
+        (do
+          (reject-params line)
+          (error (.. "unexpected temporal ICS END:" line.value)))
         (. top-level-properties line.name)
         (do
+          (reject-params line)
           (when (. seen line.name)
             (error (.. "duplicate temporal ICS VCALENDAR property: " line.name)))
           (tset seen line.name true)
           (if (= line.name "VERSION")
               (set calendar.version line.value)
-              (= line.name "PRODID")
-              (set calendar.prodid line.value)
+               (= line.name "PRODID")
+              (set calendar.prod-id line.value)
               (= line.name "CALSCALE")
               (set calendar.calscale line.value)
               (= line.name "METHOD")
               (set calendar.method line.value)))
+        (line.name:match "^X%-")
+        (if (= policy :preserve)
+            (table.insert calendar.x-properties (line-record line))
+            (error (.. "unsupported temporal ICS VCALENDAR property: " line.name)))
         (error (.. "unsupported temporal ICS VCALENDAR property: " line.name)))
     (set index (+ index 1)))
   (when (not= calendar.version "2.0")

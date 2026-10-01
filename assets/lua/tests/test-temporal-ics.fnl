@@ -210,10 +210,13 @@
   (local calendar (Temporal.ics.parse (read-fixture "single-zoned")))
   (assert= calendar.kind :temporal-ics-calendar)
   (assert= calendar.version "2.0")
+  (assert= calendar.prod-id "-//Space//Temporal//EN")
+  (assert= calendar.prodid nil "legacy prodid key should not be exposed")
   (assert= calendar.calscale "GREGORIAN")
   (assert= (. (. calendar.timezones 1) :tzid) "America/New_York")
   (local event (. calendar.events 1))
   (assert= event.uid "single-zoned@example.test")
+  (assert= event.source-order 8)
   (assert= event.status :confirmed)
   (assert= event.sequence 0)
   (assert= event.dtstart.time-mode :zoned)
@@ -233,6 +236,31 @@
   (local xprop (. (. (. calendar.events 1) :x-properties) 1))
   (assert= xprop.name "X-SPACE-COLOR")
   (assert= xprop.value "blue"))
+
+(fn parser-preserves-calendar-x-properties-under-preserve-policy []
+  (local text "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nX-SPACE-CALENDAR:blue\nBEGIN:VEVENT\nUID:calendar-x-props@example.test\nDTSTART:20261001T090000\nEND:VEVENT\nEND:VCALENDAR\n")
+  (assert-error-contains #(Temporal.ics.parse text)
+                         "X-SPACE-CALENDAR"
+                         "strict policy should reject calendar X properties")
+  (local calendar (Temporal.ics.parse text {:unknown-property-policy :preserve}))
+  (local xprop (. calendar.x-properties 1))
+  (assert= xprop.name "X-SPACE-CALENDAR")
+  (assert= xprop.value "blue")
+  (assert= xprop.source-order 4))
+
+(fn parser-rejects-unsupported-parameters-on-supported-properties []
+  (assert-error-contains #(Temporal.ics.parse "BEGIN:VCALENDAR\nVERSION;X=Y:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VEVENT\nUID:bad-version-param@example.test\nDTSTART:20261001T090000\nEND:VEVENT\nEND:VCALENDAR\n")
+                         "VERSION"
+                         "VERSION parameters should fail")
+  (assert-error-contains #(Temporal.ics.parse "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VEVENT\nUID:bad-summary-param@example.test\nDTSTART:20261001T090000\nSUMMARY;LANGUAGE=en:Hello\nEND:VEVENT\nEND:VCALENDAR\n")
+                         "SUMMARY"
+                         "SUMMARY parameters should fail")
+  (assert-error-contains #(Temporal.ics.parse "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VEVENT\nUID:bad-rrule-param@example.test\nDTSTART:20261001T090000\nRRULE;X-FOO=bar:FREQ=DAILY;COUNT=2\nEND:VEVENT\nEND:VCALENDAR\n")
+                         "RRULE"
+                         "RRULE parameters should fail")
+  (assert-error-contains #(Temporal.ics.parse "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VEVENT\nUID:bad-dtstart-param@example.test\nDTSTART;LANGUAGE=en:20261001T090000\nEND:VEVENT\nEND:VCALENDAR\n")
+                         "DTSTART"
+                         "unsupported date-time parameters should fail with property context"))
 
 (fn parser-parses-nested-vtimezone-metadata []
   (local text "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VTIMEZONE\nTZID:America/New_York\nBEGIN:STANDARD\nDTSTART:20261101T020000\nTZOFFSETFROM:-0400\nTZOFFSETTO:-0500\nTZNAME:EST\nEND:STANDARD\nEND:VTIMEZONE\nBEGIN:VEVENT\nUID:nested-zone@example.test\nDTSTART;TZID=America/New_York:20261001T090000\nSUMMARY:Nested timezone metadata\nEND:VEVENT\nEND:VCALENDAR\n")
@@ -274,7 +302,19 @@
   (local formatted (Temporal.ics.format calendar {:line-ending :lf}))
   (assert (= nil (formatted:find "\r" 1 true)) "LF formatting should not contain CR")
   (assert= formatted
-           "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nCALSCALE:GREGORIAN\nBEGIN:VEVENT\nUID:single-utc@example.test\nSEQUENCE:0\nSTATUS:CONFIRMED\nDTSTART:20261001T130000Z\nDTEND:20261001T140000Z\nSUMMARY:UTC standup\nEND:VEVENT\nEND:VCALENDAR\n"))
+            "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nCALSCALE:GREGORIAN\nBEGIN:VEVENT\nUID:single-utc@example.test\nSEQUENCE:0\nSTATUS:CONFIRMED\nDTSTART:20261001T130000Z\nDTEND:20261001T140000Z\nSUMMARY:UTC standup\nEND:VEVENT\nEND:VCALENDAR\n"))
+
+(fn formatter-uses-canonical-prod-id-key []
+  (local calendar (Temporal.ics.parse (read-fixture "single-utc")))
+  (set calendar.prod-id "-//Space//Custom//EN")
+  (assert= calendar.prodid nil)
+  (local formatted (Temporal.ics.format calendar {:line-ending :lf}))
+  (assert (formatted:find "PRODID:-//Space//Custom//EN" 1 true)
+          "formatter should emit canonical prod-id value")
+  (set calendar.prodid "-//Space//Legacy//EN")
+  (assert-error-contains #(Temporal.ics.format calendar {:line-ending :lf})
+                         "prodid"
+                         "legacy prodid key should be rejected"))
 
 (fn formatter-defaults-to-crlf []
   (local calendar (Temporal.ics.parse (read-fixture "single-utc")))
@@ -521,6 +561,31 @@
   (assert (tostring cancelled-err):find "RECURRENCE-ID" 1 true)
   (assert (tostring cancelled-err):find "master DTSTART mode" 1 true))
 
+(fn expand-rejects-unknown-record-keys []
+  (local calendar (Temporal.ics.parse (read-fixture "single-utc")))
+  (set calendar.timezone {:tzid "America/New_York"})
+  (assert-error-contains #(Temporal.ics.expand calendar {})
+                         "timezone"
+                         "expand should reject unknown calendar keys")
+  (local event-calendar (Temporal.ics.parse (read-fixture "single-utc")))
+  (local event (. event-calendar.events 1))
+  (set event.location "Room 1")
+  (assert-error-contains #(Temporal.ics.expand event-calendar {})
+                         "location"
+                         "expand should reject unknown event keys")
+  (local wrapper-calendar (Temporal.ics.parse (read-fixture "single-utc")))
+  (local wrapper (. (. wrapper-calendar.events 1) :dtstart))
+  (set wrapper.calendar "iso8601")
+  (assert-error-contains #(Temporal.ics.expand wrapper-calendar {})
+                         "calendar"
+                         "expand should reject unknown date-time wrapper keys")
+  (local property-calendar (Temporal.ics.parse "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nX-SPACE-CALENDAR:blue\nBEGIN:VEVENT\nUID:property-key@example.test\nDTSTART:20261001T090000\nEND:VEVENT\nEND:VCALENDAR\n" {:unknown-property-policy :preserve}))
+  (local property (. property-calendar.x-properties 1))
+  (set property.extra true)
+  (assert-error-contains #(Temporal.ics.expand property-calendar {:zone-id "America/New_York"})
+                         "extra"
+                         "expand should reject unknown property keys"))
+
 (fn temporal-ics-acceptance-smoke []
   (local folded (Temporal.ics.parse (read-fixture "folded-escaped")))
   (local reparsed (Temporal.ics.parse (Temporal.ics.format folded)))
@@ -561,13 +626,19 @@
 (table.insert tests {:name "parser parses all required fixture families"
                      :fn parser-parses-all-required-fixture-families})
 (table.insert tests {:name "parser preserves x properties only under preserve policy"
-                     :fn parser-preserves-x-properties-only-under-preserve-policy})
+                      :fn parser-preserves-x-properties-only-under-preserve-policy})
+(table.insert tests {:name "parser preserves calendar x properties under preserve policy"
+                     :fn parser-preserves-calendar-x-properties-under-preserve-policy})
+(table.insert tests {:name "parser rejects unsupported parameters on supported properties"
+                     :fn parser-rejects-unsupported-parameters-on-supported-properties})
 (table.insert tests {:name "parser parses nested vtimezone metadata"
                      :fn parser-parses-nested-vtimezone-metadata})
 (table.insert tests {:name "parser rejects invalid calendar and event shapes"
                       :fn parser-rejects-invalid-calendar-and-event-shapes})
 (table.insert tests {:name "formatter emits canonical single event"
-                     :fn formatter-emits-canonical-single-event})
+                      :fn formatter-emits-canonical-single-event})
+(table.insert tests {:name "formatter uses canonical prod-id key"
+                     :fn formatter-uses-canonical-prod-id-key})
 (table.insert tests {:name "formatter defaults to crlf"
                      :fn formatter-defaults-to-crlf})
 (table.insert tests {:name "formatter round trips supported fixtures"
@@ -611,7 +682,9 @@
 (table.insert tests {:name "expand rejects ambiguous duplicate events"
                      :fn expand-rejects-ambiguous-duplicate-events})
 (table.insert tests {:name "expand rejects override recurrence id mode mismatch"
-                     :fn expand-rejects-override-recurrence-id-mode-mismatch})
+                      :fn expand-rejects-override-recurrence-id-mode-mismatch})
+(table.insert tests {:name "expand rejects unknown record keys"
+                     :fn expand-rejects-unknown-record-keys})
 (table.insert tests {:name "temporal ics acceptance smoke"
                      :fn temporal-ics-acceptance-smoke})
 

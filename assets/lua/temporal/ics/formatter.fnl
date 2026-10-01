@@ -3,12 +3,12 @@
 
 (local default-prodid "-//Space//Temporal//EN")
 
-(local calendar-keys {:kind true :version true :prodid true :calscale true :method true
-                      :timezones true :events true :x-properties true})
+(local calendar-keys {:kind true :version true :prod-id true :calscale true :method true
+                       :timezones true :events true :x-properties true})
 (local event-keys {:kind true :uid true :sequence true :status true :recurrence-id true
-                   :dtstart true :dtend true :duration true :rrules true :rdates true
-                   :exdates true :exrules true :summary true :description true
-                   :x-properties true})
+                    :dtstart true :dtend true :duration true :rrules true :rdates true
+                    :exdates true :exrules true :summary true :description true
+                    :source-order true :x-properties true})
 (local timezone-keys {:kind true :tzid true :raw-lines true})
 (local property-keys {:name true :params true :value true :source-order true})
 (local date-keys {:kind true :value-type true :date true})
@@ -249,7 +249,7 @@
     (error "temporal ICS VCALENDAR requires VEVENT"))
   (local lines ["BEGIN:VCALENDAR"])
   (emit-line lines "VERSION" {} calendar.version newline false)
-  (emit-line lines "PRODID" {} (if (= calendar.prodid nil) default-prodid calendar.prodid) newline false)
+  (emit-line lines "PRODID" {} (if (= calendar.prod-id nil) default-prodid calendar.prod-id) newline false)
   (emit-line lines "CALSCALE" {} (if (= calendar.calscale nil) "GREGORIAN" calendar.calscale) newline false)
   (when calendar.method
     (emit-line lines "METHOD" {} calendar.method newline false))
