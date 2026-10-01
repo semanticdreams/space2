@@ -111,6 +111,9 @@ def validate_dependency_manifest(repo_root: Path, rel_path: Path, errors: list[s
                 errors.append(f"{rel_path}: {status} manifest requires non-empty {field}")
         if not data.get("checksum_sha256") and not data.get("reproducible_provenance"):
             errors.append(f"{rel_path}: {status} manifest requires checksum_sha256 or reproducible_provenance")
+    if rel_path == Path("external/temporal/holidays/DEPENDENCY_MANIFEST.json"):
+        if not data.get("reproducible_provenance"):
+            errors.append(f"{rel_path}: packaged holiday manifest requires non-empty reproducible_provenance")
 
 
 def validate_cldr_seed(repo_root: Path, dataset: dict, index: int, errors: list[str]) -> None:
@@ -272,6 +275,8 @@ def validate_holiday_records(holidays_path: Path, data: dict, errors: list[str])
     if not isinstance(jurisdictions, dict):
         errors.append(f"{holidays_path}: jurisdictions must be an object")
         return
+    if list(jurisdictions.keys()) != HOLIDAY_JURISDICTIONS:
+        errors.append(f"{holidays_path}: jurisdictions keys must be exactly {HOLIDAY_JURISDICTIONS!r}")
     jurisdiction_data = jurisdictions.get("US-FED")
     if not isinstance(jurisdiction_data, dict):
         errors.append(f"{holidays_path}: jurisdictions.US-FED must be an object")
@@ -398,6 +403,7 @@ def validate_runtime_manifest(repo_root: Path, errors: list[str]) -> None:
     if "packaged_data_sets" not in data or not isinstance(data.get("packaged_data_sets"), list):
         errors.append(f"{RUNTIME_MANIFEST}: packaged_data_sets must be an array")
         return
+    holiday_seed_count = 0
     for index, dataset in enumerate(data["packaged_data_sets"]):
         prefix = f"packaged_data_sets[{index}]"
         if not isinstance(dataset, dict):
@@ -418,7 +424,10 @@ def validate_runtime_manifest(repo_root: Path, errors: list[str]) -> None:
         if dataset_id == "cldr-seed":
             validate_cldr_seed(repo_root, dataset, index, errors)
         elif dataset_id == HOLIDAY_SEED_ID:
+            holiday_seed_count += 1
             validate_holiday_seed(repo_root, dataset, index, errors)
+    if holiday_seed_count != 1:
+        errors.append(f"{RUNTIME_MANIFEST}: packaged_data_sets must contain exactly one {HOLIDAY_SEED_ID} entry")
 
 
 def validate_repo(repo_root: Path) -> list[str]:

@@ -81,6 +81,11 @@ def install_valid_holiday_seed(root: Path) -> None:
     (seed_root / "holidays.json").write_text(json.dumps(holidays, indent=2) + "\n", encoding="utf-8")
     runtime_path = root / "assets/temporal/manifest.json"
     runtime = json.loads(runtime_path.read_text())
+    runtime["packaged_data_sets"] = [
+        dataset
+        for dataset in runtime["packaged_data_sets"]
+        if dataset.get("id") != "us-federal-holidays-seed"
+    ]
     runtime["packaged_data_sets"].append(
         {
             "id": "us-federal-holidays-seed",
@@ -254,6 +259,156 @@ def test_holiday_seed_rejects_runtime_network_fetch(tmp_path: Path) -> None:
     manifest_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     errors = checker.validate_repo(root)
     assert any("runtime_network_fetch_allowed" in error for error in errors)
+
+
+def test_runtime_manifest_requires_holiday_seed_dataset_entry(tmp_path: Path) -> None:
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    runtime_path = root / "assets/temporal/manifest.json"
+    data = json.loads(runtime_path.read_text())
+    data["packaged_data_sets"] = [
+        dataset
+        for dataset in data["packaged_data_sets"]
+        if dataset.get("id") != "us-federal-holidays-seed"
+    ]
+    runtime_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    errors = checker.validate_repo(root)
+    assert any("us-federal-holidays-seed" in error and "exactly one" in error for error in errors)
+
+
+def test_runtime_manifest_rejects_duplicate_holiday_seed_dataset_entries(tmp_path: Path) -> None:
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    runtime_path = root / "assets/temporal/manifest.json"
+    data = json.loads(runtime_path.read_text())
+    holiday_dataset = next(
+        dataset
+        for dataset in data["packaged_data_sets"]
+        if dataset.get("id") == "us-federal-holidays-seed"
+    )
+    data["packaged_data_sets"].append(dict(holiday_dataset))
+    runtime_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    errors = checker.validate_repo(root)
+    assert any("us-federal-holidays-seed" in error and "exactly one" in error for error in errors)
+
+
+def test_holiday_seed_rejects_unsupported_jurisdiction_data(tmp_path: Path) -> None:
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    install_valid_holiday_seed(root)
+    holidays_path = root / "assets/temporal/holidays/us-federal-seed/holidays.json"
+    data = json.loads(holidays_path.read_text())
+    data["jurisdictions"]["CA-FED"] = {
+        "name": "Unsupported Canadian federal holidays",
+        "years": {"2026": [], "2027": []},
+    }
+    holidays_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    errors = checker.validate_repo(root)
+    assert any("jurisdictions keys" in error and "US-FED" in error for error in errors)
+
+
+def test_holiday_seed_rejects_jurisdiction_order_policy_change(tmp_path: Path) -> None:
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    install_valid_holiday_seed(root)
+    holidays_path = root / "assets/temporal/holidays/us-federal-seed/holidays.json"
+    data = json.loads(holidays_path.read_text())
+    data["jurisdiction_order"] = ["CA-FED"]
+    holidays_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    errors = checker.validate_repo(root)
+    assert any("jurisdiction_order" in error and "US-FED" in error for error in errors)
+
+
+def test_holiday_seed_rejects_year_start_policy_change(tmp_path: Path) -> None:
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    install_valid_holiday_seed(root)
+    holidays_path = root / "assets/temporal/holidays/us-federal-seed/holidays.json"
+    data = json.loads(holidays_path.read_text())
+    data["year_start"] = 2025
+    holidays_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    errors = checker.validate_repo(root)
+    assert any("year_start" in error and "2026" in error for error in errors)
+
+
+def test_holiday_seed_rejects_year_end_policy_change(tmp_path: Path) -> None:
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    install_valid_holiday_seed(root)
+    holidays_path = root / "assets/temporal/holidays/us-federal-seed/holidays.json"
+    data = json.loads(holidays_path.read_text())
+    data["year_end"] = 2028
+    holidays_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    errors = checker.validate_repo(root)
+    assert any("year_end" in error and "2027" in error for error in errors)
+
+
+def test_holiday_seed_rejects_weekend_policy_change(tmp_path: Path) -> None:
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    install_valid_holiday_seed(root)
+    holidays_path = root / "assets/temporal/holidays/us-federal-seed/holidays.json"
+    data = json.loads(holidays_path.read_text())
+    data["weekend_iso_weekdays"] = [7]
+    holidays_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    errors = checker.validate_repo(root)
+    assert any("weekend_iso_weekdays" in error and "[6, 7]" in error for error in errors)
+
+
+def test_holiday_dependency_manifest_requires_packaged_status(tmp_path: Path) -> None:
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    manifest_path = root / "external/temporal/holidays/DEPENDENCY_MANIFEST.json"
+    data = json.loads(manifest_path.read_text())
+    data["status"] = "planned"
+    manifest_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    errors = checker.validate_repo(root)
+    assert any("status must be packaged" in error for error in errors)
+
+
+def test_holiday_dependency_manifest_requires_version(tmp_path: Path) -> None:
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    manifest_path = root / "external/temporal/holidays/DEPENDENCY_MANIFEST.json"
+    data = json.loads(manifest_path.read_text())
+    data.pop("version", None)
+    manifest_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    errors = checker.validate_repo(root)
+    assert any("requires non-empty version" in error for error in errors)
+
+
+def test_holiday_dependency_manifest_requires_source_url(tmp_path: Path) -> None:
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    manifest_path = root / "external/temporal/holidays/DEPENDENCY_MANIFEST.json"
+    data = json.loads(manifest_path.read_text())
+    data.pop("source_url", None)
+    manifest_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    errors = checker.validate_repo(root)
+    assert any("requires non-empty source_url" in error for error in errors)
+
+
+def test_holiday_dependency_manifest_requires_license(tmp_path: Path) -> None:
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    manifest_path = root / "external/temporal/holidays/DEPENDENCY_MANIFEST.json"
+    data = json.loads(manifest_path.read_text())
+    data.pop("license", None)
+    manifest_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    errors = checker.validate_repo(root)
+    assert any("requires non-empty license" in error for error in errors)
+
+
+def test_holiday_dependency_manifest_requires_reproducible_provenance(tmp_path: Path) -> None:
+    checker = load_checker()
+    root = copy_foundation(tmp_path)
+    manifest_path = root / "external/temporal/holidays/DEPENDENCY_MANIFEST.json"
+    data = json.loads(manifest_path.read_text())
+    data["checksum_sha256"] = "0" * 64
+    data.pop("reproducible_provenance", None)
+    manifest_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    errors = checker.validate_repo(root)
+    assert any("reproducible_provenance" in error for error in errors)
 
 
 def test_holiday_seed_requires_record_fields(tmp_path: Path) -> None:
