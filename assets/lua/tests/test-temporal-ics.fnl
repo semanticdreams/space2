@@ -305,6 +305,19 @@
                          "LOCATION"
                          "formatter should reject unsupported calendar property names"))
 
+(fn formatter-validates-context-specific-preserved-properties []
+  (local calendar-dtstamp (Temporal.ics.parse (read-fixture "single-utc")))
+  (set calendar-dtstamp.x-properties [{:name "DTSTAMP" :params {} :value "20261001T120000Z" :source-order 3}])
+  (assert-error-contains #(Temporal.ics.format calendar-dtstamp {:line-ending :lf})
+                         "DTSTAMP"
+                         "formatter should reject calendar-level DTSTAMP")
+  (local event-dtstamp (Temporal.ics.parse (read-fixture "single-utc")))
+  (table.insert (. (. event-dtstamp.events 1) :x-properties)
+                {:name "DTSTAMP" :params {} :value "20261001T120000Z" :source-order 99})
+  (local formatted (Temporal.ics.format event-dtstamp {:line-ending :lf}))
+  (assert (formatted:find "DTSTAMP:20261001T120000Z" 1 true)
+          "formatter should allow parser-supported event-level DTSTAMP"))
+
 (fn formatter-rejects-constructed-vtimezone-records []
   (local calendar (Temporal.ics.parse (read-fixture "single-utc")))
   (table.insert calendar.timezones {:kind :temporal-ics-timezone
@@ -394,6 +407,8 @@
                      :fn formatter-requires-explicit-version})
 (table.insert tests {:name "formatter rejects unsupported x property names"
                      :fn formatter-rejects-unsupported-x-property-names})
+(table.insert tests {:name "formatter validates context specific preserved properties"
+                     :fn formatter-validates-context-specific-preserved-properties})
 (table.insert tests {:name "formatter rejects constructed vtimezone records"
                      :fn formatter-rejects-constructed-vtimezone-records})
 (table.insert tests {:name "formatter rejects mixed date time modes"

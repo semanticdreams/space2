@@ -88,14 +88,18 @@
 (fn validate-property [property]
   (validate-keys property "property" property-keys))
 
-(fn validate-preserved-property-name [property]
+(fn validate-preserved-property-name [property allow-dtstamp?]
   (validate-property property)
   (local name (assert-string property.name "property name"))
-  (when (not (or (name:match "^X%-") (= name "DTSTAMP")))
+  (when (not (or (name:match "^X%-") (and allow-dtstamp? (= name "DTSTAMP"))))
     (error (.. "unsupported temporal ICS preserved property: " name))))
 
-(fn emit-property [lines property newline]
-  (validate-preserved-property-name property)
+(fn emit-calendar-property [lines property newline]
+  (validate-preserved-property-name property false)
+  (emit-line lines property.name property.params property.value newline true))
+
+(fn emit-event-property [lines property newline]
+  (validate-preserved-property-name property true)
   (emit-line lines property.name property.params property.value newline true))
 
 (fn validate-date-time [wrapper]
@@ -229,7 +233,7 @@
   (when event.description
     (emit-line lines "DESCRIPTION" {} event.description newline true))
   (each [_ property (ipairs (optional-list event.x-properties))]
-    (emit-property lines property newline))
+    (emit-event-property lines property newline))
   (table.insert lines "END:VEVENT"))
 
 (fn format-calendar [Temporal calendar options]
@@ -250,7 +254,7 @@
   (when calendar.method
     (emit-line lines "METHOD" {} calendar.method newline false))
   (each [_ property (ipairs (optional-list calendar.x-properties))]
-    (emit-property lines property newline))
+    (emit-calendar-property lines property newline))
   (each [_ timezone (ipairs (optional-list calendar.timezones))]
     (emit-timezone lines timezone newline))
   (each [_ event (ipairs (optional-list calendar.events))]
