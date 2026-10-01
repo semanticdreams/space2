@@ -40,22 +40,6 @@
       result-or-error
       (error (.. "invalid temporal business-calendar plain date-time: " (tostring result-or-error)))))
 
-(fn iso-date [plain]
-  (local fields (plain-fields plain))
-  (when (or (not (integer? fields.year))
-            (not (integer? fields.month))
-            (not (integer? fields.day)))
-    (error "invalid temporal business-calendar plain date-time fields"))
-  (string.format "%04d-%02d-%02d" fields.year fields.month fields.day))
-
-(fn date-key [plain]
-  (local fields (plain-fields plain))
-  (when (or (not (integer? fields.year))
-            (not (integer? fields.month))
-            (not (integer? fields.day)))
-    (error "invalid temporal business-calendar plain date-time fields"))
-  (+ (* fields.year 10000) (* fields.month 100) fields.day))
-
 (fn create-business-calendar [deps]
   (when (not (= (type deps) :table))
     (error "temporal business-calendar dependencies must be a table"))
@@ -74,12 +58,34 @@
       (error "temporal business-calendar year must be an integer"))
     (seed.holidays-for-year options.jurisdiction options.year))
 
+  (fn validate-supported-year [jurisdiction year]
+    (seed.holidays-for-year jurisdiction year)
+    year)
+
+  (fn supported-plain-fields [plain jurisdiction]
+    (local fields (plain-fields plain))
+    (when (or (not (integer? fields.year))
+              (not (integer? fields.month))
+              (not (integer? fields.day)))
+      (error "invalid temporal business-calendar plain date-time fields"))
+    (validate-supported-year jurisdiction fields.year)
+    fields)
+
+  (fn supported-iso-date [plain jurisdiction]
+    (local fields (supported-plain-fields plain jurisdiction))
+    (string.format "%04d-%02d-%02d" fields.year fields.month fields.day))
+
+  (fn supported-date-key [plain jurisdiction]
+    (local fields (supported-plain-fields plain jurisdiction))
+    (+ (* fields.year 10000) (* fields.month 100) fields.day))
+
   (fn is-holiday [plain options]
     (local jurisdiction (require-jurisdiction options "is-holiday"))
-    (not (= nil (seed.holiday-on-date jurisdiction (iso-date plain)))))
+    (not (= nil (seed.holiday-on-date jurisdiction (supported-iso-date plain jurisdiction)))))
 
   (fn is-business-day [plain options]
     (local jurisdiction (require-jurisdiction options "is-business-day"))
+    (supported-plain-fields plain jurisdiction)
     (and (not (. weekend-iso-weekdays (plain-iso-weekday plain)))
          (not (is-holiday plain {:jurisdiction jurisdiction}))))
 
@@ -87,7 +93,7 @@
     (local jurisdiction (require-jurisdiction options "add-business-days"))
     (when (not (integer? count))
       (error "temporal business-calendar business-day count must be an integer"))
-    (plain-fields plain)
+    (supported-plain-fields plain jurisdiction)
     (var current plain)
     (var remaining (math.abs count))
     (local direction (if (< count 0) -1 1))
@@ -99,13 +105,13 @@
 
   (fn business-days-between [start end options]
     (local jurisdiction (require-jurisdiction options "business-days-between"))
-    (local start-key (date-key start))
-    (local end-key (date-key end))
+    (local start-key (supported-date-key start jurisdiction))
+    (local end-key (supported-date-key end jurisdiction))
     (when (> start-key end-key)
       (error "descending temporal business-day range"))
     (var current start)
     (var count 0)
-    (while (< (date-key current) end-key)
+    (while (< (supported-date-key current jurisdiction) end-key)
       (when (is-business-day current {:jurisdiction jurisdiction})
         (set count (+ count 1)))
       (set current (plain-add-days current 1)))

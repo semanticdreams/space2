@@ -12,8 +12,8 @@
 (fn assert-error-contains [f fragment message]
   (local (ok err) (pcall f))
   (assert (not ok) message)
-  (assert (err:match fragment)
-           (.. message ": expected error containing " fragment ", got " (tostring err)))
+  (assert (string.find (tostring err) fragment 1 true)
+            (.. message ": expected error containing " fragment ", got " (tostring err)))
   err)
 
 (fn with-restored-app-fields [keys f]
@@ -275,8 +275,89 @@
   (assert-error-contains #(Temporal.business-calendar.business-days-between (plain "2026-07-07T09:00:00")
                                                                             (plain "2026-07-02T09:00:00")
                                                                             {:jurisdiction "US-FED"})
-                         "descending temporal business"
-                         "descending ranges should fail loudly"))
+                          "descending temporal business"
+                          "descending ranges should fail loudly"))
+
+(fn business-calendar-rejects-unknown-public-options []
+  (local Temporal (require :temporal))
+  (assert-error-contains #(Temporal.business-calendar.holidays {:jurisdiction "US-FED" :year 2026 :calendar "iso8601"})
+                         "unsupported temporal business-calendar option"
+                         "holidays should reject unknown options")
+  (assert-error-contains #(Temporal.business-calendar.is-holiday (plain "2026-01-01T09:00:00")
+                                                                 {:jurisdiction "US-FED" :calendar "iso8601"})
+                         "unsupported temporal business-calendar option"
+                         "is-holiday should reject unknown options")
+  (assert-error-contains #(Temporal.business-calendar.is-business-day (plain "2026-01-02T09:00:00")
+                                                                     {:jurisdiction "US-FED" :calendar "iso8601"})
+                         "unsupported temporal business-calendar option"
+                         "is-business-day should reject unknown options")
+  (assert-error-contains #(Temporal.business-calendar.add-business-days (plain "2026-01-01T09:00:00")
+                                                                        1
+                                                                        {:jurisdiction "US-FED" :calendar "iso8601"})
+                         "unsupported temporal business-calendar option"
+                         "add-business-days should reject unknown options")
+  (assert-error-contains #(Temporal.business-calendar.business-days-between (plain "2026-01-01T09:00:00")
+                                                                            (plain "2026-01-02T09:00:00")
+                                                                            {:jurisdiction "US-FED" :calendar "iso8601"})
+                         "unsupported temporal business-calendar option"
+                         "business-days-between should reject unknown options"))
+
+(fn business-calendar-rejects-unsupported-jurisdiction-through-public-api []
+  (local Temporal (require :temporal))
+  (assert-error-contains #(Temporal.business-calendar.holidays {:jurisdiction "CA-FED" :year 2026})
+                         "unsupported temporal holiday jurisdiction"
+                         "holidays should reject unsupported jurisdictions")
+  (assert-error-contains #(Temporal.business-calendar.is-holiday (plain "2026-01-01T09:00:00") {:jurisdiction "CA-FED"})
+                         "unsupported temporal holiday jurisdiction"
+                         "is-holiday should reject unsupported jurisdictions")
+  (assert-error-contains #(Temporal.business-calendar.is-business-day (plain "2026-07-04T09:00:00") {:jurisdiction "CA-FED"})
+                         "unsupported temporal holiday jurisdiction"
+                         "is-business-day should reject unsupported jurisdictions even for weekends")
+  (assert-error-contains #(Temporal.business-calendar.add-business-days (plain "2026-01-05T09:00:00") 0 {:jurisdiction "CA-FED"})
+                         "unsupported temporal holiday jurisdiction"
+                         "add-business-days should reject unsupported jurisdictions even for zero counts")
+  (assert-error-contains #(Temporal.business-calendar.business-days-between (plain "2026-01-05T09:00:00")
+                                                                            (plain "2026-01-05T17:00:00")
+                                                                            {:jurisdiction "CA-FED"})
+                         "unsupported temporal holiday jurisdiction"
+                         "business-days-between should reject unsupported jurisdictions even for zero-length ranges"))
+
+(fn business-calendar-rejects-unsupported-years-through-public-api []
+  (local Temporal (require :temporal))
+  (assert-error-contains #(Temporal.business-calendar.holidays {:jurisdiction "US-FED" :year 2028})
+                         "unsupported temporal holiday year"
+                         "holidays should reject unsupported years")
+  (assert-error-contains #(Temporal.business-calendar.is-holiday (plain "2028-01-03T09:00:00") {:jurisdiction "US-FED"})
+                         "unsupported temporal holiday year"
+                         "is-holiday should reject unsupported years")
+  (assert-error-contains #(Temporal.business-calendar.is-business-day (plain "2028-01-01T09:00:00") {:jurisdiction "US-FED"})
+                         "unsupported temporal holiday year"
+                         "is-business-day should reject unsupported years before weekend short-circuiting")
+  (assert-error-contains #(Temporal.business-calendar.add-business-days (plain "2028-01-03T09:00:00") 0 {:jurisdiction "US-FED"})
+                         "unsupported temporal holiday year"
+                         "add-business-days should reject unsupported start years even for zero counts")
+  (assert-error-contains #(Temporal.business-calendar.add-business-days (plain "2027-12-31T09:00:00") 1 {:jurisdiction "US-FED"})
+                         "unsupported temporal holiday year"
+                         "add-business-days should reject stepped dates outside the supported range")
+  (assert-error-contains #(Temporal.business-calendar.business-days-between (plain "2028-01-03T09:00:00")
+                                                                            (plain "2028-01-03T17:00:00")
+                                                                            {:jurisdiction "US-FED"})
+                         "unsupported temporal holiday year"
+                         "business-days-between should reject unsupported years even for zero-length ranges")
+  (assert-error-contains #(Temporal.business-calendar.business-days-between (plain "2027-12-31T09:00:00")
+                                                                            (plain "2028-01-03T09:00:00")
+                                                                            {:jurisdiction "US-FED"})
+                         "unsupported temporal holiday year"
+                         "business-days-between should reject stepped dates outside the supported range"))
+
+(fn business-calendar-rejects-invalid-public-arguments []
+  (local Temporal (require :temporal))
+  (assert-error-contains #(Temporal.business-calendar.is-holiday {} {:jurisdiction "US-FED"})
+                         "invalid temporal business-calendar plain date-time"
+                         "is-holiday should reject invalid plain values")
+  (assert-error-contains #(Temporal.business-calendar.add-business-days (plain "2026-01-05T09:00:00") 1.5 {:jurisdiction "US-FED"})
+                         "business-day count must be an integer"
+                         "add-business-days should reject non-integer counts"))
 
 (table.insert tests {:name "seed exposes supported jurisdictions defensively" :fn seed-exposes-supported-jurisdictions-defensively})
 (table.insert tests {:name "seed rejects unsupported jurisdiction loudly" :fn seed-rejects-unsupported-jurisdiction-loudly})
@@ -291,6 +372,10 @@
 (table.insert tests {:name "business calendar business day predicate excludes weekends and holidays" :fn business-calendar-business-day-predicate-excludes-weekends-and-holidays})
 (table.insert tests {:name "business calendar add business days steps over non-business days" :fn business-calendar-add-business-days-steps-over-non-business-days})
 (table.insert tests {:name "business calendar days between is half-open and rejects descending" :fn business-calendar-days-between-is-half-open-and-rejects-descending})
+(table.insert tests {:name "business calendar rejects unknown public options" :fn business-calendar-rejects-unknown-public-options})
+(table.insert tests {:name "business calendar rejects unsupported jurisdiction through public api" :fn business-calendar-rejects-unsupported-jurisdiction-through-public-api})
+(table.insert tests {:name "business calendar rejects unsupported years through public api" :fn business-calendar-rejects-unsupported-years-through-public-api})
+(table.insert tests {:name "business calendar rejects invalid public arguments" :fn business-calendar-rejects-invalid-public-arguments})
 
 (local main
   (fn []
