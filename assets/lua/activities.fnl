@@ -88,7 +88,7 @@
   (set app.activity-root-actions nil)
   (set app.activity-selection-actions nil)
   (set app.activity-left-dock-builder nil)
-  (set app.activity-command-hints-provider nil)
+  (set app.activity-command-hints-provider nil) (set app.activity-leader-command-providers nil)
   (set app.activity-delete-selection nil)
   (set app.activity-activate-focused nil)
   (set app.activity-drawing-enabled? nil)
@@ -106,9 +106,9 @@
 (fn empty-activity-hooks []
   {:root-actions nil
    :selection-actions nil
-   :left-dock-builder nil
-   :command-hints-provider nil
-   :delete-selection nil
+    :left-dock-builder nil
+    :command-hints-provider nil :leader-command-providers nil
+    :delete-selection nil
    :activate-focused nil
    :drawing-enabled? nil
    :context-enricher nil
@@ -148,7 +148,7 @@
   (set app.activity-root-actions hooks.root-actions)
   (set app.activity-selection-actions hooks.selection-actions)
   (set app.activity-left-dock-builder hooks.left-dock-builder)
-  (set app.activity-command-hints-provider hooks.command-hints-provider)
+  (set app.activity-command-hints-provider hooks.command-hints-provider) (set app.activity-leader-command-providers hooks.leader-command-providers)
   (set app.activity-delete-selection hooks.delete-selection)
   (set app.activity-activate-focused hooks.activate-focused)
   (set app.activity-drawing-enabled? hooks.drawing-enabled?)
@@ -244,9 +244,9 @@
    :clear-runtime-hooks! clear-activity-runtime-hooks!
    :set-root-actions! (fn [_self value] (set-staged-hook! :root-actions value))
    :set-selection-actions! (fn [_self value] (set-staged-hook! :selection-actions value))
-   :set-left-dock-builder! (fn [_self value] (set-staged-hook! :left-dock-builder value))
-   :set-command-hints-provider! (fn [_self value] (set-staged-hook! :command-hints-provider value))
-   :set-delete-selection! (fn [_self value] (set-staged-hook! :delete-selection value))
+    :set-left-dock-builder! (fn [_self value] (set-staged-hook! :left-dock-builder value))
+    :set-command-hints-provider! (fn [_self value] (set-staged-hook! :command-hints-provider value)) :set-leader-command-providers! (fn [_self value] (set-staged-hook! :leader-command-providers value))
+    :set-delete-selection! (fn [_self value] (set-staged-hook! :delete-selection value))
    :set-activate-focused! (fn [_self value] (set-staged-hook! :activate-focused value))
    :set-drawing-enabled! (fn [_self value]
                            (set-staged-hook! :drawing-enabled? (and value true)))

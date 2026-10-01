@@ -3671,7 +3671,7 @@
 (table.insert tests {:name "GraphView expanded card uses preview and measures child"
                       :fn graph-expanded-card-uses-preview-and-measures-child})
 (table.insert tests {:name "GraphView Enter expands focused node inline idempotently"
-                       :fn graph-enter-expands-focused-node-inline-idempotently})
+                        :fn graph-enter-expands-focused-node-inline-idempotently})
 (table.insert tests {:name "Graph expanded card header shows truncated node label" :fn graph-expanded-card-header-shows-truncated-node-label})
 (table.insert tests {:name "GraphView expanded toggle preserves selection"
                       :fn graph-expanded-toggle-preserves-selection})
@@ -4638,7 +4638,40 @@
 (table.insert tests {:name "FsNode unknown file shows only external editor"
                       :fn fs-node-unknown-file-shows-only-external-editor})
 (table.insert tests {:name "FsNode directory listing behavior remains unchanged"
-                     :fn fs-node-directory-listing-behavior-remains-unchanged})
+                      :fn fs-node-directory-listing-behavior-remains-unchanged})
+
+(fn graph-selected-preview-commands-operate-only-on-selection []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local selector (ObjectSelector {:project (fn [position _opts] position) :ctx ctx :enabled? true}))
+            (local graph (make-test-graph-map))
+            (local view (GraphView {:graph-map graph :ctx ctx :selector selector}))
+            (local selected (Graph.GraphNode {:key "selected-preview" :preview (tracked-preview {})}))
+            (local focused-only (Graph.GraphNode {:key "focused-only-preview" :preview (tracked-preview {})}))
+            (graph:add-node selected {:position (glm.vec3 0 0 0)})
+            (graph:add-node focused-only {:position (glm.vec3 10 0 0)})
+            (local focused-node (. view.focus-nodes focused-only))
+            (focused-node:request-focus)
+            (assert (= (view:selected-node-count) 0) "No selected nodes should report zero selected-node-count")
+            (assert (= (view:expand-selected-previews) 0) "No selected nodes should make expand-selected a no-op")
+            (assert (not (. view.points focused-only :_card-size)) "Focused node must not be expanded as fallback")
+            (selector:set-selected [(. view.points selected)])
+            (assert (= (view:selected-node-count) 1) "Selected node should be counted")
+            (assert (= (view:expand-selected-previews) 1) "Selected compact node should expand")
+            (assert (. view.points selected :_card-size) "Selected node should now be expanded")
+            (assert (= (view:expand-selected-previews) 0) "Expanding already-expanded selection should be idempotent")
+            (assert (= (view:collapse-selected-previews) 1) "Selected expanded node should collapse")
+            (assert (not (. view.points selected :_card-size)) "Selected node should now be compact")
+            (assert (= (view:toggle-selected-previews) 1) "Toggle should expand compact selected node")
+            (assert (. view.points selected :_card-size) "Toggle should leave selected node expanded")
+            (assert (= (view:toggle-selected-previews) 1) "Toggle should collapse expanded selected node")
+            (assert (not (. view.points selected :_card-size)) "Toggle should leave selected node compact")
+            (view:drop)
+            (graph:drop)
+            (selector:drop))))
+(table.insert tests {:name "GraphView selected preview commands operate only on selection"
+                       :fn graph-selected-preview-commands-operate-only-on-selection})
 
 
 (local main

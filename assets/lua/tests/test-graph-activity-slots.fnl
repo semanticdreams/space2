@@ -80,8 +80,8 @@
                     :canvas
                     :graph-map
                     :graph-map-manager
-                    :graph-view
-                   :activity-registry
+                    :graph-view :activity-leader-command-providers
+                    :activity-registry
                    :activities-changed
                    :active-activity-id
                    :active-interaction-surface
@@ -150,7 +150,7 @@
                 "Graph activity should activate its canvas slot")
         (assert (= slot.pointer-target.canvas-target-kind :graph-view)
                 "Graph activity slot should expose graph view target kind")
-        (assert app.graph-view "Graph activity should create a graph view")
+        (assert app.graph-view "Graph activity should create a graph view") (assert (> (length (assert app.activity-leader-command-providers "Graph activity should install graph leader command providers")) 0) "Graph activity should install graph leader command providers")
         (assert (= app.graph-view.ctx slot.ctx)
                 "Graph view should be built with the graph slot context")
         (assert (= app.graph-view.ctx.pointer-target slot.pointer-target)
@@ -173,8 +173,7 @@
         (Activities.deactivate-active-activity)
         (assert (not slot.visible?)
                 "Deactivating graph activity should hide the graph slot")
-        (assert (not app.graph-view)
-                "Deactivating graph activity should stop exposing app.graph-view")
+        (assert (not app.graph-view) "Deactivating graph activity should stop exposing app.graph-view") (assert (= app.activity-leader-command-providers nil) "Deactivating graph activity should clear graph leader command providers")
          true)))
   (pcall GraphActivityUnit.unload-graph-activity!)
   (when runtime.graph-view
