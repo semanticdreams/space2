@@ -1828,23 +1828,23 @@
   (pcall state.on-leave)
   (if ok result (error result)))
 
-(fn exercise-normal-state-enter-opens-focused-graph-node []
+(fn exercise-normal-state-enter-activates-focused-graph-node []
   (reset-engine-events)
   (local controls (create-controls-stub))
   (set app.first-person-controls controls)
   (set app.active-activity-id "graph")
   (set app.canvas-interactive? true)
   (set app.drawing-controller nil)
-  (var opened 0)
+  (var activated 0)
   (local states
     (States {:focus_manager_provider (fn [_self]
                                        nil)}))
-  (set app.graph-view {:open-focused-node (fn [_self]
-                                            (set opened (+ opened 1))
-                                            true)})
+  (set app.graph-view {:expand-focused-node (fn [_self]
+                                              (set activated (+ activated 1))
+                                              true)})
   (set app.activity-activate-focused
        (fn []
-         (app.graph-view:open-focused-node)))
+          (app.graph-view:expand-focused-node)))
   (set-app-states! states)
   (local state (NormalState))
   (states:add-state :normal state)
@@ -1853,7 +1853,7 @@
       (fn []
         (state.on-enter)
         (app.engine.events.key-down.emit {:key KEY_RETURN})
-        (assert (= opened 1) "Enter should open focused graph node")
+        (assert (= activated 1) "Enter should activate focused graph node")
         (assert (= controls.record.key_down nil) "Handled enter should not reach controls"))))
   (pcall state.on-leave)
   (if ok result (error result)))
@@ -1900,7 +1900,7 @@
      :graph-view]
     exercise-normal-state-delete-removes-graph-selection))
 
-(fn normal-state-enter-opens-focused-graph-node []
+(fn normal-state-enter-activates-focused-graph-node []
   (with-restored-app-fields
     [:activity-activate-focused
      :active-activity-id
@@ -1909,7 +1909,7 @@
      :first-person-controls
      :graph-view
      :states]
-    exercise-normal-state-enter-opens-focused-graph-node))
+    exercise-normal-state-enter-activates-focused-graph-node))
 
 (fn normal-state-activity-keyboard-commands-require-interactive-canvas []
   (reset-engine-events)
@@ -2139,7 +2139,7 @@
 (table.insert tests {:name "Normal state directional focus skips while input active"
                      :fn normal-state-directional-focus-skips-with-input})
 (table.insert tests {:name "Normal state delete removes selected graph nodes" :fn normal-state-delete-removes-graph-selection})
-(table.insert tests {:name "Normal state Enter opens focused graph node" :fn normal-state-enter-opens-focused-graph-node})
+(table.insert tests {:name "Normal state Enter activates focused graph node" :fn normal-state-enter-activates-focused-graph-node})
 (table.insert tests {:name "Normal state activity keyboard commands require interactive canvas"
                      :fn normal-state-activity-keyboard-commands-require-interactive-canvas})
 (table.insert tests {:name "Normal state F4 ignores graph view factory without workspace shell"
