@@ -237,7 +237,8 @@
       (error "malformed localized text"))
     (local valid (validate-options seed options))
     (local loaded (seed.load))
-    (local fields {:calendar valid.calendar
+    (local fields {:kind :temporal-calendar-fields
+                   :calendar valid.calendar
                    :era (if (= valid.calendar "buddhist") "be" "ce")
                    :hour 0
                    :minute 0

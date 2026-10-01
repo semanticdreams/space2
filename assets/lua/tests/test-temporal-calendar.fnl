@@ -30,7 +30,7 @@
   (local iso (plain Temporal "2026-10-01T09:30:00"))
   (local localized (Temporal.calendar.from-iso iso {:calendar "gregory"}))
   (assert-local-fields localized
-                       {:kind :temporal-calendar-date-time
+                       {:kind :temporal-calendar-fields
                         :calendar "gregory"
                         :era "ce"
                         :year 2026
@@ -75,7 +75,7 @@
                                                      {:calendar "japanese"})
                          "unsupported Japanese era range"
                          "pre-Showa date should throw")
-  (assert-error-contains #(Temporal.calendar.to-iso {:kind :temporal-calendar-date-time
+  (assert-error-contains #(Temporal.calendar.to-iso {:kind :temporal-calendar-fields
                                                     :calendar "japanese"
                                                     :era "reiwa"
                                                     :year 1
@@ -100,7 +100,7 @@
   (assert-error-contains #(Temporal.calendar.from-iso iso {:calendar "gregory" :locale "en-US"})
                          "unknown calendar option"
                          "from-iso should reject unknown option keys")
-  (assert-error-contains #(Temporal.calendar.to-iso {:kind :temporal-calendar-date-time
+  (assert-error-contains #(Temporal.calendar.to-iso {:kind :temporal-calendar-fields
                                                     :calendar "gregory"
                                                     :era "ce"
                                                     :year 2026
@@ -111,12 +111,35 @@
                                                     :second 0
                                                     :nanosecond 0
                                                     :locale "en-US"})
-                         "unknown calendar record key"
-                         "to-iso should reject unknown record keys")
+                          "unknown calendar record key"
+                          "to-iso should reject unknown record keys")
+  (assert-error-contains #(Temporal.calendar.to-iso {:calendar "gregory"
+                                                    :era "ce"
+                                                    :year 2026
+                                                    :month 10
+                                                    :day 1
+                                                    :hour 9
+                                                    :minute 30
+                                                    :second 0
+                                                    :nanosecond 0})
+                         "invalid calendar field type"
+                         "to-iso should reject missing record kind")
+  (assert-error-contains #(Temporal.calendar.to-iso {:kind :temporal-calendar-date-time
+                                                    :calendar "gregory"
+                                                    :era "ce"
+                                                    :year 2026
+                                                    :month 10
+                                                    :day 1
+                                                    :hour 9
+                                                    :minute 30
+                                                    :second 0
+                                                    :nanosecond 0})
+                         "invalid calendar field type"
+                         "to-iso should reject non-canonical record kind")
   (assert-error-contains #(Temporal.calendar.from-iso iso {:calendar "islamic"})
                          "unsupported calendar"
                          "unsupported calendar should throw")
-  (assert-error-contains #(Temporal.calendar.to-iso {:kind :temporal-calendar-date-time
+  (assert-error-contains #(Temporal.calendar.to-iso {:kind :temporal-calendar-fields
                                                     :calendar "gregory"
                                                     :era "ce"
                                                     :year "2026"
@@ -145,7 +168,7 @@
   (assert-error-contains #(Temporal.calendar.from-iso pre-seed {:calendar "buddhist"})
                          "unsupported Buddhist era range"
                          "Buddhist from-iso before seed era start should throw")
-  (assert-error-contains #(Temporal.calendar.to-iso {:kind :temporal-calendar-date-time
+  (assert-error-contains #(Temporal.calendar.to-iso {:kind :temporal-calendar-fields
                                                     :calendar "gregory"
                                                     :era "ce"
                                                     :year 0
@@ -157,7 +180,7 @@
                                                     :nanosecond 0})
                          "unsupported Gregorian era range"
                          "Gregorian localized date before seed era start should throw")
-  (assert-error-contains #(Temporal.calendar.to-iso {:kind :temporal-calendar-date-time
+  (assert-error-contains #(Temporal.calendar.to-iso {:kind :temporal-calendar-fields
                                                     :calendar "buddhist"
                                                     :era "be"
                                                     :year 543

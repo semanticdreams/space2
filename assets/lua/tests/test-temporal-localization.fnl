@@ -29,7 +29,7 @@
   (Temporal.plain-date-time.parse "2026-10-01T09:30:00"))
 
 (fn pre-1000-from-iso [_plain options]
-  {:kind :temporal-calendar-date-time
+  {:kind :temporal-calendar-fields
    :calendar options.calendar
    :era "ce"
    :year 1
@@ -45,6 +45,7 @@
 
 (fn pre-1000-to-iso [fields]
   (assert (= fields.calendar "gregory") "parser should preserve calendar")
+  (assert (= fields.kind :temporal-calendar-fields) "parser should use calendar field record kind")
   (assert (= fields.era "ce") "parser should preserve era")
   (assert (= fields.year 1) "parser should parse variable-width year")
   (assert (= fields.month 1) "parser should parse month")

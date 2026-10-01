@@ -34,8 +34,7 @@
   value)
 
 (fn validate-kind [record]
-  (when (and (not (= record.kind nil))
-             (not (= record.kind :temporal-calendar-date-time)))
+  (when (not (= record.kind :temporal-calendar-fields))
     (error "invalid calendar field type: kind")))
 
 (fn date-key [year month day]
@@ -53,7 +52,7 @@
   (plain:fields))
 
 (fn record-from-fields [calendar era year fields]
-  {:kind :temporal-calendar-date-time
+  {:kind :temporal-calendar-fields
    :calendar calendar
    :era era
    :year year
