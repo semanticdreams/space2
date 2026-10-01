@@ -170,6 +170,7 @@
   (local timezone {:kind :temporal-ics-timezone :raw-lines raw-lines})
   (each [_ line (ipairs lines)]
     (when (= line.name "TZID")
+      (reject-params line)
       (when timezone.tzid
         (error "duplicate temporal ICS VTIMEZONE TZID"))
       (set timezone.tzid line.value)))

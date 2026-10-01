@@ -260,7 +260,10 @@
                          "RRULE parameters should fail")
   (assert-error-contains #(Temporal.ics.parse "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VEVENT\nUID:bad-dtstart-param@example.test\nDTSTART;LANGUAGE=en:20261001T090000\nEND:VEVENT\nEND:VCALENDAR\n")
                          "DTSTART"
-                         "unsupported date-time parameters should fail with property context"))
+                         "unsupported date-time parameters should fail with property context")
+  (assert-error-contains #(Temporal.ics.parse "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VTIMEZONE\nTZID;X=Y:America/New_York\nEND:VTIMEZONE\nBEGIN:VEVENT\nUID:bad-vtimezone-tzid-param@example.test\nDTSTART;TZID=America/New_York:20261001T090000\nEND:VEVENT\nEND:VCALENDAR\n")
+                         "TZID"
+                         "VTIMEZONE TZID parameters should fail"))
 
 (fn parser-parses-nested-vtimezone-metadata []
   (local text "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VTIMEZONE\nTZID:America/New_York\nBEGIN:STANDARD\nDTSTART:20261101T020000\nTZOFFSETFROM:-0400\nTZOFFSETTO:-0500\nTZNAME:EST\nEND:STANDARD\nEND:VTIMEZONE\nBEGIN:VEVENT\nUID:nested-zone@example.test\nDTSTART;TZID=America/New_York:20261001T090000\nSUMMARY:Nested timezone metadata\nEND:VEVENT\nEND:VCALENDAR\n")
