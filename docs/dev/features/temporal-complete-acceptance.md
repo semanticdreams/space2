@@ -12,7 +12,7 @@ This matrix is the closeout contract for the complete temporal library program. 
 | ICS/iCalendar | `Temporal.ics` | selected-corpus fixture corpus, parse/export round trips, VTIMEZONE metadata tests, override/cancellation tests, invalid ICS diagnostics, focused `tests.test-temporal-ics` suite, constraints gate, and PR CI requirement | ICS/iCalendar interoperability |
 | Localization and calendars | `Temporal.localization`, `Temporal.calendar` | selected CLDR seed packaging tests with `python3 -m pytest scripts/tests/test_temporal_dependency_manifests.py -q`; Space Fennel compile check; `make constraints`; focused `tests.test-temporal-calendar` conversion suite; focused `tests.test-temporal-localization` format/parse suite | ICU/CLDR localization and non-Gregorian calendars |
 | Business calendars | `Temporal.business-calendar`, `Temporal.providers.business-calendar` | packaged `US-FED` holiday seed validator tests; Space Fennel compile check; `make constraints`; focused `tests.test-temporal-business-calendar` loader/facade suite; focused `tests.test-temporal-provider-registry` dispatcher coverage; fast-suite registration | Business and holiday calendars |
-| Natural language | `Temporal.natural` | locale phrase corpus, candidate/ambiguity tests, missing-context diagnostics | Broad natural-language parsing |
+| Natural language | `Temporal.natural`, `Temporal.providers.parse` | packaged `natural-phrase-seed` corpus validator tests; candidate schema/order tests; `en-US`, `fr-FR`, and `ja-JP` phrase tests; ambiguity and missing-context diagnostics; provider integration coverage; fast-suite registration | Broad natural-language parsing |
 | Timestamp migrations | `Temporal.migrations` and persistence call sites | schema inventory, idempotent migration tests, malformed-data diagnostics | Persisted timestamp migrations |
 | Runtime scheduler | `RuntimeScheduler` and timer compatibility APIs | fixed-clock tests, recurrence scheduling tests, cancellation/lifecycle tests | Runtime timer and scheduler redesign |
 | Final closeout | all temporal surfaces | end-to-end smoke tests, docs audit, focused suites, full `make test`, PR CI | Final conformance and closeout |
@@ -64,6 +64,34 @@ The focused business-calendar suite covers the packaged `US-FED` 2026-2027 seed,
 defensive loader/facade return values, observed holidays, weekend exclusion,
 zero/positive/negative business-day addition, half-open business-day counts, and
 loud failures for unsupported data or invalid options.
+
+## Track 10 natural-language acceptance evidence
+
+The broad natural-language parsing track is accepted locally when these commands
+pass in order:
+
+```bash
+make fennel-check
+make constraints
+python3 -m pytest scripts/tests/test_temporal_dependency_manifests.py -q
+SPACE_DISABLE_AUDIO=1 SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data \
+SPACE_ASSETS_PATH=$(pwd)/assets \
+FENNEL_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" \
+FENNEL_MACRO_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" \
+./build/space -m tests.test-temporal-natural-language:main
+SPACE_DISABLE_AUDIO=1 SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data \
+SPACE_ASSETS_PATH=$(pwd)/assets \
+FENNEL_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" \
+FENNEL_MACRO_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" \
+./build/space -m tests.test-temporal-provider-registry:main
+```
+
+The focused natural-language suite covers the packaged `en-US`, `fr-FR`, and
+`ja-JP` seed corpus, candidate schema fields, unambiguous English compatibility,
+bare weekday ambiguity, unsupported locale/option diagnostics, and missing
+resolve context. The provider-registry suite covers default built-in provider
+registration, provider id preservation, deterministic candidate order, and empty
+arrays for unsupported natural text.
 
 ## Maintenance rule
 

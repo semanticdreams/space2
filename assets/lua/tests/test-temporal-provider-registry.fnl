@@ -171,6 +171,31 @@
   (assert-error #(hash-registry.parse "tomorrow" {})
                 "temporal provider parse result must be a sequential array"))
 
+(fn default-natural-provider-parses-today []
+  (local candidates (Temporal.providers.parse "today" {:locale "en-US"}))
+  (assert (> (# candidates) 0) "default natural provider should return candidates for today")
+  (assert= (. candidates 1 :provider-id) "space.temporal.natural-seed")
+  (assert= (. candidates 1 :kind) :natural-candidate)
+  (assert= (. candidates 1 :locale) "en-US"))
+
+(fn candidate-signature [candidate]
+  [candidate.provider-id candidate.locale candidate.phrase-id candidate.family candidate.rank])
+
+(fn default-natural-provider-order-is-deterministic []
+  (local first (Temporal.providers.parse "Tuesday" {:locale "en-US"}))
+  (local second (Temporal.providers.parse "Tuesday" {:locale "en-US"}))
+  (assert= (# first) (# second))
+  (each [index candidate (ipairs first)]
+    (local expected (candidate-signature (. second index)))
+    (local actual (candidate-signature candidate))
+    (each [field value (ipairs actual)]
+      (assert= value (. expected field)))))
+
+(fn default-natural-provider-returns-empty-for-unsupported-text []
+  (local (ok candidates) (pcall Temporal.providers.parse "not a temporal phrase" {:locale "en-US"}))
+  (assert ok (.. "provider parse should not throw for unsupported natural text: " (tostring candidates)))
+  (assert-empty candidates "unsupported natural text should return no provider candidates"))
+
 (fn function-provider-business-calendar [operation request]
   {:operation operation
    :jurisdiction request.jurisdiction})
@@ -260,6 +285,9 @@
 (table.insert tests {:name "parse composes deterministic candidates and annotates provider ids" :fn parse-composes-candidates})
 (table.insert tests {:name "parse prefixes provider failures" :fn parse-prefixes-provider-failures})
 (table.insert tests {:name "parse rejects hash-shaped and sparse results" :fn parse-rejects-invalid-result-shapes})
+(table.insert tests {:name "default natural provider parses today candidates" :fn default-natural-provider-parses-today})
+(table.insert tests {:name "default natural provider order is deterministic" :fn default-natural-provider-order-is-deterministic})
+(table.insert tests {:name "default natural provider returns empty for unsupported text" :fn default-natural-provider-returns-empty-for-unsupported-text})
 (table.insert tests {:name "business-calendar dispatches to function provider" :fn business-calendar-function-provider-dispatches})
 (table.insert tests {:name "business-calendar dispatches to table provider" :fn business-calendar-table-provider-dispatches})
 (table.insert tests {:name "business-calendar uses deterministic provider order" :fn business-calendar-uses-deterministic-provider-order})
