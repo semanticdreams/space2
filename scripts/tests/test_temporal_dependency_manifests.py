@@ -76,6 +76,7 @@ def test_planned_manifest_may_omit_version_and_checksum(tmp_path):
     root = copy_foundation(tmp_path)
     path = root / "external/temporal/icu/DEPENDENCY_MANIFEST.json"
     data = json.loads(path.read_text())
+    data["status"] = "planned"
     data.pop("version", None)
     data.pop("checksum_sha256", None)
     data.pop("reproducible_provenance", None)
