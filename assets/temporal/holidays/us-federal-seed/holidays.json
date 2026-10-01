@@ -1,0 +1,185 @@
+{
+  "jurisdiction_order": [
+    "US-FED"
+  ],
+  "jurisdictions": {
+    "US-FED": {
+      "name": "United States federal holidays",
+      "years": {
+        "2026": [
+          {
+            "date": "2026-01-01",
+            "id": "new-years-day",
+            "name": "New Year's Day",
+            "observed": false,
+            "observed_date": "2026-01-01"
+          },
+          {
+            "date": "2026-01-19",
+            "id": "martin-luther-king-jr-day",
+            "name": "Birthday of Martin Luther King, Jr.",
+            "observed": false,
+            "observed_date": "2026-01-19"
+          },
+          {
+            "date": "2026-02-16",
+            "id": "washingtons-birthday",
+            "name": "Washington's Birthday",
+            "observed": false,
+            "observed_date": "2026-02-16"
+          },
+          {
+            "date": "2026-05-25",
+            "id": "memorial-day",
+            "name": "Memorial Day",
+            "observed": false,
+            "observed_date": "2026-05-25"
+          },
+          {
+            "date": "2026-06-19",
+            "id": "juneteenth-national-independence-day",
+            "name": "Juneteenth National Independence Day",
+            "observed": false,
+            "observed_date": "2026-06-19"
+          },
+          {
+            "date": "2026-07-04",
+            "id": "independence-day",
+            "name": "Independence Day",
+            "observed": true,
+            "observed_date": "2026-07-03"
+          },
+          {
+            "date": "2026-09-07",
+            "id": "labor-day",
+            "name": "Labor Day",
+            "observed": false,
+            "observed_date": "2026-09-07"
+          },
+          {
+            "date": "2026-10-12",
+            "id": "columbus-day",
+            "name": "Columbus Day",
+            "observed": false,
+            "observed_date": "2026-10-12"
+          },
+          {
+            "date": "2026-11-11",
+            "id": "veterans-day",
+            "name": "Veterans Day",
+            "observed": false,
+            "observed_date": "2026-11-11"
+          },
+          {
+            "date": "2026-11-26",
+            "id": "thanksgiving-day",
+            "name": "Thanksgiving Day",
+            "observed": false,
+            "observed_date": "2026-11-26"
+          },
+          {
+            "date": "2026-12-25",
+            "id": "christmas-day",
+            "name": "Christmas Day",
+            "observed": false,
+            "observed_date": "2026-12-25"
+          }
+        ],
+        "2027": [
+          {
+            "date": "2027-01-01",
+            "id": "new-years-day",
+            "name": "New Year's Day",
+            "observed": false,
+            "observed_date": "2027-01-01"
+          },
+          {
+            "date": "2027-01-18",
+            "id": "martin-luther-king-jr-day",
+            "name": "Birthday of Martin Luther King, Jr.",
+            "observed": false,
+            "observed_date": "2027-01-18"
+          },
+          {
+            "date": "2027-02-15",
+            "id": "washingtons-birthday",
+            "name": "Washington's Birthday",
+            "observed": false,
+            "observed_date": "2027-02-15"
+          },
+          {
+            "date": "2027-05-31",
+            "id": "memorial-day",
+            "name": "Memorial Day",
+            "observed": false,
+            "observed_date": "2027-05-31"
+          },
+          {
+            "date": "2027-06-19",
+            "id": "juneteenth-national-independence-day",
+            "name": "Juneteenth National Independence Day",
+            "observed": true,
+            "observed_date": "2027-06-18"
+          },
+          {
+            "date": "2027-07-04",
+            "id": "independence-day",
+            "name": "Independence Day",
+            "observed": true,
+            "observed_date": "2027-07-05"
+          },
+          {
+            "date": "2027-09-06",
+            "id": "labor-day",
+            "name": "Labor Day",
+            "observed": false,
+            "observed_date": "2027-09-06"
+          },
+          {
+            "date": "2027-10-11",
+            "id": "columbus-day",
+            "name": "Columbus Day",
+            "observed": false,
+            "observed_date": "2027-10-11"
+          },
+          {
+            "date": "2027-11-11",
+            "id": "veterans-day",
+            "name": "Veterans Day",
+            "observed": false,
+            "observed_date": "2027-11-11"
+          },
+          {
+            "date": "2027-11-25",
+            "id": "thanksgiving-day",
+            "name": "Thanksgiving Day",
+            "observed": false,
+            "observed_date": "2027-11-25"
+          },
+          {
+            "date": "2027-12-25",
+            "id": "christmas-day",
+            "name": "Christmas Day",
+            "observed": true,
+            "observed_date": "2027-12-24"
+          },
+          {
+            "date": "2028-01-01",
+            "id": "new-years-day",
+            "name": "New Year's Day",
+            "observed": true,
+            "observed_date": "2027-12-31"
+          }
+        ]
+      }
+    }
+  },
+  "provider_id": "space.temporal.us-federal-holidays",
+  "schema_version": 1,
+  "weekend_iso_weekdays": [
+    6,
+    7
+  ],
+  "year_end": 2027,
+  "year_start": 2026
+}

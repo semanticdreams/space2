@@ -1,15 +1,19 @@
 {
   "schema_version": 1,
   "id": "holiday-snapshots",
-  "status": "planned",
+  "status": "packaged",
   "purpose": "Deterministic business and holiday calendar data snapshots",
-  "candidate": "Generated checked-in snapshots from MIT-compatible sources such as Python holidays/Vacanza or Workalendar",
-  "license_policy": "MIT-compatible checked-in generated snapshots only; avoid CC BY-SA or live API terms for runtime data",
+  "candidate": "Generated checked-in US-FED 2026-2027 seed snapshot from public-domain U.S. Government sources",
+  "version": "US-FED-2026-2027-seed",
+  "source_url": "https://www.opm.gov/policy-data-oversight/pay-leave/federal-holidays/",
+  "license": "Public domain U.S. Government source material",
+  "reproducible_provenance": "Generated with python3 scripts/generate-temporal-us-federal-holidays.py --start-year 2026 --end-year 2027 --output assets/temporal/holidays/us-federal-seed/holidays.json from U.S. federal holiday rules in 5 U.S.C. § 6103 and OPM 2026/2027 federal holiday calendars.",
+  "license_policy": "Checked-in generated snapshots must use public-domain or reviewed permissive source material; avoid CC BY-SA or live API terms for runtime data",
   "adapter_boundary": "Temporal.business-calendar",
   "public_surfaces": ["Temporal.business-calendar"],
   "runtime_data_root": "assets/temporal/holidays",
   "runtime": {
     "network_fetch_allowed": false
   },
-  "follow_up_gate": "Choose initial jurisdictions, year range, source package/version, license review result, and snapshot generation command before adding data."
+  "follow_up_gate": "Additional jurisdictions or expanded year ranges require reviewed source/provenance updates, regenerated packaged data, and validator coverage before runtime exposure."
 }
