@@ -2626,7 +2626,7 @@
       (InputState.disconnect-input input))))
 
 (fn nested-demo-leader-provider [run]
-  {:commands {"demo.nested" {:id "demo.nested" :label "nested-demo" :run run}}
+  {:commands {"demo.nested" {:id "demo.nested" :label "nested-demo" :run run}} :prefixes [{:keys ["g"] :label "graph" :priority 10} {:keys ["g" "p"] :label "preview" :priority 10}]
    :bindings [{:keys ["g" "p" "e"] :command "demo.nested" :label "nested-demo" :priority 10}]})
 
 (fn with-activity-leader-providers [providers body]
@@ -2670,11 +2670,11 @@
       (assert root-section "Leader root hints should exist")
       (var found-g false)
       (each [_ item (ipairs root-section.entries)]
-        (when (= item.key "g") (set found-g true)))
+        (when (and (= item.key "g") (= item.label "graph")) (set found-g true)))
       (assert found-g "Leader root hints should include graph prefix")
       (state.on-key-down {:key KEY_G})
       (local gp-section (. (state.command_hints_provider state {}) 1))
-      (assert (= (. gp-section.entries 1 :key) "p") "g prefix should expose p child")
+      (assert (and (= (. gp-section.entries 1 :key) "p") (= (. gp-section.entries 1 :label) "preview")) "g prefix should expose labeled preview child")
       (state.on-key-down {:key KEY_P})
       (local gpe-section (. (state.command_hints_provider state {}) 1))
       (assert (= (. gpe-section.entries 1 :key) "e") "g p prefix should expose e command"))))
