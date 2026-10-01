@@ -41,7 +41,9 @@
   (assert (= (type Temporal.providers.unregister) :function) "Temporal.providers.unregister should be exported")
   (assert (= (type Temporal.providers.list) :function) "Temporal.providers.list should be exported")
   (assert (= (type Temporal.providers.all) :function) "Temporal.providers.all should be exported")
-  (assert (= (type Temporal.providers.parse) :function) "Temporal.providers.parse should be exported"))
+  (assert (= (type Temporal.providers.parse) :function) "Temporal.providers.parse should be exported")
+  (assert (= (type Temporal.providers.business-calendar) :function)
+          "Temporal.providers.business-calendar should be exported"))
 
 (fn orders-providers []
   (local registry (create-provider-registry {}))
@@ -169,6 +171,85 @@
   (assert-error #(hash-registry.parse "tomorrow" {})
                 "temporal provider parse result must be a sequential array"))
 
+(fn function-provider-business-calendar [operation request]
+  {:operation operation
+   :jurisdiction request.jurisdiction})
+
+(fn table-provider-is-business-day [request]
+  {:plain request.plain
+   :business? true})
+
+(fn later-business-calendar [_operation _request]
+  {:provider-id "later"})
+
+(fn beta-business-calendar [_operation _request]
+  {:provider-id "beta"})
+
+(fn alpha-business-calendar [_operation _request]
+  {:provider-id "alpha"})
+
+(fn bad-business-calendar [_operation _request]
+  (error "boom"))
+
+(fn missing-is-business-day [_request]
+  true)
+
+(fn business-calendar-function-provider-dispatches []
+  (local registry (create-provider-registry {}))
+  (registry.register {:id "function-provider"
+                      :version "1.0"
+                      :capabilities [:business-calendar]
+                      :business-calendar function-provider-business-calendar})
+  (local result (registry.business-calendar "holidays" {:jurisdiction "US-FED"}))
+  (assert= result.operation "holidays")
+  (assert= result.jurisdiction "US-FED"))
+
+(fn business-calendar-table-provider-dispatches []
+  (local registry (create-provider-registry {}))
+  (registry.register {:id "table-provider"
+                      :version "1.0"
+                      :capabilities [:business-calendar]
+                      :business-calendar {:is-business-day table-provider-is-business-day}})
+  (local result (registry.business-calendar "is-business-day" {:plain "2026-01-02"}))
+  (assert= result.plain "2026-01-02")
+  (assert= result.business? true))
+
+(fn business-calendar-uses-deterministic-provider-order []
+  (local registry (create-provider-registry {}))
+  (registry.register {:id "later" :version "1.0" :priority 20 :capabilities [:business-calendar]
+                      :business-calendar later-business-calendar})
+  (registry.register {:id "beta" :version "1.0" :priority 10 :capabilities [:business-calendar]
+                      :business-calendar beta-business-calendar})
+  (registry.register {:id "alpha" :version "1.0" :priority 10 :capabilities [:business-calendar]
+                      :business-calendar alpha-business-calendar})
+  (local result (registry.business-calendar "holidays" {}))
+  (assert= result.provider-id "alpha"))
+
+(fn business-calendar-rejects-invalid-operation-and-request []
+  (local registry (create-provider-registry {}))
+  (assert-error #(registry.business-calendar 42 {})
+                "temporal provider business-calendar operation must be a string")
+  (assert-error #(registry.business-calendar "holidays" nil)
+                "temporal provider business-calendar request must be a table"))
+
+(fn business-calendar-prefixes-provider-failures []
+  (local registry (create-provider-registry {}))
+  (registry.register {:id "bad-calendar"
+                      :version "1.0"
+                      :capabilities [:business-calendar]
+                      :business-calendar bad-business-calendar})
+  (assert-error #(registry.business-calendar "holidays" {})
+                "temporal provider bad-calendar business-calendar failed:"))
+
+(fn business-calendar-errors-when-handler-missing []
+  (local registry (create-provider-registry {}))
+  (registry.register {:id "missing"
+                      :version "1.0"
+                      :capabilities [:business-calendar]
+                      :business-calendar {:is-business-day missing-is-business-day}})
+  (assert-error #(registry.business-calendar "holidays" {})
+                "no temporal business-calendar provider handled operation: holidays"))
+
 (table.insert tests {:name "temporal facade exports providers" :fn facade-exports-providers})
 (table.insert tests {:name "orders providers by priority then id" :fn orders-providers})
 (table.insert tests {:name "rejects duplicate provider ids" :fn rejects-duplicate-provider-ids})
@@ -179,6 +260,12 @@
 (table.insert tests {:name "parse composes deterministic candidates and annotates provider ids" :fn parse-composes-candidates})
 (table.insert tests {:name "parse prefixes provider failures" :fn parse-prefixes-provider-failures})
 (table.insert tests {:name "parse rejects hash-shaped and sparse results" :fn parse-rejects-invalid-result-shapes})
+(table.insert tests {:name "business-calendar dispatches to function provider" :fn business-calendar-function-provider-dispatches})
+(table.insert tests {:name "business-calendar dispatches to table provider" :fn business-calendar-table-provider-dispatches})
+(table.insert tests {:name "business-calendar uses deterministic provider order" :fn business-calendar-uses-deterministic-provider-order})
+(table.insert tests {:name "business-calendar rejects invalid operation and request" :fn business-calendar-rejects-invalid-operation-and-request})
+(table.insert tests {:name "business-calendar prefixes provider failures" :fn business-calendar-prefixes-provider-failures})
+(table.insert tests {:name "business-calendar errors when handler missing" :fn business-calendar-errors-when-handler-missing})
 
 (local main
   (fn []
