@@ -129,12 +129,54 @@
                          "invalid calendar field type"
                          "invalid field type should throw"))
 
+(fn seed-era-ranges-are-loud []
+  (local Temporal (require :temporal))
+  (local pre-seed {:fields (fn [_self]
+                            {:year 0
+                             :month 12
+                             :day 31
+                             :hour 0
+                             :minute 0
+                             :second 0
+                             :nanosecond 0})})
+  (assert-error-contains #(Temporal.calendar.from-iso pre-seed {:calendar "gregory"})
+                         "unsupported Gregorian era range"
+                         "Gregorian from-iso before seed era start should throw")
+  (assert-error-contains #(Temporal.calendar.from-iso pre-seed {:calendar "buddhist"})
+                         "unsupported Buddhist era range"
+                         "Buddhist from-iso before seed era start should throw")
+  (assert-error-contains #(Temporal.calendar.to-iso {:kind :temporal-calendar-date-time
+                                                    :calendar "gregory"
+                                                    :era "ce"
+                                                    :year 0
+                                                    :month 12
+                                                    :day 31
+                                                    :hour 0
+                                                    :minute 0
+                                                    :second 0
+                                                    :nanosecond 0})
+                         "unsupported Gregorian era range"
+                         "Gregorian localized date before seed era start should throw")
+  (assert-error-contains #(Temporal.calendar.to-iso {:kind :temporal-calendar-date-time
+                                                    :calendar "buddhist"
+                                                    :era "be"
+                                                    :year 543
+                                                    :month 12
+                                                    :day 31
+                                                    :hour 0
+                                                    :minute 0
+                                                    :second 0
+                                                    :nanosecond 0})
+                         "unsupported Buddhist era range"
+                         "Buddhist localized date before seed era start should throw"))
+
 (table.insert tests {:name "supported calendars are exact" :fn supported-calendars-are-exact})
 (table.insert tests {:name "gregorian round trip" :fn gregorian-round-trip})
 (table.insert tests {:name "buddhist round trip" :fn buddhist-round-trip})
 (table.insert tests {:name "japanese era boundaries" :fn japanese-era-boundaries})
 (table.insert tests {:name "japanese errors are loud" :fn japanese-errors-are-loud})
 (table.insert tests {:name "validation errors are loud" :fn validation-errors-are-loud})
+(table.insert tests {:name "seed era ranges are loud" :fn seed-era-ranges-are-loud})
 
 (local main
   (fn []

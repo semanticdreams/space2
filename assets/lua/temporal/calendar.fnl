@@ -115,6 +115,31 @@
       (set found era)))
   found)
 
+(fn calendar-label [calendar]
+  (if (= calendar "gregory")
+      "Gregorian"
+      (= calendar "buddhist")
+      "Buddhist"
+      calendar))
+
+(fn date-in-era-range? [fields era]
+  (local date (date-key fields.year fields.month fields.day))
+  (local start (parse-iso-date-key era.start_iso))
+  (local end (and era.end_iso (parse-iso-date-key era.end_iso)))
+  (and (>= date start)
+       (if (= end nil)
+           true
+           (<= date end))))
+
+(fn require-iso-in-seed-era [seed calendar fields]
+  (local calendar-data (seed.calendar-data calendar))
+  (var in-range? false)
+  (each [_ era (ipairs calendar-data.eras)]
+    (when (date-in-era-range? fields era)
+      (set in-range? true)))
+  (when (not in-range?)
+    (error (.. "unsupported " (calendar-label calendar) " era range"))))
+
 (fn japanese-era-for-iso [seed fields]
   (local date (date-key fields.year fields.month fields.day))
   (local calendar-data (seed.calendar-data "japanese"))
@@ -129,27 +154,39 @@
       found
       (error "unsupported Japanese era range")))
 
-(fn from-gregory [fields]
+(fn from-gregory [seed fields]
+  (require-iso-in-seed-era seed "gregory" fields)
   (record-from-fields "gregory" "ce" fields.year fields))
 
-(fn to-gregory [plain-date-time record]
+(fn to-gregory [seed plain-date-time record]
   (when (not (= record.era "ce"))
     (error "inconsistent Gregorian era/date fields"))
-  (plain-date-time.from-fields record))
+  (local iso-fields {:year record.year
+                     :month record.month
+                     :day record.day
+                     :hour record.hour
+                     :minute record.minute
+                     :second record.second
+                     :nanosecond record.nanosecond})
+  (require-iso-in-seed-era seed "gregory" iso-fields)
+  (plain-date-time.from-fields iso-fields))
 
-(fn from-buddhist [fields]
+(fn from-buddhist [seed fields]
+  (require-iso-in-seed-era seed "buddhist" fields)
   (record-from-fields "buddhist" "be" (+ fields.year 543) fields))
 
-(fn to-buddhist [plain-date-time record]
+(fn to-buddhist [seed plain-date-time record]
   (when (not (= record.era "be"))
     (error "inconsistent Buddhist era/date fields"))
-  (plain-date-time.from-fields {:year (- record.year 543)
-                                :month record.month
-                                :day record.day
-                                :hour record.hour
-                                :minute record.minute
-                                :second record.second
-                                :nanosecond record.nanosecond}))
+  (local iso-fields {:year (- record.year 543)
+                     :month record.month
+                     :day record.day
+                     :hour record.hour
+                     :minute record.minute
+                     :second record.second
+                     :nanosecond record.nanosecond})
+  (require-iso-in-seed-era seed "buddhist" iso-fields)
+  (plain-date-time.from-fields iso-fields))
 
 (fn from-japanese [seed fields]
   (local era (japanese-era-for-iso seed fields))
@@ -188,18 +225,18 @@
     (local calendar (require-calendar-option seed options))
     (local fields (extract-fields plain))
     (if (= calendar "gregory")
-        (from-gregory fields)
+        (from-gregory seed fields)
         (= calendar "buddhist")
-        (from-buddhist fields)
+        (from-buddhist seed fields)
         (= calendar "japanese")
         (from-japanese seed fields)
         (error (.. "unsupported calendar: " calendar))))
   (fn to-iso [record]
     (local valid-record (validate-record seed record))
     (if (= valid-record.calendar "gregory")
-        (to-gregory plain-date-time valid-record)
+        (to-gregory seed plain-date-time valid-record)
         (= valid-record.calendar "buddhist")
-        (to-buddhist plain-date-time valid-record)
+        (to-buddhist seed plain-date-time valid-record)
         (= valid-record.calendar "japanese")
         (to-japanese seed plain-date-time valid-record)
         (error (.. "unsupported calendar: " valid-record.calendar))))
