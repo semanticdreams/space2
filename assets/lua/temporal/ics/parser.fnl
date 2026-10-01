@@ -176,6 +176,35 @@
     (error (.. "temporal ICS component missing END:" component-name)))
   (values lines raw-lines index))
 
+(fn collect-metadata-component [parsed raw start-index component-name]
+  (local top-level-lines [])
+  (local raw-lines [])
+  (var index (+ start-index 1))
+  (var depth 0)
+  (var done? false)
+  (while (and (<= index (# parsed)) (not done?))
+    (local line (. parsed index))
+    (if (= line.name "BEGIN")
+        (do
+          (table.insert raw-lines (. raw index))
+          (set depth (+ depth 1)))
+        (= line.name "END")
+        (if (and (= depth 0) (= line.value component-name))
+            (set done? true)
+            (> depth 0)
+            (do
+              (table.insert raw-lines (. raw index))
+              (set depth (- depth 1)))
+            (error (.. "unexpected temporal ICS END:" line.value)))
+        (do
+          (table.insert raw-lines (. raw index))
+          (when (= depth 0)
+            (table.insert top-level-lines line))))
+    (set index (+ index 1)))
+  (when (not done?)
+    (error (.. "temporal ICS component missing END:" component-name)))
+  (values top-level-lines raw-lines index))
+
 (fn parse-calendar [Temporal text options]
   (when (not (and Temporal Temporal.recurrence Temporal.recurrence.parse-rrule))
     (error "temporal ICS parser requires Temporal facade"))
@@ -208,7 +237,7 @@
               (set index (- end-index 1)))
             (= line.value "VTIMEZONE")
             (do
-              (local (component-lines component-raw end-index) (collect-component parsed raw-lines index "VTIMEZONE"))
+              (local (component-lines component-raw end-index) (collect-metadata-component parsed raw-lines index "VTIMEZONE"))
               (table.insert calendar.timezones (parse-timezone component-lines component-raw))
               (set index (- end-index 1)))
             (error (.. "unsupported temporal ICS component: " line.value)))

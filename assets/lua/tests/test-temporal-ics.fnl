@@ -212,6 +212,15 @@
   (assert= xprop.name "X-SPACE-COLOR")
   (assert= xprop.value "blue"))
 
+(fn parser-parses-nested-vtimezone-metadata []
+  (local text "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VTIMEZONE\nTZID:America/New_York\nBEGIN:STANDARD\nDTSTART:20261101T020000\nTZOFFSETFROM:-0400\nTZOFFSETTO:-0500\nTZNAME:EST\nEND:STANDARD\nEND:VTIMEZONE\nBEGIN:VEVENT\nUID:nested-zone@example.test\nDTSTART;TZID=America/New_York:20261001T090000\nSUMMARY:Nested timezone metadata\nEND:VEVENT\nEND:VCALENDAR\n")
+  (local calendar (Temporal.ics.parse text))
+  (local timezone (. calendar.timezones 1))
+  (assert= timezone.tzid "America/New_York")
+  (assert= (. timezone.raw-lines 2) "BEGIN:STANDARD")
+  (assert= (. timezone.raw-lines 7) "END:STANDARD")
+  (assert= (. (. calendar.events 1) :uid) "nested-zone@example.test"))
+
 (fn parser-rejects-invalid-calendar-and-event-shapes []
   (assert-error-contains #(Temporal.ics.parse "BEGIN:VCALENDAR\nPRODID:-//Space//Temporal//EN\nBEGIN:VEVENT\nUID:missing-version@example.test\nDTSTART:20261001T090000\nEND:VEVENT\nEND:VCALENDAR\n")
                          "VERSION"
@@ -266,6 +275,8 @@
                      :fn parser-parses-all-required-fixture-families})
 (table.insert tests {:name "parser preserves x properties only under preserve policy"
                      :fn parser-preserves-x-properties-only-under-preserve-policy})
+(table.insert tests {:name "parser parses nested vtimezone metadata"
+                     :fn parser-parses-nested-vtimezone-metadata})
 (table.insert tests {:name "parser rejects invalid calendar and event shapes"
                      :fn parser-rejects-invalid-calendar-and-event-shapes})
 
