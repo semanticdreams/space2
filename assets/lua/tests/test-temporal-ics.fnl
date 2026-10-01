@@ -440,6 +440,13 @@
   (assert= (first-start:to-string) "2026-10-03T09:00:00")
   (assert= (third-start:to-string) "2026-10-05T09:00:00"))
 
+(fn expand-backfills-past-large-exrule-exclusions []
+  (local text "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VEVENT\nUID:large-exrule@example.test\nDTSTART:20261001T090000\nRRULE:FREQ=DAILY\nEXRULE:FREQ=DAILY;COUNT=128\nSUMMARY:Large exclusion prefix\nEND:VEVENT\nEND:VCALENDAR\n")
+  (local occurrences (Temporal.ics.expand (Temporal.ics.parse text) {:zone-id "America/New_York" :limit 1}))
+  (assert= (# occurrences) 1)
+  (local start (. (. (. occurrences 1) :start) :plain))
+  (assert= (start:to-string) "2027-02-06T09:00:00"))
+
 (fn expand-recurrence-includes-dtstart-with-rdate-and-exdate []
   (local rdate-text "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Space//Temporal//EN\nBEGIN:VEVENT\nUID:rdate-only@example.test\nDTSTART:20261001T090000\nRDATE:20261003T090000\nSUMMARY:RDATE only\nEND:VEVENT\nEND:VCALENDAR\n")
   (local rdate-occurrences (Temporal.ics.expand (Temporal.ics.parse rdate-text) {:zone-id "America/New_York"}))
@@ -520,6 +527,8 @@
                      :fn expand-zoned-duration-honors-disambiguation})
 (table.insert tests {:name "expand limit applies after exrule exclusions"
                      :fn expand-limit-applies-after-exrule-exclusions})
+(table.insert tests {:name "expand backfills past large exrule exclusions"
+                     :fn expand-backfills-past-large-exrule-exclusions})
 (table.insert tests {:name "expand recurrence includes dtstart with rdate and exdate"
                      :fn expand-recurrence-includes-dtstart-with-rdate-and-exdate})
 

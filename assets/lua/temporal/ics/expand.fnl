@@ -2,6 +2,7 @@
 
 (local option-keys {:zone-id true :disambiguation true :limit true})
 (local valid-disambiguation {:reject true :earliest true :latest true})
+(local max-backfill-raw-limit 1048576)
 
 (fn positive-integer? [candidate]
   (and (= (type candidate) :number)
@@ -310,10 +311,13 @@
       (do
         (var expanded occurrences)
         (var current-limit raw-limit)
-        (local max-limit (* options.limit 128))
-        (while (and (< (# expanded) options.limit) (< current-limit max-limit))
-          (set current-limit (* current-limit 2))
+        (while (and (< (# expanded) options.limit) (< current-limit max-backfill-raw-limit))
+          (set current-limit (math.min max-backfill-raw-limit (* current-limit 2)))
           (set expanded (safe-recurrence-occurrences Temporal recurrence-set-record event options current-limit)))
+        (when (< (# expanded) options.limit)
+          (error (.. "temporal ICS recurrence expansion exhausted backfill limit "
+                     (tostring max-backfill-raw-limit)
+                     " before producing requested post-exclusion :limit")))
         expanded)))
 
 (fn zdt->plain [Temporal zdt]
