@@ -101,10 +101,11 @@
     :tests.test-fennel-validation-mcp
     :tests.test-launchables
      :tests.test-random
-      :tests.test-temporal
-      :tests.test-temporal-provider-registry
-      :tests.test-temporal-calendar
-     :tests.test-temporal-period
+       :tests.test-temporal
+       :tests.test-temporal-provider-registry
+       :tests.test-temporal-calendar
+       :tests.test-temporal-localization
+      :tests.test-temporal-period
     :tests.test-temporal-intervals
      :tests.test-temporal-parsing-recurrence
       :tests.test-temporal-recurrence-set

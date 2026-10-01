@@ -12,6 +12,7 @@
 (local create-provider-registry (require :temporal/provider-registry))
 (local cldr-seed (require :temporal/cldr-seed))
 (local create-calendar (require :temporal/calendar))
+(local create-localization (require :temporal/localization))
 
 (fn disambiguation-to-core [value]
   (if (= value :reject)
@@ -86,7 +87,9 @@
 (local natural (create-natural {:recurrence recurrence}))
 (local providers (create-provider-registry {}))
 (local calendar (create-calendar {:plain-date-time base.plain-date-time
-                                  :seed cldr-seed}))
+                                   :seed cldr-seed}))
+(local localization (create-localization {:calendar calendar
+                                          :seed cldr-seed}))
 (local interval (create-interval {:standard standard
                                   :period period
                                   :duration base.duration
@@ -104,10 +107,11 @@
                  :pattern (create-pattern base)
                  :recurrence recurrence
                  :recurrence-set recurrence-set
-                  :expression expression
-                  :natural natural
-                  :calendar calendar
-                  :providers providers})
+                 :expression expression
+                 :natural natural
+                 :calendar calendar
+                 :localization localization
+                 :providers providers})
 
 (local temporal-with-intervals {:standard standard
                                 :interval interval
