@@ -11,8 +11,10 @@
 (local create-natural (require :temporal/natural))
 (local create-provider-registry (require :temporal/provider-registry))
 (local cldr-seed (require :temporal/cldr-seed))
+(local holiday-seed (require :temporal/holiday-seed))
 (local create-calendar (require :temporal/calendar))
 (local create-localization (require :temporal/localization))
+(local create-business-calendar (require :temporal/business-calendar))
 
 (fn disambiguation-to-core [value]
   (if (= value :reject)
@@ -90,6 +92,8 @@
                                    :seed cldr-seed}))
 (local localization (create-localization {:calendar calendar
                                           :seed cldr-seed}))
+(local business-calendar (create-business-calendar {:plain-date-time base.plain-date-time
+                                                    :seed holiday-seed}))
 (local interval (create-interval {:standard standard
                                   :period period
                                   :duration base.duration
@@ -111,6 +115,7 @@
                  :natural natural
                  :calendar calendar
                  :localization localization
+                 :business-calendar business-calendar
                  :providers providers})
 
 (local temporal-with-intervals {:standard standard

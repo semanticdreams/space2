@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "us-federal-holidays-seed",
+  "provider_id": "space.temporal.us-federal-holidays",
+  "supported_jurisdictions": ["US-FED"],
+  "year_start": 2026,
+  "year_end": 2027,
+  "runtime_network_fetch_allowed": false,
+  "source": "U.S. federal holiday rules from 5 U.S.C. § 6103 plus OPM federal holiday calendars for 2026 and 2027.",
+  "provenance": "U.S. Government/public-domain source material curated into a deterministic checked-in seed snapshot.",
+  "generator_command": "python3 scripts/generate-temporal-us-federal-holidays.py --start-year 2026 --end-year 2027 --output assets/temporal/holidays/us-federal-seed/holidays.json"
+}

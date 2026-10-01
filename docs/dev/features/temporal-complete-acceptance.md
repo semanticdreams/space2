@@ -11,7 +11,7 @@ This matrix is the closeout contract for the complete temporal library program. 
 | ISO intervals | `Temporal.interval`, `Temporal.repeating-interval` | Track 6 grammar tests for `start/end`, `start/P...`, `P.../end`, `start/PT...`, and `PT.../end`; instant, plain date-time, and explicit bracketed-IANA zoned interval tests; half-open invariant tests; exact-duration versus calendar-period repeat-step tests; DST `:disambiguation` tests; final acceptance smoke in `tests.test-temporal-intervals`; compile, constraints, focused interval suite, broader `make test`, and PR CI | Full ISO intervals and repeating intervals |
 | ICS/iCalendar | `Temporal.ics` | selected-corpus fixture corpus, parse/export round trips, VTIMEZONE metadata tests, override/cancellation tests, invalid ICS diagnostics, focused `tests.test-temporal-ics` suite, constraints gate, and PR CI requirement | ICS/iCalendar interoperability |
 | Localization and calendars | `Temporal.localization`, `Temporal.calendar` | selected CLDR seed packaging tests with `python3 -m pytest scripts/tests/test_temporal_dependency_manifests.py -q`; Space Fennel compile check; `make constraints`; focused `tests.test-temporal-calendar` conversion suite; focused `tests.test-temporal-localization` format/parse suite | ICU/CLDR localization and non-Gregorian calendars |
-| Business calendars | `Temporal.business-calendar` | holiday fixture tests, observed-holiday tests, business-day arithmetic tests | Business and holiday calendars |
+| Business calendars | `Temporal.business-calendar`, `Temporal.providers.business-calendar` | packaged `US-FED` holiday seed validator tests; Space Fennel compile check; `make constraints`; focused `tests.test-temporal-business-calendar` loader/facade suite; focused `tests.test-temporal-provider-registry` dispatcher coverage; fast-suite registration | Business and holiday calendars |
 | Natural language | `Temporal.natural` | locale phrase corpus, candidate/ambiguity tests, missing-context diagnostics | Broad natural-language parsing |
 | Timestamp migrations | `Temporal.migrations` and persistence call sites | schema inventory, idempotent migration tests, malformed-data diagnostics | Persisted timestamp migrations |
 | Runtime scheduler | `RuntimeScheduler` and timer compatibility APIs | fixed-clock tests, recurrence scheduling tests, cancellation/lifecycle tests | Runtime timer and scheduler redesign |
@@ -38,6 +38,32 @@ SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test
 ```
 
 The focused interval suite includes a final Track 6 smoke test that parses and formats instant `start/PT...`, plain date-time `start/P...`, concrete zoned `start/end`, rejects `P1D` for instant intervals, and verifies repeating calendar-period step semantics across a month-end clamp.
+
+## Track 9 business-calendar acceptance evidence
+
+The business and holiday calendars track is accepted locally when these commands
+pass in order:
+
+```bash
+make fennel-check
+make constraints
+python3 -m pytest scripts/tests/test_temporal_dependency_manifests.py -q
+SPACE_DISABLE_AUDIO=1 SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data \
+SPACE_ASSETS_PATH=$(pwd)/assets \
+FENNEL_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" \
+FENNEL_MACRO_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" \
+./build/space -m tests.test-temporal-business-calendar:main
+SPACE_DISABLE_AUDIO=1 SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data \
+SPACE_ASSETS_PATH=$(pwd)/assets \
+FENNEL_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" \
+FENNEL_MACRO_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" \
+./build/space -m tests.test-temporal-provider-registry:main
+```
+
+The focused business-calendar suite covers the packaged `US-FED` 2026-2027 seed,
+defensive loader/facade return values, observed holidays, weekend exclusion,
+zero/positive/negative business-day addition, half-open business-day counts, and
+loud failures for unsupported data or invalid options.
 
 ## Maintenance rule
 

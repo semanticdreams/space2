@@ -10,6 +10,15 @@
       "manifest": "assets/temporal/icu/cldr-seed/manifest.json",
       "runtime_network_fetch_allowed": false,
       "files": ["locales.json", "calendars.json"]
+    },
+    {
+      "id": "us-federal-holidays-seed",
+      "provider_id": "space.temporal.us-federal-holidays",
+      "version": "US-FED-2026-2027-seed",
+      "root": "assets/temporal/holidays/us-federal-seed",
+      "manifest": "assets/temporal/holidays/us-federal-seed/manifest.json",
+      "runtime_network_fetch_allowed": false,
+      "files": ["holidays.json"]
     }
   ]
 }

@@ -179,11 +179,44 @@
             (error (.. "temporal provider " provider.id " parse failed: " (tostring result))))))
     out)
 
+  (fn business-calendar [operation request]
+    (assert (= (type operation) :string) "temporal provider business-calendar operation must be a string")
+    (assert (= (type request) :table) "temporal provider business-calendar request must be a table")
+    (var handled? false)
+    (var output nil)
+    (each [_ provider (ipairs (ordered-providers))]
+      (when (and (not handled?) (capability-present? provider :business-calendar))
+        (local dispatcher provider.business-calendar)
+        (if (= (type dispatcher) :function)
+            (do
+              (local (ok result) (pcall dispatcher operation request))
+              (if ok
+                  (do
+                    (set handled? true)
+                    (set output result))
+                  (error (.. "temporal provider " provider.id " business-calendar failed: " (tostring result)))))
+            (= (type dispatcher) :table)
+            (do
+              (local handler (. dispatcher operation))
+              (when (not (= handler nil))
+                (assert (= (type handler) :function)
+                        (.. "temporal provider " provider.id " business-calendar handler must be a function: " operation))
+                (local (ok result) (pcall handler request))
+                (if ok
+                    (do
+                      (set handled? true)
+                      (set output result))
+                    (error (.. "temporal provider " provider.id " business-calendar failed: " (tostring result)))))))))
+    (if handled?
+        output
+        (error (.. "no temporal business-calendar provider handled operation: " operation))))
+
   {:register register
    :unregister unregister
    :list list
    :all all
-   :parse parse})
+   :parse parse
+   :business-calendar business-calendar})
 
 (fn create [_deps]
   (local registry (create-registry))
@@ -191,6 +224,7 @@
    :unregister registry.unregister
    :list registry.list
    :all registry.all
-   :parse registry.parse})
+   :parse registry.parse
+   :business-calendar registry.business-calendar})
 
 create
