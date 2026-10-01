@@ -1198,6 +1198,15 @@
                                  (layout:drop)))
             widget)))
 
+(fn tracked-full-view [state]
+    (fn [_node _opts]
+        (set state.opened (+ (or state.opened 0) 1))
+        (fn [_ctx]
+            (local layout (Layout {:name "tracked-full-graph-view"}))
+            {:layout layout
+             :drop (fn [_self]
+                     (layout:drop))})))
+
 (fn graph-expanded-card-uses-preview-and-measures-child []
     (with-temp-data-dir
         (fn [_root]
@@ -1261,6 +1270,49 @@
             (collapse-button:on-click {})
             (assert (not (. view.points node :_card-size)) "Collapse button should collapse expanded card")
             (assert (not (. view.pinned node)) "Collapsing should restore unpinned state")
+            (view:drop)
+            (graph:drop))))
+
+(fn graph-enter-expands-focused-node-inline-idempotently []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local graph (make-test-graph-map))
+            (local state {:measure (glm.vec3 73 37 0)})
+            (local full-view-state {:opened 0})
+            (local node (Graph.GraphNode {:key "enter-preview-node"
+                                          :label "Enter Preview"
+                                          :view (tracked-full-view full-view-state)
+                                          :preview (tracked-preview state)}))
+            (graph:add-node node {:position (glm.vec3 0 0 0)})
+            (local view (GraphView {:graph-map graph
+                                    :ctx ctx}))
+            (local point (. view.points node))
+            (local focus-node (. view.focus-nodes node))
+            (assert focus-node "GraphView should create a focus node for graph nodes")
+            (focus-node:request-focus)
+            (local handled? (ctx.focus.manager:activate-focused-from-payload {:mod 0}))
+            (assert handled? "Enter activation should be handled by graph node focus")
+            (local card (. view.points node))
+            (assert (not (= card point)) "Enter should replace compact point with expanded card")
+            (assert card._card-size "Enter should expand the inline preview card")
+            (assert (= state.built-node node) "Enter expansion should build the node preview")
+            (assert (= full-view-state.opened 0) "Enter should not open the full node view")
+            (assert (= (. view.focus-nodes node) focus-node)
+                    "Graph node focus association should survive point-to-card replacement")
+            (local focused (ctx.focus.manager:get-focused-node))
+            (assert (= focused focus-node)
+                    "Focused graph node should remain focused after preview expansion")
+            (ctx.focus.manager:activate-focused-from-payload {:mod 0})
+            (assert (= (. view.points node) card)
+                    "Second Enter should leave the existing card expanded")
+            (assert card._card-size "Second Enter should not collapse the expanded card")
+            (assert (= full-view-state.opened 0)
+                    "Second Enter should still not open the full node view")
+            (local open-button (. card.header-bar.children 4 :element))
+            (open-button:on-click {})
+            (assert (= full-view-state.opened 1)
+                    "Card header open button should still open the full node view")
             (view:drop)
             (graph:drop))))
 
@@ -1484,18 +1536,14 @@
             (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :view-target target}))
-            (var first-opened 0)
-            (var second-opened 0)
+            (local first-state {})
+            (local second-state {})
             (local first (Graph.GraphNode {:key "focus-swap"
-                                           :view (fn [_node]
-                                                     (set first-opened (+ first-opened 1))
-                                                     (fn [_ctx]
-                                                         {:layout (Layout {:name "first-focus-view"})}))}))
+                                           :preview (tracked-preview first-state)
+                                           :view (tracked-full-view first-state)}))
             (local second (Graph.GraphNode {:key "focus-swap"
-                                            :view (fn [_node]
-                                                      (set second-opened (+ second-opened 1))
-                                                      (fn [_ctx]
-                                                          {:layout (Layout {:name "second-focus-view"})}))}))
+                                            :preview (tracked-preview second-state)
+                                            :view (tracked-full-view second-state)}))
             (graph:add-node first {:position (glm.vec3 10 20 0)})
             (local focus-node (. view.focus-nodes first))
             (assert focus-node "Fixture should create focus node for original graph node")
@@ -1508,10 +1556,15 @@
             (assert (= bounds.position.x 6.0)
                     "Compact focus bounds should be based on replacement point position and size")
             (ctx.focus.manager:activate-focused {})
-            (assert (= first-opened 0)
+            (local card (. view.points second))
+            (assert card._card-size
+                    "Replacement focus activation should expand replacement preview")
+            (assert (= second-state.built-node second)
+                    "Replacement focus activation should build replacement preview")
+            (assert (= (or first-state.opened 0) 0)
                     "Replacement focus activation should not open stale original node")
-            (assert (= second-opened 1)
-                    "Replacement focus activation should open replacement node")
+            (assert (= (or second-state.opened 0) 0)
+                    "Replacement focus activation should not open replacement full view")
             (view:drop)
             (graph:drop))))
 
@@ -3615,6 +3668,8 @@
 (table.insert tests {:name "GraphView expands node inline on double click" :fn graph-expands-node-inline-on-double-click})
 (table.insert tests {:name "GraphView expanded card uses preview and measures child"
                       :fn graph-expanded-card-uses-preview-and-measures-child})
+(table.insert tests {:name "GraphView Enter expands focused node inline idempotently"
+                       :fn graph-enter-expands-focused-node-inline-idempotently})
 (table.insert tests {:name "Graph expanded card header shows truncated node label" :fn graph-expanded-card-header-shows-truncated-node-label})
 (table.insert tests {:name "GraphView expanded toggle preserves selection"
                       :fn graph-expanded-toggle-preserves-selection})
