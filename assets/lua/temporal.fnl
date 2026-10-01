@@ -6,6 +6,7 @@
 (local create-pattern (require :temporal/pattern))
 (local create-recurrence (require :temporal/recurrence))
 (local create-recurrence-set (require :temporal/recurrence-set))
+(local create-ics (require :temporal/ics))
 (local expression (require :temporal/expression))
 (local create-natural (require :temporal/natural))
 (local create-provider-registry (require :temporal/provider-registry))
@@ -87,25 +88,29 @@
                                   :duration base.duration
                                   :plain-date-time base.plain-date-time
                                   :zoned-date-time base.zoned-date-time}))
+(local temporal {:duration base.duration
+                 :instant base.instant
+                 :plain-date-time base.plain-date-time
+                 :zoned-date-time base.zoned-date-time
+                 :clock base.clock
+                 :tzdb base.tzdb
+                 :period period
+                 :standard standard
+                 :interval interval
+                 :pattern (create-pattern base)
+                 :recurrence recurrence
+                 :recurrence-set recurrence-set
+                 :expression expression
+                 :natural natural
+                 :providers providers})
+
 (local temporal-with-intervals {:standard standard
                                 :interval interval
                                 :period period
                                 :plain-date-time base.plain-date-time
                                 :zoned-date-time base.zoned-date-time})
 
-{:duration base.duration
- :instant base.instant
- :plain-date-time base.plain-date-time
- :zoned-date-time base.zoned-date-time
- :clock base.clock
-  :tzdb base.tzdb
-  :period period
-  :standard standard
-  :interval interval
-  :repeating-interval (create-repeating-interval temporal-with-intervals)
-  :pattern (create-pattern base)
-  :recurrence recurrence
-  :recurrence-set recurrence-set
-  :expression expression
- :natural natural
- :providers providers}
+(set temporal.repeating-interval (create-repeating-interval temporal-with-intervals))
+(set temporal.ics (create-ics temporal))
+
+temporal

@@ -1,0 +1,11 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Space//Temporal//EN
+BEGIN:VEVENT
+UID:folded-escaped@example.test
+DTSTART:20261001T090000
+SUMMARY:This summary is deliberately long so it can be folded across a line
+ continuation
+DESCRIPTION:Line one\nLine two with comma\, semicolon\; and backslash\\
+END:VEVENT
+END:VCALENDAR
