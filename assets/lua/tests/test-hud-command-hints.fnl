@@ -957,6 +957,42 @@
   (set app.hud original-hud)
   (set-app-states! original-states))
 
+(fn long-command-hint-text-is-clipped-to-rail-safe-overlay []
+  (local original-states app.states)
+  (local original-hud app.hud)
+  (local states (States))
+  (states:add-state
+    :normal
+    (state-with-hints
+      :normal
+      [(entry "space" "this-single-line-command-label-is-intentionally-long-enough-to-run-past-the-middle-overlay-allocation-without-layout-clipping" {:priority 10})]))
+  (states:set-state :normal)
+  (set-app-states! states)
+  (local hud
+    (build-test-hud
+      states
+      {:right-dock-builder (fixed-widget "right-rail" (glm.vec3 5 4 0))}))
+  (set app.hud hud)
+  (assert (hud.command-hints:toggle-overlay)
+          "overlay should open before clipped text bounds check")
+  (hud:update)
+  (local overlay hud.command-hints.overlay-element)
+  (local rail hud.entity.right-dock-root)
+  (local clip (and overlay overlay.layout overlay.layout.clip-region))
+  (local bounds (and clip clip.bounds))
+  (assert bounds
+          "command hints overlay should establish a layout clip region for long rendered text")
+  (local clip-right (+ bounds.position.x bounds.size.x))
+  (local rail-left rail.layout.position.x)
+  (assert (<= clip-right rail-left)
+          (.. "command hints text clip should stay left of the right rail; clip-right "
+              clip-right
+              " rail-left "
+              rail-left))
+  (hud:drop)
+  (set app.hud original-hud)
+  (set-app-states! original-states))
+
 (fn make-icons-stub []
   (local glyph {:advance 1})
   (local font {:metadata {:metrics {:ascender 1 :descender -1}
@@ -1074,9 +1110,11 @@
 (table.insert tests {:name "Collapsed strip preserves room for the F1 toggle"
                       :fn collapsed-strip-reserves-visible-room-for-f1-toggle})
 (table.insert tests {:name "Overlay right edge stays left of right rail"
-                     :fn overlay-right-edge-stays-left-of-right-rail})
+                      :fn overlay-right-edge-stays-left-of-right-rail})
+(table.insert tests {:name "Long command hint text is clipped to rail-safe overlay"
+                     :fn long-command-hint-text-is-clipped-to-rail-safe-overlay})
 (table.insert tests {:name "Overlay may overlap expanded sidebar panel but not rail"
-                     :fn overlay-may-overlap-expanded-sidebar-panel-but-not-rail})
+                      :fn overlay-may-overlap-expanded-sidebar-panel-but-not-rail})
 
 (local main
   (fn []

@@ -265,29 +265,29 @@
 (fn toggle-key-payload? [payload]
   (= (and payload payload.key) SDLK_F1))
 
+(fn command-hints-card-builder [content]
+  (fn build-content [_ctx]
+    content)
+  (fn build-card [inner-ctx]
+    ((Card
+       {:child
+        (Padding {:edge-insets [0.6 0.45]
+                  :child build-content})})
+     inner-ctx)))
+
 (fn overlay-builder [manager]
+  (local ScrollArea (require :scroll-area))
   (fn build [ctx]
     (var text-entity nil)
     (local content
       ((Text {:text (overlay-text manager.sections)}) ctx))
     (set text-entity content)
-    (local card-builder
-      (fn [inner-ctx]
-        ((Card
-           {:child
-            (Padding {:edge-insets [0.6 0.45]
-                      :child (fn [_] content)})})
-         inner-ctx)))
-    (local card (card-builder ctx))
-    (set card.set-text
+    (local clipped ((ScrollArea {:name "command-hints-clip"
+                                 :child (command-hints-card-builder content)}) ctx))
+    (set clipped.set-text
          (fn [_self text]
            (text-entity:set-text text)))
-    card))
-
-
-
-
-
+    clipped))
 
 (fn passive-event? [event-name]
   (or (= event-name :updated)
