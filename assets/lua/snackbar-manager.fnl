@@ -14,6 +14,22 @@
     (set (. copy key) value))
   copy)
 
+(fn copy-action-descriptor [action]
+  (assert (= (type action) :table) "SnackbarManager.show actions must be tables")
+  (assert (or action.label action.text) "SnackbarManager.show actions require :label or :text")
+  (local copy {})
+  (each [key value (pairs action)]
+    (set (. copy key) value))
+  copy)
+
+(fn copy-actions [actions]
+  (when actions
+    (assert (= (type actions) :table) "SnackbarManager.show actions must be an array")
+    (local copy [])
+    (each [_ action (ipairs actions)]
+      (table.insert copy (copy-action-descriptor action)))
+    copy))
+
 (fn copy-entries [source]
   (local target [])
   (each [_ entry (ipairs source)]
@@ -37,7 +53,10 @@
   (assert (not state.dropped?) "SnackbarManager is dropped"))
 
 (fn generated-id [state]
-  (local id (.. "snackbar-" state.next-id))
+  (var id (.. "snackbar-" state.next-id))
+  (while (. state.handles id)
+    (set state.next-id (+ state.next-id 1))
+    (set id (.. "snackbar-" state.next-id)))
   (set state.next-id (+ state.next-id 1))
   id)
 
@@ -78,10 +97,11 @@
    :text text
    :content-builder request.content-builder
    :variant (if (= request.variant nil) :info request.variant)
-   :duration-ms (if (= request.duration-ms nil)
-                    state.policy.duration-ms
-                    request.duration-ms)
-   :metadata request.metadata})
+    :duration-ms (if (= request.duration-ms nil)
+                     state.policy.duration-ms
+                     request.duration-ms)
+    :actions (copy-actions request.actions)
+    :metadata request.metadata})
 
 (fn resolve-id [id-or-handle]
   (if (and (= (type id-or-handle) :table) id-or-handle.id)
@@ -134,6 +154,8 @@
 (fn show-entry [state manager request]
   (assert-active state)
   (local entry (normalize-entry state request))
+  (assert (not (. state.handles entry.id))
+          (.. "SnackbarManager.show duplicate live id: " (tostring entry.id)))
   (local handle (make-handle manager entry))
   (set (. state.handles entry.id) handle)
   (if (< (length state.visible) state.max-visible)
