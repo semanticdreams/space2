@@ -81,20 +81,23 @@
     any-active?)
   {:cancel cancel :drop cancel :active? active? :state state})
 
-(fn insert-job [scheduler kind delay-ns callback extra]
+(fn insert-job-at [scheduler kind deadline-ns callback extra]
   (local id scheduler.next-id)
   (set scheduler.next-id (+ scheduler.next-id 1))
   (local job {:id id
-              :kind kind
-              :deadline-ns (+ scheduler.now-ns delay-ns)
-              :created-order id
-              :active? true
-              :callback callback})
+               :kind kind
+               :deadline-ns deadline-ns
+               :created-order id
+               :active? true
+               :callback callback})
   (when extra
     (each [key value (pairs extra)]
       (tset job key value)))
   (tset scheduler.jobs id job)
   (create-handle scheduler job))
+
+(fn insert-job [scheduler kind delay-ns callback extra]
+  (insert-job-at scheduler kind (+ scheduler.now-ns delay-ns) callback extra))
 
 (fn due-job? [scheduler job]
   (and job.active? (<= job.deadline-ns scheduler.now-ns)))
@@ -113,15 +116,26 @@
         (tset scheduler.jobs job.id nil)
         (job:callback))))
 
+(fn earlier-job? [left right]
+  (if (< left.deadline-ns right.deadline-ns)
+      true
+      (> left.deadline-ns right.deadline-ns)
+      false
+      (< left.created-order right.created-order)))
+
+(fn earliest-due-job [scheduler]
+  (var earliest nil)
+  (each [_id job (pairs scheduler.jobs)]
+    (when (and (due-job? scheduler job)
+               (if (= earliest nil) true (earlier-job? job earliest)))
+      (set earliest job)))
+  earliest)
+
 (fn drain-due [scheduler]
-  (var keep-going? true)
-  (while keep-going?
-    (local due (sorted-jobs scheduler.jobs #(due-job? scheduler $1)))
-    (if (= (# due) 0)
-        (set keep-going? false)
-        (each [_ job (ipairs due)]
-          (when (and job.active? (. scheduler.jobs job.id))
-            (execute-job scheduler job))))))
+  (var job (earliest-due-job scheduler))
+  (while job
+    (execute-job scheduler job)
+    (set job (earliest-due-job scheduler))))
 
 (fn schedule-once [self opts]
   (local job-options (table-or-empty opts))
@@ -171,17 +185,17 @@
   (local group-box {:group nil})
   (each [index occurrence (ipairs occurrences)]
     (local scheduled-at (occurrence:instant))
-    (local delay-ns (duration->nanoseconds (scheduled-at:since self.start-instant)
-                                           "schedule-recurrence occurrence"))
+    (local deadline-ns (duration->nanoseconds (scheduled-at:since self.start-instant)
+                                              "schedule-recurrence occurrence"))
     (table.insert handles
-                  (insert-job self
-                              :recurrence
-                              delay-ns
-                              (make-recurrence-callback group-box
-                                                        job-options.callback
-                                                        scheduled-at
-                                                        index)
-                              {:scheduled-at scheduled-at :occurrence-index index})))
+                  (insert-job-at self
+                                 :recurrence
+                                 deadline-ns
+                                 (make-recurrence-callback group-box
+                                                           job-options.callback
+                                                           scheduled-at
+                                                           index)
+                                 {:scheduled-at scheduled-at :occurrence-index index})))
   (set group-box.group (create-group-handle handles))
   group-box.group)
 

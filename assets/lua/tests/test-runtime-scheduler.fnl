@@ -47,6 +47,20 @@
   (scheduler:advance (duration-ms 350))
   (assert (= (length calls) 3) "interval should fire once per missed interval"))
 
+(fn interval-catchup-recomputes-before-later-deadlines []
+  (local scheduler (RuntimeScheduler.create {:clock (fixed-clock "2026-01-01T00:00:00Z")}))
+  (local calls [])
+  (scheduler:schedule-every {:interval (duration-ms 10)
+                             :callback (record-callback calls "a")})
+  (scheduler:schedule-once {:delay (duration-ms 30)
+                            :callback (record-callback calls "b")})
+  (scheduler:advance (duration-ms 30))
+  (assert (= (# calls) 4) "interval catch-up and one-shot should all fire")
+  (assert (= (. calls 1) "a") "first interval deadline should fire first")
+  (assert (= (. calls 2) "a") "rescheduled earlier interval should fire before later one-shot")
+  (assert (= (. calls 3) "a") "equal-deadline interval should keep creation-order priority")
+  (assert (= (. calls 4) "b") "later-created equal-deadline one-shot should fire last"))
+
 (fn equal-deadlines-fire-in-creation-order []
   (local scheduler (RuntimeScheduler.create {:clock (fixed-clock "2026-01-01T00:00:00Z")}))
   (local calls [])
@@ -159,10 +173,30 @@
   (assert (= (. calls 2 :index) 2) "second recurrence payload should have index 2")
   (assert (= (. calls 2 :scheduled-at) "2026-01-01T00:00:02Z") "second recurrence scheduled-at should be public"))
 
+(fn recurrence-scheduled-after-advance-keeps-absolute-deadline []
+  (local scheduler (RuntimeScheduler.create {:clock (fixed-clock "2026-01-01T00:00:00Z")}))
+  (local calls [])
+  (local recurrence-set
+    (Temporal.recurrence-set.from {:dtstart (plain "2026-01-01T00:00:00")
+                                   :rdates [(plain "2026-01-01T00:00:02")]}))
+  (scheduler:advance (duration-ms 1000))
+  (scheduler:schedule-recurrence {:recurrence-set recurrence-set
+                                  :zone-id "UTC"
+                                  :limit 1
+                                  :callback (fn [payload]
+                                              (table.insert calls (payload.scheduled-at:to-string)))})
+  (scheduler:advance (duration-ms 999))
+  (assert (= (# calls) 0) "recurrence should wait until the absolute occurrence deadline")
+  (scheduler:advance (duration-ms 1))
+  (assert (= (# calls) 1) "recurrence should fire at absolute scheduler time")
+  (assert (= (. calls 1) "2026-01-01T00:00:02Z") "recurrence should keep scheduled-at payload"))
+
 (table.insert tests {:name "RuntimeScheduler one-shot fixed-clock fire"
                      :fn schedule-once-fires-with-fixed-clock})
 (table.insert tests {:name "RuntimeScheduler interval catches up in deadline order"
                      :fn interval-catches-up-in-deadline-order})
+(table.insert tests {:name "RuntimeScheduler interval catch-up recomputes before later deadlines"
+                     :fn interval-catchup-recomputes-before-later-deadlines})
 (table.insert tests {:name "RuntimeScheduler equal deadlines fire in creation order"
                      :fn equal-deadlines-fire-in-creation-order})
 (table.insert tests {:name "RuntimeScheduler cancel before due prevents callback"
@@ -181,6 +215,8 @@
                      :fn recurrence-requires-zone-id})
 (table.insert tests {:name "RuntimeScheduler recurrence fires finite occurrences in order with payload"
                      :fn recurrence-fires-finite-occurrences-in-order-with-payload})
+(table.insert tests {:name "RuntimeScheduler recurrence scheduled after advance keeps absolute deadline"
+                     :fn recurrence-scheduled-after-advance-keeps-absolute-deadline})
 
 (local main
   (fn []
