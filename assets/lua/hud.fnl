@@ -1,7 +1,8 @@
 (local glm (require :glm))
 (local {: Layout : LayoutRoot} (require :layout))
 (local BuildContext (require :build-context))
-(local HudLayout (require :hud-layout)) (local Snackbar (require :snackbar))
+(local HudLayout (require :hud-layout))
+(local Snackbar (require :snackbar))
 (local viewport-utils (require :viewport-utils))
 (local Rectangle (require :rectangle))
 (local Padding (require :padding))
@@ -60,6 +61,14 @@
   (fn [ctx]
     ((Stack {:children []}) ctx)))
 
+(fn make-snackbar-scope-options [ctx]
+  (local snackbar-theme (and ctx.theme ctx.theme.snackbar))
+  (local options {:theme {:snackbar snackbar-theme}})
+  (when snackbar-theme
+    (each [key value (pairs snackbar-theme)]
+      (set (. options key) value)))
+  options)
+
 (fn Hud [opts]
   (local options (or opts {}))
   (local layout-root (LayoutRoot))
@@ -112,7 +121,10 @@
 
   (set ctx.pointer-target self)
   (set ctx.panel-target self)
-  (apply-active-theme ctx) (local snackbar-scope (Snackbar.create-scope {:theme {:snackbar (and ctx.theme ctx.theme.snackbar)}})) (set self.snackbar-scope snackbar-scope) (set self.snackbar-manager snackbar-scope.manager)
+  (apply-active-theme ctx)
+  (local snackbar-scope (Snackbar.create-scope (make-snackbar-scope-options ctx)))
+  (set self.snackbar-scope snackbar-scope)
+  (set self.snackbar-manager snackbar-scope.manager)
 
   (fn normalize-movable-entry [_self entry]
     (if (not entry)
@@ -526,7 +538,12 @@
         (self:attach-entity nil)))
 
   (fn build-default [self opts]
-    (local options {}) (each [key value (pairs (if opts opts {}))] (set (. options key) value)) (when (not (= options.snackbar-host-builder false)) (set options.snackbar-host-builder self.snackbar-scope.host-builder)) (self:build (HudLayout.make-hud-builder options)))
+    (local options {})
+    (each [key value (pairs (if opts opts {}))]
+      (set (. options key) value))
+    (when (not (= options.snackbar-host-builder false))
+      (set options.snackbar-host-builder self.snackbar-scope.host-builder))
+    (self:build (HudLayout.make-hud-builder options)))
 
   (fn remove-panel-child [self element]
     (local wrapper (resolve-panel-wrapper element))
@@ -808,7 +825,10 @@
     (set self.float nil)
     (set self.overlay-root nil)
     (set self.middle-overlay-root nil)
-    (when self.snackbar-scope (self.snackbar-scope:drop) (set self.snackbar-scope nil)) (when (and self.focus-manager self.focus-scope)
+    (when self.snackbar-scope
+      (self.snackbar-scope:drop)
+      (set self.snackbar-scope nil))
+    (when (and self.focus-manager self.focus-scope)
       (self.focus-manager:detach self.focus-scope)
       (set self.focus-scope nil)))
 
@@ -925,7 +945,13 @@
   (set self.unregister-entity unregister-entity)
   (set self.attach-entity attach-entity)
   (set self.build build)
-  (set self.build-default build-default) (set self.show-snackbar (fn [self request] (self.snackbar-manager:show request))) (set self.dismiss-snackbar (fn [self id-or-handle reason] (self.snackbar-manager:dismiss id-or-handle reason)))
+  (set self.build-default build-default)
+  (set self.show-snackbar
+       (fn [self request]
+         (self.snackbar-manager:show request)))
+  (set self.dismiss-snackbar
+       (fn [self id-or-handle reason]
+         (self.snackbar-manager:dismiss id-or-handle reason)))
   (set self.drop drop)
   (set self.update-root-transform update-root-transform)
   (set self.get-view-matrix get-view-matrix)

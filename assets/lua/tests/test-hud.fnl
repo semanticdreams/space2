@@ -246,6 +246,35 @@
   (assert (and err (string.find (tostring err) "SnackbarManager is dropped" 1 true))
           "Dropped snackbar manager should report its dropped state"))
 
+(fn hud-default-snackbar-manager-uses-active-theme-policy []
+  (local original-engine app.engine)
+  (local original-themes app.themes)
+  (set app.engine (or app.engine {}))
+  (set app.themes {:get-active-theme (fn []
+                                       {:snackbar {:max-visible 1
+                                                   :duration-ms 123456}})})
+  (local hud (Hud {}))
+  (local first (hud:show-snackbar {:text "First" :persistent? true}))
+  (local second (hud:show-snackbar {:text "Second" :persistent? true}))
+  (local timed (hud:show-snackbar {:text "Timed"}))
+  (local visible (hud.snackbar-manager:visible-entries))
+  (local queued (hud.snackbar-manager:queued-entries))
+  (assert (= (length visible) 1)
+          "Active snackbar theme max-visible should limit HUD manager visibility")
+  (assert (= (. (. visible 1) :id) first.id)
+          "The first HUD snackbar should remain visible under max-visible 1")
+  (assert (= (length queued) 2)
+          "Additional HUD snackbars should queue under active snackbar max-visible policy")
+  (assert (= (. (. queued 1) :id) second.id)
+          "The second HUD snackbar should be queued by max-visible 1")
+  (assert (= (. (. queued 2) :id) timed.id)
+          "The timed HUD snackbar should be queued behind the second entry")
+  (assert (= (. (. queued 2) :duration-ms) 123456)
+          "Active snackbar theme duration-ms should become the HUD manager default duration")
+  (hud:drop)
+  (set app.themes original-themes)
+  (set app.engine original-engine))
+
 (table.insert tests {:name "Hud adaptive scaling keeps reference scale at 1080p"
                      :fn adaptive-hud-keeps-reference-scale-at-1080p})
 (table.insert tests {:name "Hud adaptive scaling grows at 1200p"
@@ -265,7 +294,9 @@
 (table.insert tests {:name "Hud overlay requires builder"
                      :fn hud-overlay-requires-builder})
 (table.insert tests {:name "Hud default snackbar scope and lifecycle"
-                     :fn hud-default-snackbar-scope-and-lifecycle})
+                      :fn hud-default-snackbar-scope-and-lifecycle})
+(table.insert tests {:name "Hud default snackbar manager uses active theme policy"
+                     :fn hud-default-snackbar-manager-uses-active-theme-policy})
 
 (local main
   (fn []
