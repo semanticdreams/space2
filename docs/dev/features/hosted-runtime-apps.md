@@ -136,6 +136,21 @@ The core entry API does not add a new required method for every game feature.
 
 Hosts pause and step scheduler lanes. Apps register pausable work with `host.scheduler`. Apps expose state through `host.inspectors` or an `inspectors` runtime facet. Pause, step, and inspection are not required methods on every app.
 
+The scheduler service keeps its existing facet registry: `register`,
+`unregister`, and `list` operate on app simulation/update facets. It also
+exposes typed runtime scheduling methods that delegate to the Fennel
+`RuntimeScheduler` policy layer:
+
+- `host.scheduler:schedule-once(opts)`
+- `host.scheduler:schedule-every(opts)`
+- `host.scheduler:schedule-recurrence(opts)`
+
+Normal `host.scheduler:update(delta-ms)` advances typed scheduled work before
+registered facets only when the scheduler is not paused. After
+`host.scheduler:set-paused true`, normal updates do not advance typed scheduled
+work or facets. `host.scheduler:step(delta-ms)` is the explicit paused-step path:
+it advances typed scheduled work and then registered facets even while paused.
+
 ## Standalone and embedded hosts
 
 Standalone launch and embedded mounting construct different generic hosts, then call the same `create(host)` app factory. App logic is shared.

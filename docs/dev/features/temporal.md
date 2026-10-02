@@ -6,6 +6,10 @@ The temporal core is Space's first production date/time layer. Correctness-criti
 
 - `require :temporal` is the public Fennel/Lua API for application and feature code (written as `(require :temporal)` in Fennel). It exposes `duration`, `instant`, `plain-date-time`, `zoned-date-time`, `period`, `interval`, `repeating-interval`, `recurrence`, `recurrence-set`, `ics`, `localization`, `calendar`, `business-calendar`, `natural`, `providers`, `migrations`, `clock`, and `tzdb` namespaces.
 - `require "temporal-core"` is the lower-level native Lua binding. Use it when testing or extending the binding layer directly; prefer `:temporal` elsewhere.
+- `require :runtime-scheduler` is the Fennel runtime policy scheduler for typed
+  one-shot, interval, and recurrence work. It is documented separately in
+  [Runtime Scheduler](./runtime-scheduler) because scheduler policy is outside
+  the native temporal core.
 
 The public wrapper intentionally keeps timezone and calendar rules in C++ instead of reimplementing them in Fennel.
 
@@ -46,13 +50,13 @@ Leap seconds such as `23:59:60` are rejected explicitly in this implementation. 
 - `temporal.clock.system()` returns a real-time clock backed by the native system clock.
 - `temporal.clock.fixed(instant)` returns a deterministic clock whose `:now` method always returns the supplied instant, for tests and replay.
 
-This feature does not change existing `engine.now-ms`, `sysinfo.now-ms`, media clocks, profiling clocks, or runtime timer behavior.
+This feature does not change existing `engine.now-ms`, `sysinfo.now-ms`, media clocks, profiling clocks, or runtime timer behavior. Runtime scheduling uses `Temporal.clock` values from a Fennel policy layer rather than adding scheduler policy to the native core.
 
 ## Future layers
 
-The temporal core intentionally excludes higher-level product features. Higher layers now include recurrence, localization, selected calendars, business calendars, deterministic natural-language parsing, and explicit persisted timestamp migrations; runtime timer redesign remains future work and must be designed separately. Future timezone-related layers must preserve the invariant that zoned conversion never silently defaults to the host-local timezone.
+The temporal core intentionally excludes higher-level product features. Higher layers now include recurrence, localization, selected calendars, business calendars, deterministic natural-language parsing, explicit persisted timestamp migrations, and the Fennel [Runtime Scheduler](./runtime-scheduler). Future timezone-related layers must preserve the invariant that zoned conversion never silently defaults to the host-local timezone.
 
-The [Temporal Complete Library Roadmap](./temporal-complete-library) owns the complete localization, recurrence, non-Gregorian calendar, persisted timestamp migration, and runtime scheduler redesign work beyond this core subset.
+The [Temporal Complete Library Roadmap](./temporal-complete-library) owns the complete localization, recurrence, non-Gregorian calendar, persisted timestamp migration, runtime scheduler, and final conformance work beyond this core subset.
 
 ## Parsing, formatting, and recurrence layers
 
