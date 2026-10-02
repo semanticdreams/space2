@@ -28,6 +28,7 @@ Detailed design and implementation notes for major feature systems.
 - [Temporal Core](./temporal)
 - [Temporal Calendar Periods](./temporal-calendar-periods)
 - [Temporal Intervals](./temporal-intervals)
+- [Temporal Persisted Timestamp Migrations](./temporal-migrations) — `Temporal.migrations` docs for canonical persisted timestamp workflow JSON.
 - [Temporal Parsing and Recurrence](./temporal-parsing-recurrence)
 - [Temporal Complete Library Roadmap](./temporal-complete-library)
 - [Temporal Complete Acceptance](./temporal-complete-acceptance)

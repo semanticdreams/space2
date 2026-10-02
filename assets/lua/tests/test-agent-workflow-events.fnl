@@ -160,6 +160,74 @@
 (fn preserves-run-identity-and-items-against-reserved-metadata []
   (assert-reserved-context-and-created-fields-do-not-own-projection))
 
+(fn assert-numeric-workflow-timestamps-project-as-canonical-strings []
+  (local session (WorkflowEvents.project-session {:id "run-numeric"
+                                                  :status :running
+                                                  :context {:agent-id "agent-alpha"}
+                                                  :created-at 0
+                                                  :updated-at 1
+                                                  :events [{:kind WorkflowEvents.KIND_SESSION_CREATED
+                                                            :data {:agent-id "agent-beta"}
+                                                            :created-at 2}
+                                                           {:kind WorkflowEvents.KIND_STATUS_CHANGED
+                                                            :status :idle
+                                                            :created-at 3}]}))
+  (assert (= session.created-at "1970-01-01T00:00:02Z") "numeric session-created timestamp should project as canonical UTC string")
+  (assert (= session.updated-at "1970-01-01T00:00:03Z") "numeric latest event timestamp should project as canonical UTC string")
+  (local summary (WorkflowEvents.session-summary session))
+  (assert (= summary.created-at "1970-01-01T00:00:02Z") "summary created-at should remain canonical UTC string")
+  (assert (= summary.updated-at "1970-01-01T00:00:03Z") "summary updated-at should remain canonical UTC string"))
+
+(fn projects-numeric-workflow-timestamps-as-canonical-strings []
+  (assert-numeric-workflow-timestamps-project-as-canonical-strings))
+
+(fn assert-present-malformed-event-timestamps-fail-loudly []
+  (local payload-session-created-run {:id "run-bad-session-created-payload-timestamp"
+                                      :status :running
+                                      :context {:agent-id "agent-alpha"}
+                                      :created-at "2026-08-14T00:00:00Z"
+                                      :updated-at "2026-08-14T00:00:00Z"
+                                      :events [{:kind WorkflowEvents.KIND_SESSION_CREATED
+                                                :data {:agent-id "agent-beta"
+                                                       :created-at false}
+                                                :created-at "2026-08-15T00:00:00Z"}]})
+  (local (payload-created-ok payload-created-err) (pcall WorkflowEvents.project-session payload-session-created-run))
+  (assert-pcall-error-containing payload-created-ok payload-created-err "unsupported timestamp value type: boolean")
+  (local payload-status-run {:id "run-bad-status-payload-timestamp"
+                             :status :running
+                             :context {:agent-id "agent-alpha"}
+                             :created-at "2026-08-14T00:00:00Z"
+                             :updated-at "2026-08-14T00:00:00Z"
+                             :events [{:kind WorkflowEvents.KIND_STATUS_CHANGED
+                                       :status :idle
+                                       :data {:created-at false}
+                                       :created-at "2026-08-15T00:00:01Z"}]})
+  (local (payload-status-ok payload-status-err) (pcall WorkflowEvents.project-session payload-status-run))
+  (assert-pcall-error-containing payload-status-ok payload-status-err "unsupported timestamp value type: boolean")
+  (local session-created-run {:id "run-bad-session-created-timestamp"
+                              :status :running
+                              :context {:agent-id "agent-alpha"}
+                              :created-at "2026-08-14T00:00:00Z"
+                              :updated-at "2026-08-14T00:00:00Z"
+                              :events [{:kind WorkflowEvents.KIND_SESSION_CREATED
+                                        :data {:agent-id "agent-beta"}
+                                        :created-at false}]})
+  (local (created-ok created-err) (pcall WorkflowEvents.project-session session-created-run))
+  (assert-pcall-error-containing created-ok created-err "unsupported timestamp value type: boolean")
+  (local status-run {:id "run-bad-status-timestamp"
+                     :status :running
+                     :context {:agent-id "agent-alpha"}
+                     :created-at "2026-08-14T00:00:00Z"
+                     :updated-at "2026-08-14T00:00:00Z"
+                     :events [{:kind WorkflowEvents.KIND_STATUS_CHANGED
+                               :status :idle
+                               :created-at false}]})
+  (local (status-ok status-err) (pcall WorkflowEvents.project-session status-run))
+  (assert-pcall-error-containing status-ok status-err "unsupported timestamp value type: boolean"))
+
+(fn rejects-present-malformed-event-timestamps []
+  (assert-present-malformed-event-timestamps-fail-loudly))
+
 (fn assert-appended-session-created-payload-is-isolated [store run]
   (local payload {:agent-id "agent-beta"
                   :data {:nested {:value "before"}}
@@ -270,9 +338,13 @@
 (table.insert tests {:name "rejects-update-for-missing-item-id"
                       :fn rejects-update-for-missing-item-id})
 (table.insert tests {:name "preserves-run-identity-and-items-against-reserved-metadata"
-                     :fn preserves-run-identity-and-items-against-reserved-metadata})
+                      :fn preserves-run-identity-and-items-against-reserved-metadata})
+(table.insert tests {:name "projects-numeric-workflow-timestamps-as-canonical-strings"
+                     :fn projects-numeric-workflow-timestamps-as-canonical-strings})
+(table.insert tests {:name "rejects-present-malformed-event-timestamps"
+                      :fn rejects-present-malformed-event-timestamps})
 (table.insert tests {:name "isolates-nested-session-created-payloads-and-projections"
-                     :fn isolates-nested-session-created-payloads-and-projections})
+                      :fn isolates-nested-session-created-payloads-and-projections})
 (table.insert tests {:name "isolates-nested-item-payloads-and-projections"
                      :fn isolates-nested-item-payloads-and-projections})
 (table.insert tests {:name "isolates-nested-status-and-update-payloads"

@@ -16,6 +16,7 @@
 (local create-calendar (require :temporal/calendar))
 (local create-localization (require :temporal/localization))
 (local create-business-calendar (require :temporal/business-calendar))
+(local migrations (require :temporal/migrations))
 
 (fn disambiguation-to-core [value]
   (if (= value :reject)
@@ -119,8 +120,9 @@
                  :natural natural
                  :calendar calendar
                  :localization localization
-                 :business-calendar business-calendar
-                 :providers providers})
+                  :business-calendar business-calendar
+                  :migrations migrations
+                  :providers providers})
 
 (local temporal-with-intervals {:standard standard
                                 :interval interval

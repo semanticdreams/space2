@@ -1,3 +1,7 @@
+(local Temporal (require :temporal))
+
+(local Migrations Temporal.migrations)
+
 (local KIND_SESSION_CREATED :agent-session-created)
 (local KIND_STATUS_CHANGED :agent-status-changed)
 (local KIND_ITEM_APPENDED :agent-item-appended)
@@ -7,6 +11,27 @@
 
 (fn table-or-empty [value]
   (if (= (type value) "table") value {}))
+
+(fn projection-timestamp [value field-path]
+  (when (not (= value nil))
+    (Migrations.instant->timestamp value {:schema-id :agent-session-projection
+                                           :field-path field-path})))
+
+(fn event-payload-created-at-present? [event]
+  (and (= (type event.data) "table")
+       (not (= event.data.created-at nil))))
+
+(fn event-projectable-created-at-present? [event]
+  (if (event-payload-created-at-present? event)
+      true
+      (not (= event.created-at nil))))
+
+(fn payload-created-at-or-event-timestamp [event field-path]
+  (if (event-payload-created-at-present? event)
+      (do
+        (projection-timestamp event.data.created-at field-path)
+        event.data.created-at)
+      (projection-timestamp event.created-at field-path)))
 
 (fn deep-copy [value]
   (if (not (= (type value) "table"))
@@ -101,9 +126,9 @@
                   :agent-id context.agent-id
                   :status (or context.status run.status)
                   :items []
-                   :data (deep-copy (table-or-empty context.data))
-                   :created-at run.created-at
-                   :updated-at run.updated-at})
+                  :data (deep-copy (table-or-empty context.data))
+                  :created-at (projection-timestamp run.created-at "created-at")
+                  :updated-at (projection-timestamp run.updated-at "updated-at")})
   (copy-projection-metadata! session context))
 
 (fn apply-session-created! [session event]
@@ -113,8 +138,8 @@
   (when data.data
     (set session.data (deep-copy data.data)))
   (copy-projection-metadata! session data)
-  (when event.created-at
-    (set session.created-at event.created-at))
+  (when (event-projectable-created-at-present? event)
+    (set session.created-at (payload-created-at-or-event-timestamp event "events[].created-at")))
   session)
 
 (fn apply-session-data-updated! [session event]
@@ -160,8 +185,9 @@
         (update-projected-item! session event.item-id event.updates)
         (= event.kind KIND_SESSION_DATA_UPDATED)
         (apply-session-data-updated! session event))
-    (when (and (relevant-event? event) event.created-at)
-      (set session.updated-at event.created-at)))
+    (when (and (relevant-event? event)
+               (event-projectable-created-at-present? event))
+      (set session.updated-at (payload-created-at-or-event-timestamp event "events[].created-at"))))
   session)
 
 (fn current-session-if-readable [store run-id]
@@ -235,8 +261,8 @@
    :agent-id session.agent-id
    :status session.status
    :item-count (length (if session.items session.items []))
-   :created-at session.created-at
-   :updated-at session.updated-at})
+   :created-at (projection-timestamp session.created-at "summary.created-at")
+   :updated-at (projection-timestamp session.updated-at "summary.updated-at")})
 
 {:KIND_SESSION_CREATED KIND_SESSION_CREATED
  :KIND_STATUS_CHANGED KIND_STATUS_CHANGED

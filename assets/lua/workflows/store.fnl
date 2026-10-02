@@ -4,6 +4,9 @@
 (local Uuid (require :uuid))
 (local Signal (require :signal))
 (local JsonUtils (require :json-utils))
+(local Temporal (require :temporal))
+
+(local Migrations Temporal.migrations)
 
 (fn ensure-dir [path]
   (assert path "ensure-dir requires path")
@@ -29,6 +32,27 @@
       []
       value))
 
+(fn array-shaped? [value]
+  (if (not (= (type value) :table))
+      false
+      (do
+        (local n (length value))
+        (var count 0)
+        (var valid? true)
+        (each [key _item (pairs value)]
+          (set count (+ count 1))
+          (when (if (not (= (type key) :number))
+                    true
+                    (not (= key (math.floor key)))
+                    true
+                    (< key 1)
+                    true
+                    (> key n)
+                    true
+                    false)
+            (set valid? false)))
+        (and valid? (= count n)))))
+
 (fn prefixed-id [prefix value]
   (assert prefix "prefixed-id requires prefix")
   (if (= value nil)
@@ -40,6 +64,12 @@
   (local out [])
   (each [_ item (ipairs source)]
     (table.insert out item))
+  out)
+
+(fn shallow-copy-table [tbl]
+  (local out {})
+  (each [key value (pairs (table-or-empty tbl))]
+    (tset out key value))
   out)
 
 (fn table-values [tbl]
@@ -82,6 +112,13 @@
     (set (. record k) v))
   record)
 
+(fn key-present? [tbl key]
+  (var present? false)
+  (each [existing-key _value (pairs (table-or-empty tbl))]
+    (when (= existing-key key)
+      (set present? true)))
+  present?)
+
 (fn reject-update-key [updates key message]
   (when (not (= (. (table-or-empty updates) key) nil))
     (error message)))
@@ -97,7 +134,26 @@
   (when (= changes.code-entity-id false)
     (error "workflow step requires :code-entity-id")))
 
-(fn normalize-definition [definition]
+(fn migration-options [schema field-path file-path optional?]
+  {:schema-id schema.id
+   :field-path field-path
+   :file-path file-path
+   :optional? optional?})
+
+(fn timestamp->epoch-seconds [value schema field-path file-path optional?]
+  (Migrations.timestamp->epoch-seconds value (migration-options schema field-path file-path optional?)))
+
+(fn timestamp->string [value schema field-path file-path optional?]
+  (Migrations.instant->timestamp value (migration-options schema field-path file-path optional?)))
+
+(fn require-array-shaped [value schema field-path file-path]
+  (when (and (not (= value nil))
+             (not (array-shaped? value)))
+    (error (.. "temporal migration timestamp container must be an array schema=" (tostring schema.id)
+               " field=" field-path
+               " file=" (tostring file-path)))))
+
+(fn normalize-definition [definition file-path]
   (local data (table-or-empty definition))
   {:id (tostring data.id)
    :name (tostring (value-or data.name ""))
@@ -107,8 +163,8 @@
    :parameters (table-or-empty data.parameters)
    :steps (array-or-empty data.steps)
    :edges (array-or-empty data.edges)
-   :created-at (tonumber (value-or data.created-at 0))
-   :updated-at (tonumber (value-or data.updated-at 0))})
+    :created-at (timestamp->epoch-seconds data.created-at Migrations.schemas.workflow-definition "created-at" file-path false)
+    :updated-at (timestamp->epoch-seconds data.updated-at Migrations.schemas.workflow-definition "updated-at" file-path false)})
 
 (fn normalize-step [step id]
   (local data (table-or-empty step))
@@ -146,7 +202,68 @@
     (table.insert out (normalize-edge edge edge.id)))
   out)
 
-(fn normalize-run [run]
+(fn normalize-run-step-timestamps [step step-id file-path]
+  (local data (shallow-copy-table step))
+  (local prefix (.. "steps." (tostring step-id)))
+  (set data.started-at (timestamp->epoch-seconds data.started-at Migrations.schemas.workflow-run (.. prefix ".started-at") file-path true))
+  (set data.finished-at (timestamp->epoch-seconds data.finished-at Migrations.schemas.workflow-run (.. prefix ".finished-at") file-path true))
+  data)
+
+(fn normalize-run-steps [steps file-path]
+  (local out {})
+  (each [step-id step (pairs (table-or-empty steps))]
+    (tset out step-id (normalize-run-step-timestamps step step-id file-path)))
+  out)
+
+(fn normalize-run-event-timestamps [event index file-path]
+  (local data (shallow-copy-table event))
+  (set data.created-at (timestamp->epoch-seconds data.created-at Migrations.schemas.workflow-run (.. "events[" index "].created-at") file-path false))
+  data)
+
+(fn normalize-run-events [events file-path]
+  (require-array-shaped events Migrations.schemas.workflow-run "events" file-path)
+  (local out [])
+  (each [index event (ipairs (array-or-empty events))]
+    (table.insert out (normalize-run-event-timestamps event index file-path)))
+  out)
+
+(fn normalize-definition-update-timestamps [updates file-path]
+  (local changes (shallow-copy-table updates))
+  (when (key-present? changes :created-at)
+    (set changes.created-at (timestamp->epoch-seconds changes.created-at Migrations.schemas.workflow-definition "created-at" file-path false)))
+  (when (key-present? changes :updated-at)
+    (set changes.updated-at (timestamp->epoch-seconds changes.updated-at Migrations.schemas.workflow-definition "updated-at" file-path false)))
+  changes)
+
+(fn normalize-run-update-timestamps [updates file-path]
+  (local changes (shallow-copy-table updates))
+  (when (key-present? changes :created-at)
+    (set changes.created-at (timestamp->epoch-seconds changes.created-at Migrations.schemas.workflow-run "created-at" file-path false)))
+  (when (key-present? changes :started-at)
+    (set changes.started-at (timestamp->epoch-seconds changes.started-at Migrations.schemas.workflow-run "started-at" file-path true)))
+  (when (key-present? changes :finished-at)
+    (set changes.finished-at (timestamp->epoch-seconds changes.finished-at Migrations.schemas.workflow-run "finished-at" file-path true)))
+  (when (key-present? changes :steps)
+    (set changes.steps (normalize-run-steps changes.steps file-path)))
+  (when (key-present? changes :events)
+    (set changes.events (normalize-run-events changes.events file-path)))
+  changes)
+
+(fn normalize-run-step-update-timestamps [updates step-id file-path]
+  (local changes (shallow-copy-table updates))
+  (local prefix (.. "steps." (tostring step-id)))
+  (when (key-present? changes :started-at)
+    (set changes.started-at (timestamp->epoch-seconds changes.started-at Migrations.schemas.workflow-run (.. prefix ".started-at") file-path true)))
+  (when (key-present? changes :finished-at)
+    (set changes.finished-at (timestamp->epoch-seconds changes.finished-at Migrations.schemas.workflow-run (.. prefix ".finished-at") file-path true)))
+  changes)
+
+(fn normalize-event-update-timestamps [event index file-path]
+  (local data (shallow-copy-table event))
+  (set data.created-at (timestamp->epoch-seconds (value-or data.created-at (now)) Migrations.schemas.workflow-run (.. "events[" index "].created-at") file-path false))
+  data)
+
+(fn normalize-run [run file-path]
   (local data (table-or-empty run))
   {:id (tostring data.id)
    :definition-id (tostring data.definition-id)
@@ -156,12 +273,12 @@
    :output (table-or-empty data.output)
    :context (table-or-empty data.context)
    :current-step-ids (array-or-empty data.current-step-ids)
-   :created-at (tonumber (value-or data.created-at 0))
-   :started-at data.started-at
-   :finished-at data.finished-at
+    :created-at (timestamp->epoch-seconds data.created-at Migrations.schemas.workflow-run "created-at" file-path false)
+    :started-at (timestamp->epoch-seconds data.started-at Migrations.schemas.workflow-run "started-at" file-path true)
+    :finished-at (timestamp->epoch-seconds data.finished-at Migrations.schemas.workflow-run "finished-at" file-path true)
     :error data.error
-    :steps (table-or-empty data.steps)
-    :events (array-or-empty data.events)})
+     :steps (normalize-run-steps data.steps file-path)
+     :events (normalize-run-events data.events file-path)})
 
 (fn active-run-status? [status]
   (if (= status :queued)
@@ -210,12 +327,35 @@
 
 (fn write-definition! [self definition]
   (ensure-dir self.definitions-dir)
-  (JsonUtils.write-json! (definition-path self definition.id) definition)
+  (local path (definition-path self definition.id))
+  (local payload (shallow-copy-table definition))
+  (set payload.created-at (timestamp->string definition.created-at Migrations.schemas.workflow-definition "created-at" path false))
+  (set payload.updated-at (timestamp->string definition.updated-at Migrations.schemas.workflow-definition "updated-at" path false))
+  (JsonUtils.write-json! path payload)
   definition)
 
 (fn write-run! [self run]
   (ensure-dir self.runs-dir)
-  (JsonUtils.write-json! (run-path self run.id) run)
+  (local path (run-path self run.id))
+  (local payload (shallow-copy-table run))
+  (set payload.created-at (timestamp->string run.created-at Migrations.schemas.workflow-run "created-at" path false))
+  (set payload.started-at (timestamp->string run.started-at Migrations.schemas.workflow-run "started-at" path true))
+  (set payload.finished-at (timestamp->string run.finished-at Migrations.schemas.workflow-run "finished-at" path true))
+  (local step-payload {})
+  (each [step-id step (pairs (table-or-empty run.steps))]
+    (local copied (shallow-copy-table step))
+    (local prefix (.. "steps." (tostring step-id)))
+    (set copied.started-at (timestamp->string step.started-at Migrations.schemas.workflow-run (.. prefix ".started-at") path true))
+    (set copied.finished-at (timestamp->string step.finished-at Migrations.schemas.workflow-run (.. prefix ".finished-at") path true))
+    (tset step-payload step-id copied))
+  (set payload.steps step-payload)
+  (local event-payload [])
+  (each [index event (ipairs (array-or-empty run.events))]
+    (local copied (shallow-copy-table event))
+    (set copied.created-at (timestamp->string event.created-at Migrations.schemas.workflow-run (.. "events[" index "].created-at") path false))
+    (table.insert event-payload copied))
+  (set payload.events event-payload)
+  (JsonUtils.write-json! path payload)
   run)
 
 (fn initialize-active-run-index! [self]
@@ -224,7 +364,7 @@
     (when (fs.exists self.runs-dir)
       (each [_ entry (ipairs (fs.list-dir self.runs-dir false))]
         (when (and entry.is-file (string.match entry.name "%.json$"))
-          (local run (normalize-run (read-json-record entry.path)))
+          (local run (normalize-run (read-json-record entry.path) entry.path))
           (set (. self._runs run.id) run)
           (set-active-run! self run))))
     (set self._active-run-indexed? true))
@@ -236,9 +376,10 @@
   (if cached
       cached
       (do
-        (local record (read-json-record (definition-path self id)))
+        (local path (definition-path self id))
+        (local record (read-json-record path))
         (when record
-          (local normalized (normalize-definition record))
+          (local normalized (normalize-definition record path))
           (set (. self._definitions id) normalized)
           normalized))))
 
@@ -254,9 +395,10 @@
   (if cached
       cached
       (do
-        (local record (read-json-record (run-path self id)))
+        (local path (run-path self id))
+        (local record (read-json-record path))
         (when record
-          (local normalized (normalize-run record))
+          (local normalized (normalize-run record path))
           (set (. self._runs id) normalized)
           normalized))))
 
@@ -290,7 +432,7 @@
   (when (fs.exists self.definitions-dir)
     (each [_ entry (ipairs (fs.list-dir self.definitions-dir false))]
       (when (and entry.is-file (string.match entry.name "%.json$"))
-        (local definition (normalize-definition (read-json-record entry.path)))
+        (local definition (normalize-definition (read-json-record entry.path) entry.path))
         (set (. self._definitions definition.id) definition)
         (table.insert items definition))))
   (table.sort items (fn [a b] (< a.id b.id)))
@@ -320,7 +462,8 @@
 (fn update-definition [self definition-id updates]
   (local definition (require-definition self definition-id))
   (validate-definition-updates updates)
-  (apply-updates! definition updates)
+  (local normalized-updates (normalize-definition-update-timestamps updates (definition-path self definition.id)))
+  (apply-updates! definition normalized-updates)
   (touch-definition! self definition)
   (self.definition-updated:emit definition)
   definition)
@@ -437,7 +580,7 @@
   (when (fs.exists self.runs-dir)
     (each [_ entry (ipairs (fs.list-dir self.runs-dir false))]
       (when (and entry.is-file (string.match entry.name "%.json$"))
-        (local run (normalize-run (read-json-record entry.path)))
+        (local run (normalize-run (read-json-record entry.path) entry.path))
         (set (. self._runs run.id) run)
         (when (if (= options.definition-id nil)
                   true
@@ -463,7 +606,8 @@
 
 (fn update-run [self run-id updates]
   (local run (require-run self run-id))
-  (apply-updates! run updates)
+  (local normalized-updates (normalize-run-update-timestamps updates (run-path self run.id)))
+  (apply-updates! run normalized-updates)
   (set-active-run! self run)
   (write-run! self run)
   (self.run-updated:emit run)
@@ -474,7 +618,8 @@
   (local definition (require-definition self run.definition-id))
   (require-step definition step-id)
   (local id (tostring step-id))
-  (local run-step (normalize-run-step run.id id updates (. run.steps id)))
+  (local normalized-updates (normalize-run-step-update-timestamps updates id (run-path self run.id)))
+  (local run-step (normalize-run-step run.id id normalized-updates (. run.steps id)))
   (set (. run.steps id) run-step)
   (write-run! self run)
   (self.run-step-updated:emit run-step)
@@ -495,11 +640,9 @@
 (fn append-event [self run-id event]
   (local run (require-run self run-id))
   (local data (table-or-empty event))
-  (local record {})
-  (apply-updates! record data)
+  (local record (normalize-event-update-timestamps data (+ (length run.events) 1) (run-path self run.id)))
   (set record.id (prefixed-id "event-" data.id))
   (set record.run-id run.id)
-  (set record.created-at (value-or data.created-at (now)))
   (table.insert run.events record)
   (write-run! self run)
   (self.event-appended:emit record)

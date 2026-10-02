@@ -102,8 +102,9 @@
     :tests.test-fennel-validation-mcp
     :tests.test-launchables
      :tests.test-random
-       :tests.test-temporal
-        :tests.test-temporal-provider-registry
+        :tests.test-temporal
+        :tests.test-temporal-migrations
+         :tests.test-temporal-provider-registry
         :tests.test-temporal-business-calendar
         :tests.test-temporal-calendar
         :tests.test-temporal-localization
