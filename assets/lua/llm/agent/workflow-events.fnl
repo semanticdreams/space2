@@ -1,3 +1,7 @@
+(local Temporal (require :temporal))
+
+(local Migrations Temporal.migrations)
+
 (local KIND_SESSION_CREATED :agent-session-created)
 (local KIND_STATUS_CHANGED :agent-status-changed)
 (local KIND_ITEM_APPENDED :agent-item-appended)
@@ -7,6 +11,11 @@
 
 (fn table-or-empty [value]
   (if (= (type value) "table") value {}))
+
+(fn projection-timestamp [value field-path]
+  (when (not (= value nil))
+    (Migrations.instant->timestamp value {:schema-id :agent-session-projection
+                                          :field-path field-path})))
 
 (fn deep-copy [value]
   (if (not (= (type value) "table"))
@@ -101,9 +110,9 @@
                   :agent-id context.agent-id
                   :status (or context.status run.status)
                   :items []
-                   :data (deep-copy (table-or-empty context.data))
-                   :created-at run.created-at
-                   :updated-at run.updated-at})
+                  :data (deep-copy (table-or-empty context.data))
+                  :created-at (projection-timestamp run.created-at "created-at")
+                  :updated-at (projection-timestamp run.updated-at "updated-at")})
   (copy-projection-metadata! session context))
 
 (fn apply-session-created! [session event]
@@ -114,7 +123,7 @@
     (set session.data (deep-copy data.data)))
   (copy-projection-metadata! session data)
   (when event.created-at
-    (set session.created-at event.created-at))
+    (set session.created-at (projection-timestamp event.created-at "events[].created-at")))
   session)
 
 (fn apply-session-data-updated! [session event]
@@ -161,7 +170,7 @@
         (= event.kind KIND_SESSION_DATA_UPDATED)
         (apply-session-data-updated! session event))
     (when (and (relevant-event? event) event.created-at)
-      (set session.updated-at event.created-at)))
+      (set session.updated-at (projection-timestamp event.created-at "events[].created-at"))))
   session)
 
 (fn current-session-if-readable [store run-id]
@@ -235,8 +244,8 @@
    :agent-id session.agent-id
    :status session.status
    :item-count (length (if session.items session.items []))
-   :created-at session.created-at
-   :updated-at session.updated-at})
+   :created-at (projection-timestamp session.created-at "summary.created-at")
+   :updated-at (projection-timestamp session.updated-at "summary.updated-at")})
 
 {:KIND_SESSION_CREATED KIND_SESSION_CREATED
  :KIND_STATUS_CHANGED KIND_STATUS_CHANGED
