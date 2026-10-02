@@ -311,6 +311,28 @@
   (host:drop)
   (manager:drop))
 
+(fn assigned-zero-host-width-clamps-child-width []
+  (local manager (SnackbarManager))
+  (local drops {})
+  (local host-builder
+    (SnackbarHost {:manager manager
+                   :content-builder (make-constrained-width-builder drops)
+                   :placement :top-right
+                   :max-width 18}))
+  (local host (host-builder (make-ctx)))
+  (manager:show {:id "assigned-zero" :text "Assigned zero" :persistent? true})
+  (set host.layout.size (glm.vec3 0 15 0))
+  (host.layout:measurer)
+  (set host.layout.position (glm.vec3 10 20 0))
+  (host.layout:layouter)
+  (local child (. host.children 1))
+  (assert (= child.layout.measure.x 0) "assigned zero host width should clamp child measured width to zero")
+  (assert (= child.layout.position.x host.layout.position.x)
+          "assigned zero host width should keep top-right child inside host left edge")
+  (assert (= child.layout.size.x 0) "assigned zero host width should lay child out with zero width")
+  (host:drop)
+  (manager:drop))
+
 (fn placement-top-left-uses-left-edge []
   (local manager (SnackbarManager))
   (local drops {})
@@ -385,9 +407,11 @@
 (table.insert tests {:name "SnackbarHost top-right clamps child width to host bounds"
                       :fn top-right-clamps-child-width-to-host-bounds})
 (table.insert tests {:name "SnackbarHost finite zero-width constraint clamps child width"
-                     :fn finite-zero-width-constraint-clamps-child-width})
+                      :fn finite-zero-width-constraint-clamps-child-width})
+(table.insert tests {:name "SnackbarHost assigned zero host width clamps child width"
+                      :fn assigned-zero-host-width-clamps-child-width})
 (table.insert tests {:name "SnackbarHost top-left placement uses left edge"
-                       :fn placement-top-left-uses-left-edge})
+                      :fn placement-top-left-uses-left-edge})
 (table.insert tests {:name "SnackbarHost same-id replacements rebuild rendered child"
                      :fn same-id-replacement-rebuilds-rendered-child})
 (table.insert tests {:name "SnackbarHost does not require scroll-view"

@@ -36,7 +36,16 @@
 
 (fn finite-nonnegative-number? [value]
   (and (finite-number? value)
-       (>= value 0)))
+        (>= value 0)))
+
+(fn assigned-host-width? [size]
+  (and size
+       (finite-nonnegative-number? size.x)
+       (if (> size.x 0)
+           true
+           (finite-positive-number? size.y)
+           true
+           (finite-positive-number? size.z))))
 
 (fn remove-child-layout [layout child]
   (local idx (table-index-of layout.children child.layout))
@@ -131,7 +140,7 @@
 (fn effective-max-width [state self constraints]
   (local layout-width (if (> self.size.x 0) self.size.x 1000))
   (var max-width (value-or state.max-width layout-width))
-  (when (finite-positive-number? self.size.x)
+  (when (assigned-host-width? self.size)
     (set max-width (math.min max-width self.size.x)))
   (local constraint-width (and constraints constraints.max constraints.max.x))
   (when (finite-nonnegative-number? constraint-width)
