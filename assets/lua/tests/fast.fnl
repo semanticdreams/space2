@@ -34,6 +34,8 @@
     :tests.test-hud-extended-sidebar
     :tests.test-hud-chrome-uniformity
     :tests.test-hud-layout
+    :tests.test-snackbar-manager
+    :tests.test-snackbar-host
     :tests.test-deep-dialog
     :tests.test-tetris-game
     :tests.test-tetris-state

@@ -57,10 +57,29 @@
    :physics-containment {:visualization {:color (glm.vec4 0.45 0.72 0.95 0.28)}}
    :flat-terrain {:dark (glm.vec4 0.12 0.14 0.18 1.0)
                   :light (glm.vec4 0.18 0.21 0.27 1.0)}
-   :card {:background (glm.vec4 0.12 0.13 0.18 1)
-          :foreground text-color}
-   :qr-code {:foreground (glm.vec4 0.05 0.06 0.08 1)
-             :background (glm.vec4 0.98 0.98 0.99 1)}
+    :card {:background (glm.vec4 0.12 0.13 0.18 1)
+           :foreground text-color}
+    :snackbar {:placement :top-right
+               :spacing 0.3
+               :padding [0.45 0.35]
+               :max-width 18.0
+               :max-visible 3
+               :max-queued 20
+               :duration-ms 4000
+               :variants {:info {:background (glm.vec4 0.12 0.16 0.22 0.98)
+                                  :foreground (glm.vec4 0.92 0.95 1 1)
+                                  :border (glm.vec4 0.32 0.48 0.86 0.95)}
+                          :success {:background (glm.vec4 0.09 0.22 0.14 0.98)
+                                    :foreground (glm.vec4 0.88 0.98 0.91 1)
+                                    :border (glm.vec4 0.22 0.64 0.38 0.95)}
+                          :warning {:background (glm.vec4 0.28 0.19 0.08 0.98)
+                                    :foreground (glm.vec4 1 0.92 0.74 1)
+                                    :border (glm.vec4 0.88 0.58 0.18 0.95)}
+                          :error {:background (glm.vec4 0.28 0.09 0.11 0.98)
+                                  :foreground (glm.vec4 1 0.83 0.82 1)
+                                  :border (glm.vec4 0.82 0.22 0.3 0.95)}}}
+    :qr-code {:foreground (glm.vec4 0.05 0.06 0.08 1)
+              :background (glm.vec4 0.98 0.98 0.99 1)}
    :input {:background input-base
            :hover-background (adjust input-base 0.04)
            :focused-background (adjust input-base 0.06)

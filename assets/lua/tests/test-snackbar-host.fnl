@@ -7,6 +7,7 @@
 (local SnackbarHost (require :snackbar-host))
 (local SnackbarContent (require :snackbar-content))
 (local Snackbar (require :snackbar))
+(local SnackbarTheme (require :snackbar-theme))
 
 (fn assert-error-contains [body expected]
   (local (ok err) (pcall body))
@@ -35,9 +36,11 @@
    :register register
    :unregister noop})
 
-(fn make-ctx []
+(fn make-ctx [opts]
+  (local options (if opts opts {}))
   (BuildContext {:clickables (make-clickables-stub)
-                 :hoverables (make-hoverables-stub)}))
+                 :hoverables (make-hoverables-stub)
+                 :theme options.theme}))
 
 (fn probe-drop-count [drops id]
   (if (not (= (. drops id) nil))
@@ -345,6 +348,42 @@
   (host:drop)
   (manager:drop))
 
+(fn resolved-dark-theme-snackbar-tokens-include-policy-defaults []
+  (local app-theme ((require :dark-theme)))
+  (assert app-theme.snackbar "dark theme should expose snackbar tokens")
+  (local theme (SnackbarTheme.resolve {:theme app-theme}))
+  (assert (= theme.placement :top-right) "dark theme snackbar placement should default to top-right")
+  (assert (= theme.max-visible 3) "dark theme snackbar max-visible should be 3")
+  (assert (= theme.max-queued 20) "dark theme snackbar max-queued should be 20")
+  (assert (= theme.duration-ms 4000) "dark theme snackbar duration should be 4000ms"))
+
+(fn light-and-dark-info-backgrounds-differ []
+  (local dark (SnackbarTheme.resolve {:theme ((require :dark-theme))}))
+  (local light (SnackbarTheme.resolve {:theme ((require :light-theme))}))
+  (local dark-background dark.variants.info.background)
+  (local light-background light.variants.info.background)
+  (assert (or (not (= dark-background.x light-background.x))
+              (not (= dark-background.y light-background.y))
+              (not (= dark-background.z light-background.z))
+              (not (= dark-background.w light-background.w)))
+          "light and dark info snackbar backgrounds should differ"))
+
+(fn host-placement-reads-build-context-theme-snackbar []
+  (local manager (SnackbarManager))
+  (local drops {})
+  (local host-builder
+    (SnackbarHost {:manager manager
+                   :content-builder (make-probe-builder drops)}))
+  (local host (host-builder (make-ctx {:theme {:snackbar {:placement :top-left
+                                                          :spacing 0.25}}})))
+  (manager:show {:id "ctx-theme-left" :text "Theme" :persistent? true})
+  (layout-host host)
+  (local child (. host.children 1))
+  (assert (= child.layout.position.x host.layout.position.x)
+          "host should read placement from ctx.theme.snackbar")
+  (host:drop)
+  (manager:drop))
+
 (fn same-id-replacement-rebuilds-rendered-child []
   (local manager (SnackbarManager))
   (local drops {})
@@ -411,7 +450,13 @@
 (table.insert tests {:name "SnackbarHost assigned zero host width clamps child width"
                       :fn assigned-zero-host-width-clamps-child-width})
 (table.insert tests {:name "SnackbarHost top-left placement uses left edge"
-                      :fn placement-top-left-uses-left-edge})
+                       :fn placement-top-left-uses-left-edge})
+(table.insert tests {:name "SnackbarTheme resolves dark theme snackbar policy tokens"
+                       :fn resolved-dark-theme-snackbar-tokens-include-policy-defaults})
+(table.insert tests {:name "SnackbarTheme light and dark info backgrounds differ"
+                       :fn light-and-dark-info-backgrounds-differ})
+(table.insert tests {:name "SnackbarHost reads placement from context theme snackbar"
+                       :fn host-placement-reads-build-context-theme-snackbar})
 (table.insert tests {:name "SnackbarHost same-id replacements rebuild rendered child"
                      :fn same-id-replacement-rebuilds-rendered-child})
 (table.insert tests {:name "SnackbarHost does not require scroll-view"
