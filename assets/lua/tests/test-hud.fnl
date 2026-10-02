@@ -199,6 +199,53 @@
           "missing overlay builders should fail loudly")
   (hud:drop))
 
+(fn hud-default-snackbar-scope-and-lifecycle []
+  (local hud (Hud {}))
+  (assert hud.snackbar-manager
+          "Hud should create a default snackbar manager")
+  (local original-manager hud.snackbar-manager)
+  (hud:build-default {:control-builder (fixed-widget "control" (glm.vec3 8 3 0))
+                      :status-builder (fixed-widget "status" (glm.vec3 8 2 0))})
+  (assert hud.entity.snackbar-host-root
+          "Hud.build-default should mount the default snackbar host root")
+  (local handle (hud:show-snackbar {:text "Saved" :persistent? true}))
+  (assert handle
+          "Hud.show-snackbar should return a handle")
+  (assert (= (length (hud.snackbar-manager:visible-entries)) 1)
+          "Hud.show-snackbar should add a visible manager entry")
+  (assert (hud:dismiss-snackbar handle)
+          "Hud.dismiss-snackbar should dismiss by handle")
+  (assert (= (length (hud.snackbar-manager:visible-entries)) 0)
+          "Hud.dismiss-snackbar should remove the visible entry")
+  (local preserved-handle (hud:show-snackbar {:text "Still here" :persistent? true}))
+  (hud:build-default {:control-builder (fixed-widget "control" (glm.vec3 8 3 0))
+                      :status-builder (fixed-widget "status" (glm.vec3 8 2 0))})
+  (assert (= hud.snackbar-manager original-manager)
+          "Hud rebuilds should preserve the snackbar manager object")
+  (assert (= (length (hud.snackbar-manager:visible-entries)) 1)
+          "Hud rebuilds should preserve existing visible snackbar entries")
+  (local visible-after-rebuild (hud.snackbar-manager:visible-entries))
+  (assert (= (. (. visible-after-rebuild 1) :id) preserved-handle.id)
+          "Hud rebuilds should keep the existing snackbar entry")
+  (local original-scope hud.snackbar-scope)
+  (var drop-count 0)
+  (local original-drop original-scope.drop)
+  (set original-scope.drop
+       (fn [self]
+         (set drop-count (+ drop-count 1))
+         (original-drop self)))
+  (hud:drop)
+  (hud:drop)
+  (assert (= drop-count 1)
+          "Hud.drop should drop the snackbar scope exactly once")
+  (local (ok err)
+    (pcall (fn []
+             (original-manager:show {:text "After drop"}))))
+  (assert (not ok)
+          "Snackbar manager should reject show after Hud.drop")
+  (assert (and err (string.find (tostring err) "SnackbarManager is dropped" 1 true))
+          "Dropped snackbar manager should report its dropped state"))
+
 (table.insert tests {:name "Hud adaptive scaling keeps reference scale at 1080p"
                      :fn adaptive-hud-keeps-reference-scale-at-1080p})
 (table.insert tests {:name "Hud adaptive scaling grows at 1200p"
@@ -217,6 +264,8 @@
                      :fn hud-overlay-layer-fails-loudly})
 (table.insert tests {:name "Hud overlay requires builder"
                      :fn hud-overlay-requires-builder})
+(table.insert tests {:name "Hud default snackbar scope and lifecycle"
+                     :fn hud-default-snackbar-scope-and-lifecycle})
 
 (local main
   (fn []
