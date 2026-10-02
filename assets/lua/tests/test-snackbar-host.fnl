@@ -423,6 +423,35 @@
   (assert (= (scope:drop) true) "scope drop should return true")
   (assert-error-contains (fn [] (scope.manager:show {:text "late"})) "SnackbarManager is dropped"))
 
+(fn public-facade-applies-nested-theme-to-scoped-manager-and-host []
+  (local app-theme {:snackbar {:max-visible 1
+                               :duration-ms 10
+                               :placement :bottom-left
+                               :spacing 0.5
+                               :max-width 6}})
+  (local drops {})
+  (local scope
+    (Snackbar.create-scope {:theme app-theme
+                            :content-builder (make-probe-builder drops)}))
+  (local host (scope.host-builder (make-ctx)))
+  (local first (scope.manager:show {:id "one" :text "One" :persistent? true}))
+  (local second (scope.manager:show {:id "two" :text "Two"}))
+  (assert (= (length (scope.manager:visible-entries)) 1)
+          "create-scope should apply nested theme max-visible to manager policy")
+  (assert (= (length (scope.manager:queued-entries)) 1)
+          "create-scope should queue overflow using nested theme policy")
+  (assert (= second.entry.duration-ms 10)
+          "create-scope should apply nested theme duration to manager defaults")
+  (layout-host host)
+  (local child (. host.children 1))
+  (assert (= first.id child.entry.id) "first entry should be the visible rendered child")
+  (assert (= child.layout.position.x host.layout.position.x)
+          "create-scope nested theme placement should align bottom-left host to left edge")
+  (assert (= child.layout.position.y (+ host.layout.position.y host.layout.size.y (- child.layout.size.y)))
+          "create-scope nested theme placement should align snackbar to bottom edge")
+  (host:drop)
+  (scope:drop))
+
 (table.insert tests {:name "SnackbarHost requires manager"
                      :fn host-requires-manager})
 (table.insert tests {:name "SnackbarHost renders visible entries"
@@ -462,7 +491,9 @@
 (table.insert tests {:name "SnackbarHost does not require scroll-view"
                      :fn snackbar-host-does-not-require-scroll-view})
 (table.insert tests {:name "Snackbar facade creates scoped manager and host"
-                     :fn public-facade-creates-scoped-manager-and-host})
+                      :fn public-facade-creates-scoped-manager-and-host})
+(table.insert tests {:name "Snackbar facade applies nested theme to scoped manager and host"
+                     :fn public-facade-applies-nested-theme-to-scoped-manager-and-host})
 
 (fn main []
   (local runner (require :tests/runner))

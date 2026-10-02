@@ -275,6 +275,44 @@
   (set app.themes original-themes)
   (set app.engine original-engine))
 
+(fn hud-snackbar-host-rebuild-uses-current-theme-placement []
+  (local original-engine app.engine)
+  (local original-themes app.themes)
+  (set app.engine (or app.engine {}))
+  (local base-theme ((require :dark-theme)))
+  (var current-theme base-theme)
+  (set current-theme.snackbar.placement :top-left)
+  (set current-theme.snackbar.max-visible 1)
+  (set app.themes {:get-active-theme (fn [] current-theme)})
+  (local hud (Hud {}))
+  (hud:build-default {:control-builder (fixed-widget "control" (glm.vec3 8 3 0))
+                      :status-builder (fixed-widget "status" (glm.vec3 8 2 0))})
+  (hud:show-snackbar {:id "placement" :text "Placement" :persistent? true})
+  (local rebuilt-theme ((require :dark-theme)))
+  (set rebuilt-theme.snackbar.placement :bottom-left)
+  (set rebuilt-theme.snackbar.max-visible 1)
+  (set current-theme rebuilt-theme)
+  (hud:build-default {:control-builder (fixed-widget "control" (glm.vec3 8 3 0))
+                      :status-builder (fixed-widget "status" (glm.vec3 8 2 0))})
+  (hud:update-projection {:width 1920 :height 1080})
+  (hud:update)
+  (local host hud.entity.snackbar-host-root)
+  (local child (. host.children 1))
+  (assert child "rebuilt HUD snackbar host should render the preserved snackbar entry")
+  (set host.layout.size (glm.vec3 (+ child.layout.size.x 10)
+                                  (+ child.layout.size.y 10)
+                                  child.layout.size.z))
+  (host.layout:layouter)
+  (assert (= child.layout.position.x host.layout.position.x)
+          "rebuilt HUD snackbar host should use current theme left placement")
+  (local expected-bottom-y (+ host.layout.position.y host.layout.size.y (- child.layout.size.y)))
+  (assert (approx child.layout.position.y expected-bottom-y 1e-5)
+          (.. "rebuilt HUD snackbar host should use current theme bottom placement, got "
+              child.layout.position.y " expected " expected-bottom-y))
+  (hud:drop)
+  (set app.themes original-themes)
+  (set app.engine original-engine))
+
 (table.insert tests {:name "Hud adaptive scaling keeps reference scale at 1080p"
                      :fn adaptive-hud-keeps-reference-scale-at-1080p})
 (table.insert tests {:name "Hud adaptive scaling grows at 1200p"
@@ -296,7 +334,9 @@
 (table.insert tests {:name "Hud default snackbar scope and lifecycle"
                       :fn hud-default-snackbar-scope-and-lifecycle})
 (table.insert tests {:name "Hud default snackbar manager uses active theme policy"
-                     :fn hud-default-snackbar-manager-uses-active-theme-policy})
+                      :fn hud-default-snackbar-manager-uses-active-theme-policy})
+(table.insert tests {:name "Hud snackbar host rebuild uses current theme placement"
+                     :fn hud-snackbar-host-rebuild-uses-current-theme-placement})
 
 (local main
   (fn []

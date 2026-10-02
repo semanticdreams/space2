@@ -62,12 +62,7 @@
     ((Stack {:children []}) ctx)))
 
 (fn make-snackbar-scope-options [ctx]
-  (local snackbar-theme (and ctx.theme ctx.theme.snackbar))
-  (local options {:theme {:snackbar snackbar-theme}})
-  (when snackbar-theme
-    (each [key value (pairs snackbar-theme)]
-      (set (. options key) value)))
-  options)
+  {:theme ctx.theme})
 
 (fn Hud [opts]
   (local options (or opts {}))
