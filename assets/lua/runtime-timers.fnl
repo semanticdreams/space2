@@ -13,7 +13,7 @@
       0))
 
 (fn duration-ms [value]
-  (Temporal.duration.from {:milliseconds value}))
+  (Temporal.duration.from {:nanoseconds (math.floor (+ (* value 1000000) 0.5))}))
 
 (fn service-state []
   (if app.__runtime_timers
