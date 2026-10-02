@@ -1,4 +1,5 @@
 (local tests [])
+(local Temporal (require :temporal))
 
 (fn load-module [name]
   (local (ok module-or-error) (pcall require name))
@@ -91,6 +92,20 @@
   (fn create-runtime [_host]
     {:presentation {:render-targets fake-render-targets}})
   {:create create-runtime})
+
+(var scheduled-calls nil)
+
+(fn record-scheduled-call []
+  (table.insert scheduled-calls :timer))
+
+(fn create-runtime-with-scheduled-once [host]
+  (host.scheduler:schedule-once {:delay (Temporal.duration.from {:milliseconds 10})
+                                 :callback record-scheduled-call})
+  {:presentation {:render-targets fake-render-targets}})
+
+(fn runtime-module-with-scheduled-once [calls]
+  (set scheduled-calls calls)
+  {:create create-runtime-with-scheduled-once})
 
 (fn run-with-deps [StandaloneRuntime deps module]
   (StandaloneRuntime.run {:module module
@@ -198,7 +213,39 @@
   (assert (= scheduler-state.updated-delta 33)
           "engine updated signal must drive host scheduler")
   (assert render-state.updated?
-          "engine updated signal must drive standalone-owned renderers"))
+           "engine updated signal must drive standalone-owned renderers"))
+
+(fn test-create-host-engine-update-drives-typed-scheduled-callback []
+  (local StandaloneRuntime (load-module :standalone-app-runtime))
+  (local HostedRuntime (load-module :hosted-app-runtime))
+  (local updated-signal (fake-signal))
+  (local engine {:events {:updated updated-signal}})
+  (local host (StandaloneRuntime.create-host {:viewport {:x 0 :y 0 :width 100 :height 100}
+                                             :engine engine}))
+  (local calls [])
+  (HostedRuntime.mount {:module (runtime-module-with-scheduled-once calls) :host host})
+  (updated-signal:emit 9)
+  (assert (= (# calls) 0) "typed scheduled callback should wait until due")
+  (updated-signal:emit 1)
+  (assert (= (. calls 1) :timer)
+          "engine updated signal must drive typed scheduled callbacks"))
+
+(fn test-controller_pause_and_step_control_typed_scheduled_callbacks []
+  (local StandaloneRuntime (load-module :standalone-app-runtime))
+  (local HostedRuntime (load-module :hosted-app-runtime))
+  (local updated-signal (fake-signal))
+  (local engine {:events {:updated updated-signal}})
+  (local host (StandaloneRuntime.create-host {:viewport {:x 0 :y 0 :width 100 :height 100}
+                                             :engine engine}))
+  (local calls [])
+  (local controller (HostedRuntime.mount {:module (runtime-module-with-scheduled-once calls)
+                                          :host host}))
+  (controller:set-paused true)
+  (updated-signal:emit 10)
+  (assert (= (# calls) 0) "paused controller update should not fire typed scheduled callbacks")
+  (controller:step 10)
+  (assert (= (. calls 1) :timer)
+          "controller step should fire typed scheduled callbacks while paused"))
 
 (fn test-run-starts-engine-before-renderer-init []
   (local StandaloneRuntime (load-module :standalone-app-runtime))
@@ -321,7 +368,11 @@
 (table.insert tests {:name "standalone create-host uses shared service errors"
                      :fn test-create-host-uses-shared-service-errors})
 (table.insert tests {:name "standalone engine update drives scheduler and renderers"
-                      :fn test-create-host-engine-update-drives-scheduler-and-renderers})
+                       :fn test-create-host-engine-update-drives-scheduler-and-renderers})
+(table.insert tests {:name "standalone engine update drives typed scheduled callback"
+                       :fn test-create-host-engine-update-drives-typed-scheduled-callback})
+(table.insert tests {:name "standalone controller pause and step control typed scheduled callbacks"
+                       :fn test-controller_pause_and_step_control_typed_scheduled_callbacks})
 (table.insert tests {:name "standalone run starts engine before renderer init"
                      :fn test-run-starts-engine-before-renderer-init})
 (table.insert tests {:name "standalone run cleans up after controller mount failure"
