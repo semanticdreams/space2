@@ -68,6 +68,7 @@
      :tests.test-main-events
      :tests.test-pointer-routing
      :tests.test-states
+     :tests.test-leader-state
      :tests.test-commands
        :tests.test-activity-presentation
       :tests.test-activity-surface-boundary
