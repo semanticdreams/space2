@@ -185,13 +185,13 @@
     (set conversions (+ conversions (apply-path! working field.path 1 "" schema field options))))
   (values working conversions))
 
-(fn read-json-file [path]
+(fn read-json-file [path context-options]
   (local (read-ok content-or-error) (pcall fs.read-file path))
   (when (not read-ok)
-    (error (.. "temporal migration failed to read JSON file=" path " error=" (tostring content-or-error))))
+    (fail (.. "failed to read JSON: " (tostring content-or-error)) context-options))
   (local (parse-ok parsed-or-error) (pcall json.loads content-or-error))
   (when (not parse-ok)
-    (error (.. "temporal migration failed to parse JSON file=" path " error=" (tostring parsed-or-error))))
+    (fail (.. "failed to parse JSON: " (tostring parsed-or-error)) context-options))
   parsed-or-error)
 
 (fn migrate-json-file! [path schema options]
@@ -199,7 +199,7 @@
   (assert schema "temporal migration requires a schema")
   (local opts (validate-options options))
   (local file-options {:file-path path :dry-run? opts.dry-run?})
-  (local record (read-json-file path))
+  (local record (read-json-file path {:schema-id schema.id :field-path "$" :file-path path}))
   (when (not (object-root? record))
     (fail "JSON root must be an object" {:schema-id schema.id :file-path path :field-path "$"}))
   (local (migrated conversions) (migrate-json-record record schema file-options))

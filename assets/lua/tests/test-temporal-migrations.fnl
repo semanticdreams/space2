@@ -136,6 +136,20 @@
   (assert-contains err path "error should include file path")
   (assert (= (fs.read-file path) before) "malformed file should not be rewritten"))
 
+(fn malformed-json-file-fails-with-root-context []
+  (local M (migrations))
+  (local dir (make-temp-dir))
+  (local path (fs.join-path dir "definition.json"))
+  (fs.write-file path "{")
+  (local before (fs.read-file path))
+  (local err (assert-error #(M.migrate-json-file! path M.schemas.workflow-definition)
+                           "malformed JSON should fail"))
+  (assert-contains err "temporal migration" "error should identify temporal migration")
+  (assert-contains err "workflow-definition" "error should include schema id")
+  (assert-contains err "field=$" "error should include root field path")
+  (assert-contains err path "error should include file path")
+  (assert (= (fs.read-file path) before) "malformed JSON file should not be rewritten"))
+
 (fn workflow-run-nested-schema-converts-events-and-steps []
   (local M (migrations))
   (local dir (make-temp-dir))
@@ -160,6 +174,47 @@
   (assert (= (. migrated.events 1 :created-at) "1970-01-01T00:00:05Z") "event created-at should be canonical")
   (assert (= (. migrated.events 2 :created-at) "1970-01-01T00:00:06Z") "canonical event timestamp should remain canonical"))
 
+(fn tree-migration-aggregates-dry-run-errors-and-idempotency []
+  (local M (migrations))
+  (local dir (make-temp-dir))
+  (local nested-dir (fs.join-path dir "nested"))
+  (fs.create-dirs nested-dir)
+  (local change-path (fs.join-path dir "change.json"))
+  (local noop-path (fs.join-path dir "noop.json"))
+  (local malformed-path (fs.join-path dir "malformed.json"))
+  (local nested-path (fs.join-path nested-dir "ignored.json"))
+  (write-json! change-path {:id "change" :created-at 0 :updated-at 1})
+  (write-json! noop-path {:id "noop" :created-at "1970-01-01T00:00:02Z" :updated-at "1970-01-01T00:00:03Z"})
+  (fs.write-file malformed-path "{")
+  (write-json! nested-path {:id "nested" :created-at 4 :updated-at 5})
+  (local change-before (fs.read-file change-path))
+  (local malformed-before (fs.read-file malformed-path))
+  (local nested-before (fs.read-file nested-path))
+
+  (local dry-run (M.migrate-json-tree! dir M.schemas.workflow-definition {:dry-run? true}))
+  (assert (= dry-run.files 3) "tree migration should scan only non-recursive root JSON files")
+  (assert (= dry-run.changed-files 1) "dry run should count changed files")
+  (assert (= dry-run.conversions 2) "dry run should count conversions")
+  (assert (= dry-run.errors 1) "dry run should count malformed files as errors")
+  (assert (= (fs.read-file change-path) change-before) "dry run should not rewrite changed files")
+  (assert (= (fs.read-file malformed-path) malformed-before) "dry run should not rewrite malformed files")
+
+  (local migrated (M.migrate-json-tree! dir M.schemas.workflow-definition))
+  (assert (= migrated.files 3) "tree migration should report root JSON files")
+  (assert (= migrated.changed-files 1) "tree migration should count rewritten files")
+  (assert (= migrated.conversions 2) "tree migration should aggregate conversions")
+  (assert (= migrated.errors 1) "tree migration should report malformed file errors")
+  (assert (= (. (read-json change-path) :created-at) "1970-01-01T00:00:00Z") "tree migration should rewrite changed files")
+  (assert (= (fs.read-file malformed-path) malformed-before) "tree migration should not rewrite malformed files")
+
+  (local rerun (M.migrate-json-tree! dir M.schemas.workflow-definition))
+  (assert (= rerun.files 3) "tree rerun should scan the same root JSON files")
+  (assert (= rerun.changed-files 0) "tree rerun should be idempotent for migrated files")
+  (assert (= rerun.conversions 0) "tree rerun should have no conversions")
+  (assert (= rerun.errors 1) "tree rerun should still report malformed files")
+  (assert (= (fs.read-file nested-path) nested-before)
+          "tree migration should not rewrite nested JSON files"))
+
 (table.insert tests {:name "numeric zero converts to instant string" :fn numeric-zero-converts-to-instant-string})
 (table.insert tests {:name "canonical string round trips through epoch seconds" :fn canonical-string-round-trips-through-epoch-seconds})
 (table.insert tests {:name "optional nil returns nil" :fn optional-nil-returns-nil})
@@ -171,7 +226,9 @@
 (table.insert tests {:name "file migration rewrites integer seconds" :fn file-migration-rewrites-integer-seconds})
 (table.insert tests {:name "rerunning file migration reports no changes" :fn rerunning-file-migration-reports-no-changes})
 (table.insert tests {:name "malformed file data fails without rewriting" :fn malformed-file-data-fails-without-rewriting})
+(table.insert tests {:name "malformed JSON file fails with root context" :fn malformed-json-file-fails-with-root-context})
 (table.insert tests {:name "workflow run nested schema converts events and steps" :fn workflow-run-nested-schema-converts-events-and-steps})
+(table.insert tests {:name "tree migration aggregates dry run errors and idempotency" :fn tree-migration-aggregates-dry-run-errors-and-idempotency})
 
 (local main
   (fn []
