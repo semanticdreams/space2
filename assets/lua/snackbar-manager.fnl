@@ -44,6 +44,11 @@
 (fn fallback-reason [reason fallback]
   (if (= reason nil) fallback reason))
 
+(fn default-duration-ms [policy]
+  (if (not (= policy.default-duration-ms nil))
+      policy.default-duration-ms
+      policy.duration-ms))
+
 (fn request-text [request]
   (if (not (= request.text nil))
       request.text
@@ -70,6 +75,17 @@
         (set idx (+ idx 1))))
   removed)
 
+(fn remove-by-replace-key [entries replace-key]
+  (local removed [])
+  (when (not (= replace-key nil))
+    (var idx 1)
+    (while (<= idx (length entries))
+      (local entry (. entries idx))
+      (if (= entry.replace-key replace-key)
+          (table.insert removed (table.remove entries idx))
+          (set idx (+ idx 1)))))
+  removed)
+
 (fn mark-dropped [handle reason]
   (when handle
     (set handle.dropped? true)
@@ -80,6 +96,32 @@
   (when timer
     (timer:drop)
     (set (. state.timers id) nil)))
+
+(fn numeric-priority [entry]
+  (if (= (type entry.priority) :number) entry.priority 0))
+
+(fn entry-before? [state left right]
+  (if state.priority-order?
+      (do
+        (local left-priority (numeric-priority left))
+        (local right-priority (numeric-priority right))
+        (if (not (= left-priority right-priority))
+            (> left-priority right-priority)
+            (> left.sequence right.sequence)))
+      (if state.newest-first?
+          (> left.sequence right.sequence)
+          (< left.sequence right.sequence))))
+
+(fn sort-visible [state]
+  (table.sort state.visible (fn [left right] (entry-before? state left right))))
+
+(fn sort-queued [state]
+  (when state.priority-order?
+    (table.sort state.queued (fn [left right] (entry-before? state left right)))))
+
+(fn sort-entries [state]
+  (sort-visible state)
+  (sort-queued state))
 
 (fn emit-change [state manager reason]
   (state.changed:emit {:reason reason
@@ -98,8 +140,12 @@
    :content-builder request.content-builder
    :variant (if (= request.variant nil) :info request.variant)
     :duration-ms (if (= request.duration-ms nil)
-                     state.policy.duration-ms
+                     (default-duration-ms state.policy)
                      request.duration-ms)
+    :persistent? (if (= request.persistent? nil) false request.persistent?)
+    :priority (if (= request.priority nil) 0 request.priority)
+    :replace-key request.replace-key
+    :sequence state.next-sequence
     :actions (copy-actions request.actions)
     :metadata request.metadata})
 
@@ -118,7 +164,8 @@
   (timer:start))
 
 (fn schedule-entry [state manager entry]
-  (when (and (= (type entry.duration-ms) :number)
+  (when (and (not entry.persistent?)
+             (= (type entry.duration-ms) :number)
              (> entry.duration-ms 0))
     (schedule-timeout state manager entry)))
 
@@ -127,42 +174,92 @@
               (> (length state.queued) 0))
     (local entry (table.remove state.queued 1))
     (table.insert state.visible entry)
-    (schedule-entry state manager entry)))
+    (schedule-entry state manager entry)
+    (sort-visible state)))
 
 (fn make-handle [manager entry]
   {:id entry.id
    :entry entry
    :dropped? false
    :drop-reason nil
-   :dismiss (fn [_self reason]
-              (manager:dismiss entry.id reason))})
+    :dismiss (fn [_self reason]
+               (manager:dismiss entry.id reason))})
 
-(fn drop-overflow [state]
-  (when (and (>= (length state.queued) state.max-queued)
-             (> (length state.queued) 0))
-    (local overflow (table.remove state.queued 1))
-    (local overflow-handle (. state.handles overflow.id))
-    (cancel-timer state overflow.id)
-    (mark-dropped overflow-handle :overflow)
-    (set (. state.handles overflow.id) nil)))
+(fn retire-entry [state entry reason]
+  (cancel-timer state entry.id)
+  (mark-dropped (. state.handles entry.id) reason)
+  (set (. state.handles entry.id) nil))
+
+(fn remove-replace-key-matches [state replace-key]
+  (when (not (= replace-key nil))
+    (each [_ entry (ipairs (remove-by-replace-key state.visible replace-key))]
+      (retire-entry state entry :replaced))
+    (each [_ entry (ipairs (remove-by-replace-key state.queued replace-key))]
+      (retire-entry state entry :replaced))))
+
+(fn oldest-visible-index [state]
+  (var oldest-index nil)
+  (var oldest-sequence nil)
+  (each [idx entry (ipairs state.visible)]
+    (when (if (= oldest-sequence nil)
+              true
+              (< entry.sequence oldest-sequence))
+      (set oldest-index idx)
+      (set oldest-sequence entry.sequence)))
+  oldest-index)
 
 (fn enqueue-entry [state entry]
-  (drop-overflow state)
-  (when (< (length state.queued) state.max-queued)
-    (table.insert state.queued entry)))
+  (if (< (length state.queued) state.max-queued)
+      (do
+        (table.insert state.queued entry)
+        (sort-queued state)
+        true)
+      false))
+
+(fn insert-visible [state manager entry]
+  (table.insert state.visible entry)
+  (sort-visible state)
+  (schedule-entry state manager entry))
+
+(fn resolve-overflow-mode [state request]
+  (if (not (= request.mode nil))
+      request.mode
+      (if (not (= state.policy.overflow-mode nil))
+          state.policy.overflow-mode
+          :queue)))
 
 (fn show-entry [state manager request]
   (assert-active state)
   (local entry (normalize-entry state request))
+  (remove-replace-key-matches state entry.replace-key)
   (assert (not (. state.handles entry.id))
           (.. "SnackbarManager.show duplicate live id: " (tostring entry.id)))
   (local handle (make-handle manager entry))
+  (set state.next-sequence (+ state.next-sequence 1))
   (set (. state.handles entry.id) handle)
   (if (< (length state.visible) state.max-visible)
       (do
-        (table.insert state.visible entry)
-        (schedule-entry state manager entry))
-      (enqueue-entry state entry))
+        (insert-visible state manager entry))
+      (do
+        (local mode (resolve-overflow-mode state request))
+        (if (= mode :drop)
+            (do
+              (mark-dropped handle :visible-full)
+              (set (. state.handles entry.id) nil))
+            (= mode :replace)
+            (do
+              (local oldest-index (oldest-visible-index state))
+              (if oldest-index
+                  (do
+                    (local replaced (table.remove state.visible oldest-index))
+                    (retire-entry state replaced :replaced)
+                    (insert-visible state manager entry))
+                  (do
+                    (mark-dropped handle :visible-full)
+                    (set (. state.handles entry.id) nil))))
+            (when (not (enqueue-entry state entry))
+              (mark-dropped handle :queue-full)
+              (set (. state.handles entry.id) nil)))))
   (emit-change state manager :show)
   handle)
 
@@ -179,6 +276,7 @@
         (mark-dropped (. state.handles id) final-reason)
         (set (. state.handles id) nil)
         (promote-queued state manager)
+        (sort-entries state)
         (emit-change state manager final-reason)
         true)
       false))
@@ -233,9 +331,12 @@
    :visible []
    :queued []
    :handles {}
-   :timers {}
-   :max-visible (positive-limit policy.max-visible 3)
-   :max-queued (positive-limit policy.max-queued 20)})
+    :timers {}
+    :next-sequence 1
+    :max-visible (positive-limit policy.max-visible 3)
+    :max-queued (positive-limit policy.max-queued 20)
+    :newest-first? (not (= policy.newest-first? false))
+    :priority-order? (if policy.priority-order? true false)})
 
 (fn SnackbarManager [opts]
   (local state (make-state opts))

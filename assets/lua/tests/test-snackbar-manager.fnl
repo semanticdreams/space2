@@ -1,5 +1,31 @@
 (local tests [])
 (local SnackbarManager (require :snackbar-manager))
+(local RuntimeTimers (require :runtime-timers))
+
+(fn reset-timers []
+  (RuntimeTimers.clear)
+  (set app.__runtime_timers nil))
+
+(fn entry-ids [entries]
+  (local ids [])
+  (each [_ entry (ipairs entries)]
+    (table.insert ids entry.id))
+  ids)
+
+(fn assert-ids [entries expected message]
+  (local ids (entry-ids entries))
+  (assert (= (length ids) (length expected))
+          (.. message " length expected " (length expected) " got " (length ids)))
+  (each [idx id (ipairs expected)]
+    (assert (= (. ids idx) id)
+            (.. message " at " idx " expected " id " got " (tostring (. ids idx))))))
+
+(fn timer-count []
+  (var count 0)
+  (when app.__runtime_timers
+    (each [_ _timer (pairs app.__runtime_timers.timers)]
+      (set count (+ count 1))))
+  count)
 
 (fn assert-error-contains [body expected]
   (local (ok err) (pcall body))
@@ -68,6 +94,127 @@
   (assert (= visible-action.label "Undo") "visible entries should include copied actions for hosts")
   (manager:drop))
 
+(fn newest-first-visible-ordering []
+  (local manager (SnackbarManager {:max-visible 3}))
+  (manager:show {:id "one" :text "One" :persistent? true})
+  (manager:show {:id "two" :text "Two" :persistent? true})
+  (manager:show {:id "three" :text "Three" :persistent? true})
+  (assert-ids (manager:visible-entries) ["three" "two" "one"]
+              "visible entries should default to newest-first")
+  (manager:drop))
+
+(fn max-visible-queues-and-promotes-after-dismiss []
+  (local manager (SnackbarManager {:max-visible 1 :max-queued 2}))
+  (manager:show {:id "visible" :text "Visible" :persistent? true})
+  (manager:show {:id "queued" :text "Queued" :persistent? true})
+  (assert-ids (manager:visible-entries) ["visible"] "first entry should remain visible")
+  (assert-ids (manager:queued-entries) ["queued"] "second entry should queue")
+  (manager:dismiss "visible")
+  (assert-ids (manager:visible-entries) ["queued"] "queued entry should promote after dismiss")
+  (assert-ids (manager:queued-entries) [] "queue should be empty after promotion")
+  (manager:drop))
+
+(fn max-queued-drops-second-overflow []
+  (local manager (SnackbarManager {:max-visible 1 :max-queued 1}))
+  (manager:show {:id "visible" :text "Visible" :persistent? true})
+  (local queued (manager:show {:id "queued" :text "Queued" :persistent? true}))
+  (local dropped (manager:show {:id "dropped" :text "Dropped" :persistent? true}))
+  (assert (not queued.dropped?) "first queued overflow should stay queued")
+  (assert dropped.dropped? "second queued overflow should return a dropped handle")
+  (assert (= dropped.drop-reason :queue-full) "drop reason should be queue-full")
+  (assert-ids (manager:queued-entries) ["queued"] "queue should preserve the first queued entry")
+  (manager:drop))
+
+(fn priority-order-sorts-by-priority-then-newest []
+  (local manager (SnackbarManager {:max-visible 4 :max-queued 3 :priority-order? true}))
+  (manager:show {:id "low" :text "Low" :priority 1 :persistent? true})
+  (manager:show {:id "tie-old" :text "Tie old" :priority 5 :persistent? true})
+  (manager:show {:id "high" :text "High" :priority 10 :persistent? true})
+  (manager:show {:id "tie-new" :text "Tie new" :priority 5 :persistent? true})
+  (manager:show {:id "queued-low" :text "Queued low" :priority 1 :persistent? true})
+  (manager:show {:id "queued-high" :text "Queued high" :priority 10 :persistent? true})
+  (assert-ids (manager:visible-entries) ["high" "tie-new" "tie-old" "low"]
+              "priority visible entries should sort by priority then newest")
+  (assert-ids (manager:queued-entries) ["queued-high" "queued-low"]
+              "priority queued entries should sort by priority then newest")
+  (manager:drop))
+
+(fn replace-key-replaces-visible-and-queued []
+  (local manager (SnackbarManager {:max-visible 1 :max-queued 2}))
+  (local first (manager:show {:id "first" :text "First" :replace-key "save" :persistent? true}))
+  (local replacement (manager:show {:id "replacement" :text "Replacement" :replace-key "save" :persistent? true}))
+  (assert first.dropped? "visible replace-key target should be dropped")
+  (assert (= first.drop-reason :replaced) "visible replace-key target should be marked replaced")
+  (assert-ids (manager:visible-entries) ["replacement"] "replacement should be visible")
+  (local queued (manager:show {:id "queued" :text "Queued" :replace-key "queued" :persistent? true}))
+  (local queued-replacement (manager:show {:id "queued-replacement" :text "Queued replacement" :replace-key "queued" :persistent? true}))
+  (assert queued.dropped? "queued replace-key target should be dropped")
+  (assert (= queued.drop-reason :replaced) "queued replace-key target should be marked replaced")
+  (assert (not queued-replacement.dropped?) "queued replacement should stay live")
+  (assert-ids (manager:queued-entries) ["queued-replacement"] "queued replacement should replace queued target")
+  (manager:drop))
+
+(fn drop-overflow-mode-drops-when-visible-full []
+  (local manager (SnackbarManager {:max-visible 1 :overflow-mode :drop}))
+  (manager:show {:id "visible" :text "Visible" :persistent? true})
+  (local dropped (manager:show {:id "dropped" :text "Dropped" :persistent? true}))
+  (assert dropped.dropped? "drop overflow mode should return a dropped handle")
+  (assert (= dropped.drop-reason :visible-full) "drop overflow mode should mark visible-full")
+  (assert-ids (manager:visible-entries) ["visible"] "visible entry should be unchanged")
+  (manager:drop))
+
+(fn replace-overflow-mode-replaces-oldest-visible []
+  (local manager (SnackbarManager {:max-visible 2 :overflow-mode :replace}))
+  (local oldest (manager:show {:id "oldest" :text "Oldest" :persistent? true}))
+  (manager:show {:id "middle" :text "Middle" :persistent? true})
+  (manager:show {:id "newest" :text "Newest" :persistent? true})
+  (assert oldest.dropped? "replace overflow mode should drop oldest visible entry")
+  (assert (= oldest.drop-reason :replaced) "replaced visible entry should be marked replaced")
+  (assert-ids (manager:visible-entries) ["newest" "middle"] "newest replacement should be visible")
+  (manager:drop))
+
+(fn queued-entry-starts-timer-only-after-promotion []
+  (reset-timers)
+  (local manager (SnackbarManager {:max-visible 1}))
+  (manager:show {:id "first" :text "First" :duration-ms 100})
+  (manager:show {:id "second" :text "Second" :duration-ms 100})
+  (assert (= (timer-count) 1) "only visible entry should have a timer")
+  (app.engine.events.updated:emit 100)
+  (assert-ids (manager:visible-entries) ["second"] "second entry should promote after first timeout")
+  (assert (= (timer-count) 1) "promoted queued entry should start its timer")
+  (app.engine.events.updated:emit 99)
+  (assert-ids (manager:visible-entries) ["second"] "promoted entry should not expire before its own duration")
+  (app.engine.events.updated:emit 1)
+  (assert-ids (manager:visible-entries) [] "promoted entry should expire after its own duration")
+  (manager:drop)
+  (RuntimeTimers.clear)
+  (set app.__runtime_timers nil))
+
+(fn persistent-entry-does-not-auto-dismiss []
+  (reset-timers)
+  (local manager (SnackbarManager))
+  (manager:show {:id "persistent" :text "Persistent" :duration-ms 100 :persistent? true})
+  (assert (= (timer-count) 0) "persistent entry should not start a timer")
+  (app.engine.events.updated:emit 1000)
+  (assert-ids (manager:visible-entries) ["persistent"] "persistent entry should remain visible")
+  (manager:drop)
+  (RuntimeTimers.clear)
+  (set app.__runtime_timers nil))
+
+(fn drop-cancels-timers-and-blocks-later-use []
+  (reset-timers)
+  (local manager (SnackbarManager))
+  (manager:show {:id "timed" :text "Timed" :duration-ms 100})
+  (assert (= (timer-count) 1) "timed entry should start a timer")
+  (manager:drop)
+  (assert (= (timer-count) 0) "drop should cancel runtime timers")
+  (assert (= app.__runtime_timers.update-handler nil) "drop should disconnect runtime timer handler")
+  (assert-error-contains (fn [] (manager:show {:text "Late"})) "SnackbarManager is dropped")
+  (assert-error-contains (fn [] (manager:dismiss "timed")) "SnackbarManager is dropped")
+  (assert-error-contains (fn [] (manager:clear)) "SnackbarManager is dropped")
+  (RuntimeTimers.clear)
+  (set app.__runtime_timers nil))
+
 (table.insert tests {:name "SnackbarManager.show requires content"
                      :fn show-requires-content})
 (table.insert tests {:name "SnackbarManager normalizes message to text"
@@ -79,7 +226,27 @@
 (table.insert tests {:name "SnackbarManager rejects duplicate explicit ids"
                      :fn duplicate-explicit-id-is-rejected})
 (table.insert tests {:name "SnackbarManager preserves text action descriptors"
-                     :fn text-snackbar-preserves-action-descriptors})
+                      :fn text-snackbar-preserves-action-descriptors})
+(table.insert tests {:name "SnackbarManager orders visible entries newest-first"
+                     :fn newest-first-visible-ordering})
+(table.insert tests {:name "SnackbarManager queues overflow and promotes after dismiss"
+                     :fn max-visible-queues-and-promotes-after-dismiss})
+(table.insert tests {:name "SnackbarManager drops queued overflow when queue is full"
+                     :fn max-queued-drops-second-overflow})
+(table.insert tests {:name "SnackbarManager priority order sorts by priority then newest"
+                     :fn priority-order-sorts-by-priority-then-newest})
+(table.insert tests {:name "SnackbarManager replace-key replaces visible and queued entries"
+                     :fn replace-key-replaces-visible-and-queued})
+(table.insert tests {:name "SnackbarManager drop overflow mode drops when visible full"
+                     :fn drop-overflow-mode-drops-when-visible-full})
+(table.insert tests {:name "SnackbarManager replace overflow mode replaces oldest visible"
+                     :fn replace-overflow-mode-replaces-oldest-visible})
+(table.insert tests {:name "SnackbarManager queued entry starts timer only after promotion"
+                     :fn queued-entry-starts-timer-only-after-promotion})
+(table.insert tests {:name "SnackbarManager persistent entry does not auto-dismiss"
+                     :fn persistent-entry-does-not-auto-dismiss})
+(table.insert tests {:name "SnackbarManager drop cancels timers and blocks later use"
+                     :fn drop-cancels-timers-and-blocks-later-use})
 
 (fn main []
   (local runner (require :tests/runner))
