@@ -24,6 +24,16 @@
 (fn value-or [value fallback]
   (if (not (= value nil)) value fallback))
 
+(fn finite-number? [value]
+  (and (= (type value) :number)
+       (= value value)
+       (not (= value math.huge))
+       (not (= value (- math.huge)))))
+
+(fn finite-positive-number? [value]
+  (and (finite-number? value)
+       (> value 0)))
+
 (fn remove-child-layout [layout child]
   (local idx (table-index-of layout.children child.layout))
   (when idx
@@ -50,6 +60,8 @@
   (local child (builder state.ctx live-entry handle))
   (assert (and child child.layout) "SnackbarHost content-builder must return a widget with layout")
   (set child.entry-id entry.id)
+  (set child.snackbar-entry live-entry)
+  (set child.snackbar-handle handle)
   child)
 
 (fn ensure-child-order [state entries]
@@ -74,6 +86,22 @@
           (table.remove state.children idx)
           (drop-rendered-child state child)))))
 
+(fn remove-replaced-children [state entries]
+  (local live-handles {})
+  (each [_ entry (ipairs entries)]
+    (set (. live-handles entry.id)
+         (assert (state.manager:handle-for entry.id)
+                 (.. "SnackbarHost missing handle for entry: " (tostring entry.id)))))
+  (var idx 1)
+  (while (<= idx (length state.children))
+    (local child (. state.children idx))
+    (local live-handle (. live-handles child.entry-id))
+    (if (and live-handle (not (= child.snackbar-handle live-handle)))
+        (do
+          (table.remove state.children idx)
+          (drop-rendered-child state child))
+        (set idx (+ idx 1)))))
+
 (fn add-new-children [state entries]
   (each [_ entry (ipairs entries)]
     (when (not (find-rendered-index state.children entry.id))
@@ -90,14 +118,24 @@
     (local visible (if entries entries (state.manager:visible-entries)))
     (local ids (entry-id-set visible))
     (remove-missing-children state ids)
+    (remove-replaced-children state visible)
     (add-new-children state visible)
     (ensure-child-order state visible)
     (when mark-dirty?
       (mark-host-measure-dirty state))))
 
-(fn measure-children [state self constraints]
+(fn effective-max-width [state self constraints]
   (local layout-width (if (> self.size.x 0) self.size.x 1000))
-  (local max-width (value-or state.max-width layout-width))
+  (var max-width (value-or state.max-width layout-width))
+  (when (finite-positive-number? self.size.x)
+    (set max-width (math.min max-width self.size.x)))
+  (local constraint-width (and constraints constraints.max constraints.max.x))
+  (when (finite-positive-number? constraint-width)
+    (set max-width (math.min max-width constraint-width)))
+  max-width)
+
+(fn measure-children [state self constraints]
+  (local max-width (effective-max-width state self constraints))
   (local child-constraints {:max (glm.vec3 max-width 1000 1000)})
   (set self.measure (glm.vec3 0))
   (each [idx child (ipairs state.children)]

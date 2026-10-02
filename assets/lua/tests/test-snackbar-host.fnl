@@ -62,6 +62,27 @@
   (fn build-probe [_ctx entry _handle]
     (make-probe-widget drops entry)))
 
+(fn make-constrained-width-widget [drops entry]
+  (fn measurer [self]
+    (set self.measure (glm.vec3 18 1 0)))
+  (fn constrained-measurer [self constraints]
+    (set self.measure (glm.vec3 (math.min 18 constraints.max.x) 1 0)))
+  (fn layouter [_self] nil)
+  (local layout (Layout {:name (.. "constrained-probe-" entry.id)
+                         :measurer measurer
+                         :constrained-measurer constrained-measurer
+                         :layouter layouter}))
+  (fn drop [self]
+    (set (. drops self.entry.id) (+ (probe-drop-count drops self.entry.id) 1))
+    (self.layout:drop))
+  {:layout layout
+   :entry entry
+   :drop drop})
+
+(fn make-constrained-width-builder [drops]
+  (fn build-probe [_ctx entry _handle]
+    (make-constrained-width-widget drops entry)))
+
 (fn build-probe-host [manager drops opts]
   (local host-builder
     (SnackbarHost {:manager manager
@@ -244,6 +265,30 @@
   (host:drop)
   (manager:drop))
 
+(fn top-right-clamps-child-width-to-host-bounds []
+  (local manager (SnackbarManager))
+  (local drops {})
+  (local host-builder
+    (SnackbarHost {:manager manager
+                   :content-builder (make-constrained-width-builder drops)
+                   :placement :top-right
+                   :max-width 18}))
+  (local host (host-builder (make-ctx)))
+  (manager:show {:id "wide" :text "Wide" :persistent? true})
+  (host.layout:measure-constrained {:max (glm.vec3 10 15 0)})
+  (set host.layout.position (glm.vec3 10 20 0))
+  (set host.layout.size (glm.vec3 10 15 0))
+  (host.layout:layouter)
+  (local child (. host.children 1))
+  (assert (= child.layout.measure.x 10) "child width should be clamped to host constrained width")
+  (assert (= child.layout.position.x host.layout.position.x)
+          "clamped top-right child should stay inside host left edge")
+  (assert (= (+ child.layout.position.x child.layout.size.x)
+             (+ host.layout.position.x host.layout.size.x))
+          "clamped top-right child should align to host right edge")
+  (host:drop)
+  (manager:drop))
+
 (fn placement-top-left-uses-left-edge []
   (local manager (SnackbarManager))
   (local drops {})
@@ -254,6 +299,24 @@
   (assert (= child.layout.position.x host.layout.position.x)
           "top-left child should align to host left edge")
   (host:drop)
+  (manager:drop))
+
+(fn same-id-replacement-rebuilds-rendered-child []
+  (local manager (SnackbarManager))
+  (local drops {})
+  (local host (build-probe-host manager drops))
+  (local first-handle
+    (manager:show {:id "save" :replace-key "save" :text "Saving" :persistent? true}))
+  (local first-child (. host.children 1))
+  (local second-handle
+    (manager:show {:id "save" :replace-key "save" :text "Saved" :persistent? true}))
+  (local second-child (. host.children 1))
+  (assert (not (= first-handle second-handle)) "manager replacement should issue a new handle")
+  (assert (not (= first-child second-child)) "same-id replacement should rebuild rendered child")
+  (assert (= (. drops :save) 1) "same-id replacement should drop old rendered child once")
+  (assert (= second-child.entry.text "Saved") "rebuilt child should use replacement entry content")
+  (host:drop)
+  (assert (= (. drops :save) 2) "replacement child should drop once on host drop")
   (manager:drop))
 
 (fn snackbar-host-does-not-require-scroll-view []
@@ -296,9 +359,13 @@
 (table.insert tests {:name "SnackbarHost manager changes mark measure dirty"
                      :fn manager-change-marks-host-measure-dirty})
 (table.insert tests {:name "SnackbarHost top-right placement uses right edge and spacing"
-                     :fn placement-top-right-uses-right-edge-and-spacing})
+                      :fn placement-top-right-uses-right-edge-and-spacing})
+(table.insert tests {:name "SnackbarHost top-right clamps child width to host bounds"
+                     :fn top-right-clamps-child-width-to-host-bounds})
 (table.insert tests {:name "SnackbarHost top-left placement uses left edge"
-                     :fn placement-top-left-uses-left-edge})
+                      :fn placement-top-left-uses-left-edge})
+(table.insert tests {:name "SnackbarHost same-id replacements rebuild rendered child"
+                     :fn same-id-replacement-rebuilds-rendered-child})
 (table.insert tests {:name "SnackbarHost does not require scroll-view"
                      :fn snackbar-host-does-not-require-scroll-view})
 (table.insert tests {:name "Snackbar facade creates scoped manager and host"
