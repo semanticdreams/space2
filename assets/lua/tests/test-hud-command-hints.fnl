@@ -33,7 +33,7 @@
                            (set self.size (or self.size self.measure)))}))
     {:layout layout
      :drop (fn [_self]
-             (layout:drop))}))
+              (layout:drop))}))
 
 (fn make-input-stub [opts]
   (local options (or opts {}))
@@ -93,12 +93,12 @@
 
 (fn build-test-hud [states opts]
   (local options (or opts {}))
-  (local hud (Hud {:states states}))
+  (local hud (Hud {:states states :icons options.icons}))
   (hud:build
     (HudLayout.make-hud-builder
       {:control-builder (or options.control-builder
-                            (fixed-widget "control" (glm.vec3 8 3 0)))
-       :status-builder options.status-builder}))
+                             (fixed-widget "control" (glm.vec3 8 3 0)))
+       :status-builder options.status-builder :right-dock-builder options.right-dock-builder}))
   (hud:update-projection (or options.viewport {:width 1920 :height 1080}))
   (hud:update)
   (when (and states states.set-hud-provider)
@@ -929,6 +929,92 @@
   (assert (= collapsed "[f1] more")
           "collapsed strip should preserve visible room for the F1 toggle"))
 
+(fn overlay-right-edge-stays-left-of-right-rail []
+  (local original-states app.states)
+  (local original-hud app.hud)
+  (local states (States))
+  (states:add-state :normal (state-with-hints :normal [(entry "space" "leader" {:priority 10})]))
+  (states:set-state :normal)
+  (set-app-states! states)
+  (local hud
+    (build-test-hud
+      states
+      {:right-dock-builder (fixed-widget "right-rail" (glm.vec3 5 4 0))}))
+  (set app.hud hud)
+  (assert (hud.command-hints:toggle-overlay)
+          "overlay should open before right rail bounds check")
+  (hud:update)
+  (local overlay hud.command-hints.overlay-element)
+  (local rail hud.entity.right-dock-root)
+  (local overlay-right (+ overlay.layout.position.x overlay.layout.size.x))
+  (local rail-left rail.layout.position.x)
+  (assert (<= overlay-right rail-left)
+          (.. "command hints overlay should not cross into the right rail; overlay-right "
+              overlay-right
+              " rail-left "
+              rail-left))
+  (hud:drop)
+  (set app.hud original-hud)
+  (set-app-states! original-states))
+
+(fn make-icons-stub []
+  (local glyph {:advance 1})
+  (local font {:metadata {:metrics {:ascender 1 :descender -1}
+                          :atlas {:width 1 :height 1}}
+               :glyph-map {4242 glyph}
+               :advance 1})
+  {:font font
+   :resolve (fn [_self _name]
+              {:type :font
+               :codepoint 4242
+               :font font})
+   :get (fn [_self _name] 4242)})
+
+(fn overlay-may-overlap-expanded-sidebar-panel-but-not-rail []
+  (local HudExtendedSidebar (require :hud-extended-sidebar))
+  (local HudExtendedSidebarView (require :hud-extended-sidebar-view))
+  (local original-states app.states)
+  (local original-hud app.hud)
+  (local states (States))
+  (states:add-state :normal (state-with-hints :normal [(entry "space" "leader" {:priority 10})]))
+  (states:set-state :normal)
+  (set-app-states! states)
+  (local sidebar (HudExtendedSidebar))
+  (sidebar:register-entry {:id :test
+                            :icon :test_icon
+                            :label "Test"
+                            :build-panel (fixed-widget "right-panel" (glm.vec3 38 10 0))})
+  (sidebar:select :test)
+  (local hud
+    (build-test-hud
+      states
+      {:right-dock-builder (HudExtendedSidebarView sidebar)
+       :icons (make-icons-stub)}))
+  (set app.hud hud)
+  (assert (hud.command-hints:toggle-overlay)
+          "overlay should open before expanded right sidebar bounds check")
+  (hud:update)
+  (local overlay hud.command-hints.overlay-element)
+  (local right-dock hud.entity.right-dock-root)
+  (local panel-layout (. right-dock.layout.children 1))
+  (local rail-layout (. right-dock.layout.children 2))
+  (local overlay-right (+ overlay.layout.position.x overlay.layout.size.x))
+  (local panel-left panel-layout.position.x)
+  (local rail-left rail-layout.position.x)
+  (assert (> overlay-right panel-left)
+          (.. "command hints overlay may overlap the expanded right sidebar flyout panel; overlay-right "
+              overlay-right
+              " panel-left "
+              panel-left))
+  (assert (<= overlay-right rail-left)
+          (.. "command hints overlay should not cross into the right rail when sidebar is expanded; overlay-right "
+              overlay-right
+              " rail-left "
+              rail-left))
+  (hud:drop)
+  (set app.hud original-hud)
+  (set-app-states! original-states))
+
 (table.insert tests {:name "HUD command strip follows active state"
                      :fn hud-command-strip-follows-active-state})
 (table.insert tests {:name "Status panel update populates width-based collapsed field"
@@ -986,7 +1072,11 @@
 (table.insert tests {:name "Width path preserves the F1 toggle with status body"
                      :fn width-path-preserves-f1-toggle-with-status-body})
 (table.insert tests {:name "Collapsed strip preserves room for the F1 toggle"
-                     :fn collapsed-strip-reserves-visible-room-for-f1-toggle})
+                      :fn collapsed-strip-reserves-visible-room-for-f1-toggle})
+(table.insert tests {:name "Overlay right edge stays left of right rail"
+                     :fn overlay-right-edge-stays-left-of-right-rail})
+(table.insert tests {:name "Overlay may overlap expanded sidebar panel but not rail"
+                     :fn overlay-may-overlap-expanded-sidebar-panel-but-not-rail})
 
 (local main
   (fn []

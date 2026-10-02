@@ -1,6 +1,6 @@
 (local glm (require :glm))
 (local Text (require :text))
-(local {: FullWidth} (require :hud-layout))
+
 (local Padding (require :padding))
 (local Card (require :card))
 (local CommandHint (require :command-hints))
@@ -278,16 +278,16 @@
             (Padding {:edge-insets [0.6 0.45]
                       :child (fn [_] content)})})
          inner-ctx)))
-    (local wrapped
-      ((FullWidth
-         {:name "hud-command-hints-overlay"
-          :hud manager.hud
-          :child card-builder})
-       ctx))
-    (set wrapped.set-text
+    (local card (card-builder ctx))
+    (set card.set-text
          (fn [_self text]
            (text-entity:set-text text)))
-    wrapped))
+    card))
+
+
+
+
+
 
 (fn passive-event? [event-name]
   (or (= event-name :updated)
@@ -318,8 +318,8 @@
           (if (not self.overlay-element)
               (set self.overlay-element
                    (self.hud:add-overlay-child {:builder (overlay-builder self)
-                                                :layer :middle
-                                                :depth-offset-index 200})))
+                                                 :layer :middle :fill-parent? true
+                                                 :depth-offset-index 200})))
           (when self.overlay-element.set-text
             (self.overlay-element:set-text (overlay-text self.sections))))
         (when self.overlay-element
