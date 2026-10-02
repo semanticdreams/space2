@@ -4,6 +4,9 @@
 (local Uuid (require :uuid))
 (local Signal (require :signal))
 (local JsonUtils (require :json-utils))
+(local Temporal (require :temporal))
+
+(local Migrations Temporal.migrations)
 
 (fn ensure-dir [path]
   (assert path "ensure-dir requires path")
@@ -40,6 +43,12 @@
   (local out [])
   (each [_ item (ipairs source)]
     (table.insert out item))
+  out)
+
+(fn shallow-copy-table [tbl]
+  (local out {})
+  (each [key value (pairs (table-or-empty tbl))]
+    (tset out key value))
   out)
 
 (fn table-values [tbl]
@@ -97,7 +106,19 @@
   (when (= changes.code-entity-id false)
     (error "workflow step requires :code-entity-id")))
 
-(fn normalize-definition [definition]
+(fn migration-options [schema field-path file-path optional?]
+  {:schema-id schema.id
+   :field-path field-path
+   :file-path file-path
+   :optional? optional?})
+
+(fn timestamp->epoch-seconds [value schema field-path file-path optional?]
+  (Migrations.timestamp->epoch-seconds value (migration-options schema field-path file-path optional?)))
+
+(fn timestamp->string [value schema field-path file-path optional?]
+  (Migrations.instant->timestamp value (migration-options schema field-path file-path optional?)))
+
+(fn normalize-definition [definition file-path]
   (local data (table-or-empty definition))
   {:id (tostring data.id)
    :name (tostring (value-or data.name ""))
@@ -107,8 +128,8 @@
    :parameters (table-or-empty data.parameters)
    :steps (array-or-empty data.steps)
    :edges (array-or-empty data.edges)
-   :created-at (tonumber (value-or data.created-at 0))
-   :updated-at (tonumber (value-or data.updated-at 0))})
+    :created-at (timestamp->epoch-seconds data.created-at Migrations.schemas.workflow-definition "created-at" file-path false)
+    :updated-at (timestamp->epoch-seconds data.updated-at Migrations.schemas.workflow-definition "updated-at" file-path false)})
 
 (fn normalize-step [step id]
   (local data (table-or-empty step))
@@ -146,7 +167,31 @@
     (table.insert out (normalize-edge edge edge.id)))
   out)
 
-(fn normalize-run [run]
+(fn normalize-run-step-timestamps [step step-id file-path]
+  (local data (shallow-copy-table step))
+  (local prefix (.. "steps." (tostring step-id)))
+  (set data.started-at (timestamp->epoch-seconds data.started-at Migrations.schemas.workflow-run (.. prefix ".started-at") file-path true))
+  (set data.finished-at (timestamp->epoch-seconds data.finished-at Migrations.schemas.workflow-run (.. prefix ".finished-at") file-path true))
+  data)
+
+(fn normalize-run-steps [steps file-path]
+  (local out {})
+  (each [step-id step (pairs (table-or-empty steps))]
+    (tset out step-id (normalize-run-step-timestamps step step-id file-path)))
+  out)
+
+(fn normalize-run-event-timestamps [event index file-path]
+  (local data (shallow-copy-table event))
+  (set data.created-at (timestamp->epoch-seconds data.created-at Migrations.schemas.workflow-run (.. "events[" index "].created-at") file-path false))
+  data)
+
+(fn normalize-run-events [events file-path]
+  (local out [])
+  (each [index event (ipairs (array-or-empty events))]
+    (table.insert out (normalize-run-event-timestamps event index file-path)))
+  out)
+
+(fn normalize-run [run file-path]
   (local data (table-or-empty run))
   {:id (tostring data.id)
    :definition-id (tostring data.definition-id)
@@ -156,12 +201,12 @@
    :output (table-or-empty data.output)
    :context (table-or-empty data.context)
    :current-step-ids (array-or-empty data.current-step-ids)
-   :created-at (tonumber (value-or data.created-at 0))
-   :started-at data.started-at
-   :finished-at data.finished-at
+    :created-at (timestamp->epoch-seconds data.created-at Migrations.schemas.workflow-run "created-at" file-path false)
+    :started-at (timestamp->epoch-seconds data.started-at Migrations.schemas.workflow-run "started-at" file-path true)
+    :finished-at (timestamp->epoch-seconds data.finished-at Migrations.schemas.workflow-run "finished-at" file-path true)
     :error data.error
-    :steps (table-or-empty data.steps)
-    :events (array-or-empty data.events)})
+     :steps (normalize-run-steps data.steps file-path)
+     :events (normalize-run-events data.events file-path)})
 
 (fn active-run-status? [status]
   (if (= status :queued)
@@ -210,12 +255,35 @@
 
 (fn write-definition! [self definition]
   (ensure-dir self.definitions-dir)
-  (JsonUtils.write-json! (definition-path self definition.id) definition)
+  (local path (definition-path self definition.id))
+  (local payload (shallow-copy-table definition))
+  (set payload.created-at (timestamp->string definition.created-at Migrations.schemas.workflow-definition "created-at" path false))
+  (set payload.updated-at (timestamp->string definition.updated-at Migrations.schemas.workflow-definition "updated-at" path false))
+  (JsonUtils.write-json! path payload)
   definition)
 
 (fn write-run! [self run]
   (ensure-dir self.runs-dir)
-  (JsonUtils.write-json! (run-path self run.id) run)
+  (local path (run-path self run.id))
+  (local payload (shallow-copy-table run))
+  (set payload.created-at (timestamp->string run.created-at Migrations.schemas.workflow-run "created-at" path false))
+  (set payload.started-at (timestamp->string run.started-at Migrations.schemas.workflow-run "started-at" path true))
+  (set payload.finished-at (timestamp->string run.finished-at Migrations.schemas.workflow-run "finished-at" path true))
+  (local step-payload {})
+  (each [step-id step (pairs (table-or-empty run.steps))]
+    (local copied (shallow-copy-table step))
+    (local prefix (.. "steps." (tostring step-id)))
+    (set copied.started-at (timestamp->string step.started-at Migrations.schemas.workflow-run (.. prefix ".started-at") path true))
+    (set copied.finished-at (timestamp->string step.finished-at Migrations.schemas.workflow-run (.. prefix ".finished-at") path true))
+    (tset step-payload step-id copied))
+  (set payload.steps step-payload)
+  (local event-payload [])
+  (each [index event (ipairs (array-or-empty run.events))]
+    (local copied (shallow-copy-table event))
+    (set copied.created-at (timestamp->string event.created-at Migrations.schemas.workflow-run (.. "events[" index "].created-at") path false))
+    (table.insert event-payload copied))
+  (set payload.events event-payload)
+  (JsonUtils.write-json! path payload)
   run)
 
 (fn initialize-active-run-index! [self]
@@ -224,7 +292,7 @@
     (when (fs.exists self.runs-dir)
       (each [_ entry (ipairs (fs.list-dir self.runs-dir false))]
         (when (and entry.is-file (string.match entry.name "%.json$"))
-          (local run (normalize-run (read-json-record entry.path)))
+          (local run (normalize-run (read-json-record entry.path) entry.path))
           (set (. self._runs run.id) run)
           (set-active-run! self run))))
     (set self._active-run-indexed? true))
@@ -236,9 +304,10 @@
   (if cached
       cached
       (do
-        (local record (read-json-record (definition-path self id)))
+        (local path (definition-path self id))
+        (local record (read-json-record path))
         (when record
-          (local normalized (normalize-definition record))
+          (local normalized (normalize-definition record path))
           (set (. self._definitions id) normalized)
           normalized))))
 
@@ -254,9 +323,10 @@
   (if cached
       cached
       (do
-        (local record (read-json-record (run-path self id)))
+        (local path (run-path self id))
+        (local record (read-json-record path))
         (when record
-          (local normalized (normalize-run record))
+          (local normalized (normalize-run record path))
           (set (. self._runs id) normalized)
           normalized))))
 
@@ -290,7 +360,7 @@
   (when (fs.exists self.definitions-dir)
     (each [_ entry (ipairs (fs.list-dir self.definitions-dir false))]
       (when (and entry.is-file (string.match entry.name "%.json$"))
-        (local definition (normalize-definition (read-json-record entry.path)))
+        (local definition (normalize-definition (read-json-record entry.path) entry.path))
         (set (. self._definitions definition.id) definition)
         (table.insert items definition))))
   (table.sort items (fn [a b] (< a.id b.id)))
@@ -437,7 +507,7 @@
   (when (fs.exists self.runs-dir)
     (each [_ entry (ipairs (fs.list-dir self.runs-dir false))]
       (when (and entry.is-file (string.match entry.name "%.json$"))
-        (local run (normalize-run (read-json-record entry.path)))
+        (local run (normalize-run (read-json-record entry.path) entry.path))
         (set (. self._runs run.id) run)
         (when (if (= options.definition-id nil)
                   true

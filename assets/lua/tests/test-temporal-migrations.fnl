@@ -2,6 +2,7 @@
 (local json (require :json))
 (local JsonUtils (require :json-utils))
 (local Temporal (require :temporal))
+(local {: WorkflowStore} (require :workflows/store))
 
 (local tests [])
 (var temp-counter 0)
@@ -28,6 +29,10 @@
 
 (fn write-json! [path data]
   (JsonUtils.write-json! path data))
+
+(fn assert-z-string [value message]
+  (assert (= (type value) :string) message)
+  (assert (string.match value "Z$") message))
 
 (fn migrations []
   (assert Temporal.migrations "Temporal.migrations should be exported"))
@@ -215,6 +220,85 @@
   (assert (= (fs.read-file nested-path) nested-before)
           "tree migration should not rewrite nested JSON files"))
 
+(fn workflow-store-persists-canonical-timestamp-strings []
+  (local dir (make-temp-dir))
+  (local store (WorkflowStore {:base-dir dir}))
+  (local definition (store:create-definition {:id "canonical"
+                                              :name "Canonical"
+                                              :steps [{:id "step-a" :code-entity-id "code-a"}]
+                                              :edges []
+                                              :created-at 0
+                                              :updated-at 1}))
+  (store:update-definition definition.id {:description "updated"})
+  (assert (= (type definition.created-at) :number) "definition cache should keep numeric created-at")
+  (assert (= (type definition.updated-at) :number) "definition cache should keep numeric updated-at")
+  (local definition-json (read-json (fs.join-path dir "workflows" "definitions" "canonical.json")))
+  (assert-z-string definition-json.created-at "definition created-at should persist as canonical string")
+  (assert-z-string definition-json.updated-at "definition updated-at should persist as canonical string")
+
+  (local run (store:create-run definition.id {} {}))
+  (store:update-run run.id {:started-at 2 :finished-at 3})
+  (store:upsert-run-step run.id "step-a" {:started-at 4 :finished-at 5 :status :succeeded})
+  (local event (store:append-event run.id {:id "event-a" :kind :step-finished :step-id "step-a" :created-at 6}))
+  (assert (= (type (. (store:get-run run.id) :created-at)) :number) "run cache should keep numeric created-at")
+  (assert (= (type (. (store:get-run run.id) :started-at)) :number) "run cache should keep numeric started-at")
+  (assert (= (type (. (store:get-run-step run.id "step-a") :started-at)) :number) "run step cache should keep numeric started-at")
+  (assert (= (type event.created-at) :number) "event cache should keep numeric created-at")
+  (local run-json (read-json (fs.join-path dir "workflows" "runs" (.. run.id ".json"))))
+  (assert-z-string run-json.created-at "run created-at should persist as canonical string")
+  (assert-z-string run-json.started-at "run started-at should persist as canonical string")
+  (assert-z-string run-json.finished-at "run finished-at should persist as canonical string")
+  (assert-z-string run-json.steps.step-a.started-at "run step started-at should persist as canonical string")
+  (assert-z-string run-json.steps.step-a.finished-at "run step finished-at should persist as canonical string")
+  (assert-z-string (. run-json.events 1 :created-at) "run event created-at should persist as canonical string"))
+
+(fn workflow-store-loads-legacy-numeric-timestamps-in-memory []
+  (local dir (make-temp-dir))
+  (local definitions-dir (fs.join-path dir "workflows" "definitions"))
+  (local runs-dir (fs.join-path dir "workflows" "runs"))
+  (fs.create-dirs definitions-dir)
+  (fs.create-dirs runs-dir)
+  (write-json! (fs.join-path definitions-dir "legacy.json")
+               {:id "legacy"
+                :name "Legacy"
+                :description ""
+                :version 1
+                :status :draft
+                :parameters {}
+                :steps [{:id "step-a" :name "Step A" :code-entity-id "code-a"}]
+                :edges []
+                :created-at 10
+                :updated-at 11})
+  (write-json! (fs.join-path runs-dir "run-legacy.json")
+               {:id "run-legacy"
+                :definition-id "legacy"
+                :definition-version 1
+                :status :succeeded
+                :input {}
+                :output {}
+                :context {}
+                :current-step-ids []
+                :created-at 12
+                :started-at 13
+                :finished-at 14
+                :steps {:step-a {:run-id "run-legacy"
+                                 :step-id "step-a"
+                                 :status :succeeded
+                                 :started-at 15
+                                 :finished-at 16}}
+                :events [{:id "event-legacy" :run-id "run-legacy" :kind :done :created-at 17}]})
+  (local store (WorkflowStore {:base-dir dir}))
+  (local definition (store:get-definition "legacy"))
+  (local run (store:get-run "run-legacy"))
+  (assert (= definition.created-at 10) "legacy definition created-at should load as numeric seconds")
+  (assert (= definition.updated-at 11) "legacy definition updated-at should load as numeric seconds")
+  (assert (= run.created-at 12) "legacy run created-at should load as numeric seconds")
+  (assert (= run.started-at 13) "legacy run started-at should load as numeric seconds")
+  (assert (= run.finished-at 14) "legacy run finished-at should load as numeric seconds")
+  (assert (= run.steps.step-a.started-at 15) "legacy run step started-at should load as numeric seconds")
+  (assert (= run.steps.step-a.finished-at 16) "legacy run step finished-at should load as numeric seconds")
+  (assert (= (. run.events 1 :created-at) 17) "legacy run event created-at should load as numeric seconds"))
+
 (table.insert tests {:name "numeric zero converts to instant string" :fn numeric-zero-converts-to-instant-string})
 (table.insert tests {:name "canonical string round trips through epoch seconds" :fn canonical-string-round-trips-through-epoch-seconds})
 (table.insert tests {:name "optional nil returns nil" :fn optional-nil-returns-nil})
@@ -229,6 +313,8 @@
 (table.insert tests {:name "malformed JSON file fails with root context" :fn malformed-json-file-fails-with-root-context})
 (table.insert tests {:name "workflow run nested schema converts events and steps" :fn workflow-run-nested-schema-converts-events-and-steps})
 (table.insert tests {:name "tree migration aggregates dry run errors and idempotency" :fn tree-migration-aggregates-dry-run-errors-and-idempotency})
+(table.insert tests {:name "workflow store persists canonical timestamp strings" :fn workflow-store-persists-canonical-timestamp-strings})
+(table.insert tests {:name "workflow store loads legacy numeric timestamps in memory" :fn workflow-store-loads-legacy-numeric-timestamps-in-memory})
 
 (local main
   (fn []
