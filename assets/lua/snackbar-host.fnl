@@ -34,6 +34,10 @@
   (and (finite-number? value)
        (> value 0)))
 
+(fn finite-nonnegative-number? [value]
+  (and (finite-number? value)
+       (>= value 0)))
+
 (fn remove-child-layout [layout child]
   (local idx (table-index-of layout.children child.layout))
   (when idx
@@ -130,7 +134,7 @@
   (when (finite-positive-number? self.size.x)
     (set max-width (math.min max-width self.size.x)))
   (local constraint-width (and constraints constraints.max constraints.max.x))
-  (when (finite-positive-number? constraint-width)
+  (when (finite-nonnegative-number? constraint-width)
     (set max-width (math.min max-width constraint-width)))
   max-width)
 
