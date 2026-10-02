@@ -154,6 +154,31 @@
   (assert-ids (manager:queued-entries) ["queued-replacement"] "queued replacement should replace queued target")
   (manager:drop))
 
+(fn replace-key-duplicate-id-failure-does-not-mutate-existing-entries []
+  (local manager (SnackbarManager {:max-visible 2}))
+  (local changed-events [])
+  (manager:subscribe (fn [event]
+                       (table.insert changed-events event)))
+  (local replaced-candidate (manager:show {:id "candidate"
+                                           :text "Candidate"
+                                           :replace-key "save"
+                                           :persistent? true}))
+  (manager:show {:id "target" :text "Target" :persistent? true})
+  (assert-error-contains
+    (fn []
+      (manager:show {:id "target"
+                     :text "Duplicate target"
+                     :replace-key "save"
+                     :persistent? true}))
+    "SnackbarManager.show duplicate live id: target")
+  (assert (not replaced-candidate.dropped?)
+          "failed duplicate-id replacement should not drop replace-key candidate")
+  (assert-ids (manager:visible-entries) ["target" "candidate"]
+              "failed duplicate-id replacement should leave visible entries intact")
+  (assert (= (length changed-events) 2)
+          "failed duplicate-id replacement should not emit a change event")
+  (manager:drop))
+
 (fn drop-overflow-mode-drops-when-visible-full []
   (local manager (SnackbarManager {:max-visible 1 :overflow-mode :drop}))
   (manager:show {:id "visible" :text "Visible" :persistent? true})
@@ -236,9 +261,11 @@
 (table.insert tests {:name "SnackbarManager priority order sorts by priority then newest"
                      :fn priority-order-sorts-by-priority-then-newest})
 (table.insert tests {:name "SnackbarManager replace-key replaces visible and queued entries"
-                     :fn replace-key-replaces-visible-and-queued})
+                      :fn replace-key-replaces-visible-and-queued})
+(table.insert tests {:name "SnackbarManager replace-key duplicate id failure does not mutate existing entries"
+                     :fn replace-key-duplicate-id-failure-does-not-mutate-existing-entries})
 (table.insert tests {:name "SnackbarManager drop overflow mode drops when visible full"
-                     :fn drop-overflow-mode-drops-when-visible-full})
+                      :fn drop-overflow-mode-drops-when-visible-full})
 (table.insert tests {:name "SnackbarManager replace overflow mode replaces oldest visible"
                      :fn replace-overflow-mode-replaces-oldest-visible})
 (table.insert tests {:name "SnackbarManager queued entry starts timer only after promotion"

@@ -86,6 +86,15 @@
           (set idx (+ idx 1)))))
   removed)
 
+(fn has-replace-key-id? [entries replace-key id]
+  (var found? false)
+  (when (not (= replace-key nil))
+    (each [_ entry (ipairs entries)]
+      (when (and (= entry.id id)
+                 (= entry.replace-key replace-key))
+        (set found? true))))
+  found?)
+
 (fn mark-dropped [handle reason]
   (when handle
     (set handle.dropped? true)
@@ -197,6 +206,17 @@
     (each [_ entry (ipairs (remove-by-replace-key state.queued replace-key))]
       (retire-entry state entry :replaced))))
 
+(fn replacing-live-id? [state entry]
+  (if (has-replace-key-id? state.visible entry.replace-key entry.id)
+      true
+      (has-replace-key-id? state.queued entry.replace-key entry.id)))
+
+(fn assert-insertable-id [state entry]
+  (assert (if (. state.handles entry.id)
+              (replacing-live-id? state entry)
+              true)
+          (.. "SnackbarManager.show duplicate live id: " (tostring entry.id))))
+
 (fn oldest-visible-index [state]
   (var oldest-index nil)
   (var oldest-sequence nil)
@@ -231,9 +251,8 @@
 (fn show-entry [state manager request]
   (assert-active state)
   (local entry (normalize-entry state request))
+  (assert-insertable-id state entry)
   (remove-replace-key-matches state entry.replace-key)
-  (assert (not (. state.handles entry.id))
-          (.. "SnackbarManager.show duplicate live id: " (tostring entry.id)))
   (local handle (make-handle manager entry))
   (set state.next-sequence (+ state.next-sequence 1))
   (set (. state.handles entry.id) handle)
