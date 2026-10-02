@@ -181,6 +181,31 @@
 (fn projects-numeric-workflow-timestamps-as-canonical-strings []
   (assert-numeric-workflow-timestamps-project-as-canonical-strings))
 
+(fn assert-present-malformed-event-timestamps-fail-loudly []
+  (local session-created-run {:id "run-bad-session-created-timestamp"
+                              :status :running
+                              :context {:agent-id "agent-alpha"}
+                              :created-at "2026-08-14T00:00:00Z"
+                              :updated-at "2026-08-14T00:00:00Z"
+                              :events [{:kind WorkflowEvents.KIND_SESSION_CREATED
+                                        :data {:agent-id "agent-beta"}
+                                        :created-at false}]})
+  (local (created-ok created-err) (pcall WorkflowEvents.project-session session-created-run))
+  (assert-pcall-error-containing created-ok created-err "unsupported timestamp value type: boolean")
+  (local status-run {:id "run-bad-status-timestamp"
+                     :status :running
+                     :context {:agent-id "agent-alpha"}
+                     :created-at "2026-08-14T00:00:00Z"
+                     :updated-at "2026-08-14T00:00:00Z"
+                     :events [{:kind WorkflowEvents.KIND_STATUS_CHANGED
+                               :status :idle
+                               :created-at false}]})
+  (local (status-ok status-err) (pcall WorkflowEvents.project-session status-run))
+  (assert-pcall-error-containing status-ok status-err "unsupported timestamp value type: boolean"))
+
+(fn rejects-present-malformed-event-timestamps []
+  (assert-present-malformed-event-timestamps-fail-loudly))
+
 (fn assert-appended-session-created-payload-is-isolated [store run]
   (local payload {:agent-id "agent-beta"
                   :data {:nested {:value "before"}}
@@ -294,6 +319,8 @@
                       :fn preserves-run-identity-and-items-against-reserved-metadata})
 (table.insert tests {:name "projects-numeric-workflow-timestamps-as-canonical-strings"
                      :fn projects-numeric-workflow-timestamps-as-canonical-strings})
+(table.insert tests {:name "rejects-present-malformed-event-timestamps"
+                      :fn rejects-present-malformed-event-timestamps})
 (table.insert tests {:name "isolates-nested-session-created-payloads-and-projections"
                       :fn isolates-nested-session-created-payloads-and-projections})
 (table.insert tests {:name "isolates-nested-item-payloads-and-projections"

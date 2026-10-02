@@ -122,7 +122,7 @@
   (when data.data
     (set session.data (deep-copy data.data)))
   (copy-projection-metadata! session data)
-  (when event.created-at
+  (when (not (= event.created-at nil))
     (set session.created-at (projection-timestamp event.created-at "events[].created-at")))
   session)
 
@@ -169,7 +169,7 @@
         (update-projected-item! session event.item-id event.updates)
         (= event.kind KIND_SESSION_DATA_UPDATED)
         (apply-session-data-updated! session event))
-    (when (and (relevant-event? event) event.created-at)
+    (when (and (relevant-event? event) (not (= event.created-at nil)))
       (set session.updated-at (projection-timestamp event.created-at "events[].created-at"))))
   session)
 
