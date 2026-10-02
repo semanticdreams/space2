@@ -53,6 +53,10 @@
         true)
       (= resolved.kind :command)
       (handle-resolved-command ctx resolved composed reset-sequence!)
+      (= resolved.kind :missing)
+      (do
+        (reset-sequence!)
+        false)
       (exit-leader ctx reset-sequence! false)))
 
 (fn LeaderState []
