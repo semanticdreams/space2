@@ -179,6 +179,21 @@
   (assert (= (. migrated.events 1 :created-at) "1970-01-01T00:00:05Z") "event created-at should be canonical")
   (assert (= (. migrated.events 2 :created-at) "1970-01-01T00:00:06Z") "canonical event timestamp should remain canonical"))
 
+(fn workflow-run-migration-rejects-object-shaped-events []
+  (local M (migrations))
+  (local dir (make-temp-dir))
+  (local path (fs.join-path dir "run.json"))
+  (write-json! path {:id "run-1"
+                     :created-at 0
+                     :events {:bad {:created-at 1}}})
+  (local before (fs.read-file path))
+  (local err (assert-error #(M.migrate-json-file! path M.schemas.workflow-run)
+                           "object-shaped events should fail loudly"))
+  (assert-contains err "workflow-run" "events container error should include schema id")
+  (assert-contains err "events" "events container error should include field path")
+  (assert-contains err path "events container error should include file path")
+  (assert (= (fs.read-file path) before) "malformed events container should not be rewritten"))
+
 (fn tree-migration-aggregates-dry-run-errors-and-idempotency []
   (local M (migrations))
   (local dir (make-temp-dir))
@@ -299,6 +314,90 @@
   (assert (= run.steps.step-a.finished-at 16) "legacy run step finished-at should load as numeric seconds")
   (assert (= (. run.events 1 :created-at) 17) "legacy run event created-at should load as numeric seconds"))
 
+(fn workflow-store-update-normalizes-timestamps-before-cache-mutation []
+  (local dir (make-temp-dir))
+  (local store (WorkflowStore {:base-dir dir}))
+  (local definition (store:create-definition {:id "updates"
+                                              :name "Updates"
+                                              :steps [{:id "step-a" :code-entity-id "code-a"}]
+                                              :edges []
+                                              :created-at 0
+                                              :updated-at 1}))
+  (store:update-definition definition.id {:created-at "1970-01-01T00:00:02Z"})
+  (assert (= definition.created-at 2) "definition update should normalize canonical created-at to numeric cache value")
+  (local bad-definition-err (assert-error #(store:update-definition definition.id {:created-at 2.5})
+                                          "malformed definition timestamp update should fail"))
+  (assert-contains bad-definition-err "workflow-definition" "definition update error should include schema id")
+  (assert (= definition.created-at 2) "failed definition update should not corrupt cached timestamp")
+
+  (local run (store:create-run definition.id {} {}))
+  (store:update-run run.id {:started-at "1970-01-01T00:00:03Z"
+                            :finished-at "1970-01-01T00:00:04Z"
+                            :steps {:step-a {:run-id run.id
+                                             :step-id "step-a"
+                                             :status :succeeded
+                                             :started-at "1970-01-01T00:00:05Z"
+                                             :finished-at "1970-01-01T00:00:06Z"}}
+                            :events [{:id "event-a" :run-id run.id :kind :done :created-at "1970-01-01T00:00:07Z"}]})
+  (assert (= run.started-at 3) "run started-at update should remain numeric in cache")
+  (assert (= run.finished-at 4) "run finished-at update should remain numeric in cache")
+  (assert (= run.steps.step-a.started-at 5) "run step update should remain numeric in cache")
+  (assert (= (. run.events 1 :created-at) 7) "run event update should remain numeric in cache")
+  (local bad-run-err (assert-error #(store:update-run run.id {:started-at 3.5})
+                                   "malformed run timestamp update should fail"))
+  (assert-contains bad-run-err "workflow-run" "run update error should include schema id")
+  (assert (= run.started-at 3) "failed run update should not corrupt cached started-at")
+
+  (store:upsert-run-step run.id "step-a" {:started-at "1970-01-01T00:00:08Z"})
+  (assert (= run.steps.step-a.started-at 8) "upserted run step timestamp should remain numeric in cache")
+  (local bad-step-err (assert-error #(store:upsert-run-step run.id "step-a" {:started-at 8.5})
+                                    "malformed run step timestamp update should fail"))
+  (assert-contains bad-step-err "steps.step-a.started-at" "run step update error should include field path")
+  (assert (= run.steps.step-a.started-at 8) "failed run step update should not corrupt cached started-at")
+
+  (local appended (store:append-event run.id {:id "event-b" :kind :done :created-at "1970-01-01T00:00:09Z"}))
+  (assert (= appended.created-at 9) "appended event timestamp should remain numeric in cache")
+  (local event-count (length run.events))
+  (local bad-event-err (assert-error #(store:append-event run.id {:id "event-bad" :kind :done :created-at 9.5})
+                                     "malformed event timestamp update should fail"))
+  (assert-contains bad-event-err "events" "event append error should include field path")
+  (assert (= (length run.events) event-count) "failed event append should not mutate cached event list"))
+
+(fn workflow-store-load-rejects-object-shaped-events []
+  (local dir (make-temp-dir))
+  (local definitions-dir (fs.join-path dir "workflows" "definitions"))
+  (local runs-dir (fs.join-path dir "workflows" "runs"))
+  (fs.create-dirs definitions-dir)
+  (fs.create-dirs runs-dir)
+  (write-json! (fs.join-path definitions-dir "events-object.json")
+               {:id "events-object"
+                :name "Events Object"
+                :description ""
+                :version 1
+                :status :draft
+                :parameters {}
+                :steps []
+                :edges []
+                :created-at 0
+                :updated-at 1})
+  (local run-path (fs.join-path runs-dir "run-events-object.json"))
+  (write-json! run-path {:id "run-events-object"
+                         :definition-id "events-object"
+                         :definition-version 1
+                         :status :succeeded
+                         :input {}
+                         :output {}
+                         :context {}
+                         :current-step-ids []
+                         :created-at 2
+                         :steps {}
+                         :events {:bad {:created-at 3}}})
+  (local err (assert-error #(WorkflowStore {:base-dir dir})
+                           "workflow store should reject object-shaped events"))
+  (assert-contains err "workflow-run" "store load event container error should include schema id")
+  (assert-contains err "events" "store load event container error should include field path")
+  (assert-contains err run-path "store load event container error should include file path"))
+
 (table.insert tests {:name "numeric zero converts to instant string" :fn numeric-zero-converts-to-instant-string})
 (table.insert tests {:name "canonical string round trips through epoch seconds" :fn canonical-string-round-trips-through-epoch-seconds})
 (table.insert tests {:name "optional nil returns nil" :fn optional-nil-returns-nil})
@@ -312,9 +411,12 @@
 (table.insert tests {:name "malformed file data fails without rewriting" :fn malformed-file-data-fails-without-rewriting})
 (table.insert tests {:name "malformed JSON file fails with root context" :fn malformed-json-file-fails-with-root-context})
 (table.insert tests {:name "workflow run nested schema converts events and steps" :fn workflow-run-nested-schema-converts-events-and-steps})
+(table.insert tests {:name "workflow run migration rejects object shaped events" :fn workflow-run-migration-rejects-object-shaped-events})
 (table.insert tests {:name "tree migration aggregates dry run errors and idempotency" :fn tree-migration-aggregates-dry-run-errors-and-idempotency})
 (table.insert tests {:name "workflow store persists canonical timestamp strings" :fn workflow-store-persists-canonical-timestamp-strings})
 (table.insert tests {:name "workflow store loads legacy numeric timestamps in memory" :fn workflow-store-loads-legacy-numeric-timestamps-in-memory})
+(table.insert tests {:name "workflow store update normalizes timestamps before cache mutation" :fn workflow-store-update-normalizes-timestamps-before-cache-mutation})
+(table.insert tests {:name "workflow store load rejects object shaped events" :fn workflow-store-load-rejects-object-shaped-events})
 
 (local main
   (fn []

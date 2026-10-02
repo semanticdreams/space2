@@ -32,6 +32,27 @@
       []
       value))
 
+(fn array-shaped? [value]
+  (if (not (= (type value) :table))
+      false
+      (do
+        (local n (length value))
+        (var count 0)
+        (var valid? true)
+        (each [key _item (pairs value)]
+          (set count (+ count 1))
+          (when (if (not (= (type key) :number))
+                    true
+                    (not (= key (math.floor key)))
+                    true
+                    (< key 1)
+                    true
+                    (> key n)
+                    true
+                    false)
+            (set valid? false)))
+        (and valid? (= count n)))))
+
 (fn prefixed-id [prefix value]
   (assert prefix "prefixed-id requires prefix")
   (if (= value nil)
@@ -91,6 +112,13 @@
     (set (. record k) v))
   record)
 
+(fn key-present? [tbl key]
+  (var present? false)
+  (each [existing-key _value (pairs (table-or-empty tbl))]
+    (when (= existing-key key)
+      (set present? true)))
+  present?)
+
 (fn reject-update-key [updates key message]
   (when (not (= (. (table-or-empty updates) key) nil))
     (error message)))
@@ -117,6 +145,13 @@
 
 (fn timestamp->string [value schema field-path file-path optional?]
   (Migrations.instant->timestamp value (migration-options schema field-path file-path optional?)))
+
+(fn require-array-shaped [value schema field-path file-path]
+  (when (and (not (= value nil))
+             (not (array-shaped? value)))
+    (error (.. "temporal migration timestamp container must be an array schema=" (tostring schema.id)
+               " field=" field-path
+               " file=" (tostring file-path)))))
 
 (fn normalize-definition [definition file-path]
   (local data (table-or-empty definition))
@@ -186,10 +221,47 @@
   data)
 
 (fn normalize-run-events [events file-path]
+  (require-array-shaped events Migrations.schemas.workflow-run "events" file-path)
   (local out [])
   (each [index event (ipairs (array-or-empty events))]
     (table.insert out (normalize-run-event-timestamps event index file-path)))
   out)
+
+(fn normalize-definition-update-timestamps [updates file-path]
+  (local changes (shallow-copy-table updates))
+  (when (key-present? changes :created-at)
+    (set changes.created-at (timestamp->epoch-seconds changes.created-at Migrations.schemas.workflow-definition "created-at" file-path false)))
+  (when (key-present? changes :updated-at)
+    (set changes.updated-at (timestamp->epoch-seconds changes.updated-at Migrations.schemas.workflow-definition "updated-at" file-path false)))
+  changes)
+
+(fn normalize-run-update-timestamps [updates file-path]
+  (local changes (shallow-copy-table updates))
+  (when (key-present? changes :created-at)
+    (set changes.created-at (timestamp->epoch-seconds changes.created-at Migrations.schemas.workflow-run "created-at" file-path false)))
+  (when (key-present? changes :started-at)
+    (set changes.started-at (timestamp->epoch-seconds changes.started-at Migrations.schemas.workflow-run "started-at" file-path true)))
+  (when (key-present? changes :finished-at)
+    (set changes.finished-at (timestamp->epoch-seconds changes.finished-at Migrations.schemas.workflow-run "finished-at" file-path true)))
+  (when (key-present? changes :steps)
+    (set changes.steps (normalize-run-steps changes.steps file-path)))
+  (when (key-present? changes :events)
+    (set changes.events (normalize-run-events changes.events file-path)))
+  changes)
+
+(fn normalize-run-step-update-timestamps [updates step-id file-path]
+  (local changes (shallow-copy-table updates))
+  (local prefix (.. "steps." (tostring step-id)))
+  (when (key-present? changes :started-at)
+    (set changes.started-at (timestamp->epoch-seconds changes.started-at Migrations.schemas.workflow-run (.. prefix ".started-at") file-path true)))
+  (when (key-present? changes :finished-at)
+    (set changes.finished-at (timestamp->epoch-seconds changes.finished-at Migrations.schemas.workflow-run (.. prefix ".finished-at") file-path true)))
+  changes)
+
+(fn normalize-event-update-timestamps [event index file-path]
+  (local data (shallow-copy-table event))
+  (set data.created-at (timestamp->epoch-seconds (value-or data.created-at (now)) Migrations.schemas.workflow-run (.. "events[" index "].created-at") file-path false))
+  data)
 
 (fn normalize-run [run file-path]
   (local data (table-or-empty run))
@@ -390,7 +462,8 @@
 (fn update-definition [self definition-id updates]
   (local definition (require-definition self definition-id))
   (validate-definition-updates updates)
-  (apply-updates! definition updates)
+  (local normalized-updates (normalize-definition-update-timestamps updates (definition-path self definition.id)))
+  (apply-updates! definition normalized-updates)
   (touch-definition! self definition)
   (self.definition-updated:emit definition)
   definition)
@@ -533,7 +606,8 @@
 
 (fn update-run [self run-id updates]
   (local run (require-run self run-id))
-  (apply-updates! run updates)
+  (local normalized-updates (normalize-run-update-timestamps updates (run-path self run.id)))
+  (apply-updates! run normalized-updates)
   (set-active-run! self run)
   (write-run! self run)
   (self.run-updated:emit run)
@@ -544,7 +618,8 @@
   (local definition (require-definition self run.definition-id))
   (require-step definition step-id)
   (local id (tostring step-id))
-  (local run-step (normalize-run-step run.id id updates (. run.steps id)))
+  (local normalized-updates (normalize-run-step-update-timestamps updates id (run-path self run.id)))
+  (local run-step (normalize-run-step run.id id normalized-updates (. run.steps id)))
   (set (. run.steps id) run-step)
   (write-run! self run)
   (self.run-step-updated:emit run-step)
@@ -565,11 +640,9 @@
 (fn append-event [self run-id event]
   (local run (require-run self run-id))
   (local data (table-or-empty event))
-  (local record {})
-  (apply-updates! record data)
+  (local record (normalize-event-update-timestamps data (+ (length run.events) 1) (run-path self run.id)))
   (set record.id (prefixed-id "event-" data.id))
   (set record.run-id run.id)
-  (set record.created-at (value-or data.created-at (now)))
   (table.insert run.events record)
   (write-run! self run)
   (self.event-appended:emit record)

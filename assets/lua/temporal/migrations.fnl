@@ -115,6 +115,27 @@
   (and (= (type value) :table)
        (= (length value) 0)))
 
+(fn array-shaped? [value]
+  (if (not (= (type value) :table))
+      false
+      (do
+        (local n (length value))
+        (var count 0)
+        (var valid? true)
+        (each [key _item (pairs value)]
+          (set count (+ count 1))
+          (when (if (not (= (type key) :number))
+                    true
+                    (not (= key (math.floor key)))
+                    true
+                    (< key 1)
+                    true
+                    (> key n)
+                    true
+                    false)
+            (set valid? false)))
+        (and valid? (= count n)))))
+
 (fn segment->string [segment]
   (tostring segment))
 
@@ -135,6 +156,10 @@
 (fn require-container [value field-path base-options schema]
   (when (not (= (type value) :table))
     (fail "timestamp container must be an object" (path-options base-options schema field-path false))))
+
+(fn require-array-container [value field-path base-options schema]
+  (when (not (array-shaped? value))
+    (fail "timestamp container must be an array" (path-options base-options schema field-path false))))
 
 (fn convert-leaf! [node key field-path schema field base-options]
   (require-container node field-path base-options schema)
@@ -164,7 +189,7 @@
         (if (= node nil)
             0
             (do
-              (require-container node field-path base-options schema)
+              (require-array-container node field-path base-options schema)
               (var count 0)
               (each [array-index child (ipairs node)]
                 (set count (+ count (apply-path! child path (+ index 1) (extend-array-path field-path array-index) schema field base-options))))
