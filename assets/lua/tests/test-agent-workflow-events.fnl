@@ -182,6 +182,28 @@
   (assert-numeric-workflow-timestamps-project-as-canonical-strings))
 
 (fn assert-present-malformed-event-timestamps-fail-loudly []
+  (local payload-session-created-run {:id "run-bad-session-created-payload-timestamp"
+                                      :status :running
+                                      :context {:agent-id "agent-alpha"}
+                                      :created-at "2026-08-14T00:00:00Z"
+                                      :updated-at "2026-08-14T00:00:00Z"
+                                      :events [{:kind WorkflowEvents.KIND_SESSION_CREATED
+                                                :data {:agent-id "agent-beta"
+                                                       :created-at false}
+                                                :created-at "2026-08-15T00:00:00Z"}]})
+  (local (payload-created-ok payload-created-err) (pcall WorkflowEvents.project-session payload-session-created-run))
+  (assert-pcall-error-containing payload-created-ok payload-created-err "unsupported timestamp value type: boolean")
+  (local payload-status-run {:id "run-bad-status-payload-timestamp"
+                             :status :running
+                             :context {:agent-id "agent-alpha"}
+                             :created-at "2026-08-14T00:00:00Z"
+                             :updated-at "2026-08-14T00:00:00Z"
+                             :events [{:kind WorkflowEvents.KIND_STATUS_CHANGED
+                                       :status :idle
+                                       :data {:created-at false}
+                                       :created-at "2026-08-15T00:00:01Z"}]})
+  (local (payload-status-ok payload-status-err) (pcall WorkflowEvents.project-session payload-status-run))
+  (assert-pcall-error-containing payload-status-ok payload-status-err "unsupported timestamp value type: boolean")
   (local session-created-run {:id "run-bad-session-created-timestamp"
                               :status :running
                               :context {:agent-id "agent-alpha"}

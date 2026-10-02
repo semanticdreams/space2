@@ -15,7 +15,23 @@
 (fn projection-timestamp [value field-path]
   (when (not (= value nil))
     (Migrations.instant->timestamp value {:schema-id :agent-session-projection
-                                          :field-path field-path})))
+                                           :field-path field-path})))
+
+(fn event-payload-created-at-present? [event]
+  (and (= (type event.data) "table")
+       (not (= event.data.created-at nil))))
+
+(fn event-projectable-created-at-present? [event]
+  (if (event-payload-created-at-present? event)
+      true
+      (not (= event.created-at nil))))
+
+(fn payload-created-at-or-event-timestamp [event field-path]
+  (if (event-payload-created-at-present? event)
+      (do
+        (projection-timestamp event.data.created-at field-path)
+        event.data.created-at)
+      (projection-timestamp event.created-at field-path)))
 
 (fn deep-copy [value]
   (if (not (= (type value) "table"))
@@ -122,8 +138,8 @@
   (when data.data
     (set session.data (deep-copy data.data)))
   (copy-projection-metadata! session data)
-  (when (not (= event.created-at nil))
-    (set session.created-at (projection-timestamp event.created-at "events[].created-at")))
+  (when (event-projectable-created-at-present? event)
+    (set session.created-at (payload-created-at-or-event-timestamp event "events[].created-at")))
   session)
 
 (fn apply-session-data-updated! [session event]
@@ -169,8 +185,9 @@
         (update-projected-item! session event.item-id event.updates)
         (= event.kind KIND_SESSION_DATA_UPDATED)
         (apply-session-data-updated! session event))
-    (when (and (relevant-event? event) (not (= event.created-at nil)))
-      (set session.updated-at (projection-timestamp event.created-at "events[].created-at"))))
+    (when (and (relevant-event? event)
+               (event-projectable-created-at-present? event))
+      (set session.updated-at (payload-created-at-or-event-timestamp event "events[].created-at"))))
   session)
 
 (fn current-session-if-readable [store run-id]
