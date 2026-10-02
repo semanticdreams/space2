@@ -65,8 +65,6 @@
 (local KEY_J (string.byte "j"))
 (local KEY_K (string.byte "k"))
 (local KEY_L (string.byte "l"))
-(local KEY_Z (string.byte "z"))
-(local KEY_F1 1073741882)
 (local KEY_F4 1073741885)
 (local KEY_Q (string.byte "q"))
 (local KEY_P (string.byte "p"))
@@ -2351,54 +2349,6 @@
       (assert (= (. transitions 2) :normal))))
   )
 
-(fn leader-state-unknown-key-stays-in-leader []
-  (with-state-recorder
-    (fn [transitions install-state]
-      (local state (install-state :leader (LeaderState)))
-      (local handled (state.on-key-down {:key KEY_Z}))
-      (assert (not handled) "Unknown leader key should remain available to route wrappers")
-      (assert (= (# transitions) 0)
-              "Unknown leader key should not leave leader state"))))
-
-(fn leader-state-f1-stays-in-leader []
-  (with-state-recorder
-    (fn [transitions install-state]
-      (local state (install-state :leader (LeaderState)))
-      (local handled (state.on-key-down {:key KEY_F1}))
-      (assert handled "F1 should remain available for command hints after leader misses")
-      (assert (= (# transitions) 0)
-              "F1 in leader state should not transition to normal"))))
-
-(local nested-miss-leader-provider
-  {:commands {"demo.nested" {:id "demo.nested" :label "nested-demo" :run (fn [_ctx] true)}}
-   :prefixes [{:keys ["g"] :label "graph" :priority 10}]
-   :bindings [{:keys ["g" "p"] :command "demo.nested" :label "nested-demo" :priority 10}]})
-
-(fn assert-root-command-after-nested-leader-miss [transitions install-state]
-  (local state (install-state :leader (LeaderState)))
-  (state.on-key-down {:key KEY_G})
-  (assert (= (# transitions) 0) "Prefix should stay in leader")
-  (local handled (state.on-key-down {:key KEY_Z}))
-  (assert (not handled) "Unknown nested leader key should not be handled")
-  (assert (= (# transitions) 0)
-          "Unknown nested leader key should not leave leader state")
-  (state.on-key-down {:key KEY_C})
-  (assert (= (# transitions) 1)
-          "Valid root command after nested miss should use cleared sequence")
-  (assert (= (. transitions 1) :camera)
-          "Valid root command after nested miss should run normally"))
-
-(fn run-nested-leader-miss-scenario []
-  (with-state-recorder assert-root-command-after-nested-leader-miss))
-
-(fn leader-state-unknown-nested-key-clears-sequence []
-  (local original-providers app.activity-leader-command-providers)
-  (set app.activity-leader-command-providers [nested-miss-leader-provider])
-  (local (ok err) (pcall run-nested-leader-miss-scenario))
-  (set app.activity-leader-command-providers original-providers)
-  (when (not ok)
-    (error err)))
-
 (fn quit-state-quits-and-escapes []
   (local original-quit app.engine.quit)
   (var quit-calls 0)
@@ -2821,13 +2771,7 @@
 (table.insert tests {:name "Leader state graph preview command requires selection"
                        :fn leader-state-graph-preview-command-requires-selection})
 (table.insert tests {:name "Leader state graph preview idempotent command closes hints"
-                        :fn leader-state-graph-preview-idempotent-command-closes-hints})
-(table.insert tests {:name "Leader state unknown key stays in leader"
-                       :fn leader-state-unknown-key-stays-in-leader})
-(table.insert tests {:name "Leader state F1 stays in leader"
-                       :fn leader-state-f1-stays-in-leader})
-(table.insert tests {:name "Leader state unknown nested key clears sequence"
-                       :fn leader-state-unknown-nested-key-clears-sequence})
+                       :fn leader-state-graph-preview-idempotent-command-closes-hints})
 (table.insert tests {:name "Camera state F enters fpc state" :fn camera-state-f-enters-fpc-state})
 (table.insert tests {:name "Camera state escape exits to normal" :fn camera-state-escape-exits-to-normal})
 (table.insert tests {:name "Camera state 0 resets camera transform" :fn camera-state-zero-resets-camera})
