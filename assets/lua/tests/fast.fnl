@@ -11,6 +11,7 @@
     :tests.test-render-capture
     :tests.test-next-frame
     :tests.test-runtime-timers
+    :tests.test-runtime-scheduler
     :tests.test-runtime-updates
     :tests.test-layout-stats-view
     :tests.test-clickables

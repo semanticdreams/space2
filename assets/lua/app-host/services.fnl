@@ -1,3 +1,5 @@
+(local RuntimeScheduler (require :runtime-scheduler))
+
 (fn service-error [message]
   (error (.. "[app-host.services] " message)))
 
@@ -39,6 +41,7 @@
 
 (fn make-scheduler [_opts]
   (local registrations [])
+  (local runtime-scheduler (RuntimeScheduler.create))
   (var paused? false)
 
   (fn register [_self facet]
@@ -57,16 +60,27 @@
 
   (fn update [_self delta-ms]
     (when (not paused?)
+      (runtime-scheduler:update delta-ms)
       (each [_ facet (ipairs registrations)]
         (when (and facet (= (type facet.update) :function))
           (facet:update delta-ms))))
     true)
+
+  (fn schedule-once [_self opts]
+    (runtime-scheduler:schedule-once opts))
+
+  (fn schedule-every [_self opts]
+    (runtime-scheduler:schedule-every opts))
+
+  (fn schedule-recurrence [_self opts]
+    (runtime-scheduler:schedule-recurrence opts))
 
   (fn set-paused [_self next-paused]
     (set paused? (not (not next-paused)))
     paused?)
 
   (fn step [_self delta-ms]
+    (runtime-scheduler:update delta-ms)
     (each [_ facet (ipairs registrations)]
       (when (and facet (= (type facet.update) :function))
         (facet:update delta-ms)))
@@ -77,6 +91,9 @@
 
   {:register register
    :unregister unregister
+   :schedule-once schedule-once
+   :schedule-every schedule-every
+   :schedule-recurrence schedule-recurrence
    :update update
    :set-paused set-paused
    :step step
