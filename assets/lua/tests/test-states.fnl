@@ -2712,6 +2712,54 @@
       (assert (= result.last-transition :normal)
               "Unavailable graph preview command should return to normal without running"))))
 
+(fn leader-state-graph-selection-command-routes-to-provider []
+  (local GraphCommands (require :graph/commands))
+  (local calls {:add 0})
+  (local graph-view {:selected-node-count (fn [_self] 0)
+                     :add-focused-node-to-selection (fn [_self]
+                                                      (set calls.add (+ calls.add 1))
+                                                      true)})
+  (set graph-view.has-focused-node?
+       (fn [_self] true))
+  (set graph-view.focused-node-selected?
+       (fn [_self] false))
+  (with-state-recorder
+    (fn [transitions install-state]
+      (with-activity-leader-providers
+        [(GraphCommands.provider {:graph-view (fn [] graph-view)})]
+        (fn []
+          (local state (install-state :leader (LeaderState)))
+          (state.on-key-down {:key KEY_G})
+          (state.on-key-down {:key (string.byte "s")})
+          (state.on-key-down {:key (string.byte "a")})))
+      (assert (= calls.add 1) "SPC g s a should add focused graph node to selection")
+      (assert (= (. transitions (# transitions)) :normal)
+              "Graph selection command should return to normal"))))
+
+(fn leader-state-graph-selection-unavailable-command-does-not-mutate []
+  (local GraphCommands (require :graph/commands))
+  (local calls {:remove 0})
+  (local graph-view {:selected-node-count (fn [_self] 0)
+                     :remove-focused-node-from-selection (fn [_self]
+                                                           (set calls.remove (+ calls.remove 1))
+                                                           true)})
+  (set graph-view.has-focused-node?
+       (fn [_self] true))
+  (set graph-view.focused-node-selected?
+       (fn [_self] false))
+  (with-state-recorder
+    (fn [transitions install-state]
+      (with-activity-leader-providers
+        [(GraphCommands.provider {:graph-view (fn [] graph-view)})]
+        (fn []
+          (local state (install-state :leader (LeaderState)))
+          (state.on-key-down {:key KEY_G})
+          (state.on-key-down {:key (string.byte "s")})
+          (state.on-key-down {:key (string.byte "r")})))
+      (assert (= calls.remove 0) "Unavailable SPC g s r should not remove focused graph node from selection")
+      (assert (= (. transitions (# transitions)) :normal)
+              "Unavailable graph selection command should return to normal"))))
+
 (fn leader-state-graph-preview-idempotent-command-closes-hints []
   (local GraphCommands (require :graph/commands))
   (local original-states app.states)
@@ -2769,9 +2817,13 @@
 (table.insert tests {:name "Leader state graph preview command uses selection provider"
                       :fn leader-state-graph-preview-command-uses-selection-provider})
 (table.insert tests {:name "Leader state graph preview command requires selection"
-                       :fn leader-state-graph-preview-command-requires-selection})
+                        :fn leader-state-graph-preview-command-requires-selection})
+(table.insert tests {:name "Leader state graph selection command routes to provider"
+                       :fn leader-state-graph-selection-command-routes-to-provider})
+(table.insert tests {:name "Leader state graph selection unavailable command does not mutate"
+                       :fn leader-state-graph-selection-unavailable-command-does-not-mutate})
 (table.insert tests {:name "Leader state graph preview idempotent command closes hints"
-                       :fn leader-state-graph-preview-idempotent-command-closes-hints})
+                        :fn leader-state-graph-preview-idempotent-command-closes-hints})
 (table.insert tests {:name "Camera state F enters fpc state" :fn camera-state-f-enters-fpc-state})
 (table.insert tests {:name "Camera state escape exits to normal" :fn camera-state-escape-exits-to-normal})
 (table.insert tests {:name "Camera state 0 resets camera transform" :fn camera-state-zero-resets-camera})
