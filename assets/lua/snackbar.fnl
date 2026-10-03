@@ -7,7 +7,10 @@
 
 (fn make-host-options [manager options scope-theme ctx]
   {:manager manager
-   :theme (if (current-context-snackbar-theme? ctx) nil scope-theme)
+   :theme (if (and options.use-context-theme?
+                   (current-context-snackbar-theme? ctx))
+              nil
+              scope-theme)
    :placement options.placement
    :spacing options.spacing
    :max-width options.max-width

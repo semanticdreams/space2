@@ -336,6 +336,31 @@
   (host:drop)
   (manager:drop))
 
+(fn assigned-narrow-host-width-remeasures-unconstrained-child []
+  (local manager (SnackbarManager))
+  (local drops {})
+  (local host-builder
+    (SnackbarHost {:manager manager
+                   :content-builder (make-constrained-width-builder drops)
+                   :placement :top-right
+                   :max-width 18}))
+  (local host (host-builder (make-ctx)))
+  (manager:show {:id "narrow" :text "Narrow" :persistent? true})
+  (host.layout:measurer)
+  (set host.layout.position (glm.vec3 10 20 0))
+  (set host.layout.size (glm.vec3 10 15 0))
+  (host.layout:layouter)
+  (local child (. host.children 1))
+  (assert (= child.layout.measure.x 10)
+          "layouter should remeasure unconstrained child to assigned host width")
+  (assert (= child.layout.position.x host.layout.position.x)
+          "remeasured top-right child should stay inside assigned host left edge")
+  (assert (= (+ child.layout.position.x child.layout.size.x)
+             (+ host.layout.position.x host.layout.size.x))
+          "remeasured top-right child should align to assigned host right edge")
+  (host:drop)
+  (manager:drop))
+
 (fn placement-top-left-uses-left-edge []
   (local manager (SnackbarManager))
   (local drops {})
@@ -452,6 +477,30 @@
   (host:drop)
   (scope:drop))
 
+(fn explicitly-themed-scope-ignores-ambient-context-snackbar-theme []
+  (local app-theme {:snackbar {:max-visible 1
+                               :duration-ms 10
+                               :placement :bottom-left
+                               :spacing 0.5
+                               :max-width 6}})
+  (local ambient-theme {:snackbar {:placement :top-right
+                                   :spacing 0.1
+                                   :max-width 18}})
+  (local drops {})
+  (local scope
+    (Snackbar.create-scope {:theme app-theme
+                            :content-builder (make-probe-builder drops)}))
+  (local host (scope.host-builder (make-ctx {:theme ambient-theme})))
+  (scope.manager:show {:id "explicit" :text "Explicit" :persistent? true})
+  (layout-host host)
+  (local child (. host.children 1))
+  (assert (= child.layout.position.x host.layout.position.x)
+          "explicit scoped theme should keep bottom-left placement instead of ambient top-right")
+  (assert (= child.layout.position.y (+ host.layout.position.y host.layout.size.y (- child.layout.size.y)))
+          "explicit scoped theme should keep bottom-left vertical placement")
+  (host:drop)
+  (scope:drop))
+
 (table.insert tests {:name "SnackbarHost requires manager"
                      :fn host-requires-manager})
 (table.insert tests {:name "SnackbarHost renders visible entries"
@@ -477,7 +526,9 @@
 (table.insert tests {:name "SnackbarHost finite zero-width constraint clamps child width"
                       :fn finite-zero-width-constraint-clamps-child-width})
 (table.insert tests {:name "SnackbarHost assigned zero host width clamps child width"
-                      :fn assigned-zero-host-width-clamps-child-width})
+                       :fn assigned-zero-host-width-clamps-child-width})
+(table.insert tests {:name "SnackbarHost assigned narrow host width remeasures unconstrained child"
+                       :fn assigned-narrow-host-width-remeasures-unconstrained-child})
 (table.insert tests {:name "SnackbarHost top-left placement uses left edge"
                        :fn placement-top-left-uses-left-edge})
 (table.insert tests {:name "SnackbarTheme resolves dark theme snackbar policy tokens"
@@ -493,7 +544,9 @@
 (table.insert tests {:name "Snackbar facade creates scoped manager and host"
                       :fn public-facade-creates-scoped-manager-and-host})
 (table.insert tests {:name "Snackbar facade applies nested theme to scoped manager and host"
-                     :fn public-facade-applies-nested-theme-to-scoped-manager-and-host})
+                      :fn public-facade-applies-nested-theme-to-scoped-manager-and-host})
+(table.insert tests {:name "Snackbar facade preserves explicit scoped theme over ambient context theme"
+                      :fn explicitly-themed-scope-ignores-ambient-context-snackbar-theme})
 
 (fn main []
   (local runner (require :tests/runner))

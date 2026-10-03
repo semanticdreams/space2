@@ -62,7 +62,7 @@
     ((Stack {:children []}) ctx)))
 
 (fn make-snackbar-scope-options [ctx]
-  {:theme ctx.theme})
+  {:theme ctx.theme :use-context-theme? true})
 
 (fn Hud [opts]
   (local options (or opts {}))

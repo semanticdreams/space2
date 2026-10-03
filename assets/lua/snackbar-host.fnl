@@ -196,6 +196,8 @@
 
 (fn layout-children [state self]
   (assert-supported-placement state.placement)
+  (when self.size
+    (measure-children state self {:max self.size}))
   (var y (initial-y state self))
   (each [idx child (ipairs state.children)]
     (local child-layout child.layout)
