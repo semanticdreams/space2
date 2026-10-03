@@ -15,7 +15,7 @@ This matrix is the closeout contract for the complete temporal library program. 
 | Natural language | `Temporal.natural`, `Temporal.providers.parse` | packaged `natural-phrase-seed` corpus validator tests; candidate schema/order tests; `en-US`, `fr-FR`, and `ja-JP` phrase tests; ambiguity and missing-context diagnostics; provider integration coverage; fast-suite registration | Broad natural-language parsing |
 | Timestamp migrations | `Temporal.migrations` and workflow persistence call sites | schema inventory, canonical persisted timestamp docs, idempotent migration tests, malformed-data diagnostics, dry-run coverage, workflow JSON write/read integration | Persisted timestamp migrations |
 | Runtime scheduler | `RuntimeScheduler` and timer compatibility APIs | fixed-clock tests, recurrence scheduling tests, cancellation/lifecycle tests, host pause/step tests, `RuntimeTimers` compatibility tests, Space Fennel compile check, constraints gate, focused scheduler/timer/host suites, broader `make test`, and PR CI | Runtime timer and scheduler redesign |
-| Final closeout | all temporal surfaces | end-to-end smoke tests, docs audit, focused suites, full `make test`, PR CI | Final conformance and closeout |
+| Final closeout | all temporal surfaces | `tests.test-temporal-closeout` cross-surface smoke suite, ecosystem-gap docs audit, focused suites when relevant, full `make test`, PR CI and merge queue | Final conformance and closeout |
 
 ## Validation ladder
 
@@ -161,6 +161,24 @@ one-shot/interval catch-up, deterministic deadline ordering, recurrence
 unknown legacy-key rejection, and callback error propagation. The compatibility
 and host suites cover `RuntimeTimers` millisecond wrapper behavior, typed host
 scheduler delegation, pause, and explicit step semantics.
+
+## Track 13 final closeout acceptance evidence
+
+The final conformance and closeout track is accepted locally when these commands pass in order:
+
+```bash
+make fennel-check
+make constraints
+SPACE_NATIVE_LIFECYCLE_DIAGNOSTICS=0 SPACE_DISABLE_AUDIO=1 SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data \
+SPACE_ASSETS_PATH=$(pwd)/assets \
+FENNEL_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" \
+FENNEL_MACRO_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" \
+./build/space -m tests.test-temporal-closeout:main
+SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data \
+SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test
+```
+
+The closeout suite is a cross-surface smoke test. It does not replace focused per-track suites; it proves that public exports, packaged deterministic data, representative integrations, and loud unsupported behavior remain wired together after the roadmap closes. PR CI and the merge queue remain the integration gate.
 
 ## Maintenance rule
 
