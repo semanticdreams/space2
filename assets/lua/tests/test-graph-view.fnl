@@ -4640,6 +4640,95 @@
 (table.insert tests {:name "FsNode directory listing behavior remains unchanged"
                       :fn fs-node-directory-listing-behavior-remains-unchanged})
 
+(fn selection-editing-array-contains? [items expected]
+    (var found? false)
+    (each [_ item (ipairs items)]
+        (when (= item expected)
+            (set found? true)))
+    found?)
+
+(fn assert-selection-editing-array-members [actual expected message]
+    (assert (= (length actual) (length expected))
+            (.. message " length mismatch; expected " (length expected) " got " (length actual)))
+    (each [_ item (ipairs expected)]
+        (assert (selection-editing-array-contains? actual item)
+                (.. message " missing expected item"))))
+
+(fn assert-selection-editing-state [view selector graph-map nodes keys message]
+    (assert-selection-editing-array-members view.selected-nodes nodes (.. message " selected nodes"))
+    (assert-selection-editing-array-members (view.selection:resolve-selection) nodes (.. message " resolved selection"))
+    (local expected-points (icollect [_ node (ipairs nodes)] (. view.points node)))
+    (assert-selection-editing-array-members selector.selected expected-points (.. message " selector points"))
+    (assert-selection-editing-array-members graph-map.selected_node_keys keys (.. message " selected keys")))
+
+(fn graph-view-selection-editing-select-focused-node-only-syncs-state []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local selector (ObjectSelector {:project (fn [position _opts] position) :ctx ctx :enabled? true}))
+            (local graph-map (make-test-graph-map))
+            (local view (GraphView {:graph-map graph-map :ctx ctx :selector selector}))
+            (local a (Graph.GraphNode {:key "a"}))
+            (local b (Graph.GraphNode {:key "b"}))
+            (graph-map:add-node a {:position (glm.vec3 0 0 0)})
+            (graph-map:add-node b {:position (glm.vec3 10 0 0)})
+            (selector:set-selected [(. view.points b)])
+            (local focus-node (. view.focus-nodes a))
+            (focus-node:request-focus)
+            (local result (view:select-focused-node-only))
+            (assert (= result true) "Selecting focused node only should report a mutation target")
+            (assert-selection-editing-state view selector graph-map [a] ["a"] "select focused node only")
+            (view:drop)
+            (graph-map:drop)
+            (selector:drop))))
+
+(fn graph-view-selection-editing-add-remove-toggle-and-clear-sync-state []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local selector (ObjectSelector {:project (fn [position _opts] position) :ctx ctx :enabled? true}))
+            (local graph-map (make-test-graph-map))
+            (local view (GraphView {:graph-map graph-map :ctx ctx :selector selector}))
+            (local a (Graph.GraphNode {:key "a"}))
+            (local b (Graph.GraphNode {:key "b"}))
+            (local c (Graph.GraphNode {:key "c"}))
+            (graph-map:add-node a {:position (glm.vec3 0 0 0)})
+            (graph-map:add-node b {:position (glm.vec3 10 0 0)})
+            (graph-map:add-node c {:position (glm.vec3 20 0 0)})
+            (selector:set-selected [(. view.points a)])
+            (local focus-node (. view.focus-nodes b))
+            (focus-node:request-focus)
+            (assert (= (view:add-focused-node-to-selection) true)
+                    "Adding focused node should report a mutation target")
+            (assert-selection-editing-state view selector graph-map [a b] ["a" "b"] "add focused node")
+            (assert (= (view:add-focused-node-to-selection) true)
+                    "Adding an already-selected focused node should still report a focus target")
+            (assert-selection-editing-state view selector graph-map [a b] ["a" "b"] "add focused node idempotently")
+            (assert (= (view:remove-focused-node-from-selection) true)
+                    "Removing focused node should report a mutation target")
+            (assert-selection-editing-state view selector graph-map [a] ["a"] "remove focused node")
+            (assert (= (graph-map:lookup "b") b)
+                    "Deselecting focused node must not remove it from the graph map")
+            (assert-selection-editing-array-members (icollect [_ node (pairs graph-map.nodes)] node) [a b c]
+                                                    "Deselecting focused node must leave graph map nodes intact")
+            (assert (= (view:toggle-focused-node-selection) true)
+                    "Toggling unselected focused node should report a mutation target")
+            (assert-selection-editing-state view selector graph-map [a b] ["a" "b"] "toggle focused node on")
+            (assert (= (view:toggle-focused-node-selection) true)
+                    "Toggling selected focused node should report a mutation target")
+            (assert-selection-editing-state view selector graph-map [a] ["a"] "toggle focused node off")
+            (assert (= (view:clear-selection) true)
+                    "Clearing a non-empty selection should report a mutation")
+            (assert-selection-editing-state view selector graph-map [] [] "clear selection")
+            (view:drop)
+            (graph-map:drop)
+            (selector:drop))))
+
+(table.insert tests {:name "GraphView selection editing select focused node only syncs state"
+                     :fn graph-view-selection-editing-select-focused-node-only-syncs-state})
+(table.insert tests {:name "GraphView selection editing add remove toggle and clear sync state"
+                     :fn graph-view-selection-editing-add-remove-toggle-and-clear-sync-state})
+
 (fn graph-selected-preview-commands-operate-only-on-selection []
     (with-temp-data-dir
         (fn [_root]

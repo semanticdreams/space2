@@ -11,7 +11,7 @@
 (local GraphViewLabels (require :graph/view/labels))
 (local GraphViewSelection (require :graph/view/selection))
 (local GraphViewNodeViews (require :graph/view/node-views))
-(local GraphViewPersistence (require :graph/view/persistence)) (local ActivityCameraState (require :activity-camera-state)) (local SelectedPreviewCommands (require :graph/view/selected-preview-commands))
+(local GraphViewPersistence (require :graph/view/persistence)) (local ActivityCameraState (require :activity-camera-state)) (local SelectedPreviewCommands (require :graph/view/selected-preview-commands)) (local GraphViewSelectionEditing (require :graph/view/selection-editing))
 (local NodeBase (require :graph/node-base))
 (local GraphNodePresentation (require :graph/view/presentation))
 (local IslandHost (require :graph/view/island-host))
@@ -105,8 +105,8 @@
                     (graph-map:update-island island-id {:state next-state}))
                 (set (. runtime.positions island-id) nil))))) (fn selected-node-keys [nodes] (assert (= (type nodes) :table) "GraphView selected-node-keys requires nodes table") (icollect [_ node (ipairs nodes)] (and node node.key))) (fn sync-map-selected-node-keys! [graph-map keys] (assert graph-map "GraphView selected-node-key sync requires graph-map") (if graph-map.set-selected-node-keys (graph-map:set-selected-node-keys keys) (do (set graph-map.selected_node_keys keys) graph-map.selected_node_keys)))
 
-(fn GraphView [opts]
-    (local options (or opts {}))
+(fn GraphView [options]
+
     (local graph-map options.graph-map)
     (assert graph-map "GraphView requires :graph-map") (assert graph-map.list-islands "GraphView requires :graph-map with list-islands")
     (local graph-map-id (or graph-map.id "main"))
@@ -188,7 +188,7 @@
     (local lod-surface-provider
            (or options.lod-surface-provider
                (fn []
-                   (or options.lod-surface
+                    (or options.lod-surface
                        (and ctx ctx.pointer-target)))))
     (local labels (GraphViewLabels {:ctx ctx
                                     :camera options.camera
@@ -513,11 +513,11 @@
                         :make-line new-triangle-line
                         :ctx ctx
                          :edge-color (or options.edge-color (and graph-theme graph-theme.edge-color))
-                         :edge-thickness (or options.edge-thickness
+                          :edge-thickness (or options.edge-thickness
                                              (and graph-theme graph-theme.edge-thickness)
                                              2.0)
                         :label-color (or resolved-label-color (glm.vec4 0.8 0.8 0.8 1))
-                        :label-depth-offset (or options.label-depth-offset 1.0)
+                         :label-depth-offset (or options.label-depth-offset 1.0)
                         :set-point-position set-point-position
                         :update-labels update-labels
                         :refresh-label-positions refresh-label-positions
@@ -605,14 +605,14 @@
      (fn reconcile-graph-islands! [opts]
           (with-island-label-refresh
               (fn []
-                   (island-host:reconcile-all (icollect [_ island (ipairs (graph-map:list-islands))] (island-with-runtime-position options._island-layout-runtime island)))
-                   (sync-island-layouts! options._island-layout-runtime graph-map island-host graph-layout opts))))
+                    (island-host:reconcile-all (icollect [_ island (ipairs (graph-map:list-islands))] (island-with-runtime-position options._island-layout-runtime island)))
+                    (sync-island-layouts! options._island-layout-runtime graph-map island-host graph-layout opts))))
 
      (fn reconcile-graph-island! [island]
          (with-island-label-refresh
              (fn []
-                 (island-host:reconcile-island (island-with-runtime-position options._island-layout-runtime island))
-                 (sync-island-layouts! options._island-layout-runtime graph-map island-host graph-layout))))
+                  (island-host:reconcile-island (island-with-runtime-position options._island-layout-runtime island))
+                  (sync-island-layouts! options._island-layout-runtime graph-map island-host graph-layout))))
 
     (var batch-depth 0)
     (var batched-layout-dirty? false)
@@ -818,7 +818,7 @@
                              (when (and entry entry.target persistence)
                                (persistence:set-size (. presentation :node) entry.target.size)))
              :pointer-target (or presentation._pointer-target
-                                  (and options options.pointer-target)
+                                  options.pointer-target
                                   (and ctx ctx.pointer-target))})))
 
     (fn detach-node-signals [node]
@@ -1563,8 +1563,9 @@
                                 (assert-not-dropped "remove-nodes")
                                 (graph-map:remove-nodes nodes-to-remove)))
     (set view.remove-selected-nodes (fn [_self]
-                                          (assert-not-dropped "remove-selected-nodes")
-                                          (graph-map:remove-nodes selected-nodes)))
+                                           (assert-not-dropped "remove-selected-nodes")
+                                           (graph-map:remove-nodes selected-nodes)))
+    (GraphViewSelectionEditing.install! view {:assert-not-dropped assert-not-dropped :focused-node (fn [] focused-node) :selected-node? (fn [node] (and node (rawget selected-set node))) :selected-nodes selected-nodes :points registry.points :selector selector :selection selection})
     (SelectedPreviewCommands.install! view assert-not-dropped toggle-node-presentation expanded-nodes)
     (set view.reveal-node
          (fn [_self node-or-key opts]
