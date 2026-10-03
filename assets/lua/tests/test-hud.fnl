@@ -199,6 +199,120 @@
           "missing overlay builders should fail loudly")
   (hud:drop))
 
+(fn hud-default-snackbar-scope-and-lifecycle []
+  (local hud (Hud {}))
+  (assert hud.snackbar-manager
+          "Hud should create a default snackbar manager")
+  (local original-manager hud.snackbar-manager)
+  (hud:build-default {:control-builder (fixed-widget "control" (glm.vec3 8 3 0))
+                      :status-builder (fixed-widget "status" (glm.vec3 8 2 0))})
+  (assert hud.entity.snackbar-host-root
+          "Hud.build-default should mount the default snackbar host root")
+  (local handle (hud:show-snackbar {:text "Saved" :persistent? true}))
+  (assert handle
+          "Hud.show-snackbar should return a handle")
+  (assert (= (length (hud.snackbar-manager:visible-entries)) 1)
+          "Hud.show-snackbar should add a visible manager entry")
+  (assert (hud:dismiss-snackbar handle)
+          "Hud.dismiss-snackbar should dismiss by handle")
+  (assert (= (length (hud.snackbar-manager:visible-entries)) 0)
+          "Hud.dismiss-snackbar should remove the visible entry")
+  (local preserved-handle (hud:show-snackbar {:text "Still here" :persistent? true}))
+  (hud:build-default {:control-builder (fixed-widget "control" (glm.vec3 8 3 0))
+                      :status-builder (fixed-widget "status" (glm.vec3 8 2 0))})
+  (assert (= hud.snackbar-manager original-manager)
+          "Hud rebuilds should preserve the snackbar manager object")
+  (assert (= (length (hud.snackbar-manager:visible-entries)) 1)
+          "Hud rebuilds should preserve existing visible snackbar entries")
+  (local visible-after-rebuild (hud.snackbar-manager:visible-entries))
+  (assert (= (. (. visible-after-rebuild 1) :id) preserved-handle.id)
+          "Hud rebuilds should keep the existing snackbar entry")
+  (local original-scope hud.snackbar-scope)
+  (var drop-count 0)
+  (local original-drop original-scope.drop)
+  (set original-scope.drop
+       (fn [self]
+         (set drop-count (+ drop-count 1))
+         (original-drop self)))
+  (hud:drop)
+  (hud:drop)
+  (assert (= drop-count 1)
+          "Hud.drop should drop the snackbar scope exactly once")
+  (local (ok err)
+    (pcall (fn []
+             (original-manager:show {:text "After drop"}))))
+  (assert (not ok)
+          "Snackbar manager should reject show after Hud.drop")
+  (assert (and err (string.find (tostring err) "SnackbarManager is dropped" 1 true))
+          "Dropped snackbar manager should report its dropped state"))
+
+(fn hud-default-snackbar-manager-uses-active-theme-policy []
+  (local original-engine app.engine)
+  (local original-themes app.themes)
+  (set app.engine (or app.engine {}))
+  (set app.themes {:get-active-theme (fn []
+                                       {:snackbar {:max-visible 1
+                                                   :duration-ms 123456}})})
+  (local hud (Hud {}))
+  (local first (hud:show-snackbar {:text "First" :persistent? true}))
+  (local second (hud:show-snackbar {:text "Second" :persistent? true}))
+  (local timed (hud:show-snackbar {:text "Timed"}))
+  (local visible (hud.snackbar-manager:visible-entries))
+  (local queued (hud.snackbar-manager:queued-entries))
+  (assert (= (length visible) 1)
+          "Active snackbar theme max-visible should limit HUD manager visibility")
+  (assert (= (. (. visible 1) :id) first.id)
+          "The first HUD snackbar should remain visible under max-visible 1")
+  (assert (= (length queued) 2)
+          "Additional HUD snackbars should queue under active snackbar max-visible policy")
+  (assert (= (. (. queued 1) :id) second.id)
+          "The second HUD snackbar should be queued by max-visible 1")
+  (assert (= (. (. queued 2) :id) timed.id)
+          "The timed HUD snackbar should be queued behind the second entry")
+  (assert (= (. (. queued 2) :duration-ms) 123456)
+          "Active snackbar theme duration-ms should become the HUD manager default duration")
+  (hud:drop)
+  (set app.themes original-themes)
+  (set app.engine original-engine))
+
+(fn hud-snackbar-host-rebuild-uses-current-theme-placement []
+  (local original-engine app.engine)
+  (local original-themes app.themes)
+  (set app.engine (or app.engine {}))
+  (local base-theme ((require :dark-theme)))
+  (var current-theme base-theme)
+  (set current-theme.snackbar.placement :top-left)
+  (set current-theme.snackbar.max-visible 1)
+  (set app.themes {:get-active-theme (fn [] current-theme)})
+  (local hud (Hud {}))
+  (hud:build-default {:control-builder (fixed-widget "control" (glm.vec3 8 3 0))
+                      :status-builder (fixed-widget "status" (glm.vec3 8 2 0))})
+  (hud:show-snackbar {:id "placement" :text "Placement" :persistent? true})
+  (local rebuilt-theme ((require :dark-theme)))
+  (set rebuilt-theme.snackbar.placement :bottom-left)
+  (set rebuilt-theme.snackbar.max-visible 1)
+  (set current-theme rebuilt-theme)
+  (hud:build-default {:control-builder (fixed-widget "control" (glm.vec3 8 3 0))
+                      :status-builder (fixed-widget "status" (glm.vec3 8 2 0))})
+  (hud:update-projection {:width 1920 :height 1080})
+  (hud:update)
+  (local host hud.entity.snackbar-host-root)
+  (local child (. host.children 1))
+  (assert child "rebuilt HUD snackbar host should render the preserved snackbar entry")
+  (set host.layout.size (glm.vec3 (+ child.layout.size.x 10)
+                                  (+ child.layout.size.y 10)
+                                  child.layout.size.z))
+  (host.layout:layouter)
+  (assert (= child.layout.position.x host.layout.position.x)
+          "rebuilt HUD snackbar host should use current theme left placement")
+  (local expected-bottom-y (+ host.layout.position.y host.layout.size.y (- child.layout.size.y)))
+  (assert (approx child.layout.position.y expected-bottom-y 1e-5)
+          (.. "rebuilt HUD snackbar host should use current theme bottom placement, got "
+              child.layout.position.y " expected " expected-bottom-y))
+  (hud:drop)
+  (set app.themes original-themes)
+  (set app.engine original-engine))
+
 (table.insert tests {:name "Hud adaptive scaling keeps reference scale at 1080p"
                      :fn adaptive-hud-keeps-reference-scale-at-1080p})
 (table.insert tests {:name "Hud adaptive scaling grows at 1200p"
@@ -217,6 +331,12 @@
                      :fn hud-overlay-layer-fails-loudly})
 (table.insert tests {:name "Hud overlay requires builder"
                      :fn hud-overlay-requires-builder})
+(table.insert tests {:name "Hud default snackbar scope and lifecycle"
+                      :fn hud-default-snackbar-scope-and-lifecycle})
+(table.insert tests {:name "Hud default snackbar manager uses active theme policy"
+                      :fn hud-default-snackbar-manager-uses-active-theme-policy})
+(table.insert tests {:name "Hud snackbar host rebuild uses current theme placement"
+                     :fn hud-snackbar-host-rebuild-uses-current-theme-placement})
 
 (local main
   (fn []

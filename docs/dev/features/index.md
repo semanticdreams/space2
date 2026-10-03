@@ -24,6 +24,7 @@ Detailed design and implementation notes for major feature systems.
 - [Orthographic UI Surface](./orthographic-ui-surface) — standalone retained orthographic UI target for examples and simple apps.
 - [Layout Widget Engine](./layout-widget-engine)
 - [Panel Transfer System](./panel-transfer-system)
+- [Snackbar System](./snackbar-system)
 - [Stylus Drawing Input](./stylus-drawing-input)
 - [Temporal Core](./temporal)
 - [Temporal Calendar Periods](./temporal-calendar-periods)

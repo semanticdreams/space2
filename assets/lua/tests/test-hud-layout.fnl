@@ -29,7 +29,41 @@
                            (set captured.position self.position))}))
     {:layout layout
      :drop (fn [_self]
-              (layout:drop))}))
+               (layout:drop))}))
+
+(fn make-captured-snackbar-host-builder [captured]
+  (fn build [_ctx]
+    (fn measurer [self]
+      (set self.measure (glm.vec3 1 1 0)))
+    (fn layouter [self]
+      (set captured.size self.size)
+      (set captured.position self.position))
+    (local layout
+      (Layout {:name "snackbar-host"
+               :measurer measurer
+               :layouter layouter}))
+    (fn update [_self]
+      (set captured.updates (+ captured.updates 1)))
+    (fn drop [_self]
+      (layout:drop))
+    {:layout layout
+     :update update
+     :drop drop}))
+
+(fn constrained-snackbar-content [_ctx entry _handle]
+  (fn measurer [self]
+    (set self.measure (glm.vec3 18 1 0)))
+  (fn constrained-measurer [self constraints]
+    (set self.measure (glm.vec3 (math.min 18 constraints.max.x) 1 0)))
+  (fn layouter [_self] nil)
+  (local layout
+    (Layout {:name (.. "hud-snackbar-content-" entry.id)
+             :measurer measurer
+             :constrained-measurer constrained-measurer
+             :layouter layouter}))
+  {:layout layout
+   :drop (fn [self]
+           (self.layout:drop))})
 
 (local HudExtendedSidebar (require :hud-extended-sidebar))
 (local HudExtendedSidebarView (require :hud-extended-sidebar-view))
@@ -305,6 +339,90 @@
           (.. "tiles height should be 31 (= 35 - 4), got " entity.tiles-root.layout.size.y))
   (entity:drop))
 
+(fn snackbar-host-mounts-inside-center-scene-stack []
+  (local hud {:world-units-per-pixel 1
+              :margin-px 0
+              :half-width 50
+              :half-height 20})
+  (local ctx (BuildContext {:pointer-target hud}))
+  (local captured {:updates 0})
+  (local snackbar-host-builder (make-captured-snackbar-host-builder captured))
+  (local builder
+    (HudLayout.make-hud-builder
+      {:control-builder (fixed-widget "control" (glm.vec3 100 3 0))
+       :status-builder (fixed-widget "status" (glm.vec3 100 2 0))
+       :left-dock-builder (fixed-widget "left" (glm.vec3 5 7 0))
+       :right-dock-builder (fixed-widget "right" (glm.vec3 6 7 0))
+       :top-toolbar-builder (fixed-widget "toolbar" (glm.vec3 20 4 0))
+       :snackbar-host-builder snackbar-host-builder}))
+  (local entity (builder ctx))
+  (entity.layout:measurer)
+  (set entity.layout.position (glm.vec3 0 0 0))
+  (set entity.layout.size entity.layout.measure)
+  (set entity.layout.rotation (glm.quat 1 0 0 0))
+  (set entity.layout.clip-region nil)
+  (set entity.layout.depth-offset-index 0)
+  (entity.layout:layouter)
+  (assert entity.snackbar-host-root "snackbar-host-root should be returned when builder is configured")
+  (assert entity.middle-overlay-root "middle-overlay-root should still exist when snackbar host is configured")
+  (assert (= entity.snackbar-host-root.layout.size.x 89)
+          (.. "snackbar host width should be 89 (= 100 - 5 - 6), got " entity.snackbar-host-root.layout.size.x))
+  (assert (= entity.snackbar-host-root.layout.size.y 31)
+          (.. "snackbar host height should be 31 (= 40 - 3 - 2 - 4), got " entity.snackbar-host-root.layout.size.y))
+  (assert (= entity.snackbar-host-root.layout.position.x 5)
+          (.. "snackbar host x should start after the left dock at 5, got " entity.snackbar-host-root.layout.position.x))
+  (assert (= entity.snackbar-host-root.layout.position.y 2)
+          (.. "snackbar host y should start above the status panel and below toolbar/control band at 2, got "
+              entity.snackbar-host-root.layout.position.y))
+  (assert (= captured.size.x 89) "snackbar host child should be laid out at center scene width")
+  (assert (= captured.size.y 31) "snackbar host child should be laid out at center scene height")
+  (entity:update)
+  (assert (= captured.updates 1) "HUD update should update configured snackbar host")
+  (entity:drop))
+
+(fn snackbar-host-clamps-snackbar-content-to-center-scene-width []
+  (local Snackbar (require :snackbar))
+  (local hud {:world-units-per-pixel 1
+              :margin-px 0
+              :half-width 10.5
+              :half-height 10})
+  (local ctx (BuildContext {:pointer-target hud}))
+  (local scope
+    (Snackbar.create-scope {:theme {:snackbar {:placement :top-right
+                                               :max-width 18
+                                               :spacing 0.3}}
+                            :content-builder constrained-snackbar-content}))
+  (local builder
+    (HudLayout.make-hud-builder
+      {:control-builder (fixed-widget "control" (glm.vec3 21 3 0))
+       :status-builder (fixed-widget "status" (glm.vec3 21 2 0))
+       :left-dock-builder (fixed-widget "left" (glm.vec3 5 7 0))
+       :right-dock-builder (fixed-widget "right" (glm.vec3 6 7 0))
+       :top-toolbar-builder (fixed-widget "toolbar" (glm.vec3 10 4 0))
+       :snackbar-host-builder scope.host-builder}))
+  (scope.manager:show {:id "too-wide" :text "Too wide" :persistent? true})
+  (local entity (builder ctx))
+  (entity.layout:measurer)
+  (set entity.layout.position (glm.vec3 0 0 0))
+  (set entity.layout.size entity.layout.measure)
+  (set entity.layout.rotation (glm.quat 1 0 0 0))
+  (set entity.layout.clip-region nil)
+  (set entity.layout.depth-offset-index 0)
+  (entity.layout:layouter)
+  (local snackbar-host entity.snackbar-host-root)
+  (local child (. snackbar-host.children 1))
+  (assert (= snackbar-host.layout.size.x 10)
+          (.. "snackbar host should receive shrunken center width 10, got " snackbar-host.layout.size.x))
+  (assert (= child.layout.size.x 10)
+          (.. "snackbar child should be clamped to center width 10, got " child.layout.size.x))
+  (assert (= child.layout.position.x snackbar-host.layout.position.x)
+          "clamped HUD snackbar should not extend into the left dock")
+  (assert (= (+ child.layout.position.x child.layout.size.x)
+             (+ snackbar-host.layout.position.x snackbar-host.layout.size.x))
+          "clamped HUD snackbar should align to the center host right edge")
+  (entity:drop)
+  (scope:drop))
+
 (fn right-dock-expanded-sidebar-reserves-rail-width-only []
   (local hud {:world-units-per-pixel 1
               :margin-px 0
@@ -345,6 +463,10 @@
 
 (table.insert tests {:name "Hud layout top toolbar reserves center column between full-height rails"
                      :fn top-toolbar-reserves-center-column-between-full-height-rails})
+(table.insert tests {:name "Hud layout snackbar host mounts inside center scene stack"
+                      :fn snackbar-host-mounts-inside-center-scene-stack})
+(table.insert tests {:name "Hud layout snackbar host clamps content to center scene width"
+                      :fn snackbar-host-clamps-snackbar-content-to-center-scene-width})
 
 (table.insert tests {:name "Hud layout left dock fills canvas band height"
                      :fn left-dock-fills-canvas-band-height})

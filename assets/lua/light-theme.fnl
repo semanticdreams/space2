@@ -2,6 +2,27 @@
 (local Font (require :font))
 (local {: adjust : make-button-variant} (require :widget-theme-utils))
 
+(fn LightSnackbarTheme []
+  {:placement :top-right
+   :spacing 0.3
+   :padding [0.45 0.35]
+   :max-width 18.0
+   :max-visible 3
+   :max-queued 20
+   :duration-ms 4000
+   :variants {:info {:background (glm.vec4 0.92 0.96 1 0.98)
+                      :foreground (glm.vec4 0.08 0.15 0.32 1)
+                      :border (glm.vec4 0.24 0.48 0.88 0.95)}
+              :success {:background (glm.vec4 0.88 0.97 0.9 0.98)
+                        :foreground (glm.vec4 0.08 0.32 0.16 1)
+                        :border (glm.vec4 0.2 0.6 0.32 0.95)}
+              :warning {:background (glm.vec4 1 0.95 0.82 0.98)
+                        :foreground (glm.vec4 0.42 0.26 0.04 1)
+                        :border (glm.vec4 0.86 0.56 0.16 0.95)}
+              :error {:background (glm.vec4 1 0.88 0.88 0.98)
+                      :foreground (glm.vec4 0.58 0.08 0.09 1)
+                      :border (glm.vec4 0.82 0.2 0.26 0.95)}}})
+
 (fn LightTheme []
   (local font (Font {:metadata-path "ubuntu-font/msdf/UbuntuMono-R.json"
                      :texture-path "ubuntu-font/msdf/UbuntuMono-R.png"
@@ -64,10 +85,11 @@
    :physics-containment {:visualization {:color (glm.vec4 0.14 0.31 0.58 0.42)}}
    :flat-terrain {:dark (glm.vec4 0.86 0.89 0.93 1.0)
                   :light (glm.vec4 0.945 0.962 0.982 1.0)}
-   :card {:background card-surface
-          :foreground text-color}
-   :qr-code {:foreground (glm.vec4 0.08 0.1 0.13 1)
-             :background (glm.vec4 1 1 1 1)}
+    :card {:background card-surface
+           :foreground text-color}
+    :snackbar (LightSnackbarTheme)
+    :qr-code {:foreground (glm.vec4 0.08 0.1 0.13 1)
+              :background (glm.vec4 1 1 1 1)}
    :input {:background input-base
            :hover-background (adjust input-base -0.012)
            :focused-background (adjust input-base -0.026)

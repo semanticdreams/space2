@@ -123,12 +123,139 @@
     (set overlay.drop drop)
     overlay))
 
+(fn maybe-update [widget]
+  (when (and widget widget.update)
+    (widget:update)))
+
+(fn build-scene-stack [ctx tiles float snackbar-host middle-overlay]
+  (local children [(fn [_ctx] tiles)
+                   (fn [_ctx] float)])
+  (when snackbar-host
+    (table.insert children (fn [_ctx] snackbar-host)))
+  (table.insert children (fn [_ctx] middle-overlay))
+  ((Stack {:depth-offset-step panel-depth-layer-step
+           :children children})
+   ctx))
+
+(fn build-hud-entity [ctx parts]
+  (local control (parts.control-wrapper ctx))
+  (local status (parts.status-wrapper ctx))
+  (local tiles (parts.tiles-root ctx))
+  (local float (parts.float-root ctx))
+  (local overlay (parts.overlay-root ctx))
+  (local middle-overlay (parts.middle-overlay-root ctx))
+  (local left-dock (and parts.left-dock-builder (parts.left-dock-builder ctx)))
+  (local right-dock (and parts.right-dock-builder (parts.right-dock-builder ctx)))
+  (local top-toolbar (and parts.top-toolbar-builder (parts.top-toolbar-builder ctx)))
+  (local snackbar-host (and parts.snackbar-host-builder (parts.snackbar-host-builder ctx)))
+  (local hud (assert ctx.pointer-target "HudLayout requires ctx.pointer-target"))
+  (local scene-stack (build-scene-stack ctx tiles float snackbar-host middle-overlay))
+  (local center-children [])
+  (when top-toolbar
+    (table.insert center-children (FlexChild (fn [_ctx] top-toolbar))))
+  (table.insert center-children (FlexChild (fn [_ctx] scene-stack) 1))
+  (local center-column
+    ((Flex {:axis 2
+            :xalign :stretch
+            :yspacing 0
+            :children center-children})
+     ctx))
+  (local base-children [])
+  (when left-dock
+    (table.insert base-children (FlexChild (fn [_ctx] left-dock))))
+  (table.insert base-children (FlexChild (fn [_ctx] center-column) 1))
+  (when right-dock
+    (table.insert base-children (FlexChild (fn [_ctx] right-dock))))
+  (local middle-base
+    ((Flex {:axis 1
+            :xspacing 0
+            :yalign :stretch
+            :children base-children})
+     ctx))
+  (local bands
+    ((Flex {:axis 2
+            :xalign :stretch
+            :yspacing 0
+            :children [(FlexChild (fn [_ctx] control))
+                       (FlexChild (fn [_ctx] middle-base) 1)
+                       (FlexChild (fn [_ctx] status))]})
+     ctx))
+
+  (fn measurer [self]
+    (bands.layout:measurer)
+    (overlay.layout:measurer)
+    (local width (hud-content-width hud))
+    (local height (hud-content-height hud))
+    (local depth (math.max (. bands.layout.measure 3)
+                           (. overlay.layout.measure 3)))
+    (set self.measure (glm.vec3 width height depth)))
+
+  (fn layouter [self]
+    (set self.size self.measure)
+    (local base-position self.position)
+    (set bands.layout.size self.size)
+    (set bands.layout.position base-position)
+    (set bands.layout.rotation self.rotation)
+    (set bands.layout.clip-region self.clip-region)
+    (set bands.layout.depth-offset-index self.depth-offset-index)
+    (bands.layout:layouter)
+    (set overlay.layout.size self.size)
+    (set overlay.layout.position base-position)
+    (set overlay.layout.rotation self.rotation)
+    (set overlay.layout.clip-region self.clip-region)
+    (set overlay.layout.depth-offset-index (+ self.depth-offset-index 64))
+    (overlay.layout:layouter))
+
+  (local layout
+    (Layout {:name "hud-panels"
+             :measurer measurer
+             :layouter layouter
+             :children [bands.layout overlay.layout]}))
+
+  (fn update [_self]
+    (maybe-update control)
+    (maybe-update status)
+    (maybe-update top-toolbar)
+    (maybe-update tiles)
+    (maybe-update float)
+    (maybe-update snackbar-host)
+    (maybe-update left-dock)
+    (maybe-update right-dock)
+    (maybe-update overlay))
+
+  (fn drop [self]
+    (self.layout:drop)
+    (bands:drop)
+    (overlay:drop)
+    (when top-toolbar
+      (top-toolbar:drop)))
+
+  {:layout layout
+   :update update
+   :bands-root bands
+   :middle-root scene-stack
+   :control-root control
+   :status-root status
+   :tiles-root tiles
+   :float-root float
+   :snackbar-host-root snackbar-host
+   :left-dock-root left-dock
+   :right-dock-root right-dock
+   :middle-overlay-root middle-overlay
+   :overlay-root overlay
+   :top-toolbar-root top-toolbar
+   :drop drop})
+
 (fn make-hud-builder [opts]
-  (local options (or opts {}))
-  (local control-builder (or options.control-builder
-                             (ControlPanel (or options.control-panel-opts {}))))
-  (local status-builder (or options.status-builder
-                            (StatusPanel (or options.status-panel-opts {}))))
+  (local options (if opts opts {}))
+  (local control-panel-opts (if options.control-panel-opts options.control-panel-opts {}))
+  (local status-panel-opts (if options.status-panel-opts options.status-panel-opts {}))
+  (local control-builder (if options.control-builder
+                             options.control-builder
+                             (ControlPanel control-panel-opts)))
+  (local status-builder (if options.status-builder
+                            options.status-builder
+                            (StatusPanel status-panel-opts)))
   (local tiles-root (Tiles {:rows 4
                             :columns 4
                             :xspacing 0
@@ -140,128 +267,22 @@
   (local left-dock-builder options.left-dock-builder)
   (local right-dock-builder options.right-dock-builder)
   (local top-toolbar-builder options.top-toolbar-builder)
+  (local snackbar-host-builder options.snackbar-host-builder)
   (local control-wrapper (FullWidth {:name "control-panel-wrapper"
-                                     :child control-builder}))
+                                      :child control-builder}))
   (local status-wrapper (FullWidth {:name "status-panel-wrapper"
-                                    :child status-builder}))
+                                     :child status-builder}))
   (fn build [ctx]
-    (local control (control-wrapper ctx))
-    (local status (status-wrapper ctx))
-    (local tiles (tiles-root ctx))
-    (local float (float-root ctx))
-    (local overlay (overlay-root ctx))
-    (local middle-overlay (middle-overlay-root ctx))
-    (local left-dock (and left-dock-builder (left-dock-builder ctx)))
-    (local right-dock (and right-dock-builder (right-dock-builder ctx)))
-    (local top-toolbar (and top-toolbar-builder (top-toolbar-builder ctx)))
-    (local hud (or ctx.pointer-target {}))
-    (local scene-stack
-      ((Stack {:depth-offset-step panel-depth-layer-step
-               :children [(fn [_ctx] tiles)
-                          (fn [_ctx] float)
-                          (fn [_ctx] middle-overlay)]})
-       ctx))
-    (local center-children [])
-    (when top-toolbar
-      (table.insert center-children (FlexChild (fn [_ctx] top-toolbar))))
-    (table.insert center-children (FlexChild (fn [_ctx] scene-stack) 1))
-    (local center-column
-      ((Flex {:axis 2
-              :xalign :stretch
-              :yspacing 0
-              :children center-children})
-       ctx))
-    (local base-children [])
-    (when left-dock
-      (table.insert base-children (FlexChild (fn [_ctx] left-dock))))
-    (table.insert base-children (FlexChild (fn [_ctx] center-column) 1))
-    (when right-dock
-      (table.insert base-children (FlexChild (fn [_ctx] right-dock))))
-    (local middle-base
-      ((Flex {:axis 1
-              :xspacing 0
-              :yalign :stretch
-              :children base-children})
-       ctx))
-    (local bands
-      ((Flex {:axis 2
-              :xalign :stretch
-              :yspacing 0
-              :children [(FlexChild (fn [_ctx] control))
-                         (FlexChild (fn [_ctx] middle-base) 1)
-                         (FlexChild (fn [_ctx] status))]})
-       ctx))
-
-    (fn measurer [self]
-      (bands.layout:measurer)
-      (overlay.layout:measurer)
-      (local width (hud-content-width hud))
-      (local height (hud-content-height hud))
-      (local depth (math.max (. bands.layout.measure 3)
-                             (. overlay.layout.measure 3)))
-      (set self.measure (glm.vec3 width height depth)))
-
-    (fn layouter [self]
-      (set self.size self.measure)
-      (local base-position self.position)
-      (set bands.layout.size self.size)
-      (set bands.layout.position base-position)
-      (set bands.layout.rotation self.rotation)
-      (set bands.layout.clip-region self.clip-region)
-      (set bands.layout.depth-offset-index self.depth-offset-index)
-      (bands.layout:layouter)
-      (set overlay.layout.size self.size)
-      (set overlay.layout.position base-position)
-      (set overlay.layout.rotation self.rotation)
-      (set overlay.layout.clip-region self.clip-region)
-      (set overlay.layout.depth-offset-index (+ self.depth-offset-index 64))
-      (overlay.layout:layouter))
-
-    (local layout
-      (Layout {:name "hud-panels"
-               :measurer measurer
-               :layouter layouter
-               :children [bands.layout overlay.layout]}))
-
-    (fn update [_self]
-      (when (and control control.update)
-        (control:update))
-      (when (and status status.update)
-        (status:update))
-      (when (and top-toolbar top-toolbar.update)
-        (top-toolbar:update))
-      (when (and tiles tiles.update)
-        (tiles:update))
-      (when (and float float.update)
-        (float:update))
-      (when (and left-dock left-dock.update)
-        (left-dock:update))
-      (when (and right-dock right-dock.update)
-        (right-dock:update))
-      (when (and overlay overlay.update)
-        (overlay:update)))
-
-    (fn drop [self]
-      (self.layout:drop)
-      (bands:drop)
-      (overlay:drop)
-      (when top-toolbar
-        (top-toolbar:drop)))
-
-    {:layout layout
-     :update update
-     :bands-root bands
-     :middle-root scene-stack
-     :control-root control
-     :status-root status
-     :tiles-root tiles
-     :float-root float
-     :left-dock-root left-dock
-     :right-dock-root right-dock
-     :middle-overlay-root middle-overlay
-     :overlay-root overlay
-     :top-toolbar-root top-toolbar
-     :drop drop}))
+    (build-hud-entity ctx {:control-wrapper control-wrapper
+                           :status-wrapper status-wrapper
+                           :tiles-root tiles-root
+                           :float-root float-root
+                           :overlay-root overlay-root
+                           :middle-overlay-root middle-overlay-root
+                           :left-dock-builder left-dock-builder
+                           :right-dock-builder right-dock-builder
+                           :top-toolbar-builder top-toolbar-builder
+                           :snackbar-host-builder snackbar-host-builder})))
 
 {:FullWidth FullWidth
  :make-overlay-root make-overlay-root
