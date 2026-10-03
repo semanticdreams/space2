@@ -117,6 +117,7 @@
       :tests.test-temporal-recurrence-set
       :tests.test-temporal-recurrence-rfc5545
       :tests.test-temporal-ics
+      :tests.test-temporal-closeout
      :tests.test-tempfile
     :tests.test-graph-loaders
     :tests.test-sysinfo
