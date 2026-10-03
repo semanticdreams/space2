@@ -662,9 +662,9 @@
                               (* parent-inverse options.rotation)
                               (glm.quat 1 0 0 0)))
     (local metadata {:element element
-                     :position offset
-                     :rotation local-rotation
-                     :depth-offset-index options.depth-offset-index})
+                      :position offset
+                      :rotation local-rotation :fill-parent? (= options.fill-parent? true)
+                      :depth-offset-index options.depth-offset-index})
     (table.insert root.children metadata)
     (root.layout:add-child element.layout)
     (root.layout:mark-measure-dirty)

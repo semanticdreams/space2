@@ -1,6 +1,6 @@
 (local glm (require :glm))
 (local Text (require :text))
-(local {: FullWidth} (require :hud-layout))
+
 (local Padding (require :padding))
 (local Card (require :card))
 (local CommandHint (require :command-hints))
@@ -265,29 +265,29 @@
 (fn toggle-key-payload? [payload]
   (= (and payload payload.key) SDLK_F1))
 
+(fn command-hints-card-builder [content]
+  (fn build-content [_ctx]
+    content)
+  (fn build-card [inner-ctx]
+    ((Card
+       {:child
+        (Padding {:edge-insets [0.6 0.45]
+                  :child build-content})})
+     inner-ctx)))
+
 (fn overlay-builder [manager]
+  (local ScrollArea (require :scroll-area))
   (fn build [ctx]
     (var text-entity nil)
     (local content
       ((Text {:text (overlay-text manager.sections)}) ctx))
     (set text-entity content)
-    (local card-builder
-      (fn [inner-ctx]
-        ((Card
-           {:child
-            (Padding {:edge-insets [0.6 0.45]
-                      :child (fn [_] content)})})
-         inner-ctx)))
-    (local wrapped
-      ((FullWidth
-         {:name "hud-command-hints-overlay"
-          :hud manager.hud
-          :child card-builder})
-       ctx))
-    (set wrapped.set-text
+    (local clipped ((ScrollArea {:name "command-hints-clip"
+                                 :child (command-hints-card-builder content)}) ctx))
+    (set clipped.set-text
          (fn [_self text]
            (text-entity:set-text text)))
-    wrapped))
+    clipped))
 
 (fn passive-event? [event-name]
   (or (= event-name :updated)
@@ -318,8 +318,8 @@
           (if (not self.overlay-element)
               (set self.overlay-element
                    (self.hud:add-overlay-child {:builder (overlay-builder self)
-                                                :layer :middle
-                                                :depth-offset-index 200})))
+                                                 :layer :middle :fill-parent? true
+                                                 :depth-offset-index 200})))
           (when self.overlay-element.set-text
             (self.overlay-element:set-text (overlay-text self.sections))))
         (when self.overlay-element

@@ -14,7 +14,7 @@ This matrix is the closeout contract for the complete temporal library program. 
 | Business calendars | `Temporal.business-calendar`, `Temporal.providers.business-calendar` | packaged `US-FED` holiday seed validator tests; Space Fennel compile check; `make constraints`; focused `tests.test-temporal-business-calendar` loader/facade suite; focused `tests.test-temporal-provider-registry` dispatcher coverage; fast-suite registration | Business and holiday calendars |
 | Natural language | `Temporal.natural`, `Temporal.providers.parse` | packaged `natural-phrase-seed` corpus validator tests; candidate schema/order tests; `en-US`, `fr-FR`, and `ja-JP` phrase tests; ambiguity and missing-context diagnostics; provider integration coverage; fast-suite registration | Broad natural-language parsing |
 | Timestamp migrations | `Temporal.migrations` and workflow persistence call sites | schema inventory, canonical persisted timestamp docs, idempotent migration tests, malformed-data diagnostics, dry-run coverage, workflow JSON write/read integration | Persisted timestamp migrations |
-| Runtime scheduler | `RuntimeScheduler` and timer compatibility APIs | fixed-clock tests, recurrence scheduling tests, cancellation/lifecycle tests | Runtime timer and scheduler redesign |
+| Runtime scheduler | `RuntimeScheduler` and timer compatibility APIs | fixed-clock tests, recurrence scheduling tests, cancellation/lifecycle tests, host pause/step tests, `RuntimeTimers` compatibility tests, Space Fennel compile check, constraints gate, focused scheduler/timer/host suites, broader `make test`, and PR CI | Runtime timer and scheduler redesign |
 | Final closeout | all temporal surfaces | end-to-end smoke tests, docs audit, focused suites, full `make test`, PR CI | Final conformance and closeout |
 
 ## Validation ladder
@@ -122,6 +122,45 @@ dry-run/no-write behavior, idempotent file rewrites, malformed-data diagnostics,
 and nested workflow-run schema fields. The workflow runner suite covers the
 integrated `workflows/definitions` and run persistence call sites that write
 canonical UTC strings while preserving numeric epoch seconds in memory.
+
+## Track 12 runtime scheduler acceptance evidence
+
+The runtime timer and scheduler redesign track is accepted locally when these
+commands pass in order:
+
+```bash
+make fennel-check
+make constraints
+SPACE_DISABLE_AUDIO=1 SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data \
+SPACE_ASSETS_PATH=$(pwd)/assets \
+FENNEL_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" \
+FENNEL_MACRO_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" \
+./build/space -m tests.test-runtime-scheduler:main
+SPACE_DISABLE_AUDIO=1 SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data \
+SPACE_ASSETS_PATH=$(pwd)/assets \
+FENNEL_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" \
+FENNEL_MACRO_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" \
+./build/space -m tests.test-runtime-timers:main
+SPACE_DISABLE_AUDIO=1 SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data \
+SPACE_ASSETS_PATH=$(pwd)/assets \
+FENNEL_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" \
+FENNEL_MACRO_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" \
+./build/space -m tests.test-app-host-services:main
+SPACE_DISABLE_AUDIO=1 SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data \
+SPACE_ASSETS_PATH=$(pwd)/assets \
+FENNEL_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" \
+FENNEL_MACRO_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" \
+./build/space -m tests.test-standalone-app-runtime:main
+SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data \
+SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test
+```
+
+The focused runtime scheduler suite covers fixed-clock/manual advance,
+one-shot/interval catch-up, deterministic deadline ordering, recurrence
+`:zone-id` requirements, recurrence callback payloads, cancellation, clear/drop,
+unknown legacy-key rejection, and callback error propagation. The compatibility
+and host suites cover `RuntimeTimers` millisecond wrapper behavior, typed host
+scheduler delegation, pause, and explicit step semantics.
 
 ## Maintenance rule
 

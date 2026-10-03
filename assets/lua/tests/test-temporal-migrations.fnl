@@ -396,7 +396,7 @@
                            "workflow store should reject object-shaped events"))
   (assert-contains err "workflow-run" "store load event container error should include schema id")
   (assert-contains err "events" "store load event container error should include field path")
-  (assert-contains err run-path "store load event container error should include file path"))
+  (assert-contains err "run-events-object.json" "store load event container error should include file path"))
 
 (table.insert tests {:name "numeric zero converts to instant string" :fn numeric-zero-converts-to-instant-string})
 (table.insert tests {:name "canonical string round trips through epoch seconds" :fn canonical-string-round-trips-through-epoch-seconds})

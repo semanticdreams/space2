@@ -21,11 +21,9 @@
             (.. message " at " idx " expected " id " got " (tostring (. ids idx))))))
 
 (fn timer-count []
-  (var count 0)
-  (when app.__runtime_timers
-    (each [_ _timer (pairs app.__runtime_timers.timers)]
-      (set count (+ count 1))))
-  count)
+  (if app.__runtime_timers
+      app.__runtime_timers.active-count
+      0))
 
 (fn assert-error-contains [body expected]
   (local (ok err) (pcall body))

@@ -11,6 +11,7 @@
     :tests.test-render-capture
     :tests.test-next-frame
     :tests.test-runtime-timers
+    :tests.test-runtime-scheduler
     :tests.test-runtime-updates
     :tests.test-layout-stats-view
     :tests.test-clickables
@@ -69,6 +70,7 @@
      :tests.test-main-events
      :tests.test-pointer-routing
      :tests.test-states
+     :tests.test-leader-state
      :tests.test-commands
        :tests.test-activity-presentation
       :tests.test-activity-surface-boundary

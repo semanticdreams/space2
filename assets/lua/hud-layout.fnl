@@ -93,7 +93,7 @@
         (local child (and metadata metadata.element))
         (local layout (and child child.layout))
         (when layout
-          (set layout.size (or metadata.size layout.measure layout.size))
+          (set layout.size (if metadata.fill-parent? self.size (or metadata.size layout.measure layout.size)))
           (local offset (or metadata.position (glm.vec3 0 0 0)))
           (local rotation (or metadata.rotation (glm.quat 1 0 0 0)))
           (local depth-offset-index
