@@ -20,10 +20,12 @@
        :known-hosts-path (env "SPACE_TEST_SSH_KNOWN_HOSTS")
        :root (env "SPACE_TEST_SSH_ROOT")
        :echo-host (env "SPACE_TEST_SSH_ECHO_HOST")
-       :echo-port (and (env "SPACE_TEST_SSH_ECHO_PORT")
-                       (tonumber (env "SPACE_TEST_SSH_ECHO_PORT")))
-       :local-tunnel-port (and (env "SPACE_TEST_SSH_LOCAL_TUNNEL_PORT")
-                               (tonumber (env "SPACE_TEST_SSH_LOCAL_TUNNEL_PORT")))}))
+        :echo-port (and (env "SPACE_TEST_SSH_ECHO_PORT")
+                        (tonumber (env "SPACE_TEST_SSH_ECHO_PORT")))
+        :local-tunnel-port (and (env "SPACE_TEST_SSH_LOCAL_TUNNEL_PORT")
+                                (tonumber (env "SPACE_TEST_SSH_LOCAL_TUNNEL_PORT")))
+        :remote-tunnel-port (and (env "SPACE_TEST_SSH_REMOTE_TUNNEL_PORT")
+                                 (tonumber (env "SPACE_TEST_SSH_REMOTE_TUNNEL_PORT")))}))
 
 (fn terminal-event? [event]
   (if (= event.kind "operation-success")
@@ -118,11 +120,13 @@
             message))
 
 (fn connect-options [fixture policy]
-  {:target {:host fixture.host :port fixture.port :username fixture.username}
-   :auth-methods [{:type "private-key" :key-path fixture.key-path}]
-   :known-host-policy policy
-   :known-hosts-path fixture.known-hosts-path
-   :timeout-ms 10000})
+  (local options {:target {:host fixture.host :port fixture.port :username fixture.username}
+                  :auth-methods [{:type "private-key" :key-path fixture.key-path}]
+                  :known-hosts-path fixture.known-hosts-path
+                  :timeout-ms 10000})
+  (when policy
+    (tset options :known-host-policy policy))
+  options)
 
 (fn maybe-skip-unavailable [terminal]
   (when (and (= terminal.kind "operation-error")
@@ -134,7 +138,7 @@
   (assert (= event.kind "operation-success") (.. message ": " (tostring event.kind) " " (tostring event.error-code))))
 
 (fn connect-with-known-host-acceptance [ssh fixture]
-  (local rejected-op (ssh.connect (connect-options fixture "reject")))
+  (local rejected-op (ssh.connect (connect-options fixture nil)))
   (local (rejected) (wait-for-terminal ssh rejected-op "default known-host rejection should finish"))
   (if (maybe-skip-unavailable rejected)
       (values nil true)
@@ -223,9 +227,11 @@
         (local (close-terminal) (wait-for-terminal ssh close-op "local tunnel close should finish"))
         (assert-success close-terminal "local tunnel close should succeed"))))
 
-(fn remote-tunnel [ssh session-id]
+(fn remote-tunnel [ssh fixture session-id]
+  (assert fixture.remote-tunnel-port "remote tunnel fixture listen port must be provided")
+  (assert (> fixture.remote-tunnel-port 0) "remote tunnel fixture port must be positive")
   (local op (ssh.open-remote-tunnel session-id {:remote-host "127.0.0.1"
-                                                :remote-port 0
+                                                :remote-port fixture.remote-tunnel-port
                                                 :local-host "127.0.0.1"
                                                 :local-port 9
                                                 :timeout-ms 10000}))
@@ -255,7 +261,7 @@
           (sftp-round-trip ssh fixture session-id)
           (shell-round-trip ssh session-id)
           (local-tunnel-round-trip ssh fixture session-id)
-          (remote-tunnel ssh session-id)
+          (remote-tunnel ssh fixture session-id)
           (cancel-long-running-exec ssh session-id)
           (ssh.close-session session-id)))))
 

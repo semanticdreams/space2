@@ -115,12 +115,29 @@ def wait_for_port(port: int, process: subprocess.Popen[str]) -> bool:
 def stop_process(process: subprocess.Popen[str]) -> None:
     if process.poll() is not None:
         return
-    process.terminate()
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
     try:
         process.wait(timeout=5.0)
     except subprocess.TimeoutExpired:
-        process.kill()
+        os.killpg(process.pid, signal.SIGKILL)
         process.wait(timeout=5.0)
+
+
+def stop_and_collect_start_failure(process: subprocess.Popen[str]) -> tuple[int | None, str]:
+    if process.poll() is None:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    try:
+        _stdout, stderr = process.communicate(timeout=5.0)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        _stdout, stderr = process.communicate(timeout=5.0)
+    return process.returncode, (stderr or "")
 
 
 def parse_args() -> argparse.Namespace:
@@ -143,8 +160,8 @@ def main() -> int:
 
     sshd_path = Path(sshd).resolve()
     if not sshd_path.is_absolute():
-        print("SKIP space_ssh_integration: sshd path is not absolute")
-        return 0
+        print("ERROR space_ssh_integration: sshd path is not absolute", file=sys.stderr)
+        return 1
 
     fixture_parent = Path("/tmp/space/tests")
     fixture_parent.mkdir(parents=True, exist_ok=True)
@@ -184,6 +201,7 @@ def main() -> int:
 
         ssh_port = allocate_port()
         local_tunnel_port = allocate_port()
+        remote_tunnel_port = allocate_port()
         echo_server = EchoServer()
         echo_server.start()
         write_sshd_config(config_path, port=ssh_port, host_key=host_key, authorized_keys=authorized_keys, sftp_root=sftp_root)
@@ -194,16 +212,13 @@ def main() -> int:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            start_new_session=True,
         )
         if not wait_for_port(ssh_port, sshd_process):
-            stderr = ""
-            if sshd_process.stderr:
-                try:
-                    stderr = sshd_process.stderr.read()
-                except OSError:
-                    stderr = ""
-            print(f"SKIP space_ssh_integration: disposable sshd did not start: {stderr.strip()}")
-            return 0
+            returncode, stderr = stop_and_collect_start_failure(sshd_process)
+            detail = stderr.strip() or f"sshd return code {returncode}"
+            print(f"ERROR space_ssh_integration: disposable sshd did not start: {detail}", file=sys.stderr)
+            return 1
 
         env = os.environ.copy()
         assets = str(Path(args.assets).resolve())
@@ -225,6 +240,7 @@ def main() -> int:
                 "SPACE_TEST_SSH_ECHO_HOST": echo_server.host,
                 "SPACE_TEST_SSH_ECHO_PORT": str(echo_server.port),
                 "SPACE_TEST_SSH_LOCAL_TUNNEL_PORT": str(local_tunnel_port),
+                "SPACE_TEST_SSH_REMOTE_TUNNEL_PORT": str(remote_tunnel_port),
             }
         )
         command = [args.space, "-m", args.module]

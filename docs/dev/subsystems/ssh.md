@@ -78,7 +78,7 @@ CTest target `space_ssh_integration` runs a disposable local OpenSSH server when
 SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets ctest --test-dir build -R space_ssh_integration --output-on-failure
 ```
 
-The fixture creates all files under `/tmp/space/tests/ssh-fixture-*`, generates ephemeral user and host keys, supplies fixture environment variables to `tests.test-ssh-integration:main`, and exits successfully with a clear skip message if OpenSSH tools are unavailable.
+The fixture creates all files under `/tmp/space/tests/ssh-fixture-*`, generates ephemeral user and host keys, supplies fixture environment variables to `tests.test-ssh-integration:main`, including positive preallocated local and remote tunnel listen ports, and exits successfully with a clear skip message only when OpenSSH tools are unavailable. After the tools are present, fixture startup failures are reported as nonzero errors.
 
 ## Phase 1 non-goals
 
