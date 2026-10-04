@@ -305,6 +305,59 @@ struct SftpFileResource
     sftp_file value { nullptr };
 };
 
+struct RelayResource
+{
+    RelayResource(int accepted_client, ChannelHandle remote_channel)
+        : client_fd(accepted_client)
+        , remote(std::move(remote_channel))
+    {
+    }
+
+    ~RelayResource()
+    {
+        request_close();
+    }
+
+    RelayResource(const RelayResource&) = delete;
+    RelayResource& operator=(const RelayResource&) = delete;
+
+    bool running() const
+    {
+        return active.load();
+    }
+
+    int client()
+    {
+        std::lock_guard<std::mutex> lock(client_mutex);
+        return client_fd;
+    }
+
+    void request_close()
+    {
+        active.store(false);
+        close_client();
+        std::lock_guard<std::mutex> lock(remote_mutex);
+        remote.reset();
+    }
+
+    void close_client()
+    {
+        std::lock_guard<std::mutex> lock(client_mutex);
+        if (client_fd >= 0)
+        {
+            shutdown(client_fd, SHUT_RDWR);
+            close(client_fd);
+            client_fd = -1;
+        }
+    }
+
+    std::mutex client_mutex;
+    int client_fd { -1 };
+    std::mutex remote_mutex;
+    ChannelHandle remote;
+    std::atomic<bool> active { true };
+};
+
 struct TunnelResource
 {
     explicit TunnelResource(int listener)
@@ -324,6 +377,15 @@ struct TunnelResource
     void stop()
     {
         handle.stop();
+        std::vector<std::shared_ptr<RelayResource>> relays;
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            relays = active_relays;
+        }
+        for (const auto& relay : relays)
+        {
+            relay->request_close();
+        }
     }
 
     void join()
@@ -338,7 +400,26 @@ struct TunnelResource
         }
     }
 
+    bool add_relay(const std::shared_ptr<RelayResource>& relay)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (!handle.running.load())
+        {
+            return false;
+        }
+        active_relays.push_back(relay);
+        return true;
+    }
+
+    void remove_relay(const std::shared_ptr<RelayResource>& relay)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        active_relays.erase(std::remove(active_relays.begin(), active_relays.end(), relay), active_relays.end());
+    }
+
     TunnelHandle handle;
+    std::mutex mutex;
+    std::vector<std::shared_ptr<RelayResource>> active_relays;
     std::thread worker;
 };
 
@@ -1188,6 +1269,7 @@ private:
                 }
                 break;
             }
+            fcntl(client, F_SETFL, fcntl(client, F_GETFL, 0) | O_NONBLOCK);
             ChannelHandle remote;
             {
                 std::lock_guard<std::mutex> session_lock(session->mutex);
@@ -1198,20 +1280,48 @@ private:
                 close(client);
                 continue;
             }
+            ssh_channel_set_blocking(remote.value, 0);
+            auto relay = std::make_shared<RelayResource>(client, std::move(remote));
+            if (!tunnel->add_relay(relay))
             {
-                std::lock_guard<std::mutex> session_lock(session->mutex);
-                if (ssh_channel_open_forward(remote.value, options.remote_host.c_str(), options.remote_port, options.local_host.c_str(), options.local_port) != SSH_OK)
-                {
-                    close(client);
-                    continue;
-                }
-            }
-            if (!tunnel_running(tunnel_id, tunnel))
-            {
-                close(client);
+                relay->request_close();
                 continue;
             }
-            relay_tunnel_connection(client, remote.value, tunnel_id, tunnel);
+            bool opened = false;
+            {
+                std::lock_guard<std::mutex> session_lock(session->mutex);
+                while (relay->running() && tunnel_running(tunnel_id, tunnel))
+                {
+                    int result = SSH_ERROR;
+                    {
+                        std::lock_guard<std::mutex> remote_lock(relay->remote_mutex);
+                        if (!relay->remote.value)
+                        {
+                            break;
+                        }
+                        result = ssh_channel_open_forward(relay->remote.value, options.remote_host.c_str(), options.remote_port, options.local_host.c_str(), options.local_port);
+                    }
+                    if (result == SSH_OK)
+                    {
+                        opened = true;
+                        break;
+                    }
+                    if (result != SSH_AGAIN)
+                    {
+                        break;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+            }
+            if (!opened || !tunnel_running(tunnel_id, tunnel))
+            {
+                tunnel->remove_relay(relay);
+                relay->request_close();
+                continue;
+            }
+            relay_tunnel_connection(relay, tunnel_id, tunnel);
+            tunnel->remove_relay(relay);
+            relay->request_close();
         }
         bool emit_closed = false;
         {
@@ -1244,11 +1354,29 @@ private:
         return it == tunnels_.end() || it->second != tunnel ? -1 : tunnel->handle.listener_fd;
     }
 
-    void relay_tunnel_connection(int client, ssh_channel remote, TunnelId tunnel_id, const std::shared_ptr<TunnelResource>& tunnel)
+    void relay_tunnel_connection(const std::shared_ptr<RelayResource>& relay, TunnelId tunnel_id, const std::shared_ptr<TunnelResource>& tunnel)
     {
         std::vector<char> buffer(8192);
-        while (tunnel_running(tunnel_id, tunnel) && !ssh_channel_is_eof(remote))
+        while (relay->running() && tunnel_running(tunnel_id, tunnel))
         {
+            int client = relay->client();
+            if (client < 0)
+            {
+                break;
+            }
+            bool remote_eof = false;
+            {
+                std::lock_guard<std::mutex> remote_lock(relay->remote_mutex);
+                if (!relay->remote.value)
+                {
+                    break;
+                }
+                remote_eof = ssh_channel_is_eof(relay->remote.value);
+            }
+            if (remote_eof)
+            {
+                break;
+            }
             fd_set reads;
             FD_ZERO(&reads);
             FD_SET(client, &reads);
@@ -1257,43 +1385,79 @@ private:
             if (ready > 0 && FD_ISSET(client, &reads))
             {
                 const ssize_t received = recv(client, buffer.data(), buffer.size(), 0);
+                if (received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR))
+                {
+                    continue;
+                }
                 if (received <= 0)
                 {
                     break;
                 }
                 std::size_t sent = 0;
-                while (sent < static_cast<std::size_t>(received))
+                while (sent < static_cast<std::size_t>(received) && relay->running() && tunnel_running(tunnel_id, tunnel))
                 {
-                    const int written = ssh_channel_write(remote, buffer.data() + sent, static_cast<uint32_t>(received - sent));
+                    int written = SSH_ERROR;
+                    {
+                        std::lock_guard<std::mutex> remote_lock(relay->remote_mutex);
+                        if (!relay->remote.value)
+                        {
+                            return;
+                        }
+                        written = ssh_channel_write(relay->remote.value, buffer.data() + sent, static_cast<uint32_t>(received - sent));
+                    }
+                    if (written == SSH_AGAIN)
+                    {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                        continue;
+                    }
                     if (written <= 0)
                     {
-                        close(client);
                         return;
                     }
                     sent += static_cast<std::size_t>(written);
                 }
             }
-            const int remote_read = ssh_channel_read_timeout(remote, buffer.data(), static_cast<uint32_t>(buffer.size()), 0, 1);
+            int remote_read = SSH_ERROR;
+            {
+                std::lock_guard<std::mutex> remote_lock(relay->remote_mutex);
+                if (!relay->remote.value)
+                {
+                    break;
+                }
+                remote_read = ssh_channel_read_timeout(relay->remote.value, buffer.data(), static_cast<uint32_t>(buffer.size()), 0, 1);
+            }
             if (remote_read > 0)
             {
                 std::size_t sent = 0;
-                while (sent < static_cast<std::size_t>(remote_read))
+                while (sent < static_cast<std::size_t>(remote_read) && relay->running() && tunnel_running(tunnel_id, tunnel))
                 {
+                    client = relay->client();
+                    if (client < 0)
+                    {
+                        return;
+                    }
                     const ssize_t written = send(client, buffer.data() + sent, static_cast<size_t>(remote_read) - sent, 0);
+                    if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR))
+                    {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                        continue;
+                    }
                     if (written <= 0)
                     {
-                        close(client);
                         return;
                     }
                     sent += static_cast<std::size_t>(written);
                 }
+            }
+            else if (remote_read == SSH_AGAIN)
+            {
+                continue;
             }
             else if (remote_read == SSH_ERROR || remote_read == SSH_EOF)
             {
                 break;
             }
         }
-        close(client);
     }
 
     bool configure_session(OperationContext& context, ssh_session session, const ConnectOptions& options)
