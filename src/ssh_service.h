@@ -62,6 +62,7 @@ private:
     bool is_session_known(SessionId session_id) const;
     bool is_channel_known(ChannelId channel_id) const;
     bool is_tunnel_known(TunnelId tunnel_id) const;
+    bool is_shutdown() const;
     Event malformed_options_event(OperationId operation_id, std::string message) const;
     void queue_event_locked(Event event);
     void note_handles_for_event_locked(const Event& event);

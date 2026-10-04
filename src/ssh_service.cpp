@@ -250,6 +250,10 @@ OperationId Service::exec(SessionId session_id, const ExecOptions& options)
 
 OperationId Service::sftp_upload(SessionId session_id, const SftpTransferOptions& options)
 {
+    if (options.local_path.empty() || options.remote_path.empty())
+    {
+        return enqueue_error(ErrorCode::MalformedOptions, "sftp upload local_path and remote_path must be non-empty");
+    }
     if (!is_session_known(session_id))
     {
         return enqueue_error(ErrorCode::InvalidId, "unknown SSH session id");
@@ -263,6 +267,10 @@ OperationId Service::sftp_upload(SessionId session_id, const SftpTransferOptions
 
 OperationId Service::sftp_download(SessionId session_id, const SftpTransferOptions& options)
 {
+    if (options.local_path.empty() || options.remote_path.empty())
+    {
+        return enqueue_error(ErrorCode::MalformedOptions, "sftp download local_path and remote_path must be non-empty");
+    }
     if (!is_session_known(session_id))
     {
         return enqueue_error(ErrorCode::InvalidId, "unknown SSH session id");
@@ -276,6 +284,10 @@ OperationId Service::sftp_download(SessionId session_id, const SftpTransferOptio
 
 OperationId Service::open_shell(SessionId session_id, const ShellOptions& options)
 {
+    if (options.request_pty && (options.cols == 0 || options.rows == 0))
+    {
+        return enqueue_error(ErrorCode::MalformedOptions, "shell PTY rows and cols must be non-zero");
+    }
     if (!is_session_known(session_id))
     {
         return enqueue_error(ErrorCode::InvalidId, "unknown SSH session id");
@@ -289,6 +301,10 @@ OperationId Service::open_shell(SessionId session_id, const ShellOptions& option
 
 OperationId Service::channel_write(ChannelId channel_id, const std::string& data)
 {
+    if (is_shutdown())
+    {
+        return 0;
+    }
     if (!is_channel_known(channel_id))
     {
         return enqueue_error(ErrorCode::InvalidId, "unknown SSH channel id");
@@ -302,6 +318,10 @@ OperationId Service::channel_write(ChannelId channel_id, const std::string& data
 
 OperationId Service::channel_resize(ChannelId channel_id, uint32_t cols, uint32_t rows)
 {
+    if (is_shutdown())
+    {
+        return 0;
+    }
     if (!is_channel_known(channel_id))
     {
         return enqueue_error(ErrorCode::InvalidId, "unknown SSH channel id");
@@ -315,6 +335,10 @@ OperationId Service::channel_resize(ChannelId channel_id, uint32_t cols, uint32_
 
 OperationId Service::channel_close(ChannelId channel_id)
 {
+    if (is_shutdown())
+    {
+        return 0;
+    }
     if (!is_channel_known(channel_id))
     {
         return enqueue_error(ErrorCode::InvalidId, "unknown SSH channel id");
@@ -328,6 +352,10 @@ OperationId Service::channel_close(ChannelId channel_id)
 
 OperationId Service::open_local_tunnel(SessionId session_id, const TunnelOptions& options)
 {
+    if (options.remote_host.empty() || options.remote_port == 0)
+    {
+        return enqueue_error(ErrorCode::MalformedOptions, "local tunnel remote_host and remote_port must be set");
+    }
     if (!is_session_known(session_id))
     {
         return enqueue_error(ErrorCode::InvalidId, "unknown SSH session id");
@@ -341,6 +369,10 @@ OperationId Service::open_local_tunnel(SessionId session_id, const TunnelOptions
 
 OperationId Service::open_remote_tunnel(SessionId session_id, const TunnelOptions& options)
 {
+    if (options.remote_host.empty() || options.remote_port == 0)
+    {
+        return enqueue_error(ErrorCode::MalformedOptions, "remote tunnel remote_host and remote_port must be set");
+    }
     if (!is_session_known(session_id))
     {
         return enqueue_error(ErrorCode::InvalidId, "unknown SSH session id");
@@ -354,6 +386,10 @@ OperationId Service::open_remote_tunnel(SessionId session_id, const TunnelOption
 
 OperationId Service::close_tunnel(TunnelId tunnel_id)
 {
+    if (is_shutdown())
+    {
+        return 0;
+    }
     if (!is_tunnel_known(tunnel_id))
     {
         return enqueue_error(ErrorCode::InvalidId, "unknown SSH tunnel id");
@@ -391,6 +427,7 @@ std::vector<Event> Service::poll(std::size_t max_results)
 void Service::shutdown()
 {
     std::vector<std::thread> workers;
+    std::vector<OperationId> active_operations;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (shutdown_)
@@ -398,8 +435,10 @@ void Service::shutdown()
             return;
         }
         shutdown_ = true;
-        for (auto& [_, operation] : operations_)
+        active_operations.reserve(operations_.size());
+        for (auto& [operation_id, operation] : operations_)
         {
+            active_operations.push_back(operation_id);
             operation->terminal = true;
             operation->token->cancel();
         }
@@ -409,6 +448,11 @@ void Service::shutdown()
         tunnels_.clear();
         events_.clear();
         workers.swap(workers_);
+    }
+
+    for (OperationId operation_id : active_operations)
+    {
+        backend_->cancel_operation(operation_id);
     }
 
     for (auto& worker : workers)
@@ -491,8 +535,12 @@ OperationId Service::next_operation_id_locked()
 
 OperationId Service::enqueue_error(ErrorCode code, std::string message)
 {
-    const OperationId operation_id = next_operation_id_locked();
     std::lock_guard<std::mutex> lock(mutex_);
+    if (shutdown_)
+    {
+        return 0;
+    }
+    const OperationId operation_id = next_operation_id_++;
     queue_event_locked(Event{ EventKind::OperationError, operation_id, 0, 0, 0, error_fields(code), code, std::move(message) });
     return operation_id;
 }
@@ -634,6 +682,12 @@ bool Service::is_tunnel_known(TunnelId tunnel_id) const
 {
     std::lock_guard<std::mutex> lock(mutex_);
     return tunnels_.find(tunnel_id) != tunnels_.end();
+}
+
+bool Service::is_shutdown() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return shutdown_;
 }
 
 Event Service::malformed_options_event(OperationId operation_id, std::string message) const

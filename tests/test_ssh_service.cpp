@@ -51,6 +51,24 @@ ExecOptions exec_options()
     return options;
 }
 
+SftpTransferOptions sftp_options()
+{
+    SftpTransferOptions options;
+    options.local_path = "/tmp/local.dat";
+    options.remote_path = "/remote.dat";
+    return options;
+}
+
+TunnelOptions tunnel_options()
+{
+    TunnelOptions options;
+    options.local_host = "127.0.0.1";
+    options.local_port = 10022;
+    options.remote_host = "remote.test";
+    options.remote_port = 22;
+    return options;
+}
+
 std::vector<Event> poll_until(Service& service, std::size_t expected, int max_attempts = 200)
 {
     std::vector<Event> events;
@@ -80,6 +98,18 @@ std::size_t count_kind(const std::vector<Event>& events, EventKind kind)
     return count;
 }
 
+const Event* find_kind(const std::vector<Event>& events, EventKind kind)
+{
+    for (const auto& event : events)
+    {
+        if (event.kind == kind)
+        {
+            return &event;
+        }
+    }
+    return nullptr;
+}
+
 class FakeBackend : public Backend
 {
 public:
@@ -95,7 +125,12 @@ public:
         AllocateThenError,
         KnownHostChallenge,
         BlockingKnownHostResolution,
-        ThrowSecretException
+        ThrowSecretException,
+        RichOperations,
+        WaitForOperationCancel,
+        SftpErrors,
+        RemoteTunnelUnsupported,
+        LongLivedResources
     };
 
     explicit FakeBackend(Mode mode)
@@ -105,6 +140,19 @@ public:
 
     void connect(OperationContext& context, const ConnectOptions&) override
     {
+        if (mode_ == Mode::RichOperations ||
+            mode_ == Mode::WaitForOperationCancel ||
+            mode_ == Mode::SftpErrors ||
+            mode_ == Mode::RemoteTunnelUnsupported ||
+            mode_ == Mode::LongLivedResources)
+        {
+            const SessionId session_id = context.sink().allocate_session();
+            last_session_id_.store(session_id);
+            context.sink().emit(Event{ EventKind::Connected, context.operation_id(), session_id });
+            context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), session_id });
+            return;
+        }
+
         if (mode_ == Mode::EmitThreeEvents)
         {
             context.sink().emit(Event{ EventKind::OperationStarted, context.operation_id() });
@@ -231,21 +279,106 @@ public:
 
     void exec(OperationContext& context, SessionId session_id, const ExecOptions&) override
     {
+        if (mode_ == Mode::RichOperations)
+        {
+            context.sink().emit(Event{ EventKind::ExecStdout, context.operation_id(), session_id, 0, 0, {{ "data", "out" }} });
+            context.sink().emit(Event{ EventKind::ExecStderr, context.operation_id(), session_id, 0, 0, {{ "data", "err" }} });
+            context.sink().emit(Event{ EventKind::ExecComplete, context.operation_id(), session_id, 0, 0, {{ "exit-status", "7" }} });
+            context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), session_id });
+            return;
+        }
+        if (mode_ == Mode::WaitForOperationCancel)
+        {
+            while (!context.token().is_cancelled())
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), session_id });
+            return;
+        }
         context.sink().emit(Event{ EventKind::ExecComplete, context.operation_id(), session_id });
         context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), session_id });
     }
 
-    void sftp_upload(OperationContext&, SessionId, const SftpTransferOptions&) override {}
-    void sftp_download(OperationContext&, SessionId, const SftpTransferOptions&) override {}
-    void open_shell(OperationContext&, SessionId, const ShellOptions&) override {}
+    void sftp_upload(OperationContext& context, SessionId session_id, const SftpTransferOptions&) override
+    {
+        if (mode_ == Mode::SftpErrors)
+        {
+            context.sink().emit(Event{ EventKind::OperationError,
+                                        context.operation_id(),
+                                        session_id,
+                                        0,
+                                        0,
+                                        {{ "error-code", "local-file-error" }},
+                                        ErrorCode::LocalFileError,
+                                        "local file unavailable" });
+            return;
+        }
+        context.sink().emit(Event{ EventKind::SftpProgress, context.operation_id(), session_id, 0, 0, {{ "bytes", "5" }, { "total-bytes", "10" }} });
+        context.sink().emit(Event{ EventKind::SftpComplete, context.operation_id(), session_id });
+        context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), session_id });
+    }
+    void sftp_download(OperationContext& context, SessionId session_id, const SftpTransferOptions&) override
+    {
+        if (mode_ == Mode::SftpErrors)
+        {
+            context.sink().emit(Event{ EventKind::OperationError,
+                                        context.operation_id(),
+                                        session_id,
+                                        0,
+                                        0,
+                                        {{ "error-code", "remote-file-error" }},
+                                        ErrorCode::RemoteFileError,
+                                        "remote file unavailable" });
+            return;
+        }
+        context.sink().emit(Event{ EventKind::SftpProgress, context.operation_id(), session_id, 0, 0, {{ "bytes", "10" }, { "total-bytes", "10" }} });
+        context.sink().emit(Event{ EventKind::SftpComplete, context.operation_id(), session_id });
+        context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), session_id });
+    }
+    void open_shell(OperationContext& context, SessionId session_id, const ShellOptions&) override
+    {
+        const ChannelId channel_id = context.sink().allocate_channel();
+        last_channel_id_.store(channel_id);
+        context.sink().emit(Event{ EventKind::ShellOpened, context.operation_id(), session_id, channel_id });
+        context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), session_id, channel_id });
+    }
     void channel_write(OperationContext& context, ChannelId channel_id, const std::string&) override
     {
         context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), 0, channel_id });
     }
-    void channel_resize(OperationContext&, ChannelId, uint32_t, uint32_t) override {}
-    void channel_close(OperationContext&, ChannelId) override {}
-    void open_local_tunnel(OperationContext&, SessionId, const TunnelOptions&) override {}
-    void open_remote_tunnel(OperationContext&, SessionId, const TunnelOptions&) override {}
+    void channel_resize(OperationContext& context, ChannelId channel_id, uint32_t, uint32_t) override
+    {
+        context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), 0, channel_id });
+    }
+    void channel_close(OperationContext& context, ChannelId channel_id) override
+    {
+        context.sink().emit(Event{ EventKind::ChannelClosed, context.operation_id(), 0, channel_id });
+        context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), 0, channel_id });
+    }
+    void open_local_tunnel(OperationContext& context, SessionId session_id, const TunnelOptions&) override
+    {
+        const TunnelId tunnel_id = context.sink().allocate_tunnel();
+        last_tunnel_id_.store(tunnel_id);
+        context.sink().emit(Event{ EventKind::TunnelOpened, context.operation_id(), session_id, 0, tunnel_id });
+        context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), session_id, 0, tunnel_id });
+    }
+    void open_remote_tunnel(OperationContext& context, SessionId session_id, const TunnelOptions&) override
+    {
+        if (mode_ == Mode::RemoteTunnelUnsupported)
+        {
+            context.sink().emit(Event{ EventKind::OperationError,
+                                        context.operation_id(),
+                                        session_id,
+                                        0,
+                                        0,
+                                        {{ "error-code", "unsupported" }},
+                                        ErrorCode::Unsupported,
+                                        "remote tunnels unsupported" });
+            return;
+        }
+        open_local_tunnel(context, session_id, TunnelOptions{});
+    }
     void close_tunnel(OperationContext& context, TunnelId tunnel_id) override
     {
         context.sink().emit(Event{ EventKind::TunnelClosed, context.operation_id(), 0, 0, tunnel_id });
@@ -255,8 +388,19 @@ public:
 private:
     Mode mode_;
     std::atomic<SessionId> last_session_id_ { 0 };
+    std::atomic<ChannelId> last_channel_id_ { 0 };
+    std::atomic<TunnelId> last_tunnel_id_ { 0 };
     std::atomic<int> cancelled_operations_ { 0 };
 };
+
+SessionId connect_session(Service& service)
+{
+    service.connect(connect_options());
+    auto events = poll_until(service, 2);
+    const Event* connected = find_kind(events, EventKind::Connected);
+    expect_true(connected != nullptr, "expected connected event");
+    return connected->session_id;
+}
 
 void connect_returns_monotonic_operation_ids()
 {
@@ -542,6 +686,166 @@ void backend_exception_messages_are_sanitized()
     expect_true(events[0].message.find("passphrase=") == std::string::npos, "passphrase marker must be redacted");
 }
 
+void exec_streams_stdout_stderr_then_single_terminal_event()
+{
+    Service service(std::make_unique<FakeBackend>(FakeBackend::Mode::RichOperations));
+    const SessionId session_id = connect_session(service);
+
+    service.exec(session_id, exec_options());
+    auto events = poll_until(service, 4);
+
+    expect_eq(events.size(), std::size_t{ 4 }, "expected exec stream, complete, and terminal success events");
+    expect_eq(events[0].kind, EventKind::ExecStdout, "stdout must be first exec event");
+    expect_eq(events[0].fields.at("data"), std::string("out"), "stdout payload");
+    expect_eq(events[1].kind, EventKind::ExecStderr, "stderr must be second exec event");
+    expect_eq(events[1].fields.at("data"), std::string("err"), "stderr payload");
+    expect_eq(events[2].kind, EventKind::ExecComplete, "exec complete must precede terminal success");
+    expect_eq(events[2].fields.at("exit-status"), std::string("7"), "exit status field");
+    expect_eq(count_kind(events, EventKind::OperationSuccess), std::size_t{ 1 }, "exec must have one terminal success");
+}
+
+void exec_cancel_closes_operation_once()
+{
+    auto backend = std::make_unique<FakeBackend>(FakeBackend::Mode::WaitForOperationCancel);
+    FakeBackend* backend_ptr = backend.get();
+    Service service(std::move(backend));
+    const SessionId session_id = connect_session(service);
+
+    const OperationId operation_id = service.exec(session_id, exec_options());
+    expect_true(service.cancel(operation_id), "exec cancel should accept active operation");
+    expect_true(!service.cancel(operation_id), "exec cancel should reject already terminal operation");
+    auto events = poll_until(service, 1);
+
+    expect_eq(count_kind(events, EventKind::OperationCancelled), std::size_t{ 1 }, "exec emits one cancelled event");
+    expect_eq(backend_ptr->cancelled_operations(), 1, "backend cleanup called once for exec cancel");
+}
+
+void sftp_progress_precedes_completion()
+{
+    Service service(std::make_unique<FakeBackend>(FakeBackend::Mode::RichOperations));
+    const SessionId session_id = connect_session(service);
+
+    service.sftp_download(session_id, sftp_options());
+    auto events = poll_until(service, 3);
+
+    expect_eq(events.size(), std::size_t{ 3 }, "expected progress, completion, success");
+    expect_eq(events[0].kind, EventKind::SftpProgress, "progress before completion");
+    expect_eq(events[0].fields.at("bytes"), std::string("10"), "progress bytes");
+    expect_eq(events[0].fields.at("total-bytes"), std::string("10"), "progress total bytes");
+    expect_eq(events[1].kind, EventKind::SftpComplete, "completion after progress");
+    expect_eq(events[2].kind, EventKind::OperationSuccess, "terminal success after sftp completion");
+}
+
+void sftp_upload_download_errors_are_structured()
+{
+    Service service(std::make_unique<FakeBackend>(FakeBackend::Mode::SftpErrors));
+    const SessionId session_id = connect_session(service);
+
+    service.sftp_upload(session_id, sftp_options());
+    auto upload = poll_until(service, 1);
+    service.sftp_download(session_id, sftp_options());
+    auto download = poll_until(service, 1);
+
+    expect_eq(upload.size(), std::size_t{ 1 }, "expected upload error");
+    expect_eq(upload[0].error_code, ErrorCode::LocalFileError, "upload local file error code");
+    expect_eq(upload[0].fields.at("error-code"), std::string("local-file-error"), "upload error field");
+    expect_eq(download.size(), std::size_t{ 1 }, "expected download error");
+    expect_eq(download[0].error_code, ErrorCode::RemoteFileError, "download remote file error code");
+    expect_eq(download[0].fields.at("error-code"), std::string("remote-file-error"), "download error field");
+}
+
+void open_shell_returns_channel_id_and_accepts_write_resize_close()
+{
+    Service service(std::make_unique<FakeBackend>(FakeBackend::Mode::RichOperations));
+    const SessionId session_id = connect_session(service);
+
+    service.open_shell(session_id, ShellOptions{});
+    auto opened = poll_until(service, 2);
+    const Event* shell = find_kind(opened, EventKind::ShellOpened);
+    expect_true(shell != nullptr, "shell opened event expected");
+    expect_true(shell->channel_id != 0, "shell returns channel id");
+
+    const ChannelId channel_id = shell->channel_id;
+    service.channel_write(channel_id, "hello");
+    service.channel_resize(channel_id, 100, 40);
+    service.channel_close(channel_id);
+    auto events = poll_until(service, 4);
+
+    expect_eq(count_kind(events, EventKind::OperationSuccess), std::size_t{ 3 }, "write resize close each succeed");
+    expect_eq(count_kind(events, EventKind::ChannelClosed), std::size_t{ 1 }, "close emits channel closed");
+}
+
+void closed_channel_write_fails_with_invalid_id_or_closed()
+{
+    Service service(std::make_unique<FakeBackend>(FakeBackend::Mode::RichOperations));
+    const SessionId session_id = connect_session(service);
+    service.open_shell(session_id, ShellOptions{});
+    auto opened = poll_until(service, 2);
+    const ChannelId channel_id = find_kind(opened, EventKind::ShellOpened)->channel_id;
+
+    service.channel_close(channel_id);
+    poll_until(service, 2);
+    service.channel_write(channel_id, "after close");
+    auto events = poll_until(service, 1);
+
+    expect_eq(events.size(), std::size_t{ 1 }, "closed write must report an error");
+    expect_eq(events[0].kind, EventKind::OperationError, "closed write error kind");
+    expect_true(events[0].error_code == ErrorCode::InvalidId || events[0].error_code == ErrorCode::Closed,
+                "closed write error code must be invalid-id or closed");
+}
+
+void local_tunnel_open_close_lifecycle()
+{
+    Service service(std::make_unique<FakeBackend>(FakeBackend::Mode::RichOperations));
+    const SessionId session_id = connect_session(service);
+
+    service.open_local_tunnel(session_id, tunnel_options());
+    auto opened = poll_until(service, 2);
+    const Event* tunnel = find_kind(opened, EventKind::TunnelOpened);
+    expect_true(tunnel != nullptr, "tunnel opened event expected");
+    expect_true(tunnel->tunnel_id != 0, "tunnel id expected");
+
+    service.close_tunnel(tunnel->tunnel_id);
+    auto closed = poll_until(service, 2);
+    expect_eq(count_kind(closed, EventKind::TunnelClosed), std::size_t{ 1 }, "tunnel close event expected");
+    expect_eq(count_kind(closed, EventKind::OperationSuccess), std::size_t{ 1 }, "tunnel close success expected");
+}
+
+void remote_tunnel_unsupported_is_structured()
+{
+    Service service(std::make_unique<FakeBackend>(FakeBackend::Mode::RemoteTunnelUnsupported));
+    const SessionId session_id = connect_session(service);
+
+    service.open_remote_tunnel(session_id, tunnel_options());
+    auto events = poll_until(service, 1);
+
+    expect_eq(events.size(), std::size_t{ 1 }, "expected unsupported remote tunnel error");
+    expect_eq(events[0].kind, EventKind::OperationError, "remote tunnel error kind");
+    expect_eq(events[0].error_code, ErrorCode::Unsupported, "remote tunnel unsupported code");
+    expect_eq(events[0].fields.at("error-code"), std::string("unsupported"), "remote tunnel error field");
+}
+
+void shutdown_cancels_sessions_channels_tunnels_and_workers()
+{
+    auto backend = std::make_unique<FakeBackend>(FakeBackend::Mode::LongLivedResources);
+    FakeBackend* backend_ptr = backend.get();
+    Service service(std::move(backend));
+    const SessionId session_id = connect_session(service);
+    service.open_shell(session_id, ShellOptions{});
+    const ChannelId channel_id = find_kind(poll_until(service, 2), EventKind::ShellOpened)->channel_id;
+    service.open_local_tunnel(session_id, tunnel_options());
+    const TunnelId tunnel_id = find_kind(poll_until(service, 2), EventKind::TunnelOpened)->tunnel_id;
+    const OperationId exec_id = service.exec(session_id, exec_options());
+
+    service.shutdown();
+
+    expect_true(!service.cancel(exec_id), "shutdown removes active operations");
+    expect_eq(service.channel_close(channel_id), OperationId{ 0 }, "shutdown rejects old channel ids without queueing work");
+    expect_eq(service.close_tunnel(tunnel_id), OperationId{ 0 }, "shutdown rejects old tunnel ids without queueing work");
+    expect_true(service.poll(0).empty(), "shutdown clears queued events");
+    expect_eq(backend_ptr->cancelled_operations(), 1, "shutdown asks backend to cancel active worker once");
+}
+
 void run(const std::string& name, void (*test)())
 {
     test();
@@ -572,6 +876,15 @@ int main()
         run("known_host_challenge_blocks_until_resolution", known_host_challenge_blocks_until_resolution);
         run("known_host_resolution_returns_before_backend_continuation_finishes", known_host_resolution_returns_before_backend_continuation_finishes);
         run("backend_exception_messages_are_sanitized", backend_exception_messages_are_sanitized);
+        run("exec_streams_stdout_stderr_then_single_terminal_event", exec_streams_stdout_stderr_then_single_terminal_event);
+        run("exec_cancel_closes_operation_once", exec_cancel_closes_operation_once);
+        run("sftp_progress_precedes_completion", sftp_progress_precedes_completion);
+        run("sftp_upload_download_errors_are_structured", sftp_upload_download_errors_are_structured);
+        run("open_shell_returns_channel_id_and_accepts_write_resize_close", open_shell_returns_channel_id_and_accepts_write_resize_close);
+        run("closed_channel_write_fails_with_invalid_id_or_closed", closed_channel_write_fails_with_invalid_id_or_closed);
+        run("local_tunnel_open_close_lifecycle", local_tunnel_open_close_lifecycle);
+        run("remote_tunnel_unsupported_is_structured", remote_tunnel_unsupported_is_structured);
+        run("shutdown_cancels_sessions_channels_tunnels_and_workers", shutdown_cancels_sessions_channels_tunnels_and_workers);
     }
     catch (const std::exception& ex)
     {
