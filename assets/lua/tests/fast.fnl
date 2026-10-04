@@ -131,6 +131,8 @@
     :tests.test-logging
     :tests.test-error-reporting
     :tests.test-http
+    :tests.test-ssh
+    :tests.test-ssh-fleet
     :tests.test-settings
     :tests.test-runtime-performance
     :tests.test-glm

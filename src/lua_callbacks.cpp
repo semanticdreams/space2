@@ -16,6 +16,7 @@
 #include "lua_http_server.h"
 #include "lua_jobs.h"
 #include "lua_process.h"
+#include "lua_ssh.h"
 
 namespace {
 
@@ -233,6 +234,7 @@ void lua_bind_callbacks(sol::state& lua, sol::table& lua_space)
             if (poll_process) {
                 lua_process_dispatch(lua);
             }
+            lua_ssh_dispatch(lua);
             lua_http_server_dispatch(lua);
             lua_callbacks_dispatch(lua);
 

@@ -20,6 +20,7 @@ CMake-based C++ build with cross-platform packaging (DEB/RPM/AppImage/tarball), 
 ## Dependencies
 
 - Depends on: [Core Platform](/dev/features/core-platform)
+- Optional native dependency: `libssh` via pkg-config enables the SSH backend when `SPACE_ENABLE_SSH=ON` (the default). There is no project-enforced minimum version floor; if CMake cannot find `libssh`, Space still builds and SSH operations report structured `unavailable-backend` errors.
 
 ## Dev notes
 
