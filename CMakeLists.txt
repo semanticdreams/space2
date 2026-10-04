@@ -819,6 +819,15 @@ set_tests_properties(${PROJECT_NAME}_fnl_tests_integration PROPERTIES
     ENVIRONMENT "SKIP_KEYRING_TESTS=1;XDG_DATA_HOME=/tmp/space/tests/xdg-data;SPACE_DISABLE_AUDIO=1;SPACE_LOG_DIR=/tmp/space/tests/log;SPACE_ASSETS_PATH=${CMAKE_SOURCE_DIR}/assets;FENNEL_PATH=${CMAKE_SOURCE_DIR}/assets/lua/?.fnl\;${CMAKE_SOURCE_DIR}/assets/lua/?/init.fnl;FENNEL_MACRO_PATH=${CMAKE_SOURCE_DIR}/assets/lua/?.fnl\;${CMAKE_SOURCE_DIR}/assets/lua/?/init.fnl"
 )
 
+add_test(NAME space_ssh_integration
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/ssh_fixture.py --space $<TARGET_FILE:${SPACE_TEST_COMMAND_TARGET}> --assets ${CMAKE_SOURCE_DIR}/assets --module tests.test-ssh-integration:main
+)
+set_tests_properties(space_ssh_integration PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    FIXTURES_REQUIRED space_constraints
+    ENVIRONMENT "SKIP_KEYRING_TESTS=1;XDG_DATA_HOME=/tmp/space/tests/xdg-data;SPACE_DISABLE_AUDIO=1;SPACE_LOG_DIR=/tmp/space/tests/log;SPACE_ASSETS_PATH=${CMAKE_SOURCE_DIR}/assets;FENNEL_PATH=${CMAKE_SOURCE_DIR}/assets/lua/?.fnl\;${CMAKE_SOURCE_DIR}/assets/lua/?/init.fnl;FENNEL_MACRO_PATH=${CMAKE_SOURCE_DIR}/assets/lua/?.fnl\;${CMAKE_SOURCE_DIR}/assets/lua/?/init.fnl"
+)
+
 add_test(NAME ${PROJECT_NAME}_constraints
     COMMAND $<TARGET_FILE:${SPACE_TEST_COMMAND_TARGET}> -m constraints.runner:main -- --output summary --target repo
 )
