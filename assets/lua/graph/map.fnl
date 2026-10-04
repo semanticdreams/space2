@@ -669,9 +669,9 @@
                     []))
             (set-selected-node-keys self restored-selected-keys)
             (set self.focused_node_key
-                 (and (= (type payload.focused_node_key) :string)
-                      (lookup self payload.focused_node_key)
-                      payload.focused_node_key))
+                 (if (and (= (type payload.focused_node_key) :string)
+                          (lookup self payload.focused_node_key))
+                     payload.focused_node_key nil))
             true))
 
     (set self.clear-unresolved-restored-state
@@ -878,6 +878,117 @@
          (identity-store.identity-deleted:connect
              (fn [entity]
                  (refresh-link-edges-for-key (.. "identity:" (tostring entity.id))))))
+
+    (set self.clearable?
+        (fn [_self]
+            (or (> (length (icollect [_ _ (pairs nodes)] true)) 0)
+                (> (length edges) 0)
+                (> (length (list-islands self)) 0)
+                (> (length self.selected_node_keys) 0)
+                (not (= self.focused_node_key nil)))))
+
+    (set self.clear!
+        (fn [_self]
+            (self:restore-state {:nodes []
+                                 :edges []
+                                 :islands []
+                                 :selected_node_keys []
+                                 :focused_node_key nil})
+            true))
+
+    (set self.add-start-node!
+        (fn [_self]
+            (local node (self:load-by-key "start"))
+            (assert node "Add Start failed to load graph key: start")
+            node))
+
+    (fn add-normalized-visible-key [key included key-list]
+        (when (and (= (type key) :string)
+                   (lookup self key)
+                   (not (. included key)))
+            (set (. included key) true)
+            (table.insert key-list key)))
+
+    (fn normalize-visible-node-keys [node-keys]
+        (assert (= (type node-keys) :table)
+                "GraphMap.capture-subgraph-state requires node keys table")
+        (local included {})
+        (local key-list [])
+        (each [_ key (ipairs node-keys)]
+            (add-normalized-visible-key key included key-list))
+        (each [key include? (pairs node-keys)]
+            (when include?
+                (add-normalized-visible-key key included key-list)))
+        (table.sort key-list)
+        (values included key-list))
+
+    (fn selected-node-keys-for-subgraph [selected-node-keys included]
+        (assert (= (type selected-node-keys) :table)
+                "GraphMap.capture-subgraph-state requires selected node keys table")
+        (icollect [_ key (ipairs selected-node-keys)]
+            (if (and (= (type key) :string)
+                     (. included key))
+                key)))
+
+    (fn island-contained-in-subgraph? [island included]
+        (var contained? true)
+        (each [_ key (ipairs island.members) &until (not contained?)]
+            (when (not (. included key))
+                (set contained? false)))
+        contained?)
+
+    (set self.capture-subgraph-state
+        (fn [_self node-keys opts]
+            (local options (or opts {}))
+            (assert (= (type options) :table)
+                    "GraphMap.capture-subgraph-state requires opts table")
+            (local selected-node-keys (if (= options.selected-node-keys nil)
+                                          []
+                                          options.selected-node-keys))
+            (local (included sorted-node-keys) (normalize-visible-node-keys node-keys))
+            (local edge-keys {})
+            (local edge-list [])
+            (each [_ edge (ipairs edges)]
+                (local source-key (and edge.source edge.source.key))
+                (local target-key (and edge.target edge.target.key))
+                (local composite (edge-key edge))
+                (when (and source-key target-key
+                           (. included source-key)
+                           (. included target-key)
+                           (not (. edge-keys composite))
+                           (not (. derived-edge-keys composite)))
+                    (set (. edge-keys composite) true)
+                    (table.insert edge-list {:source source-key
+                                             :target target-key})))
+            (table.sort edge-list
+                        (fn [a b]
+                            (< (.. (if a.source a.source "") "->" (if a.target a.target ""))
+                               (.. (if b.source b.source "") "->" (if b.target b.target "")))))
+            (local island-list [])
+            (each [_ island (ipairs (list-islands self))]
+                (when (island-contained-in-subgraph? island included)
+                    (table.insert island-list island)))
+            (local selected-keys (selected-node-keys-for-subgraph selected-node-keys included))
+            (local focused-key (if (and (= (type options.focused-node-key) :string)
+                                        (. included options.focused-node-key))
+                                   options.focused-node-key
+                                   nil))
+            {:nodes sorted-node-keys
+             :edges edge-list
+             :islands island-list
+             :selected_node_keys selected-keys
+             :focused_node_key focused-key}))
+
+    (set self.capture-selected-subgraph-state
+        (fn [_self opts]
+            (local options (or opts {}))
+            (assert (= (type options) :table)
+                    "GraphMap.capture-selected-subgraph-state requires opts table")
+            (self:capture-subgraph-state self.selected_node_keys
+                                         {:selected-node-keys self.selected_node_keys
+                                          :focused-node-key (if (or (= (type options.focused-node-key) :string) (= options.focused-node-key-provided? true))
+                                                              options.focused-node-key
+                                                              self.focused_node_key)})))
 
     (set self.drop
         (fn [_self]

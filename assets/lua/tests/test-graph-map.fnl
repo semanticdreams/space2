@@ -120,6 +120,101 @@
     (map:drop)
     (graph:drop))
 
+(fn graph-map-clear-removes-map-local-topology-only []
+    (local graph (Graph {:with-start false}))
+    (local loader-source {:test:a true :test:b true})
+    (graph:register-key-loader "test"
+        (fn [key]
+            (if (. loader-source key)
+                (Graph.GraphNode {:key key})
+                nil)))
+    (local map (GraphMap.GraphMap {:graph graph :id "test-clear"}))
+    (local a (map:load-by-key "test:a"))
+    (local b (map:load-by-key "test:b"))
+    (map:add-edge (Graph.GraphEdge {:source a :target b}))
+    (map:create-island {:id "island-ab"
+                        :kind "selection"
+                        :members ["test:a" "test:b"]})
+    (set map.selected_node_keys ["test:a"])
+    (set map.focused_node_key "test:a")
+    (assert (map:clearable?) "Populated map should be clearable")
+    (assert (map:clear!) "GraphMap clear! should return true")
+    (assert (= (map:node-count) 0) "GraphMap clear! should remove map-local nodes")
+    (assert (= (map:edge-count) 0) "GraphMap clear! should remove map-local edges")
+    (assert (= (length (map:list-islands)) 0) "GraphMap clear! should remove islands")
+    (assert (= (length map.selected_node_keys) 0) "GraphMap clear! should clear selected keys")
+    (assert (= map.focused_node_key nil) "GraphMap clear! should clear focused key")
+    (assert (. loader-source "test:a") "GraphMap clear! should not delete loader source records")
+    (assert (. loader-source "test:b") "GraphMap clear! should not delete loader source records")
+    (assert (not (map:clearable?)) "Empty map should not be clearable")
+    (map:drop)
+    (graph:drop))
+
+(fn graph-map-captures-selected-subgraph-state []
+    (local graph (Graph {:with-start false}))
+    (register-test-loader graph)
+    (local map (GraphMap.GraphMap {:graph graph :id "test-selected-subgraph"}))
+    (local a (map:load-by-key "test:a"))
+    (local b (map:load-by-key "test:b"))
+    (local c (map:load-by-key "test:c"))
+    (map:add-edge (Graph.GraphEdge {:source a :target b}))
+    (map:add-edge (Graph.GraphEdge {:source b :target c}))
+    (graph.edge-added:emit
+        {:edge {:source {:key "test:a"}
+                :target {:key "test:b"}
+                :label "derived"}
+         :opts {:from-link-entity "selected-derived"}})
+    (map:create-island {:id "complete"
+                        :kind "selection"
+                        :members ["test:a" "test:b"]
+                        :state {:label "complete"}})
+    (map:create-island {:id "partial"
+                        :kind "selection"
+                        :members ["test:b" "test:c"]})
+    (set map.selected_node_keys ["test:a" "test:b"])
+    (set map.focused_node_key "test:b")
+    (local state (map:capture-selected-subgraph-state {:focused-node-key "test:b"}))
+    (assert (= (length state.nodes) 2) "Selected subgraph should include selected visible nodes")
+    (assert (= (. state.nodes 1) "test:a"))
+    (assert (= (. state.nodes 2) "test:b"))
+    (assert (= (length state.edges) 1) "Selected subgraph should include only explicit selected-to-selected edges")
+    (assert (= (and (. state.edges 1) (. (. state.edges 1) :source)) "test:a"))
+    (assert (= (and (. state.edges 1) (. (. state.edges 1) :target)) "test:b"))
+    (assert (= (length state.selected_node_keys) 2) "Selected subgraph should restrict selected keys")
+    (assert (= (. state.selected_node_keys 1) "test:a"))
+    (assert (= (. state.selected_node_keys 2) "test:b"))
+    (assert (= state.focused_node_key "test:b") "Selected subgraph should keep included focus")
+    (local nil-focus-state (map:capture-selected-subgraph-state {:focused-node-key-provided? true}))
+    (assert (= nil-focus-state.focused_node_key nil) "Selected subgraph should honor explicitly absent current focus")
+    (assert (= (length state.islands) 1) "Selected subgraph should include only complete islands")
+    (assert (= (. (. state.islands 1) :id) "complete"))
+    (assert (= state.panels nil) "Selected subgraph state should not include panels")
+    (assert (= state.camera nil) "Selected subgraph state should not include camera")
+    (assert (= state.positions nil) "Selected subgraph state should not include position metadata")
+    (assert (= state.domain_data nil) "Selected subgraph state should not include domain data")
+    (map:drop)
+    (graph:drop))
+(fn graph-map-add-start-node-uses-key-loader []
+    (local graph (Graph {:with-start false}))
+    (graph:register-key-loader "start"
+        (fn [key]
+            (if (= key "start")
+                (Graph.GraphNode {:key key :label "start"})
+                nil)))
+    (local map (GraphMap.GraphMap {:graph graph :id "test-add-start"}))
+    (local node (map:add-start-node!))
+    (assert (= node.key "start") "GraphMap add-start-node! should return start node")
+    (assert (map:lookup "start") "GraphMap add-start-node! should make start visible")
+    (map:drop)
+    (graph:drop)
+    (local graph-without-start (Graph {:with-start false}))
+    (local map-without-start (GraphMap.GraphMap {:graph graph-without-start :id "test-add-start-missing"}))
+    (local (ok err) (pcall (fn [] (map-without-start:add-start-node!))))
+    (assert (not ok) "GraphMap add-start-node! should fail without start loader")
+    (assert (string.find (tostring err) "Add Start failed to load graph key: start" 1 true)
+            "GraphMap add-start-node! failure should name missing start key")
+    (map-without-start:drop)
+    (graph-without-start:drop))
 (fn graph-map-restores-state []
     (local graph (Graph {:with-start false}))
     (graph:register-key-loader "test"
@@ -1033,6 +1128,9 @@
 (table.insert tests {:name "GraphMap emits signals" :fn graph-map-emits-signals})
 (table.insert tests {:name "GraphMap mounts nodes with node.graph == graph-map" :fn graph-map-mounts-nodes})
 (table.insert tests {:name "GraphMap captures state" :fn graph-map-captures-state})
+(table.insert tests {:name "GraphMap clear removes map-local topology only" :fn graph-map-clear-removes-map-local-topology-only})
+(table.insert tests {:name "GraphMap captures selected subgraph state" :fn graph-map-captures-selected-subgraph-state})
+(table.insert tests {:name "GraphMap add-start-node! uses key loader" :fn graph-map-add-start-node-uses-key-loader})
 (table.insert tests {:name "GraphMap restores state" :fn graph-map-restores-state})
 (table.insert tests {:name "GraphMap removes nodes without deleting backing objects" :fn graph-map-removes-nodes-without-deleting-backing-objects})
 (table.insert tests {:name "Two GraphMaps load same key into separate adapters" :fn two-graph-maps-load-same-key-into-separate-adapters})

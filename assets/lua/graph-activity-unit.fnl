@@ -128,8 +128,16 @@
        graph-view.remove-selected-nodes
        (> (graph-view:remove-selected-nodes) 0)))
 
-(fn current-graph-view [] app.graph-view)
-(fn graph-leader-command-providers [] [(GraphCommands.provider {:graph-view current-graph-view})])
+(fn current-graph-view [] (active-graph-view))
+(fn current-graph-map-manager []
+  (local world-runtime app.active-world-runtime)
+  (if (and world-runtime world-runtime.graph-map-manager)
+      world-runtime.graph-map-manager
+      app.graph-map-manager))
+(fn graph-leader-command-providers []
+  [(GraphCommands.provider {:graph-view current-graph-view
+                            :graph-map active-graph-map
+                            :graph-map-manager current-graph-map-manager})])
 
 (fn graph-selection-count []
   (local graph-view app.graph-view)

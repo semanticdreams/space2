@@ -281,9 +281,9 @@
 
 (fn handle-add-start [state]
     (local current-map (assert (state.manager:get-active-map)
-                               "Add Start requires an active graph map"))
-    (local node (current-map:load-by-key "start"))
-    (assert node "Add Start failed to load graph key: start")
+                                "Add Start requires an active graph map"))
+    (assert current-map.add-start-node! "Add Start requires GraphMap:add-start-node!")
+    (current-map:add-start-node!)
     (request-rebuild state {:cause :add-start}))
 
 (fn build-add-start [state]
