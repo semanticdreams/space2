@@ -43,10 +43,15 @@
   (fn []
     (not (= (get-terminal) nil))))
 
-(fn read-file! [path]
-  (local file (assert (io.open path :r) (.. "failed to open " path)))
-  (local contents (assert (file:read :*a) (.. "failed to read " path)))
-  (file:close)
+(fn read-existing-file! [paths]
+  (var contents nil)
+  (each [_ path (ipairs paths)]
+    (when (not contents)
+      (local file (io.open path :r))
+      (when file
+        (set contents (assert (file:read :*a) (.. "failed to read " path)))
+        (file:close))))
+  (assert contents (.. "failed to open any CMake cache path: " (table.concat paths ", ")))
   contents)
 
 (fn cmake-cache-enabled? [contents key]
@@ -56,7 +61,7 @@
   (not (= (string.match contents (.. key ":INTERNAL=1")) nil)))
 
 (fn ssh-backend-available-from-cmake-cache? []
-  (local contents (read-file! "build/CMakeCache.txt"))
+  (local contents (read-existing-file! ["CMakeCache.txt" "build/CMakeCache.txt"]))
   (and (cmake-cache-enabled? contents "SPACE_ENABLE_SSH")
        (cmake-cache-found? contents "LIBSSH_FOUND")))
 
