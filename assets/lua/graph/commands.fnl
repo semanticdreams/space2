@@ -54,13 +54,16 @@
   (local graph-map (resolve-active-map opts))
   (and graph-map (> (selected-map-key-count graph-map) 0)))
 
-(fn active-map-has-focus? [opts]
-  (local graph-map (resolve-active-map opts))
-  (and graph-map graph-map.focused_node_key true))
-
 (fn graph-map-clearable? [opts]
   (local graph-map (resolve-active-map opts))
   (and graph-map graph-map.clearable? (graph-map:clearable?)))
+
+(fn graph-view-focused-node-key [graph-view]
+  (if (and graph-view graph-view.focused-node)
+      (do
+        (local node (graph-view:focused-node))
+        (and node node.key))
+      nil))
 
 (fn graph-view-method-available? [opts method-name]
   (local graph-view (resolve-graph-view opts))
@@ -164,8 +167,7 @@
   (and (graph-map-deps-available? opts)
        graph-map.capture-selected-subgraph-state
        manager.create-and-switch-map!
-       (active-map-has-selection? opts)
-       (active-map-has-focus? opts)))
+       (active-map-has-selection? opts)))
 
 (fn map-clear-active-available? [opts]
   (local graph-map (resolve-active-map opts))
@@ -188,12 +190,12 @@
   (manager:create-and-switch-map! {:name nil}))
 
 (fn run-from-selection [opts]
-  (require-graph-view opts)
+  (local graph-view (require-graph-view opts))
   (local graph-map (require-active-map opts))
   (local manager (require-map-manager opts))
   (assert graph-map.capture-selected-subgraph-state "GraphCommands requires active graph map capture-selected-subgraph-state")
   (assert manager.create-and-switch-map! "GraphCommands requires graph-map-manager create-and-switch-map!")
-  (local state (graph-map:capture-selected-subgraph-state {:focused-node-key graph-map.focused_node_key}))
+  (local state (graph-map:capture-selected-subgraph-state {:focused-node-key (graph-view-focused-node-key graph-view)}))
   (manager:create-and-switch-map! {:name "Selection" :state state}))
 
 (fn run-clear-active [opts]

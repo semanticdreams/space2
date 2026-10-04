@@ -215,12 +215,14 @@
    {:name "two" :fn expanded-action-noop}
    {:name "three" :fn expanded-action-noop}])
 
-(fn make-expanded-graph-view-stub []
+(fn make-expanded-graph-view-stub [opts]
+  (local options (if opts opts {}))
   (local calls {:open 0 :menu 0 :toggle 0 :copy 0 :remove 0 :slot [] :center 0 :layout 0})
   {:calls calls
-   :selected-node-count (fn [_self] 1)
-   :has-focused-node? (fn [_self] true)
-   :focused-node-selected? (fn [_self] true)
+    :selected-node-count (fn [_self] 1)
+    :has-focused-node? (fn [_self] true)
+    :focused-node (fn [_self] options.focused-node)
+    :focused-node-selected? (fn [_self] true)
    :open-focused-node (fn [_self] (set calls.open (+ calls.open 1)) true)
    :open-focused-node-menu (fn [_self] (set calls.menu (+ calls.menu 1)) true)
    :toggle-focused-node-preview (fn [_self] (set calls.toggle (+ calls.toggle 1)) true)
@@ -320,8 +322,8 @@
   (assert (= view.calls.layout 1) "start-layout should route to graph view"))
 
 (fn graph-provider-map-commands-route-to-active-map-and-manager []
-  (local view (make-expanded-graph-view-stub))
-  (local graph-map (make-expanded-map-stub {:focused-node-key "focus" :clearable? true}))
+  (local view (make-expanded-graph-view-stub {:focused-node {:key "current-focus"}}))
+  (local graph-map (make-expanded-map-stub {:focused-node-key "stale-focus" :clearable? true}))
   (local manager (make-expanded-manager-stub))
   (local composed (expanded-graph-composed view graph-map manager))
   (assert (Commands.run composed "graph.map.add-start" {}) "add-start should run")
@@ -332,7 +334,8 @@
   (assert (Commands.run composed "graph.map.from-selection" {}) "from-selection should run")
   (assert (= graph-map.calls.capture 1) "from-selection should capture active map selection")
   (assert (= (. manager.calls.create 2 :name) "Selection") "from-selection should name new map")
-  (assert (= (. manager.calls.create 2 :state :captured-focus) "focus") "from-selection should pass focused key")
+  (assert (= (. manager.calls.create 2 :state :captured-focus) "current-focus")
+          "from-selection should pass current graph view focused key")
   (assert (Commands.run composed "graph.map.clear-active" {}) "clear-active should run")
   (assert (= graph-map.calls.clear 1) "clear-active should route to active map")
   (assert (not (Commands.available? (expanded-graph-composed nil graph-map manager) "graph.map.add-start" {}))
@@ -343,8 +346,14 @@
           "new-empty should require manager")
   (assert (not (Commands.available? (expanded-graph-composed view (make-expanded-map-stub {:selected-node-keys [] :focused-node-key "focus"}) manager) "graph.map.from-selection" {}))
           "from-selection should require selection")
-  (assert (not (Commands.available? (expanded-graph-composed view (make-expanded-map-stub {:selected-node-keys ["focus"]}) manager) "graph.map.from-selection" {}))
-          "from-selection should require focus")
+  (local selection-only-map (make-expanded-map-stub {:selected-node-keys ["selected"]
+                                                     :focused-node-key "stale-focus"}))
+  (assert (Commands.available? (expanded-graph-composed (make-expanded-graph-view-stub) selection-only-map manager) "graph.map.from-selection" {})
+          "from-selection should be available for selection without focus")
+  (assert (Commands.run (expanded-graph-composed (make-expanded-graph-view-stub) selection-only-map manager) "graph.map.from-selection" {})
+          "from-selection should run for selection without focus")
+  (assert (= (. manager.calls.create 3 :state :captured-focus) nil)
+          "from-selection should not pass stale map focus when graph view has no focused node")
   (assert (not (Commands.available? (expanded-graph-composed view (make-expanded-map-stub {:focused-node-key "focus" :clearable? false}) manager) "graph.map.clear-active" {}))
           "clear-active should require clearable map"))
 
