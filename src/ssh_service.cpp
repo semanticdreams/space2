@@ -446,6 +446,8 @@ void Service::shutdown()
         sessions_.clear();
         channels_.clear();
         tunnels_.clear();
+        channel_sessions_.clear();
+        tunnel_sessions_.clear();
         events_.clear();
         workers.swap(workers_);
     }
@@ -719,22 +721,56 @@ void Service::note_handles_for_event_locked(const Event& event)
     else if (event.kind == EventKind::SessionClosed && event.session_id != 0)
     {
         sessions_.erase(event.session_id);
+        for (auto it = channel_sessions_.begin(); it != channel_sessions_.end();)
+        {
+            if (it->second == event.session_id)
+            {
+                channels_.erase(it->first);
+                it = channel_sessions_.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+        for (auto it = tunnel_sessions_.begin(); it != tunnel_sessions_.end();)
+        {
+            if (it->second == event.session_id)
+            {
+                tunnels_.erase(it->first);
+                it = tunnel_sessions_.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
     }
     else if (event.kind == EventKind::ShellOpened && event.channel_id != 0)
     {
         channels_.insert(event.channel_id);
+        if (event.session_id != 0)
+        {
+            channel_sessions_[event.channel_id] = event.session_id;
+        }
     }
     else if (event.kind == EventKind::ChannelClosed && event.channel_id != 0)
     {
         channels_.erase(event.channel_id);
+        channel_sessions_.erase(event.channel_id);
     }
     else if (event.kind == EventKind::TunnelOpened && event.tunnel_id != 0)
     {
         tunnels_.insert(event.tunnel_id);
+        if (event.session_id != 0)
+        {
+            tunnel_sessions_[event.tunnel_id] = event.session_id;
+        }
     }
     else if (event.kind == EventKind::TunnelClosed && event.tunnel_id != 0)
     {
         tunnels_.erase(event.tunnel_id);
+        tunnel_sessions_.erase(event.tunnel_id);
     }
 }
 

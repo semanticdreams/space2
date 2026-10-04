@@ -130,6 +130,8 @@ public:
         WaitForOperationCancel,
         SftpErrors,
         RemoteTunnelUnsupported,
+        LocalTunnelBindFailure,
+        RemoteShellCloses,
         LongLivedResources
     };
 
@@ -144,6 +146,8 @@ public:
             mode_ == Mode::WaitForOperationCancel ||
             mode_ == Mode::SftpErrors ||
             mode_ == Mode::RemoteTunnelUnsupported ||
+            mode_ == Mode::LocalTunnelBindFailure ||
+            mode_ == Mode::RemoteShellCloses ||
             mode_ == Mode::LongLivedResources)
         {
             const SessionId session_id = context.sink().allocate_session();
@@ -342,6 +346,11 @@ public:
         last_channel_id_.store(channel_id);
         context.sink().emit(Event{ EventKind::ShellOpened, context.operation_id(), session_id, channel_id });
         context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), session_id, channel_id });
+        if (mode_ == Mode::RemoteShellCloses)
+        {
+            context.sink().emit(Event{ EventKind::ChannelData, 0, session_id, channel_id, 0, {{ "data", "remote" }} });
+            context.sink().emit(Event{ EventKind::ChannelClosed, 0, session_id, channel_id });
+        }
     }
     void channel_write(OperationContext& context, ChannelId channel_id, const std::string&) override
     {
@@ -358,6 +367,18 @@ public:
     }
     void open_local_tunnel(OperationContext& context, SessionId session_id, const TunnelOptions&) override
     {
+        if (mode_ == Mode::LocalTunnelBindFailure)
+        {
+            context.sink().emit(Event{ EventKind::OperationError,
+                                        context.operation_id(),
+                                        session_id,
+                                        0,
+                                        0,
+                                        {{ "error-code", "tunnel-bind-failed" }},
+                                        ErrorCode::TunnelBindFailed,
+                                        "bind failed" });
+            return;
+        }
         const TunnelId tunnel_id = context.sink().allocate_tunnel();
         last_tunnel_id_.store(tunnel_id);
         context.sink().emit(Event{ EventKind::TunnelOpened, context.operation_id(), session_id, 0, tunnel_id });
@@ -794,6 +815,45 @@ void closed_channel_write_fails_with_invalid_id_or_closed()
                 "closed write error code must be invalid-id or closed");
 }
 
+void close_session_invalidates_owned_shell_channel()
+{
+    Service service(std::make_unique<FakeBackend>(FakeBackend::Mode::RichOperations));
+    const SessionId session_id = connect_session(service);
+    service.open_shell(session_id, ShellOptions{});
+    auto opened = poll_until(service, 2);
+    const ChannelId channel_id = find_kind(opened, EventKind::ShellOpened)->channel_id;
+
+    service.close_session(session_id);
+    auto closed = poll_until(service, 2);
+    expect_eq(count_kind(closed, EventKind::SessionClosed), std::size_t{ 1 }, "session close event expected");
+
+    service.channel_write(channel_id, "after session close");
+    auto events = poll_until(service, 1);
+
+    expect_eq(events.size(), std::size_t{ 1 }, "session close must invalidate owned channel ids");
+    expect_eq(events[0].kind, EventKind::OperationError, "owned channel write after session close error kind");
+    expect_eq(events[0].error_code, ErrorCode::InvalidId, "owned channel write after session close invalid id");
+}
+
+void remote_shell_close_invalidates_channel_id()
+{
+    Service service(std::make_unique<FakeBackend>(FakeBackend::Mode::RemoteShellCloses));
+    const SessionId session_id = connect_session(service);
+
+    service.open_shell(session_id, ShellOptions{});
+    auto opened = poll_until(service, 4);
+    const Event* shell = find_kind(opened, EventKind::ShellOpened);
+    expect_true(shell != nullptr, "shell opened before remote close");
+    expect_eq(count_kind(opened, EventKind::ChannelData), std::size_t{ 1 }, "remote channel data event expected");
+    expect_eq(count_kind(opened, EventKind::ChannelClosed), std::size_t{ 1 }, "remote channel close event expected");
+
+    service.channel_write(shell->channel_id, "after remote close");
+    auto events = poll_until(service, 1);
+
+    expect_eq(events.size(), std::size_t{ 1 }, "remote close must invalidate channel id");
+    expect_eq(events[0].error_code, ErrorCode::InvalidId, "remote-closed channel write invalid id");
+}
+
 void local_tunnel_open_close_lifecycle()
 {
     Service service(std::make_unique<FakeBackend>(FakeBackend::Mode::RichOperations));
@@ -823,6 +883,20 @@ void remote_tunnel_unsupported_is_structured()
     expect_eq(events[0].kind, EventKind::OperationError, "remote tunnel error kind");
     expect_eq(events[0].error_code, ErrorCode::Unsupported, "remote tunnel unsupported code");
     expect_eq(events[0].fields.at("error-code"), std::string("unsupported"), "remote tunnel error field");
+}
+
+void local_tunnel_bind_failure_is_structured()
+{
+    Service service(std::make_unique<FakeBackend>(FakeBackend::Mode::LocalTunnelBindFailure));
+    const SessionId session_id = connect_session(service);
+
+    service.open_local_tunnel(session_id, tunnel_options());
+    auto events = poll_until(service, 1);
+
+    expect_eq(events.size(), std::size_t{ 1 }, "expected tunnel bind failure error");
+    expect_eq(events[0].kind, EventKind::OperationError, "bind failure event kind");
+    expect_eq(events[0].error_code, ErrorCode::TunnelBindFailed, "bind failure code");
+    expect_eq(events[0].fields.at("error-code"), std::string("tunnel-bind-failed"), "bind failure field");
 }
 
 void shutdown_cancels_sessions_channels_tunnels_and_workers()
@@ -882,8 +956,11 @@ int main()
         run("sftp_upload_download_errors_are_structured", sftp_upload_download_errors_are_structured);
         run("open_shell_returns_channel_id_and_accepts_write_resize_close", open_shell_returns_channel_id_and_accepts_write_resize_close);
         run("closed_channel_write_fails_with_invalid_id_or_closed", closed_channel_write_fails_with_invalid_id_or_closed);
+        run("close_session_invalidates_owned_shell_channel", close_session_invalidates_owned_shell_channel);
+        run("remote_shell_close_invalidates_channel_id", remote_shell_close_invalidates_channel_id);
         run("local_tunnel_open_close_lifecycle", local_tunnel_open_close_lifecycle);
         run("remote_tunnel_unsupported_is_structured", remote_tunnel_unsupported_is_structured);
+        run("local_tunnel_bind_failure_is_structured", local_tunnel_bind_failure_is_structured);
         run("shutdown_cancels_sessions_channels_tunnels_and_workers", shutdown_cancels_sessions_channels_tunnels_and_workers);
     }
     catch (const std::exception& ex)

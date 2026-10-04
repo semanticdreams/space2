@@ -77,6 +77,8 @@ private:
     std::unordered_set<SessionId> sessions_;
     std::unordered_set<ChannelId> channels_;
     std::unordered_set<TunnelId> tunnels_;
+    std::unordered_map<ChannelId, SessionId> channel_sessions_;
+    std::unordered_map<TunnelId, SessionId> tunnel_sessions_;
     std::deque<Event> events_;
     std::vector<std::thread> workers_;
     bool shutdown_ { false };

@@ -1,5 +1,6 @@
 #include "ssh_backend_libssh.h"
 
+#include <algorithm>
 #include <map>
 #include <mutex>
 #include <string>
@@ -7,11 +8,21 @@
 #include <vector>
 
 #if SPACE_HAS_LIBSSH
+#include <arpa/inet.h>
+#include <cerrno>
+#include <cstring>
 #include <fcntl.h>
 #include <libssh/libssh.h>
 #include <libssh/sftp.h>
+#include <netinet/in.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
+#include <atomic>
+#include <chrono>
 #include <fstream>
+#include <thread>
 #endif
 
 namespace space::ssh
@@ -166,9 +177,97 @@ struct SftpFileHandle
     }
 };
 
+struct TunnelHandle
+{
+    int listener_fd { -1 };
+    std::atomic<bool> running { true };
+
+    TunnelHandle() = default;
+    explicit TunnelHandle(int listener)
+        : listener_fd(listener)
+    {
+    }
+
+    TunnelHandle(const TunnelHandle&) = delete;
+    TunnelHandle& operator=(const TunnelHandle&) = delete;
+
+    TunnelHandle(TunnelHandle&& other) noexcept
+        : listener_fd(other.listener_fd)
+        , running(other.running.load())
+    {
+        other.listener_fd = -1;
+        other.running.store(false);
+    }
+
+    TunnelHandle& operator=(TunnelHandle&& other) noexcept
+    {
+        if (this != &other)
+        {
+            stop();
+            listener_fd = other.listener_fd;
+            running.store(other.running.load());
+            other.listener_fd = -1;
+            other.running.store(false);
+        }
+        return *this;
+    }
+
+    ~TunnelHandle()
+    {
+        stop();
+    }
+
+    void stop()
+    {
+        running.store(false);
+        if (listener_fd >= 0)
+        {
+            shutdown(listener_fd, SHUT_RDWR);
+            close(listener_fd);
+            listener_fd = -1;
+        }
+    }
+};
+
 class LibsshBackend : public Backend
 {
 public:
+    ~LibsshBackend() override
+    {
+        std::vector<std::thread> workers;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            for (auto& [_, tunnel] : tunnels_)
+            {
+                tunnel.stop();
+            }
+            for (auto& [_, channel] : channels_)
+            {
+                channel.reset();
+            }
+            for (auto& [_, session] : sessions_)
+            {
+                session.reset();
+            }
+            for (auto& worker : workers_)
+            {
+                workers.push_back(std::move(worker));
+            }
+            workers_.clear();
+            tunnels_.clear();
+            channels_.clear();
+            sessions_.clear();
+            pending_.clear();
+        }
+        for (auto& worker : workers)
+        {
+            if (worker.joinable())
+            {
+                worker.join();
+            }
+        }
+    }
+
     void connect(OperationContext& context, const ConnectOptions& options) override
     {
         SessionHandle session(ssh_new());
@@ -242,6 +341,8 @@ public:
     {
         {
             std::lock_guard<std::mutex> lock(mutex_);
+            close_owned_channels_locked(session_id);
+            close_owned_tunnels_locked(session_id);
             sessions_.erase(session_id);
         }
         context.sink().emit(Event{ EventKind::SessionClosed, context.operation_id(), session_id });
@@ -252,6 +353,26 @@ public:
     {
         std::lock_guard<std::mutex> lock(mutex_);
         pending_.erase(operation_id);
+        auto active = active_operations_.find(operation_id);
+        if (active == active_operations_.end())
+        {
+            return;
+        }
+        for (ssh_channel channel : active->second.channels)
+        {
+            if (channel)
+            {
+                ssh_channel_close(channel);
+            }
+        }
+        for (sftp_file file : active->second.sftp_files)
+        {
+            if (file)
+            {
+                sftp_close(file);
+            }
+        }
+        active_operations_.erase(active);
     }
 
     void exec(OperationContext& context, SessionId session_id, const ExecOptions& options) override
@@ -269,12 +390,15 @@ public:
             context.sink().emit(error_event(context.operation_id(), ErrorCode::BackendError, "SSH exec failed to open channel"));
             return;
         }
+        register_active_channel(context.operation_id(), channel.value);
         if (!check_active(context))
         {
+            unregister_active_channel(context.operation_id(), channel.value);
             return;
         }
         if (ssh_channel_request_exec(channel.value, options.command.c_str()) != SSH_OK)
         {
+            unregister_active_channel(context.operation_id(), channel.value);
             context.sink().emit(error_event(context.operation_id(), ErrorCode::BackendError, "SSH exec request failed"));
             return;
         }
@@ -291,6 +415,7 @@ public:
             }
             else if (stdout_bytes == SSH_ERROR)
             {
+                unregister_active_channel(context.operation_id(), channel.value);
                 context.sink().emit(error_event(context.operation_id(), ErrorCode::BackendError, "SSH exec stdout read failed"));
                 return;
             }
@@ -306,6 +431,7 @@ public:
             }
             else if (stderr_bytes == SSH_ERROR)
             {
+                unregister_active_channel(context.operation_id(), channel.value);
                 context.sink().emit(error_event(context.operation_id(), ErrorCode::BackendError, "SSH exec stderr read failed"));
                 return;
             }
@@ -323,9 +449,11 @@ public:
 
         if (!check_active(context))
         {
+            unregister_active_channel(context.operation_id(), channel.value);
             return;
         }
         const int exit_status = ssh_channel_get_exit_status(channel.value);
+        unregister_active_channel(context.operation_id(), channel.value);
         context.sink().emit(Event{ EventKind::ExecComplete, context.operation_id(), session_id, 0, 0, {{ "exit-status", std::to_string(exit_status) }} });
         context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), session_id });
     }
@@ -360,6 +488,7 @@ public:
             context.sink().emit(error_event(context.operation_id(), ErrorCode::RemoteFileError, "SSH SFTP upload could not open remote file"));
             return;
         }
+        register_active_sftp_file(context.operation_id(), output.value);
 
         std::vector<char> buffer(32768);
         uint64_t bytes = 0;
@@ -371,13 +500,26 @@ public:
             {
                 break;
             }
-            const ssize_t written = sftp_write(output.value, buffer.data(), static_cast<size_t>(read));
-            if (written != read)
+            std::streamsize total_written = 0;
+            while (total_written < read && check_active(context))
             {
-                context.sink().emit(error_event(context.operation_id(), ErrorCode::RemoteFileError, "SSH SFTP upload write failed"));
+                const ssize_t written = sftp_write(output.value,
+                                                  buffer.data() + total_written,
+                                                  static_cast<size_t>(read - total_written));
+                if (written <= 0)
+                {
+                    unregister_active_sftp_file(context.operation_id(), output.value);
+                    context.sink().emit(error_event(context.operation_id(), ErrorCode::RemoteFileError, "SSH SFTP upload write failed before all bytes were delivered"));
+                    return;
+                }
+                total_written += written;
+            }
+            if (!check_active(context))
+            {
+                unregister_active_sftp_file(context.operation_id(), output.value);
                 return;
             }
-            bytes += static_cast<uint64_t>(written);
+            bytes += static_cast<uint64_t>(total_written);
             context.sink().emit(Event{ EventKind::SftpProgress,
                                         context.operation_id(),
                                         session_id,
@@ -387,8 +529,10 @@ public:
         }
         if (!check_active(context))
         {
+            unregister_active_sftp_file(context.operation_id(), output.value);
             return;
         }
+        unregister_active_sftp_file(context.operation_id(), output.value);
         context.sink().emit(Event{ EventKind::SftpComplete, context.operation_id(), session_id });
         context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), session_id });
     }
@@ -413,6 +557,7 @@ public:
             context.sink().emit(error_event(context.operation_id(), ErrorCode::RemoteFileError, "SSH SFTP download could not open remote file"));
             return;
         }
+        register_active_sftp_file(context.operation_id(), input.value);
         uint64_t total = 0;
         sftp_attributes attributes = sftp_fstat(input.value);
         if (attributes)
@@ -438,12 +583,14 @@ public:
             }
             if (read < 0)
             {
+                unregister_active_sftp_file(context.operation_id(), input.value);
                 context.sink().emit(error_event(context.operation_id(), ErrorCode::RemoteFileError, "SSH SFTP download read failed"));
                 return;
             }
             output.write(buffer.data(), read);
             if (!output)
             {
+                unregister_active_sftp_file(context.operation_id(), input.value);
                 context.sink().emit(error_event(context.operation_id(), ErrorCode::LocalFileError, "SSH SFTP download write failed"));
                 return;
             }
@@ -460,8 +607,10 @@ public:
         }
         if (!check_active(context))
         {
+            unregister_active_sftp_file(context.operation_id(), input.value);
             return;
         }
+        unregister_active_sftp_file(context.operation_id(), input.value);
         context.sink().emit(Event{ EventKind::SftpComplete, context.operation_id(), session_id });
         context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), session_id });
     }
@@ -493,7 +642,11 @@ public:
         const ChannelId channel_id = context.sink().allocate_channel();
         {
             std::lock_guard<std::mutex> lock(mutex_);
+            session_channels_[session_id].push_back(channel_id);
             channels_.emplace(channel_id, std::move(channel));
+            workers_.emplace_back([this, sink = &context.sink(), session_id, channel_id]() {
+                read_shell_channel(*sink, session_id, channel_id);
+            });
         }
         context.sink().emit(Event{ EventKind::ShellOpened, context.operation_id(), session_id, channel_id });
         context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), session_id, channel_id });
@@ -507,11 +660,25 @@ public:
             context.sink().emit(error_event(context.operation_id(), ErrorCode::InvalidId, "unknown SSH channel id"));
             return;
         }
-        if (ssh_channel_write(channel, data.data(), data.size()) == SSH_ERROR)
+        register_active_channel(context.operation_id(), channel);
+        std::size_t written = 0;
+        while (written < data.size() && check_active(context))
         {
-            context.sink().emit(error_event(context.operation_id(), ErrorCode::Closed, "SSH channel write failed"));
+            const int next = ssh_channel_write(channel, data.data() + written, static_cast<uint32_t>(data.size() - written));
+            if (next <= 0)
+            {
+                unregister_active_channel(context.operation_id(), channel);
+                context.sink().emit(error_event(context.operation_id(), ErrorCode::Closed, "SSH channel write failed before all bytes were delivered"));
+                return;
+            }
+            written += static_cast<std::size_t>(next);
+        }
+        if (!check_active(context))
+        {
+            unregister_active_channel(context.operation_id(), channel);
             return;
         }
+        unregister_active_channel(context.operation_id(), channel);
         context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), 0, channel_id });
     }
 
@@ -542,14 +709,61 @@ public:
                 return;
             }
             channels_.erase(it);
+            for (auto& [_, channel_ids] : session_channels_)
+            {
+                channel_ids.erase(std::remove(channel_ids.begin(), channel_ids.end(), channel_id), channel_ids.end());
+            }
         }
         context.sink().emit(Event{ EventKind::ChannelClosed, context.operation_id(), 0, channel_id });
         context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), 0, channel_id });
     }
 
-    void open_local_tunnel(OperationContext& context, SessionId, const TunnelOptions&) override { emit_unsupported(context); }
+    void open_local_tunnel(OperationContext& context, SessionId session_id, const TunnelOptions& options) override
+    {
+        ssh_session session = session_for_id(session_id);
+        if (!session)
+        {
+            context.sink().emit(error_event(context.operation_id(), ErrorCode::InvalidId, "unknown SSH session id"));
+            return;
+        }
+
+        int listener = bind_local_listener(options);
+        if (listener < 0)
+        {
+            context.sink().emit(error_event(context.operation_id(), ErrorCode::TunnelBindFailed, "SSH local tunnel could not bind listener"));
+            return;
+        }
+
+        const TunnelId tunnel_id = context.sink().allocate_tunnel();
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            tunnels_.emplace(tunnel_id, TunnelHandle(listener));
+            session_tunnels_[session_id].push_back(tunnel_id);
+            workers_.emplace_back([this, sink = &context.sink(), session, session_id, tunnel_id, options]() {
+                accept_local_tunnel(*sink, session, session_id, tunnel_id, options);
+            });
+        }
+        context.sink().emit(Event{ EventKind::TunnelOpened, context.operation_id(), session_id, 0, tunnel_id });
+        context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), session_id, 0, tunnel_id });
+    }
     void open_remote_tunnel(OperationContext& context, SessionId, const TunnelOptions&) override { emit_unsupported(context); }
-    void close_tunnel(OperationContext& context, TunnelId) override { emit_unsupported(context); }
+    void close_tunnel(OperationContext& context, TunnelId tunnel_id) override
+    {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            auto it = tunnels_.find(tunnel_id);
+            if (it == tunnels_.end())
+            {
+                context.sink().emit(error_event(context.operation_id(), ErrorCode::InvalidId, "unknown SSH tunnel id"));
+                return;
+            }
+            it->second.stop();
+            tunnels_.erase(it);
+            erase_owned_tunnel_locked(tunnel_id);
+        }
+        context.sink().emit(Event{ EventKind::TunnelClosed, context.operation_id(), 0, 0, tunnel_id });
+        context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), 0, 0, tunnel_id });
+    }
 
 private:
     struct PendingConnect
@@ -559,6 +773,263 @@ private:
         ErrorCode error_code { ErrorCode::UnknownHost };
         std::string error_message;
     };
+
+    struct ActiveOperation
+    {
+        std::vector<ssh_channel> channels;
+        std::vector<sftp_file> sftp_files;
+    };
+
+    void register_active_channel(OperationId operation_id, ssh_channel channel)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        active_operations_[operation_id].channels.push_back(channel);
+    }
+
+    void unregister_active_channel(OperationId operation_id, ssh_channel channel)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = active_operations_.find(operation_id);
+        if (it == active_operations_.end())
+        {
+            return;
+        }
+        auto& channels = it->second.channels;
+        channels.erase(std::remove(channels.begin(), channels.end(), channel), channels.end());
+        erase_empty_active_operation_locked(it);
+    }
+
+    void register_active_sftp_file(OperationId operation_id, sftp_file file)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        active_operations_[operation_id].sftp_files.push_back(file);
+    }
+
+    void unregister_active_sftp_file(OperationId operation_id, sftp_file file)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = active_operations_.find(operation_id);
+        if (it == active_operations_.end())
+        {
+            return;
+        }
+        auto& files = it->second.sftp_files;
+        files.erase(std::remove(files.begin(), files.end(), file), files.end());
+        erase_empty_active_operation_locked(it);
+    }
+
+    void erase_empty_active_operation_locked(std::map<OperationId, ActiveOperation>::iterator it)
+    {
+        if (it->second.channels.empty() && it->second.sftp_files.empty())
+        {
+            active_operations_.erase(it);
+        }
+    }
+
+    void close_owned_channels_locked(SessionId session_id)
+    {
+        auto owned = session_channels_.find(session_id);
+        if (owned == session_channels_.end())
+        {
+            return;
+        }
+        for (ChannelId channel_id : owned->second)
+        {
+            channels_.erase(channel_id);
+        }
+        session_channels_.erase(owned);
+    }
+
+    void close_owned_tunnels_locked(SessionId session_id)
+    {
+        auto owned = session_tunnels_.find(session_id);
+        if (owned == session_tunnels_.end())
+        {
+            return;
+        }
+        for (TunnelId tunnel_id : owned->second)
+        {
+            auto it = tunnels_.find(tunnel_id);
+            if (it != tunnels_.end())
+            {
+                it->second.stop();
+                tunnels_.erase(it);
+            }
+        }
+        session_tunnels_.erase(owned);
+    }
+
+    void erase_owned_tunnel_locked(TunnelId tunnel_id)
+    {
+        for (auto& [_, tunnel_ids] : session_tunnels_)
+        {
+            tunnel_ids.erase(std::remove(tunnel_ids.begin(), tunnel_ids.end(), tunnel_id), tunnel_ids.end());
+        }
+    }
+
+    void read_shell_channel(OperationSink& sink, SessionId session_id, ChannelId channel_id)
+    {
+        std::vector<char> buffer(4096);
+        while (true)
+        {
+            ssh_channel channel = channel_for_id(channel_id);
+            if (!channel)
+            {
+                return;
+            }
+            const int read = ssh_channel_read_timeout(channel, buffer.data(), static_cast<uint32_t>(buffer.size()), 0, 25);
+            if (read > 0)
+            {
+                sink.emit(Event{ EventKind::ChannelData, 0, session_id, channel_id, 0, {{ "data", std::string(buffer.data(), read) }} });
+                continue;
+            }
+            if (read == SSH_ERROR || read == SSH_EOF || ssh_channel_is_eof(channel))
+            {
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    channels_.erase(channel_id);
+                    for (auto& [_, channel_ids] : session_channels_)
+                    {
+                        channel_ids.erase(std::remove(channel_ids.begin(), channel_ids.end(), channel_id), channel_ids.end());
+                    }
+                }
+                sink.emit(Event{ EventKind::ChannelClosed, 0, session_id, channel_id });
+                return;
+            }
+        }
+    }
+
+    int bind_local_listener(const TunnelOptions& options)
+    {
+        int listener = socket(AF_INET, SOCK_STREAM, 0);
+        if (listener < 0)
+        {
+            return -1;
+        }
+        int yes = 1;
+        setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+        sockaddr_in address {};
+        address.sin_family = AF_INET;
+        address.sin_port = htons(options.local_port);
+        const std::string host = options.local_host.empty() ? "127.0.0.1" : options.local_host;
+        if (inet_pton(AF_INET, host.c_str(), &address.sin_addr) != 1 || bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 || listen(listener, 16) != 0)
+        {
+            close(listener);
+            return -1;
+        }
+        fcntl(listener, F_SETFL, fcntl(listener, F_GETFL, 0) | O_NONBLOCK);
+        return listener;
+    }
+
+    void accept_local_tunnel(OperationSink& sink, ssh_session session, SessionId session_id, TunnelId tunnel_id, TunnelOptions options)
+    {
+        while (tunnel_running(tunnel_id))
+        {
+            int listener = tunnel_listener(tunnel_id);
+            if (listener < 0)
+            {
+                break;
+            }
+            sockaddr_in client_address {};
+            socklen_t client_length = sizeof(client_address);
+            int client = accept(listener, reinterpret_cast<sockaddr*>(&client_address), &client_length);
+            if (client < 0)
+            {
+                if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    continue;
+                }
+                break;
+            }
+            ChannelHandle remote(ssh_channel_new(session));
+            if (!remote.value || ssh_channel_open_forward(remote.value, options.remote_host.c_str(), options.remote_port, options.local_host.c_str(), options.local_port) != SSH_OK)
+            {
+                close(client);
+                continue;
+            }
+            relay_tunnel_connection(client, remote.value, tunnel_id);
+        }
+        bool emit_closed = false;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            emit_closed = tunnels_.erase(tunnel_id) > 0;
+            if (emit_closed)
+            {
+                erase_owned_tunnel_locked(tunnel_id);
+            }
+        }
+        if (emit_closed)
+        {
+            sink.emit(Event{ EventKind::TunnelClosed, 0, session_id, 0, tunnel_id });
+        }
+    }
+
+    bool tunnel_running(TunnelId tunnel_id)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = tunnels_.find(tunnel_id);
+        return it != tunnels_.end() && it->second.running.load();
+    }
+
+    int tunnel_listener(TunnelId tunnel_id)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = tunnels_.find(tunnel_id);
+        return it == tunnels_.end() ? -1 : it->second.listener_fd;
+    }
+
+    void relay_tunnel_connection(int client, ssh_channel remote, TunnelId tunnel_id)
+    {
+        std::vector<char> buffer(8192);
+        while (tunnel_running(tunnel_id) && !ssh_channel_is_eof(remote))
+        {
+            fd_set reads;
+            FD_ZERO(&reads);
+            FD_SET(client, &reads);
+            timeval timeout { 0, 25000 };
+            const int ready = select(client + 1, &reads, nullptr, nullptr, &timeout);
+            if (ready > 0 && FD_ISSET(client, &reads))
+            {
+                const ssize_t received = recv(client, buffer.data(), buffer.size(), 0);
+                if (received <= 0)
+                {
+                    break;
+                }
+                std::size_t sent = 0;
+                while (sent < static_cast<std::size_t>(received))
+                {
+                    const int written = ssh_channel_write(remote, buffer.data() + sent, static_cast<uint32_t>(received - sent));
+                    if (written <= 0)
+                    {
+                        close(client);
+                        return;
+                    }
+                    sent += static_cast<std::size_t>(written);
+                }
+            }
+            const int remote_read = ssh_channel_read_timeout(remote, buffer.data(), static_cast<uint32_t>(buffer.size()), 0, 1);
+            if (remote_read > 0)
+            {
+                std::size_t sent = 0;
+                while (sent < static_cast<std::size_t>(remote_read))
+                {
+                    const ssize_t written = send(client, buffer.data() + sent, static_cast<size_t>(remote_read) - sent, 0);
+                    if (written <= 0)
+                    {
+                        close(client);
+                        return;
+                    }
+                    sent += static_cast<std::size_t>(written);
+                }
+            }
+            else if (remote_read == SSH_ERROR || remote_read == SSH_EOF)
+            {
+                break;
+            }
+        }
+        close(client);
+    }
 
     bool configure_session(OperationContext& context, ssh_session session, const ConnectOptions& options)
     {
@@ -730,8 +1201,13 @@ private:
 
     std::mutex mutex_;
     std::map<OperationId, PendingConnect> pending_;
+    std::map<OperationId, ActiveOperation> active_operations_;
     std::map<SessionId, SessionHandle> sessions_;
     std::map<ChannelId, ChannelHandle> channels_;
+    std::map<TunnelId, TunnelHandle> tunnels_;
+    std::map<SessionId, std::vector<ChannelId>> session_channels_;
+    std::map<SessionId, std::vector<TunnelId>> session_tunnels_;
+    std::vector<std::thread> workers_;
 };
 
 #endif
