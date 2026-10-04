@@ -220,6 +220,8 @@ int main()
         lua.script(R"(
             local ssh = require("ssh")
             assert(type(ssh) == "table")
+            assert(ssh.available == true)
+            assert(ssh["missing-reason"] == nil)
 
             local names = {
                 "connect", "resolve-known-host", "close-session", "exec",
@@ -383,6 +385,19 @@ int main()
 
         lua_ssh_drop(lua);
         service->shutdown();
+        lua_callbacks_shutdown();
+
+        sol::state unavailable_lua;
+        unavailable_lua.open_libraries(sol::lib::base, sol::lib::package, sol::lib::table, sol::lib::string, sol::lib::math);
+        auto unavailable_service = std::make_shared<Service>(make_unavailable_backend("libssh backend not available"));
+        lua_bind_ssh(unavailable_lua, unavailable_service);
+        unavailable_lua.script(R"(
+            local ssh = require("ssh")
+            assert(ssh.available == false)
+            assert(ssh["missing-reason"] == "libssh backend not available")
+        )");
+        lua_ssh_drop(unavailable_lua);
+        unavailable_service->shutdown();
         lua_callbacks_shutdown();
     }
     catch (const std::exception& ex)

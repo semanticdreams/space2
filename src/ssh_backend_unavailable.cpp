@@ -16,9 +16,12 @@ public:
     {
         if (reason_.empty())
         {
-            reason_ = "SSH backend unavailable";
+            reason_ = "libssh backend not available";
         }
     }
+
+    bool available() const override { return false; }
+    std::string missing_reason() const override { return reason_; }
 
     void connect(OperationContext& context, const ConnectOptions&) override { unavailable(context); }
     void resolve_known_host(OperationContext& context, KnownHostDecision) override

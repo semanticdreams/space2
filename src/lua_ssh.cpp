@@ -395,6 +395,11 @@ void lua_bind_ssh(sol::state& lua, std::shared_ptr<Service> service)
     preload.set_function("ssh", [](sol::this_state this_state) {
         sol::state_view lua(this_state);
         sol::table module = lua.create_table();
+        SshLuaState& module_state = state_for(this_state);
+
+        module["available"] = module_state.service->available();
+        const std::string missing_reason = module_state.service->missing_reason();
+        module["missing-reason"] = missing_reason.empty() ? sol::make_object(lua, sol::lua_nil) : sol::make_object(lua, missing_reason);
 
         module.set_function("connect", [](sol::this_state ts, sol::table opts, sol::optional<sol::function> callback) {
             SshLuaState& state = state_for(ts);
