@@ -842,6 +842,17 @@ set_tests_properties(test_temporal_core PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
+add_executable(test_ssh_service
+    tests/test_ssh_service.cpp
+    src/ssh_service.cpp
+    src/ssh_backend_unavailable.cpp
+)
+target_include_directories(test_ssh_service PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME test_ssh_service COMMAND test_ssh_service)
+set_tests_properties(test_ssh_service PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
 add_executable(test_window_title
     tests/test_window_title.cpp
 )
