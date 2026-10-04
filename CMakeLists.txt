@@ -872,6 +872,23 @@ set_tests_properties(test_ssh_service PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
+add_executable(test_lua_ssh_binding
+    tests/test_lua_ssh_binding.cpp
+    src/lua_ssh.cpp
+    src/ssh_service.cpp
+    src/ssh_backend_unavailable.cpp
+)
+target_include_directories(test_lua_ssh_binding PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(test_lua_ssh_binding lua)
+if(SPACE_HAS_LIBSSH)
+    target_link_libraries(test_lua_ssh_binding PkgConfig::LIBSSH)
+    target_compile_definitions(test_lua_ssh_binding PRIVATE SPACE_HAS_LIBSSH=1)
+endif()
+add_test(NAME test_lua_ssh_binding COMMAND test_lua_ssh_binding)
+set_tests_properties(test_lua_ssh_binding PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
 add_executable(test_window_title
     tests/test_window_title.cpp
 )

@@ -9,6 +9,7 @@
 #include <sol/sol.hpp>
 
 class HttpClient;
+namespace space::ssh { class Service; }
 
 class LuaRuntime {
 public:
@@ -41,4 +42,5 @@ private:
     std::string assets_path_value;
     std::string fennel_path_value;
     std::unique_ptr<HttpClient> http;
+    std::shared_ptr<space::ssh::Service> ssh;
 };
