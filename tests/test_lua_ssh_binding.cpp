@@ -252,6 +252,23 @@ int main()
                 ["auth-methods"] = { { type = "password", password = "secret" } }
             })
             assert(type(op) == "number")
+
+            ok, err = pcall(function()
+                ssh.connect({
+                    target = { host = "h" },
+                    ["auth-methods"] = { named = { type = "agent" } }
+                })
+            end)
+            assert(ok == false)
+            assert(string.find(tostring(err), "auth-methods", 1, true))
+
+            ok, err = pcall(function()
+                local sparse = {}
+                sparse[2] = { type = "agent" }
+                ssh.connect({ target = { host = "h" }, ["auth-methods"] = sparse })
+            end)
+            assert(ok == false)
+            assert(string.find(tostring(err), "auth-methods", 1, true))
         )");
 
         wait_for_events();
@@ -289,15 +306,17 @@ int main()
         lua.script(R"(
             local ssh = require("ssh")
             callback_event = nil
+            callback_events = {}
             callback_op = ssh.connect({ target = { host = "h" } }, function(event)
                 callback_event = event
+                table.insert(callback_events, event)
             end)
         )");
         for (int i = 0; i < 50; ++i)
         {
             lua_ssh_dispatch(lua);
-            sol::object event = lua["callback_event"];
-            if (event.valid() && event != sol::lua_nil)
+            sol::table events = lua["callback_events"];
+            if (events.valid() && events.size() >= 3)
             {
                 break;
             }
@@ -306,10 +325,49 @@ int main()
         expect_true(lua["callback_event"].valid() && lua["callback_event"] != sol::lua_nil,
                     "SSH callback did not receive a terminal event");
         lua.script(R"(
-            assert(callback_event.kind == "operation-success")
+            assert(callback_event.kind == "operation-success", callback_event.kind)
         )");
 
         backend_ptr->known_host_mode.store(true);
+        lua.script(R"(
+            local ssh = require("ssh")
+            known_host_callback_events = {}
+            known_host_callback_op = ssh.connect({ target = { host = "h" } }, function(event)
+                table.insert(known_host_callback_events, event)
+            end)
+        )");
+        for (int i = 0; i < 50; ++i)
+        {
+            lua_ssh_dispatch(lua);
+            sol::table events = lua["known_host_callback_events"];
+            if (events.valid() && events.size() >= 2)
+            {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        lua.script(R"(
+            local ssh = require("ssh")
+            assert(#known_host_callback_events >= 2, #known_host_callback_events)
+            assert(known_host_callback_events[1].kind == "operation-started", known_host_callback_events[1].kind)
+            assert(known_host_callback_events[2].kind == "known-host-challenge", known_host_callback_events[2].kind)
+            assert(ssh["resolve-known-host"](known_host_callback_op, "accept-once") == true)
+        )");
+        for (int i = 0; i < 50; ++i)
+        {
+            lua_ssh_dispatch(lua);
+            sol::table events = lua["known_host_callback_events"];
+            if (events.valid() && events.size() >= 4)
+            {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        lua.script(R"(
+            assert(known_host_callback_events[#known_host_callback_events].kind == "operation-success",
+                   known_host_callback_events[#known_host_callback_events].kind)
+        )");
+
         lua.script(R"(
             local ssh = require("ssh")
             known_host_op = ssh.connect({ target = { host = "h" } })

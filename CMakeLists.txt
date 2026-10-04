@@ -877,6 +877,7 @@ add_executable(test_lua_ssh_binding
     src/lua_ssh.cpp
     src/ssh_service.cpp
     src/ssh_backend_unavailable.cpp
+    src/ssh_backend_libssh.cpp
 )
 target_include_directories(test_lua_ssh_binding PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(test_lua_ssh_binding lua)

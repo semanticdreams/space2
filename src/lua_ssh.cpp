@@ -148,6 +148,53 @@ AuthMethodType parse_auth_type(const std::string& value)
     throw sol::error("ssh option auth-methods.type has invalid value");
 }
 
+std::vector<AuthMethod> parse_auth_methods(const sol::table& auth_table)
+{
+    std::set<std::size_t> indexes;
+    std::size_t max_index = 0;
+    for (const auto& pair : auth_table)
+    {
+        const sol::object& key = pair.first;
+        const sol::object& value = pair.second;
+        if (!key.is<double>() && !key.is<int>() && !key.is<uint64_t>())
+        {
+            throw sol::error("ssh option auth-methods must be an array");
+        }
+        double numeric_key = key.as<double>();
+        std::size_t index = static_cast<std::size_t>(numeric_key);
+        if (numeric_key <= 0.0 || numeric_key != static_cast<double>(index))
+        {
+            throw sol::error("ssh option auth-methods must use positive integer indexes");
+        }
+        if (!value.is<sol::table>())
+        {
+            throw sol::error("ssh option auth-methods item must be a table");
+        }
+        indexes.insert(index);
+        max_index = std::max(max_index, index);
+    }
+
+    if (indexes.size() != max_index)
+    {
+        throw sol::error("ssh option auth-methods must be contiguous");
+    }
+
+    std::vector<AuthMethod> methods;
+    methods.reserve(indexes.size());
+    for (std::size_t i = 1; i <= max_index; ++i)
+    {
+        sol::table item = auth_table[static_cast<int>(i)];
+        reject_unknown_keys(item, { "type", "key-path", "passphrase", "password" }, "auth-methods.");
+        AuthMethod method;
+        method.type = parse_auth_type(require_string(item, "type"));
+        method.key_path = require_string(item, "key-path", false);
+        method.passphrase = require_string(item, "passphrase", false);
+        method.password = require_string(item, "password", false);
+        methods.push_back(std::move(method));
+    }
+    return methods;
+}
+
 ConnectOptions parse_connect_options(const sol::table& opts)
 {
     reject_unknown_keys(opts, { "target", "auth-methods", "known-host-policy", "known-hosts-path", "timeout-ms" }, "connect.");
@@ -185,26 +232,7 @@ ConnectOptions parse_connect_options(const sol::table& opts)
             throw sol::error("ssh option auth-methods must be a table");
         }
         sol::table auth_table = auth_obj.as<sol::table>();
-        for (std::size_t i = 1;; ++i)
-        {
-            sol::object item_obj = auth_table[static_cast<int>(i)];
-            if (!item_obj.valid() || item_obj == sol::lua_nil)
-            {
-                break;
-            }
-            if (!item_obj.is<sol::table>())
-            {
-                throw sol::error("ssh option auth-methods item must be a table");
-            }
-            sol::table item = item_obj.as<sol::table>();
-            reject_unknown_keys(item, { "type", "key-path", "passphrase", "password" }, "auth-methods.");
-            AuthMethod method;
-            method.type = parse_auth_type(require_string(item, "type"));
-            method.key_path = require_string(item, "key-path", false);
-            method.passphrase = require_string(item, "passphrase", false);
-            method.password = require_string(item, "password", false);
-            result.auth_methods.push_back(std::move(method));
-        }
+        result.auth_methods = parse_auth_methods(auth_table);
     }
 
     return result;
@@ -299,16 +327,15 @@ void handle_polled_event(sol::state_view lua, SshLuaState& state, Event event)
 
     const uint64_t callback_id = callback_it->second;
     const bool terminal = terminal_event(event.kind);
-    if (!terminal)
-    {
-        return;
-    }
     lua_callbacks_enqueue(callback_id, [event](sol::state_view callback_lua) {
         return sol::make_object(callback_lua, event_to_lua(callback_lua, event));
     });
     lua_callbacks_dispatch_ids(lua, { callback_id }, 1);
-    state.callback_by_operation.erase(callback_it);
-    lua_callbacks_unregister(callback_id);
+    if (terminal)
+    {
+        state.callback_by_operation.erase(callback_it);
+        lua_callbacks_unregister(callback_id);
+    }
 }
 
 OperationId remember_callback(SshLuaState& state, OperationId operation_id, sol::optional<sol::function> callback)
