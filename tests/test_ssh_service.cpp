@@ -1,6 +1,7 @@
 #include "ssh_backend.h"
 #include "ssh_service.h"
 
+#include <atomic>
 #include <chrono>
 #include <exception>
 #include <iostream>
@@ -85,7 +86,12 @@ public:
         EmitThreeEvents,
         WaitForCancel,
         SleepPastTimeout,
-        KnownHostChallenge
+        EmitStdoutAfterTimeout,
+        EmitStdoutAfterCancel,
+        AllocateThenError,
+        KnownHostChallenge,
+        BlockingKnownHostResolution,
+        ThrowSecretException
     };
 
     explicit FakeBackend(Mode mode)
@@ -119,10 +125,53 @@ public:
             return;
         }
 
+        if (mode_ == Mode::EmitStdoutAfterTimeout)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            context.sink().emit(Event{ EventKind::ExecStdout, context.operation_id(), 0, 0, 0, {{ "data", "late" }} });
+            return;
+        }
+
+        if (mode_ == Mode::EmitStdoutAfterCancel)
+        {
+            while (!context.token().is_cancelled())
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            context.sink().emit(Event{ EventKind::ExecStdout, context.operation_id(), 0, 0, 0, {{ "data", "late" }} });
+            return;
+        }
+
+        if (mode_ == Mode::AllocateThenError)
+        {
+            const SessionId session_id = context.sink().allocate_session();
+            last_session_id_.store(session_id);
+            context.sink().emit(Event{ EventKind::OperationError,
+                                        context.operation_id(),
+                                        session_id,
+                                        0,
+                                        0,
+                                        {{ "error-code", "auth-failed" }},
+                                        ErrorCode::AuthFailed,
+                                        "authentication failed" });
+            return;
+        }
+
         if (mode_ == Mode::KnownHostChallenge)
         {
             context.sink().emit(Event{ EventKind::KnownHostChallenge, context.operation_id() });
             return;
+        }
+
+        if (mode_ == Mode::BlockingKnownHostResolution)
+        {
+            context.sink().emit(Event{ EventKind::KnownHostChallenge, context.operation_id() });
+            return;
+        }
+
+        if (mode_ == Mode::ThrowSecretException)
+        {
+            throw std::runtime_error("backend failed with password=hunter2 and passphrase=opensesame");
         }
 
         const SessionId session_id = context.sink().allocate_session();
@@ -130,11 +179,20 @@ public:
         context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), session_id });
     }
 
-    void resolve_known_host(OperationId operation_id, KnownHostDecision, OperationSink& sink) override
+    void resolve_known_host(OperationContext& context, KnownHostDecision) override
     {
-        const SessionId session_id = sink.allocate_session();
-        sink.emit(Event{ EventKind::Connected, operation_id, session_id });
-        sink.emit(Event{ EventKind::OperationSuccess, operation_id, session_id });
+        if (mode_ == Mode::BlockingKnownHostResolution)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        const SessionId session_id = context.sink().allocate_session();
+        context.sink().emit(Event{ EventKind::Connected, context.operation_id(), session_id });
+        context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), session_id });
+    }
+
+    SessionId last_session_id() const
+    {
+        return last_session_id_.load();
     }
 
     void close_session(OperationContext& context, SessionId session_id) override
@@ -168,6 +226,7 @@ public:
 
 private:
     Mode mode_;
+    std::atomic<SessionId> last_session_id_ { 0 };
 };
 
 void connect_returns_monotonic_operation_ids()
@@ -248,6 +307,51 @@ void timeout_emits_timeout_terminal_event()
     expect_eq(count_kind(events, EventKind::OperationTimeout), std::size_t{ 1 }, "exactly one timeout event");
 }
 
+void late_non_terminal_events_after_timeout_are_suppressed()
+{
+    Service service(std::make_unique<FakeBackend>(FakeBackend::Mode::EmitStdoutAfterTimeout));
+
+    service.connect(connect_options(1));
+    auto timeout = poll_until(service, 1);
+    expect_eq(count_kind(timeout, EventKind::OperationTimeout), std::size_t{ 1 }, "expected timeout event");
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(75));
+    auto late = service.poll(0);
+    expect_eq(count_kind(late, EventKind::ExecStdout), std::size_t{ 0 }, "late stdout after timeout must be suppressed");
+}
+
+void late_non_terminal_events_after_cancel_are_suppressed()
+{
+    Service service(std::make_unique<FakeBackend>(FakeBackend::Mode::EmitStdoutAfterCancel));
+
+    const OperationId operation_id = service.connect(connect_options());
+    expect_true(service.cancel(operation_id), "cancel should accept active operation");
+    auto cancelled = poll_until(service, 1);
+    expect_eq(count_kind(cancelled, EventKind::OperationCancelled), std::size_t{ 1 }, "expected cancelled event");
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    auto late = service.poll(0);
+    expect_eq(count_kind(late, EventKind::ExecStdout), std::size_t{ 0 }, "late stdout after cancel must be suppressed");
+}
+
+void allocated_session_is_not_live_after_failed_connect()
+{
+    auto backend = std::make_unique<FakeBackend>(FakeBackend::Mode::AllocateThenError);
+    FakeBackend* backend_ptr = backend.get();
+    Service service(std::move(backend));
+
+    service.connect(connect_options());
+    auto failed = poll_until(service, 1);
+    expect_eq(count_kind(failed, EventKind::OperationError), std::size_t{ 1 }, "expected failed connect error");
+    const SessionId failed_session_id = backend_ptr->last_session_id();
+    expect_true(failed_session_id != 0, "backend allocated a provisional session id");
+
+    service.exec(failed_session_id, exec_options());
+    auto invalid = poll_until(service, 1);
+    expect_eq(invalid.size(), std::size_t{ 1 }, "expected invalid session error");
+    expect_eq(invalid[0].error_code, ErrorCode::InvalidId, "failed-connect session id must not become live");
+}
+
 void known_host_challenge_blocks_until_resolution()
 {
     Service service(std::make_unique<FakeBackend>(FakeBackend::Mode::KnownHostChallenge));
@@ -264,6 +368,39 @@ void known_host_challenge_blocks_until_resolution()
     expect_eq(connected.size(), std::size_t{ 2 }, "expected connected and success after resolution");
     expect_eq(connected[0].kind, EventKind::Connected, "connected event kind");
     expect_eq(connected[1].kind, EventKind::OperationSuccess, "success event kind");
+}
+
+void known_host_resolution_returns_before_backend_continuation_finishes()
+{
+    Service service(std::make_unique<FakeBackend>(FakeBackend::Mode::BlockingKnownHostResolution));
+
+    const OperationId operation_id = service.connect(connect_options());
+    auto challenge = poll_until(service, 1);
+    expect_eq(challenge.size(), std::size_t{ 1 }, "expected known-host challenge");
+
+    const auto before = std::chrono::steady_clock::now();
+    expect_true(service.resolve_known_host(operation_id, KnownHostDecision::AcceptOnce), "resolve known host succeeds");
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - before);
+    expect_true(elapsed < std::chrono::milliseconds(50), "known-host resolution must not block on backend continuation");
+
+    auto connected = poll_until(service, 2);
+    expect_eq(connected.size(), std::size_t{ 2 }, "expected connected and success after async continuation");
+}
+
+void backend_exception_messages_are_sanitized()
+{
+    Service service(std::make_unique<FakeBackend>(FakeBackend::Mode::ThrowSecretException));
+
+    service.connect(connect_options());
+    auto events = poll_until(service, 1);
+
+    expect_eq(events.size(), std::size_t{ 1 }, "expected backend exception error");
+    expect_eq(events[0].kind, EventKind::OperationError, "exception event kind");
+    expect_eq(events[0].error_code, ErrorCode::BackendError, "exception error code");
+    expect_true(events[0].message.find("hunter2") == std::string::npos, "password text must be redacted");
+    expect_true(events[0].message.find("opensesame") == std::string::npos, "passphrase text must be redacted");
+    expect_true(events[0].message.find("password=") == std::string::npos, "password marker must be redacted");
+    expect_true(events[0].message.find("passphrase=") == std::string::npos, "passphrase marker must be redacted");
 }
 
 void run(const std::string& name, void (*test)())
@@ -284,7 +421,12 @@ int main()
         run("invalid_session_operations_fail_loudly", invalid_session_operations_fail_loudly);
         run("cancel_emits_cancelled_terminal_event", cancel_emits_cancelled_terminal_event);
         run("timeout_emits_timeout_terminal_event", timeout_emits_timeout_terminal_event);
+        run("late_non_terminal_events_after_timeout_are_suppressed", late_non_terminal_events_after_timeout_are_suppressed);
+        run("late_non_terminal_events_after_cancel_are_suppressed", late_non_terminal_events_after_cancel_are_suppressed);
+        run("allocated_session_is_not_live_after_failed_connect", allocated_session_is_not_live_after_failed_connect);
         run("known_host_challenge_blocks_until_resolution", known_host_challenge_blocks_until_resolution);
+        run("known_host_resolution_returns_before_backend_continuation_finishes", known_host_resolution_returns_before_backend_continuation_finishes);
+        run("backend_exception_messages_are_sanitized", backend_exception_messages_are_sanitized);
     }
     catch (const std::exception& ex)
     {

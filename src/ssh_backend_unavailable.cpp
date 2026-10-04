@@ -21,9 +21,9 @@ public:
     }
 
     void connect(OperationContext& context, const ConnectOptions&) override { unavailable(context); }
-    void resolve_known_host(OperationId operation_id, KnownHostDecision, OperationSink& sink) override
+    void resolve_known_host(OperationContext& context, KnownHostDecision) override
     {
-        sink.emit(unavailable_event(operation_id));
+        context.sink().emit(unavailable_event(context.operation_id()));
     }
     void close_session(OperationContext& context, SessionId) override { unavailable(context); }
     void exec(OperationContext& context, SessionId, const ExecOptions&) override { unavailable(context); }

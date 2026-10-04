@@ -56,6 +56,8 @@ private:
     OperationId enqueue_error(ErrorCode code, std::string message);
     OperationId start_operation(uint64_t timeout_ms);
     void dispatch(OperationId operation_id, uint64_t timeout_ms, std::function<void(OperationContext&)> work);
+    bool dispatch_existing_operation(OperationId operation_id, std::function<void(OperationContext&)> work);
+    void run_backend_work(OperationId operation_id, const std::shared_ptr<OperationState>& state, std::function<void(OperationContext&)> work);
     bool finish_operation(OperationId operation_id, EventKind terminal_kind, ErrorCode code, std::string message);
     bool is_session_known(SessionId session_id) const;
     bool is_channel_known(ChannelId channel_id) const;

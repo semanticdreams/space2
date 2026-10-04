@@ -50,7 +50,7 @@ public:
     virtual ~Backend() = default;
 
     virtual void connect(OperationContext& context, const ConnectOptions& options) = 0;
-    virtual void resolve_known_host(OperationId operation_id, KnownHostDecision decision, OperationSink& sink) = 0;
+    virtual void resolve_known_host(OperationContext& context, KnownHostDecision decision) = 0;
     virtual void close_session(OperationContext& context, SessionId session_id) = 0;
     virtual void exec(OperationContext& context, SessionId session_id, const ExecOptions& options) = 0;
     virtual void sftp_upload(OperationContext& context, SessionId session_id, const SftpTransferOptions& options) = 0;

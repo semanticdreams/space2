@@ -200,16 +200,9 @@ OperationId Service::connect(const ConnectOptions& options)
 
 bool Service::resolve_known_host(OperationId operation_id, KnownHostDecision decision)
 {
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (shutdown_ || operations_.find(operation_id) == operations_.end())
-        {
-            return false;
-        }
-    }
-
-    backend_->resolve_known_host(operation_id, decision, *this);
-    return true;
+    return dispatch_existing_operation(operation_id, [this, decision](OperationContext& context) {
+        backend_->resolve_known_host(context, decision);
+    });
 }
 
 OperationId Service::close_session(SessionId session_id)
@@ -422,22 +415,19 @@ void Service::emit(Event event)
         return;
     }
 
-    if (terminal_kind(event.kind))
+    if (event.operation_id != 0)
     {
         auto it = operations_.find(event.operation_id);
-        if (it != operations_.end())
+        if (it == operations_.end() || it->second->terminal)
         {
-            if (it->second->terminal)
-            {
-                return;
-            }
+            return;
+        }
+
+        if (terminal_kind(event.kind))
+        {
             it->second->terminal = true;
             it->second->token->cancel();
             operations_.erase(it);
-        }
-        else if (event.operation_id != 0)
-        {
-            return;
         }
     }
 
@@ -453,7 +443,6 @@ SessionId Service::allocate_session()
         return 0;
     }
     const SessionId id = next_session_id_++;
-    sessions_.insert(id);
     return id;
 }
 
@@ -465,7 +454,6 @@ ChannelId Service::allocate_channel()
         return 0;
     }
     const ChannelId id = next_channel_id_++;
-    channels_.insert(id);
     return id;
 }
 
@@ -477,7 +465,6 @@ TunnelId Service::allocate_tunnel()
         return 0;
     }
     const TunnelId id = next_tunnel_id_++;
-    tunnels_.insert(id);
     return id;
 }
 
@@ -514,33 +501,7 @@ void Service::dispatch(OperationId operation_id, uint64_t timeout_ms, std::funct
         }
         state = operations_.at(operation_id);
         workers_.emplace_back([this, operation_id, state, work = std::move(work)]() mutable {
-            OperationContext context(operation_id, *this, *state->token);
-            try
-            {
-                work(context);
-            }
-            catch (const std::exception& ex)
-            {
-                emit(Event{ EventKind::OperationError,
-                            operation_id,
-                            0,
-                            0,
-                            0,
-                            error_fields(ErrorCode::BackendError),
-                            ErrorCode::BackendError,
-                            ex.what() });
-            }
-            catch (...)
-            {
-                emit(Event{ EventKind::OperationError,
-                            operation_id,
-                            0,
-                            0,
-                            0,
-                            error_fields(ErrorCode::BackendError),
-                            ErrorCode::BackendError,
-                            "SSH backend operation failed" });
-            }
+            run_backend_work(operation_id, state, std::move(work));
         });
 
         if (timeout_ms > 0)
@@ -558,6 +519,62 @@ void Service::dispatch(OperationId operation_id, uint64_t timeout_ms, std::funct
                 finish_operation(operation_id, EventKind::OperationTimeout, ErrorCode::Timeout, "SSH operation timed out");
             });
         }
+    }
+}
+
+bool Service::dispatch_existing_operation(OperationId operation_id, std::function<void(OperationContext&)> work)
+{
+    std::shared_ptr<OperationState> state;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (shutdown_)
+        {
+            return false;
+        }
+
+        auto it = operations_.find(operation_id);
+        if (it == operations_.end() || it->second->terminal)
+        {
+            return false;
+        }
+
+        state = it->second;
+        workers_.emplace_back([this, operation_id, state, work = std::move(work)]() mutable {
+            run_backend_work(operation_id, state, std::move(work));
+        });
+    }
+
+    return true;
+}
+
+void Service::run_backend_work(OperationId operation_id, const std::shared_ptr<OperationState>& state, std::function<void(OperationContext&)> work)
+{
+    OperationContext context(operation_id, *this, *state->token);
+    try
+    {
+        work(context);
+    }
+    catch (const std::exception&)
+    {
+        emit(Event{ EventKind::OperationError,
+                    operation_id,
+                    0,
+                    0,
+                    0,
+                    error_fields(ErrorCode::BackendError),
+                    ErrorCode::BackendError,
+                    "SSH backend operation failed" });
+    }
+    catch (...)
+    {
+        emit(Event{ EventKind::OperationError,
+                    operation_id,
+                    0,
+                    0,
+                    0,
+                    error_fields(ErrorCode::BackendError),
+                    ErrorCode::BackendError,
+                    "SSH backend operation failed" });
     }
 }
 
