@@ -223,6 +223,26 @@ struct SessionResource
     SessionHandle handle;
 };
 
+struct ActiveSessionResource
+{
+    explicit ActiveSessionResource(SessionHandle session)
+        : handle(std::move(session))
+    {
+    }
+
+    ActiveSessionResource(const ActiveSessionResource&) = delete;
+    ActiveSessionResource& operator=(const ActiveSessionResource&) = delete;
+
+    void request_close()
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        handle.reset();
+    }
+
+    std::mutex mutex;
+    SessionHandle handle;
+};
+
 struct ChannelResource
 {
     explicit ChannelResource(ChannelHandle channel)
@@ -466,14 +486,14 @@ public:
 
     void connect(OperationContext& context, const ConnectOptions& options) override
     {
-        SessionHandle session(ssh_new());
-        if (!session.value)
+        auto session = std::make_shared<ActiveSessionResource>(SessionHandle(ssh_new()));
+        if (!session->handle.value)
         {
             context.sink().emit(error_event(context.operation_id(), ErrorCode::BackendError, "SSH backend failed to create a session"));
             return;
         }
 
-        if (!configure_session(context, session.value, options))
+        if (!configure_session(context, session->handle.value, options))
         {
             return;
         }
@@ -483,7 +503,10 @@ public:
             return;
         }
 
-        if (ssh_connect(session.value) != SSH_OK)
+        register_active_session(context.operation_id(), session);
+        const bool connected = connect_nonblocking(context, session);
+        unregister_active_session(context.operation_id(), session);
+        if (!connected)
         {
             if (!check_active(context))
             {
@@ -493,7 +516,23 @@ public:
             return;
         }
 
-        if (!check_known_host(context, std::move(session), options))
+        SessionHandle connected_session;
+        {
+            std::lock_guard<std::mutex> session_lock(session->mutex);
+            connected_session = std::move(session->handle);
+        }
+
+        if (!connected_session.value)
+        {
+            if (!check_active(context))
+            {
+                return;
+            }
+            context.sink().emit(error_event(context.operation_id(), ErrorCode::BackendError, "SSH backend failed to connect"));
+            return;
+        }
+
+        if (!check_known_host(context, std::move(connected_session), options))
         {
             return;
         }
@@ -578,6 +617,10 @@ public:
         {
             file->request_close();
         }
+        for (const auto& session : active.sessions)
+        {
+            session->request_close();
+        }
     }
 
     void exec(OperationContext& context, SessionId session_id, const ExecOptions& options) override
@@ -616,7 +659,24 @@ public:
         }
         {
             std::lock_guard<std::mutex> channel_lock(channel->mutex);
-            if (!channel->handle.value || ssh_channel_request_exec(channel->handle.value, options.command.c_str()) != SSH_OK)
+            if (!channel->handle.value)
+            {
+                unregister_active_channel(context.operation_id(), channel);
+                context.sink().emit(error_event(context.operation_id(), ErrorCode::BackendError, "SSH exec request failed"));
+                return;
+            }
+            for (const auto& [key, value] : options.env)
+            {
+                if (ssh_channel_request_env(channel->handle.value, key.c_str(), value.c_str()) != SSH_OK)
+                {
+                    unregister_active_channel(context.operation_id(), channel);
+                    auto fields = error_fields(ErrorCode::BackendError);
+                    fields["env-key"] = key;
+                    context.sink().emit(Event{ EventKind::OperationError, context.operation_id(), session_id, 0, 0, std::move(fields), ErrorCode::BackendError, "SSH exec environment request failed" });
+                    return;
+                }
+            }
+            if (ssh_channel_request_exec(channel->handle.value, options.command.c_str()) != SSH_OK)
             {
                 unregister_active_channel(context.operation_id(), channel);
                 context.sink().emit(error_event(context.operation_id(), ErrorCode::BackendError, "SSH exec request failed"));
@@ -1065,9 +1125,29 @@ private:
 
     struct ActiveOperation
     {
+        std::vector<std::shared_ptr<ActiveSessionResource>> sessions;
         std::vector<std::shared_ptr<ChannelResource>> channels;
         std::vector<std::shared_ptr<SftpFileResource>> sftp_files;
     };
+
+    void register_active_session(OperationId operation_id, std::shared_ptr<ActiveSessionResource> session)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        active_operations_[operation_id].sessions.push_back(session);
+    }
+
+    void unregister_active_session(OperationId operation_id, const std::shared_ptr<ActiveSessionResource>& session)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = active_operations_.find(operation_id);
+        if (it == active_operations_.end())
+        {
+            return;
+        }
+        auto& sessions = it->second.sessions;
+        sessions.erase(std::remove(sessions.begin(), sessions.end(), session), sessions.end());
+        erase_empty_active_operation_locked(it);
+    }
 
     void register_active_channel(OperationId operation_id, std::shared_ptr<ChannelResource> channel)
     {
@@ -1109,7 +1189,7 @@ private:
 
     void erase_empty_active_operation_locked(std::map<OperationId, ActiveOperation>::iterator it)
     {
-        if (it->second.channels.empty() && it->second.sftp_files.empty())
+        if (it->second.sessions.empty() && it->second.channels.empty() && it->second.sftp_files.empty())
         {
             active_operations_.erase(it);
         }
@@ -1489,6 +1569,35 @@ private:
         return true;
     }
 
+    bool connect_nonblocking(OperationContext& context, const std::shared_ptr<ActiveSessionResource>& session)
+    {
+        while (check_active(context))
+        {
+            int rc = SSH_ERROR;
+            {
+                std::lock_guard<std::mutex> session_lock(session->mutex);
+                if (!session->handle.value)
+                {
+                    return false;
+                }
+                ssh_set_blocking(session->handle.value, 0);
+                rc = ssh_connect(session->handle.value);
+                if (rc == SSH_OK)
+                {
+                    ssh_set_blocking(session->handle.value, 1);
+                    return true;
+                }
+            }
+
+            if (rc != SSH_AGAIN)
+            {
+                return false;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return false;
+    }
+
     bool check_active(OperationContext& context)
     {
         if (context.token().is_expired())
@@ -1502,6 +1611,42 @@ private:
             return false;
         }
         return true;
+    }
+
+    std::map<std::string, std::string> known_host_challenge_fields(ssh_session session, const ConnectOptions& options, ErrorCode code)
+    {
+        auto fields = error_fields(code);
+        fields["host"] = options.target.host;
+        fields["port"] = std::to_string(options.target.port);
+        fields["username"] = options.target.username;
+        fields["known-hosts-path"] = options.known_hosts_path;
+        fields["known-hosts-source"] = options.known_hosts_path.empty() ? "default" : "configured";
+        fields["reason"] = error_code_to_string(code);
+
+        ssh_key public_key = nullptr;
+        if (session && ssh_get_server_publickey(session, &public_key) == SSH_OK && public_key)
+        {
+            const char* key_type = ssh_key_type_to_char(ssh_key_type(public_key));
+            if (key_type)
+            {
+                fields["key-type"] = key_type;
+            }
+
+            unsigned char* hash = nullptr;
+            size_t hash_length = 0;
+            if (ssh_get_publickey_hash(public_key, SSH_PUBLICKEY_HASH_SHA256, &hash, &hash_length) == SSH_OK && hash)
+            {
+                char* fingerprint = ssh_get_hexa(hash, hash_length);
+                if (fingerprint)
+                {
+                    fields["fingerprint"] = fingerprint;
+                    ssh_string_free_char(fingerprint);
+                }
+                ssh_clean_pubkey_hash(&hash);
+            }
+            ssh_key_free(public_key);
+        }
+        return fields;
     }
 
     bool check_known_host(OperationContext& context, SessionHandle session, const ConnectOptions& options)
@@ -1532,11 +1677,12 @@ private:
 
         if ((code == ErrorCode::UnknownHost || code == ErrorCode::ChangedHostKey) && options.known_host_policy == KnownHostPolicy::Ask)
         {
+            auto fields = known_host_challenge_fields(session.value, options, code);
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 pending_[context.operation_id()] = PendingConnect{ std::move(session), options, code, message };
             }
-            context.sink().emit(Event{ EventKind::KnownHostChallenge, context.operation_id(), 0, 0, 0, error_fields(code), code, message });
+            context.sink().emit(Event{ EventKind::KnownHostChallenge, context.operation_id(), 0, 0, 0, std::move(fields), code, message });
             return false;
         }
 

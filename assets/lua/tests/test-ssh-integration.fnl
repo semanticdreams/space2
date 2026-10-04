@@ -149,6 +149,14 @@
         (local connect-op (ssh.connect (connect-options fixture "ask")))
         (local (challenge) (wait-for-kind ssh connect-op "known-host-challenge" "known-host challenge should be emitted"))
         (assert (= challenge.error-code "unknown-host") "known-host challenge should identify unknown host")
+        (assert (= challenge.fields.host fixture.host) "known-host challenge should include target host")
+        (assert (= challenge.fields.port (tostring fixture.port)) "known-host challenge should include target port")
+        (assert (= challenge.fields.username fixture.username) "known-host challenge should include username")
+        (assert (= challenge.fields.known-hosts-path fixture.known-hosts-path) "known-host challenge should include known-hosts path")
+        (assert (= challenge.fields.known-hosts-source "configured") "known-host challenge should identify known-hosts source")
+        (assert (= challenge.fields.reason "unknown-host") "known-host challenge should include reason")
+        (assert (and challenge.fields.key-type (> (# challenge.fields.key-type) 0)) "known-host challenge should include key type")
+        (assert (and challenge.fields.fingerprint (> (# challenge.fields.fingerprint) 0)) "known-host challenge should include fingerprint")
         (assert (ssh.resolve-known-host connect-op "accept-and-store") "known-host decision should be accepted")
         (local (_terminal events) (wait-for-terminal ssh connect-op "accepted known-host connect should finish"))
         (local connected (find-event events connect-op "connected"))
@@ -171,6 +179,15 @@
   (assert (= stdout.fields.data "stdout-ok") "exec stdout should match")
   (assert (= stderr.fields.data "stderr-ok") "exec stderr should match")
   (assert (= complete.fields.exit-status "7") "exec exit status should be captured"))
+
+(fn exec-env [ssh session-id]
+  (local op (ssh.exec session-id {:command "printf %s \"$SPACE_SSH_ENV_PROBE\"" :env {:SPACE_SSH_ENV_PROBE "env-ok"} :timeout-ms 10000}))
+  (local (_terminal events) (wait-for-terminal ssh op "exec env should finish"))
+  (local stdout (find-event events op "exec-stdout"))
+  (local success (find-event events op "operation-success"))
+  (assert stdout "exec env should emit stdout")
+  (assert-success success "exec env transport should succeed")
+  (assert (= stdout.fields.data "env-ok") "exec env should be visible to remote command"))
 
 (fn sftp-round-trip [ssh fixture session-id]
   (local payload (.. "space\0ssh\255payload\n" (string.char 1 2 3 250)))
@@ -258,6 +275,7 @@
         (local (session-id unavailable?) (connect-with-known-host-acceptance ssh fixture))
         (when (not unavailable?)
           (exec-nonzero ssh session-id)
+          (exec-env ssh session-id)
           (sftp-round-trip ssh fixture session-id)
           (shell-round-trip ssh session-id)
           (local-tunnel-round-trip ssh fixture session-id)
