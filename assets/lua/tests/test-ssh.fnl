@@ -8,7 +8,13 @@
 
 (fn require-ssh-returns-table []
   (local ssh (require :ssh))
-  (assert (= (type ssh) :table) "ssh module should return a table"))
+  (assert (= (type ssh) :table) "ssh module should return a table")
+  (assert (= (type ssh.available) :boolean) "ssh.available should report backend availability")
+  (when ssh.available
+    (assert (= ssh.missing-reason nil) "available backend should not report a missing reason"))
+  (when (not ssh.available)
+    (assert (= ssh.missing-reason "libssh backend not available")
+            "unavailable backend should report its native missing reason")))
 
 (fn native-functions-use-kebab-case []
   (local ssh (require :ssh))
@@ -43,28 +49,6 @@
   (fn []
     (not (= (get-terminal) nil))))
 
-(fn read-existing-file! [paths]
-  (var contents nil)
-  (each [_ path (ipairs paths)]
-    (when (not contents)
-      (local file (io.open path :r))
-      (when file
-        (set contents (assert (file:read :*a) (.. "failed to read " path)))
-        (file:close))))
-  (assert contents (.. "failed to open any CMake cache path: " (table.concat paths ", ")))
-  contents)
-
-(fn cmake-cache-enabled? [contents key]
-  (not (= (string.match contents (.. key ":BOOL=ON")) nil)))
-
-(fn cmake-cache-found? [contents key]
-  (not (= (string.match contents (.. key ":INTERNAL=1")) nil)))
-
-(fn ssh-backend-available-from-cmake-cache? []
-  (local contents (read-existing-file! ["CMakeCache.txt" "build/CMakeCache.txt"]))
-  (and (cmake-cache-enabled? contents "SPACE_ENABLE_SSH")
-       (cmake-cache-found? contents "LIBSSH_FOUND")))
-
 (fn unavailable-backend-callback-result-is-structured []
   (local ssh (require :ssh))
   (local callbacks (require :callbacks))
@@ -82,7 +66,9 @@
   (assert completed "ssh connect should produce a terminal callback event")
   (assert (= terminal.operation-id operation-id)
           "terminal backend event should include the operation id")
-  (when (not (ssh-backend-available-from-cmake-cache?))
+  (when (not ssh.available)
+    (assert (= ssh.missing-reason "libssh backend not available")
+            "unavailable backend should expose native missing reason")
     (assert (= terminal.kind "operation-error")
             "unavailable backend should be reported as operation-error")
     (assert (= terminal.error-code "unavailable-backend")

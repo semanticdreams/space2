@@ -26,6 +26,9 @@ public:
     Service(const Service&) = delete;
     Service& operator=(const Service&) = delete;
 
+    bool available() const;
+    std::string missing_reason() const;
+
     OperationId connect(const ConnectOptions& options);
     bool resolve_known_host(OperationId operation_id, KnownHostDecision decision);
     OperationId close_session(SessionId session_id);

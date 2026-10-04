@@ -110,6 +110,16 @@ CancellationToken& OperationContext::token()
     return token_;
 }
 
+bool Backend::available() const
+{
+    return true;
+}
+
+std::string Backend::missing_reason() const
+{
+    return {};
+}
+
 std::string error_code_to_string(ErrorCode code)
 {
     switch (code)
@@ -181,6 +191,16 @@ Service::Service(std::unique_ptr<Backend> backend)
 Service::~Service()
 {
     shutdown();
+}
+
+bool Service::available() const
+{
+    return backend_->available();
+}
+
+std::string Service::missing_reason() const
+{
+    return backend_->missing_reason();
 }
 
 std::unique_ptr<Backend> make_default_backend()

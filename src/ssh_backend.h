@@ -49,6 +49,9 @@ class Backend
 public:
     virtual ~Backend() = default;
 
+    virtual bool available() const;
+    virtual std::string missing_reason() const;
+
     virtual void connect(OperationContext& context, const ConnectOptions& options) = 0;
     virtual void resolve_known_host(OperationContext& context, KnownHostDecision decision) = 0;
     virtual void close_session(OperationContext& context, SessionId session_id) = 0;

@@ -457,7 +457,23 @@ void unavailable_backend_returns_structured_error()
     expect_eq(events[0].error_code, ErrorCode::UnavailableBackend, "unavailable error code");
     expect_eq(events[0].fields.at("error-code"), std::string("unavailable-backend"), "unavailable error field");
     expect_true(events[0].message.find("SSH backend not available") != std::string::npos,
-                 "unavailable error message names reason");
+                  "unavailable error message names reason");
+}
+
+void unavailable_backend_reports_availability_reason()
+{
+    Service service(make_unavailable_backend("libssh backend not available"));
+
+    expect_true(!service.available(), "unavailable backend must report unavailable");
+    expect_eq(service.missing_reason(), std::string("libssh backend not available"), "unavailable backend reason");
+}
+
+void available_backend_reports_no_missing_reason()
+{
+    Service service(std::make_unique<FakeBackend>(FakeBackend::Mode::ImmediateConnect));
+
+    expect_true(service.available(), "working backend must report available");
+    expect_eq(service.missing_reason(), std::string(), "working backend must not report a missing reason");
 }
 
 void default_backend_factory_never_returns_null()
@@ -935,6 +951,8 @@ int main()
         run("connect_returns_monotonic_operation_ids", connect_returns_monotonic_operation_ids);
         run("poll_preserves_event_order", poll_preserves_event_order);
         run("unavailable_backend_returns_structured_error", unavailable_backend_returns_structured_error);
+        run("unavailable_backend_reports_availability_reason", unavailable_backend_reports_availability_reason);
+        run("available_backend_reports_no_missing_reason", available_backend_reports_no_missing_reason);
         run("default_backend_factory_never_returns_null", default_backend_factory_never_returns_null);
         run("default_backend_reports_unavailable_when_libssh_missing", default_backend_reports_unavailable_when_libssh_missing);
         run("public_headers_do_not_include_libssh_symbols", public_headers_do_not_include_libssh_symbols);
