@@ -986,9 +986,9 @@
                     "GraphMap.capture-selected-subgraph-state requires opts table")
             (self:capture-subgraph-state self.selected_node_keys
                                          {:selected-node-keys self.selected_node_keys
-                                          :focused-node-key (if (not (= options.focused-node-key nil))
-                                                               options.focused-node-key
-                                                               self.focused_node_key)})))
+                                          :focused-node-key (if (or (= (type options.focused-node-key) :string) (= options.focused-node-key-provided? true))
+                                                              options.focused-node-key
+                                                              self.focused_node_key)})))
 
     (set self.drop
         (fn [_self]

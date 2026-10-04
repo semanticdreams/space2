@@ -195,7 +195,8 @@
   (local manager (require-map-manager opts))
   (assert graph-map.capture-selected-subgraph-state "GraphCommands requires active graph map capture-selected-subgraph-state")
   (assert manager.create-and-switch-map! "GraphCommands requires graph-map-manager create-and-switch-map!")
-  (local state (graph-map:capture-selected-subgraph-state {:focused-node-key (graph-view-focused-node-key graph-view)}))
+  (local state (graph-map:capture-selected-subgraph-state {:focused-node-key (graph-view-focused-node-key graph-view)
+                                                           :focused-node-key-provided? true}))
   (manager:create-and-switch-map! {:name "Selection" :state state}))
 
 (fn run-clear-active [opts]

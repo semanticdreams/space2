@@ -184,6 +184,8 @@
     (assert (= (. state.selected_node_keys 1) "test:a"))
     (assert (= (. state.selected_node_keys 2) "test:b"))
     (assert (= state.focused_node_key "test:b") "Selected subgraph should keep included focus")
+    (local nil-focus-state (map:capture-selected-subgraph-state {:focused-node-key-provided? true}))
+    (assert (= nil-focus-state.focused_node_key nil) "Selected subgraph should honor explicitly absent current focus")
     (assert (= (length state.islands) 1) "Selected subgraph should include only complete islands")
     (assert (= (. (. state.islands 1) :id) "complete"))
     (assert (= state.panels nil) "Selected subgraph state should not include panels")
@@ -192,7 +194,6 @@
     (assert (= state.domain_data nil) "Selected subgraph state should not include domain data")
     (map:drop)
     (graph:drop))
-
 (fn graph-map-add-start-node-uses-key-loader []
     (local graph (Graph {:with-start false}))
     (graph:register-key-loader "start"
@@ -214,7 +215,6 @@
             "GraphMap add-start-node! failure should name missing start key")
     (map-without-start:drop)
     (graph-without-start:drop))
-
 (fn graph-map-restores-state []
     (local graph (Graph {:with-start false}))
     (graph:register-key-loader "test"

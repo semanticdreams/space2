@@ -253,10 +253,12 @@
    :clear! (fn [_self]
              (set calls.clear (+ calls.clear 1))
              true)
-   :clearable? (fn [_self] (= options.clearable? true))
-   :capture-selected-subgraph-state (fn [_self capture-opts]
-                                      (set calls.capture (+ calls.capture 1))
-                                      {:captured-focus capture-opts.focused-node-key})})
+    :clearable? (fn [_self] (= options.clearable? true))
+    :capture-selected-subgraph-state (fn [_self capture-opts]
+                                       (set calls.capture (+ calls.capture 1))
+                                       {:captured-focus (if capture-opts.focused-node-key-provided?
+                                                           capture-opts.focused-node-key
+                                                           options.focused-node-key)})})
 
 (fn make-expanded-manager-stub []
   (local calls {:create []})
