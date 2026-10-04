@@ -492,6 +492,30 @@ Do not silently delete backing objects when removing from a map.
 
 `Add Start` is map membership recovery, not automatic start-node re-seeding. It uses the registry-installed `start` key loader through the active `GraphMap` and does not delete or mutate backing domain objects.
 
+### Leader map commands
+
+Leader graph map commands live under `SPC g m ...` and operate on the active map:
+
+| Binding | Command | Semantics |
+| --- | --- | --- |
+| `SPC g m a` | Add Start | Explicitly adds the `start` node to the active map when absent. |
+| `SPC g m n` | New Empty Map | Creates and switches to an empty map. It does not seed `start`; use Add Start when that node is wanted. |
+| `SPC g m s` | New Map From Selection | Creates and switches to a map containing a map-local copy of the current selected subgraph. |
+| `SPC g m c` | Clear Map | Clears the active map's map-local topology and interaction state. |
+
+Clear Map is non-destructive. It removes active-map node membership, explicit map edges, presentation islands, selection, and focus, but it does not delete backing domain objects or shared graph records.
+
+New Map From Selection copies only map-local topology from the selected visible nodes:
+
+- selected visible node keys;
+- explicit map edges whose endpoints are both selected;
+- selection and focus restricted to copied nodes;
+- presentation islands only when every island member is included.
+
+It does not copy graph panels, graph-view camera state, high-churn metadata such as positions/card sizes, or backing domain data. Domain stores and shared graph-addressable objects remain owned by their original systems.
+
+Active map delete and rename leader commands remain outside leader-command scope in this phase. Sidebar controls may still expose map management actions independently of leader bindings.
+
 String entity `Create child` is a node-specific domain action. It mutates `StringEntityStore` and `LinkEntityStore`, then materializes the new child node in the containing `GraphMap`; it does not add an explicit map edge.
 
 ## Migration Phases
