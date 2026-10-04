@@ -81,4 +81,6 @@ private:
     bool shutdown_ { false };
 };
 
+std::unique_ptr<Backend> make_default_backend();
+
 }

@@ -2,9 +2,12 @@
 #include "ssh_service.h"
 
 #include <atomic>
+#include <array>
 #include <chrono>
 #include <exception>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -263,7 +266,70 @@ void unavailable_backend_returns_structured_error()
     expect_eq(events[0].error_code, ErrorCode::UnavailableBackend, "unavailable error code");
     expect_eq(events[0].fields.at("error-code"), std::string("unavailable-backend"), "unavailable error field");
     expect_true(events[0].message.find("SSH backend not available") != std::string::npos,
-                "unavailable error message names reason");
+                 "unavailable error message names reason");
+}
+
+void default_backend_factory_never_returns_null()
+{
+    auto backend = make_default_backend();
+
+    expect_true(static_cast<bool>(backend), "default backend factory must return a backend");
+}
+
+void default_backend_reports_unavailable_when_libssh_missing()
+{
+#if SPACE_HAS_LIBSSH
+    return;
+#else
+    Service service(make_default_backend());
+
+    service.connect(connect_options());
+    auto events = poll_until(service, 1);
+
+    expect_eq(events.size(), std::size_t{ 1 }, "expected unavailable default backend error");
+    expect_eq(events[0].kind, EventKind::OperationError, "default backend unavailable event kind");
+    expect_eq(events[0].error_code, ErrorCode::UnavailableBackend, "default backend unavailable error code");
+    expect_eq(events[0].fields.at("error-code"), std::string("unavailable-backend"), "default backend unavailable field");
+    expect_eq(events[0].message, std::string("libssh backend not available"), "default backend unavailable reason");
+#endif
+}
+
+std::string read_header(const std::string& path)
+{
+    std::ifstream input(path);
+    if (!input)
+    {
+        input.open("../" + path);
+    }
+    if (!input)
+    {
+        throw std::runtime_error("failed to open " + path);
+    }
+    return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+}
+
+void public_headers_do_not_include_libssh_symbols()
+{
+    const std::array<std::string, 3> headers = {
+        "src/ssh_types.h",
+        "src/ssh_backend.h",
+        "src/ssh_service.h",
+    };
+    const std::array<std::string, 4> forbidden = {
+        "libssh",
+        "ssh_session",
+        "ssh_channel",
+        "ssh_scp",
+    };
+
+    for (const auto& header : headers)
+    {
+        const std::string contents = read_header(header);
+        for (const auto& symbol : forbidden)
+        {
+            expect_true(contents.find(symbol) == std::string::npos, header + " exposes " + symbol);
+        }
+    }
 }
 
 void invalid_session_operations_fail_loudly()
@@ -418,6 +484,9 @@ int main()
         run("connect_returns_monotonic_operation_ids", connect_returns_monotonic_operation_ids);
         run("poll_preserves_event_order", poll_preserves_event_order);
         run("unavailable_backend_returns_structured_error", unavailable_backend_returns_structured_error);
+        run("default_backend_factory_never_returns_null", default_backend_factory_never_returns_null);
+        run("default_backend_reports_unavailable_when_libssh_missing", default_backend_reports_unavailable_when_libssh_missing);
+        run("public_headers_do_not_include_libssh_symbols", public_headers_do_not_include_libssh_symbols);
         run("invalid_session_operations_fail_loudly", invalid_session_operations_fail_loudly);
         run("cancel_emits_cancelled_terminal_event", cancel_emits_cancelled_terminal_event);
         run("timeout_emits_timeout_terminal_event", timeout_emits_timeout_terminal_event);

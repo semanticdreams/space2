@@ -1,5 +1,7 @@
 #include "ssh_service.h"
 
+#include "ssh_backend_libssh.h"
+
 #include <algorithm>
 #include <functional>
 #include <stdexcept>
@@ -179,6 +181,15 @@ Service::Service(std::unique_ptr<Backend> backend)
 Service::~Service()
 {
     shutdown();
+}
+
+std::unique_ptr<Backend> make_default_backend()
+{
+#if SPACE_HAS_LIBSSH
+    return make_libssh_backend();
+#else
+    return make_unavailable_backend("libssh backend not available");
+#endif
 }
 
 OperationId Service::connect(const ConnectOptions& options)
