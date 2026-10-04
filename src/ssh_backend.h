@@ -62,6 +62,7 @@ public:
     virtual void open_local_tunnel(OperationContext& context, SessionId session_id, const TunnelOptions& options) = 0;
     virtual void open_remote_tunnel(OperationContext& context, SessionId session_id, const TunnelOptions& options) = 0;
     virtual void close_tunnel(OperationContext& context, TunnelId tunnel_id) = 0;
+    virtual void cancel_operation(OperationId operation_id);
 };
 
 std::unique_ptr<Backend> make_unavailable_backend(std::string reason);

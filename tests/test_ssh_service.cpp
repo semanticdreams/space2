@@ -90,6 +90,7 @@ public:
         WaitForCancel,
         SleepPastTimeout,
         EmitStdoutAfterTimeout,
+        EmitBackendErrorAfterTimeout,
         EmitStdoutAfterCancel,
         AllocateThenError,
         KnownHostChallenge,
@@ -132,6 +133,20 @@ public:
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
             context.sink().emit(Event{ EventKind::ExecStdout, context.operation_id(), 0, 0, 0, {{ "data", "late" }} });
+            return;
+        }
+
+        if (mode_ == Mode::EmitBackendErrorAfterTimeout)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            context.sink().emit(Event{ EventKind::OperationError,
+                                        context.operation_id(),
+                                        0,
+                                        0,
+                                        0,
+                                        {{ "error-code", "backend-error" }},
+                                        ErrorCode::BackendError,
+                                        "backend reported late failure" });
             return;
         }
 
@@ -198,6 +213,16 @@ public:
         return last_session_id_.load();
     }
 
+    int cancelled_operations() const
+    {
+        return cancelled_operations_.load();
+    }
+
+    void cancel_operation(OperationId) override
+    {
+        cancelled_operations_.fetch_add(1);
+    }
+
     void close_session(OperationContext& context, SessionId session_id) override
     {
         context.sink().emit(Event{ EventKind::SessionClosed, context.operation_id(), session_id });
@@ -230,6 +255,7 @@ public:
 private:
     Mode mode_;
     std::atomic<SessionId> last_session_id_ { 0 };
+    std::atomic<int> cancelled_operations_ { 0 };
 };
 
 void connect_returns_monotonic_operation_ids()
@@ -386,6 +412,53 @@ void late_non_terminal_events_after_timeout_are_suppressed()
     expect_eq(count_kind(late, EventKind::ExecStdout), std::size_t{ 0 }, "late stdout after timeout must be suppressed");
 }
 
+void late_backend_error_after_timeout_is_reported_as_timeout()
+{
+    Service service(std::make_unique<FakeBackend>(FakeBackend::Mode::EmitBackendErrorAfterTimeout));
+
+    service.connect(connect_options(1));
+    auto timeout = poll_until(service, 1);
+
+    expect_eq(timeout.size(), std::size_t{ 1 }, "expected one terminal event");
+    expect_eq(timeout[0].kind, EventKind::OperationTimeout, "timeout must win over late backend error");
+    expect_eq(timeout[0].error_code, ErrorCode::Timeout, "late backend error after timeout must remain timeout-classified");
+}
+
+void cancel_notifies_backend_for_pending_cleanup()
+{
+    auto backend = std::make_unique<FakeBackend>(FakeBackend::Mode::KnownHostChallenge);
+    FakeBackend* backend_ptr = backend.get();
+    Service service(std::move(backend));
+
+    const OperationId operation_id = service.connect(connect_options());
+    auto challenge = poll_until(service, 1);
+    expect_eq(challenge.size(), std::size_t{ 1 }, "expected known-host challenge before cancel");
+    expect_eq(challenge[0].kind, EventKind::KnownHostChallenge, "challenge event kind before cancel");
+
+    expect_true(service.cancel(operation_id), "cancel should accept pending known-host operation");
+    auto cancelled = poll_until(service, 1);
+
+    expect_eq(count_kind(cancelled, EventKind::OperationCancelled), std::size_t{ 1 }, "expected cancelled event");
+    expect_eq(backend_ptr->cancelled_operations(), 1, "backend must be notified to clean pending challenge resources");
+}
+
+void timeout_notifies_backend_for_pending_cleanup()
+{
+    auto backend = std::make_unique<FakeBackend>(FakeBackend::Mode::KnownHostChallenge);
+    FakeBackend* backend_ptr = backend.get();
+    Service service(std::move(backend));
+
+    service.connect(connect_options(20));
+    auto challenge = poll_until(service, 1);
+    expect_eq(challenge.size(), std::size_t{ 1 }, "expected known-host challenge before timeout");
+    expect_eq(challenge[0].kind, EventKind::KnownHostChallenge, "challenge event kind before timeout");
+
+    auto timeout = poll_until(service, 1);
+
+    expect_eq(count_kind(timeout, EventKind::OperationTimeout), std::size_t{ 1 }, "expected timeout after unresolved challenge");
+    expect_eq(backend_ptr->cancelled_operations(), 1, "backend must be notified to clean timed-out challenge resources");
+}
+
 void late_non_terminal_events_after_cancel_are_suppressed()
 {
     Service service(std::make_unique<FakeBackend>(FakeBackend::Mode::EmitStdoutAfterCancel));
@@ -491,6 +564,9 @@ int main()
         run("cancel_emits_cancelled_terminal_event", cancel_emits_cancelled_terminal_event);
         run("timeout_emits_timeout_terminal_event", timeout_emits_timeout_terminal_event);
         run("late_non_terminal_events_after_timeout_are_suppressed", late_non_terminal_events_after_timeout_are_suppressed);
+        run("late_backend_error_after_timeout_is_reported_as_timeout", late_backend_error_after_timeout_is_reported_as_timeout);
+        run("cancel_notifies_backend_for_pending_cleanup", cancel_notifies_backend_for_pending_cleanup);
+        run("timeout_notifies_backend_for_pending_cleanup", timeout_notifies_backend_for_pending_cleanup);
         run("late_non_terminal_events_after_cancel_are_suppressed", late_non_terminal_events_after_cancel_are_suppressed);
         run("allocated_session_is_not_live_after_failed_connect", allocated_session_is_not_live_after_failed_connect);
         run("known_host_challenge_blocks_until_resolution", known_host_challenge_blocks_until_resolution);

@@ -365,6 +365,10 @@ OperationId Service::close_tunnel(TunnelId tunnel_id)
     return operation_id;
 }
 
+void Backend::cancel_operation(OperationId)
+{
+}
+
 bool Service::cancel(OperationId operation_id)
 {
     return finish_operation(operation_id, EventKind::OperationCancelled, ErrorCode::Cancelled, "SSH operation cancelled");
@@ -591,22 +595,26 @@ void Service::run_backend_work(OperationId operation_id, const std::shared_ptr<O
 
 bool Service::finish_operation(OperationId operation_id, EventKind kind, ErrorCode code, std::string message)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (shutdown_)
     {
-        return false;
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (shutdown_)
+        {
+            return false;
+        }
+
+        auto it = operations_.find(operation_id);
+        if (it == operations_.end() || it->second->terminal)
+        {
+            return false;
+        }
+
+        it->second->terminal = true;
+        it->second->token->cancel();
+        operations_.erase(it);
+        queue_event_locked(Event{ kind, operation_id, 0, 0, 0, error_fields(code), code, std::move(message) });
     }
 
-    auto it = operations_.find(operation_id);
-    if (it == operations_.end() || it->second->terminal)
-    {
-        return false;
-    }
-
-    it->second->terminal = true;
-    it->second->token->cancel();
-    operations_.erase(it);
-    queue_event_locked(Event{ kind, operation_id, 0, 0, 0, error_fields(code), code, std::move(message) });
+    backend_->cancel_operation(operation_id);
     return true;
 }
 

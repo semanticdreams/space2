@@ -102,6 +102,10 @@ public:
 
         if (ssh_connect(session.value) != SSH_OK)
         {
+            if (!check_active(context))
+            {
+                return;
+            }
             context.sink().emit(error_event(context.operation_id(), ErrorCode::BackendError, "SSH backend failed to connect"));
             return;
         }
@@ -135,6 +139,10 @@ public:
 
         if (decision == KnownHostDecision::AcceptAndStore && ssh_session_update_known_hosts(pending.session.value) != SSH_OK)
         {
+            if (!check_active(context))
+            {
+                return;
+            }
             context.sink().emit(error_event(context.operation_id(), ErrorCode::BackendError, "SSH backend failed to store known host"));
             return;
         }
@@ -150,6 +158,12 @@ public:
         }
         context.sink().emit(Event{ EventKind::SessionClosed, context.operation_id(), session_id });
         context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), session_id });
+    }
+
+    void cancel_operation(OperationId operation_id) override
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        pending_.erase(operation_id);
     }
 
     void exec(OperationContext& context, SessionId, const ExecOptions&) override { emit_unsupported(context); }
@@ -203,14 +217,14 @@ private:
 
     bool check_active(OperationContext& context)
     {
-        if (context.token().is_cancelled())
-        {
-            context.sink().emit(Event{ EventKind::OperationCancelled, context.operation_id(), 0, 0, 0, error_fields(ErrorCode::Cancelled), ErrorCode::Cancelled, "SSH operation cancelled" });
-            return false;
-        }
         if (context.token().is_expired())
         {
             context.sink().emit(Event{ EventKind::OperationTimeout, context.operation_id(), 0, 0, 0, error_fields(ErrorCode::Timeout), ErrorCode::Timeout, "SSH operation timed out" });
+            return false;
+        }
+        if (context.token().is_cancelled())
+        {
+            context.sink().emit(Event{ EventKind::OperationCancelled, context.operation_id(), 0, 0, 0, error_fields(ErrorCode::Cancelled), ErrorCode::Cancelled, "SSH operation cancelled" });
             return false;
         }
         return true;
@@ -219,6 +233,10 @@ private:
     bool check_known_host(OperationContext& context, SessionHandle session, const ConnectOptions& options)
     {
         const int state = ssh_session_is_known_server(session.value);
+        if (!check_active(context))
+        {
+            return false;
+        }
         if (state == SSH_KNOWN_HOSTS_OK)
         {
             authenticate_and_register(context, std::move(session), options);
@@ -252,6 +270,10 @@ private:
         {
             if (ssh_session_update_known_hosts(session.value) != SSH_OK)
             {
+                if (!check_active(context))
+                {
+                    return false;
+                }
                 context.sink().emit(error_event(context.operation_id(), ErrorCode::BackendError, "SSH backend failed to store known host"));
                 return false;
             }
