@@ -25,21 +25,45 @@
   (assert (string.find (tostring err) "authMethods" 1 true)
           "error should identify the invalid option"))
 
-(fn unavailable-backend-poll-result-is-structured []
+(fn terminal-ssh-event? [event]
+  (if (= event.kind "operation-error")
+      true
+      (= event.kind "operation-success")
+      true
+      (= event.kind "operation-timeout")
+      true
+      (= event.kind "operation-cancelled")))
+
+(fn terminal-event-callback [set-terminal]
+  (fn [event]
+    (when (terminal-ssh-event? event)
+      (set-terminal event))))
+
+(fn terminal-ready? [get-terminal]
+  (fn []
+    (not (= (get-terminal) nil))))
+
+(fn unavailable-backend-callback-result-is-structured []
   (local ssh (require :ssh))
-  (local operation-id (ssh.connect {:target {:host "example.invalid"}}))
-  (var unavailable nil)
-  (var attempts 0)
-  (while (and (not unavailable) (< attempts 50))
-    (set attempts (+ attempts 1))
-    (each [_ event (ipairs (ssh.poll))]
-      (when (and (= event.kind "operation-error")
-                 (= event.error-code "unavailable-backend"))
-        (set unavailable event))))
-  (when unavailable
-    (assert (= unavailable.operation-id operation-id)
-            "unavailable backend event should include the operation id")
-    (assert (= unavailable.error-code "unavailable-backend")
+  (local callbacks (require :callbacks))
+  (var terminal nil)
+  (local set-terminal (fn [event] (set terminal event)))
+  (local get-terminal (fn [] terminal))
+  (local operation-id (ssh.connect {:target {:host "example.invalid"}}
+                                   (terminal-event-callback set-terminal)))
+  (local completed (callbacks.run-loop {:poll-jobs false
+                                        :poll-http false
+                                        :poll-process false
+                                        :sleep-ms 1
+                                        :timeout-ms 200
+                                        :until (terminal-ready? get-terminal)}))
+  (assert completed "ssh connect should produce a terminal callback event")
+  (assert (= terminal.operation-id operation-id)
+          "terminal backend event should include the operation id")
+  (when (= terminal.error-code "unavailable-backend")
+    (assert (= terminal.kind "operation-error")
+            "unavailable backend should be reported as operation-error")
+    (assert (= terminal.error-code "unavailable-backend")
             "unavailable backend should use structured error-code")))
 
 (fn no-compatibility-aliases []
@@ -54,7 +78,7 @@
 (table.insert tests {:name "SSH facade require returns table" :fn require-ssh-returns-table})
 (table.insert tests {:name "SSH facade exposes native kebab-case functions" :fn native-functions-use-kebab-case})
 (table.insert tests {:name "SSH facade invalid connect options raise" :fn invalid-connect-options-raise})
-(table.insert tests {:name "SSH facade unavailable backend poll result is structured" :fn unavailable-backend-poll-result-is-structured})
+(table.insert tests {:name "SSH facade unavailable backend callback result is structured" :fn unavailable-backend-callback-result-is-structured})
 (table.insert tests {:name "SSH facade does not introduce compatibility aliases" :fn no-compatibility-aliases})
 
 (local main

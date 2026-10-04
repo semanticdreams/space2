@@ -21,46 +21,35 @@
 (fn make-success-fake []
   (local fake {:next-op 1 :started 0 :finished 0 :max-active 0 :connect-options [] :exec-options [] :operations {} :cancelled {}})
   (set fake.connect
-       (fn [opts]
+       (fn [opts callback]
          (local op fake.next-op)
          (set fake.next-op (+ fake.next-op 1))
          (set fake.started (+ fake.started 1))
          (set fake.max-active (math.max fake.max-active (- fake.started fake.finished)))
          (table.insert fake.connect-options opts)
          (set (. fake.operations op) {:phase :connect :session-id (+ 100 op)})
+         (when callback
+           (callback {:kind "connected" :operation-id op :session-id (+ 100 op)})
+           (callback {:kind "operation-success" :operation-id op :session-id (+ 100 op)}))
          op))
   (set fake.exec
-       (fn [session-id opts]
+       (fn [session-id opts callback]
          (local op fake.next-op)
          (set fake.next-op (+ fake.next-op 1))
          (table.insert fake.exec-options opts)
          (set (. fake.operations op) {:phase :exec :session-id session-id})
+         (when callback
+           (set fake.finished (+ fake.finished 1))
+           (callback {:kind "exec-stdout" :operation-id op :fields {:data "out"}})
+           (callback {:kind "exec-stderr" :operation-id op :fields {:data "err"}})
+           (callback {:kind "exec-complete" :operation-id op :fields {:exit-status "7"}})
+           (callback {:kind "operation-success" :operation-id op :session-id session-id}))
          op))
   (set fake.cancel
        (fn [op]
          (set (. fake.cancelled op) true)
          true))
-  (set fake.poll
-       (fn []
-         (var selected-op nil)
-         (var selected nil)
-         (each [op state (pairs fake.operations)]
-           (when (not selected-op)
-             (set selected-op op)
-             (set selected state)))
-         (if (not selected-op)
-             []
-             (do
-               (set (. fake.operations selected-op) nil)
-               (if (= selected.phase :connect)
-                   [{:kind "connected" :operation-id selected-op :session-id selected.session-id}
-                    {:kind "operation-success" :operation-id selected-op :session-id selected.session-id}]
-                   (do
-                     (set fake.finished (+ fake.finished 1))
-                     [{:kind "exec-stdout" :operation-id selected-op :fields {:data "out"}}
-                      {:kind "exec-stderr" :operation-id selected-op :fields {:data "err"}}
-                      {:kind "exec-complete" :operation-id selected-op :fields {:exit-status "7"}}
-                      {:kind "operation-success" :operation-id selected-op :session-id selected.session-id}]))))))
+  (set fake.poll (fn [] (error "ssh.fleet must not drain global ssh.poll")))
   fake)
 
 (fn fleet-concurrency-results-and-known-host-pass-through []
@@ -90,7 +79,7 @@
 (fn make-idle-fake []
   (local fake {:next-op 1 :cancelled {}})
   (set fake.connect
-       (fn [_opts]
+       (fn [_opts _callback]
          (local op fake.next-op)
          (set fake.next-op (+ fake.next-op 1))
          op))
@@ -99,7 +88,7 @@
        (fn [op]
          (set (. fake.cancelled op) true)
          true))
-  (set fake.poll (fn [] []))
+  (set fake.poll (fn [] (error "ssh.fleet must not drain global ssh.poll")))
   fake)
 
 (fn per-host-timeout-cancels-operation []
@@ -116,24 +105,21 @@
 (fn make-cancelling-fake []
   (local fake {:next-op 1 :cancelled {} :cancel-issued false})
   (set fake.connect
-       (fn [_opts]
+       (fn [_opts callback]
          (local op fake.next-op)
-         (set fake.next-op (+ fake.next-op 1))
-         (set fake.operation-id op)
-         op))
+          (set fake.next-op (+ fake.next-op 1))
+          (set fake.operation-id op)
+          (set fake.cancel-issued true)
+          (fake.cancel op)
+          (when callback
+            (callback {:kind "operation-cancelled" :operation-id op :error-code "cancelled" :message "cancelled"}))
+          op))
   (set fake.exec (fn [_session-id _opts] (error "exec should not run after cancellation")))
   (set fake.cancel
        (fn [op]
          (set (. fake.cancelled op) true)
          true))
-  (set fake.poll
-       (fn []
-         (if fake.cancel-issued
-             []
-             (do
-               (set fake.cancel-issued true)
-               (fake.cancel fake.operation-id)
-               [{:kind "operation-cancelled" :operation-id fake.operation-id :error-code "cancelled" :message "cancelled"}]))))
+  (set fake.poll (fn [] (error "ssh.fleet must not drain global ssh.poll")))
   fake)
 
 (fn cancellation-produces-cancelled-result []
@@ -150,15 +136,15 @@
 (fn make-secret-error-fake []
   (local fake {:next-op 1})
   (set fake.connect
-       (fn [_opts]
+       (fn [_opts callback]
          (local op fake.next-op)
          (set fake.next-op (+ fake.next-op 1))
+         (when callback
+           (callback {:kind "operation-error" :operation-id op :error-code "auth-failed" :message "password p.a$s[%] secret failed"}))
          op))
   (set fake.exec (fn [_session-id _opts] (error "exec should not run after connect error")))
   (set fake.cancel (fn [_op] true))
-  (set fake.poll
-       (fn []
-         [{:kind "operation-error" :operation-id 1 :error-code "auth-failed" :message "password secret failed"}]))
+  (set fake.poll (fn [] (error "ssh.fleet must not drain global ssh.poll")))
   fake)
 
 (fn credential-material-is-redacted-from-results []
@@ -166,18 +152,49 @@
   (install-fake fake
     (fn []
       (local fleet (require :ssh.fleet))
-      (local results (fleet.exec [{:host "h" :username "u" :auth-methods [{:type "password" :password "secret"}]}]
+      (local results (fleet.exec [{:host "h" :username "u" :auth-methods [{:type "password" :password "p.a$s[%]" :passphrase "secret"}]}]
                                  {:command "id" :concurrency 1}))
       (local result (. results 1))
       (assert (= result.ok false))
       (assert (= result.error-code "auth-failed"))
       (assert (not result.password) "password should not be copied to results")
+      (assert (not (contains? result.error "p.a$s[%]")) "pattern-like password should be redacted from result error")
       (assert (not (contains? result.error "secret")) "secret should be redacted from result error"))))
+
+(var validation-fleet nil)
+(var validation-hosts nil)
+(var validation-opts nil)
+
+(fn run-validation-exec []
+  (validation-fleet.exec validation-hosts validation-opts))
+
+(fn expect-validation-error [fleet hosts opts message]
+  (set validation-fleet fleet)
+  (set validation-hosts hosts)
+  (set validation-opts opts)
+  (local (ok err) (pcall run-validation-exec))
+  (set validation-fleet nil)
+  (set validation-hosts nil)
+  (set validation-opts nil)
+  (assert (= ok false) (.. "expected malformed option to fail: " message))
+  (assert (contains? (tostring err) message)
+          (.. "error should identify malformed option: " message)))
+
+(fn malformed-fleet-options-raise []
+  (local fake (make-success-fake))
+  (install-fake fake
+    (fn []
+      (local fleet (require :ssh.fleet))
+      (expect-validation-error fleet [{:host "h"}] {:command "id" :timeout_ms 1} "timeout_ms")
+      (expect-validation-error fleet [{:host "h" :userName "u"}] {:command "id"} "userName")
+      (expect-validation-error fleet [{:host "h" :port "22"}] {:command "id"} "port")
+      (expect-validation-error fleet [{:host "h"}] {:command "id" :concurrency 0} "concurrency"))))
 
 (table.insert tests {:name "SSH fleet honors concurrency and returns canonical result fields" :fn fleet-concurrency-results-and-known-host-pass-through})
 (table.insert tests {:name "SSH fleet per-host timeout cancels active operation" :fn per-host-timeout-cancels-operation})
 (table.insert tests {:name "SSH fleet cancellation produces cancelled result" :fn cancellation-produces-cancelled-result})
 (table.insert tests {:name "SSH fleet omits credential material from results" :fn credential-material-is-redacted-from-results})
+(table.insert tests {:name "SSH fleet rejects malformed and noncanonical options" :fn malformed-fleet-options-raise})
 
 (local main
   (fn []

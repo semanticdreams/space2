@@ -1,4 +1,5 @@
 (local ssh (require :ssh))
+(local callbacks (require :callbacks))
 
 (fn now-ms []
   (* (os.clock) 1000.0))
@@ -7,6 +8,74 @@
   (if (and (= (type value) :number) (>= value 1))
       (math.floor value)
       fallback))
+
+(fn has-key? [tbl key]
+  (not (= (. tbl key) nil)))
+
+(fn assert-allowed-keys [tbl allowed label]
+  (each [key _value (pairs tbl)]
+    (assert (= (type key) :string) (.. label " keys must be strings"))
+    (assert (has-key? allowed key) (.. label " contains unsupported option " key))))
+
+(fn valid-timeout? [value]
+  (and (= (type value) :number) (>= value 0)))
+
+(fn valid-positive-integer? [value]
+  (and (= (type value) :number) (>= value 1) (= value (math.floor value))))
+
+(fn validate-host [host index]
+  (assert (= (type host) :table) (.. "ssh.fleet host " index " must be a table"))
+  (assert-allowed-keys host {:host true
+                             :port true
+                             :username true
+                             :auth-methods true
+                             :known-host-policy true
+                             :known-hosts-path true
+                             :timeout-ms true}
+                       (.. "ssh.fleet host " index))
+  (assert (and (= (type host.host) :string) (> (# host.host) 0))
+          (.. "ssh.fleet host " index " requires string host"))
+  (when (not (= host.port nil))
+    (assert (and (valid-positive-integer? host.port) (<= host.port 65535))
+            (.. "ssh.fleet host " index " port must be an integer from 1 to 65535")))
+  (when (not (= host.username nil))
+    (assert (= (type host.username) :string)
+            (.. "ssh.fleet host " index " username must be a string")))
+  (when (not (= host.auth-methods nil))
+    (assert (= (type host.auth-methods) :table)
+            (.. "ssh.fleet host " index " auth-methods must be a table")))
+  (when (not (= host.known-host-policy nil))
+    (assert (or (= (type host.known-host-policy) :string)
+                (= (type host.known-host-policy) :table))
+            (.. "ssh.fleet host " index " known-host-policy must be a string or table")))
+  (when (not (= host.known-hosts-path nil))
+    (assert (= (type host.known-hosts-path) :string)
+            (.. "ssh.fleet host " index " known-hosts-path must be a string")))
+  (when (not (= host.timeout-ms nil))
+    (assert (valid-timeout? host.timeout-ms)
+            (.. "ssh.fleet host " index " timeout-ms must be a non-negative number"))))
+
+(fn validate-inputs [hosts opts]
+  (assert (= (type hosts) :table) "ssh.fleet.exec requires hosts")
+  (assert (= (type opts) :table) "ssh.fleet.exec opts must be a table")
+  (assert-allowed-keys opts {:command true
+                             :concurrency true
+                             :timeout-ms true
+                             :env true}
+                       "ssh.fleet opts")
+  (assert (and (= (type opts.command) :string) (> (# opts.command) 0))
+          "ssh.fleet.exec requires opts.command")
+  (when (not (= opts.concurrency nil))
+    (assert (valid-positive-integer? opts.concurrency)
+            "ssh.fleet opts concurrency must be a positive integer"))
+  (when (not (= opts.timeout-ms nil))
+    (assert (valid-timeout? opts.timeout-ms)
+            "ssh.fleet opts timeout-ms must be a non-negative number"))
+  (when (not (= opts.env nil))
+    (assert (= (type opts.env) :table)
+            "ssh.fleet opts env must be a table"))
+  (each [index host (ipairs hosts)]
+    (validate-host host index)))
 
 (fn host-port [host]
   (if (= host.port nil)
@@ -58,7 +127,21 @@
   (local secrets [])
   (credential-values host secrets)
   (each [_ secret (ipairs secrets)]
-    (set result (string.gsub result secret "[redacted]")))
+    (var start 1)
+    (var next-start nil)
+    (var next-end nil)
+    (local pieces [])
+    (while (do
+             (local (found-start found-end) (string.find result secret start true))
+             (set next-start found-start)
+             (set next-end found-end)
+             next-start)
+      (table.insert pieces (string.sub result start (- next-start 1)))
+      (table.insert pieces "[redacted]")
+      (set start (+ next-end 1)))
+    (when (> (length pieces) 0)
+      (table.insert pieces (string.sub result start))
+      (set result (table.concat pieces ""))))
   result)
 
 (fn base-result [host started-at]
@@ -119,7 +202,20 @@
     (set (. op-states state.exec-op) nil))
   (remove-active active state))
 
-(fn start-host [host index opts active op-states]
+(fn enqueue-event [event-queue]
+  (fn [event]
+    (table.insert event-queue event)))
+
+(fn event-queued? [event-queue]
+  (fn []
+    (> (length event-queue) 0)))
+
+(fn has-work? [hosts next-index active]
+  (if (<= next-index (length hosts))
+      true
+      (> (length active) 0)))
+
+(fn start-host [host index opts active op-states event-queue]
   (local timeout-ms (if (= host.timeout-ms nil) opts.timeout-ms host.timeout-ms))
   (local state {:host host
                 :index index
@@ -132,28 +228,28 @@
                 :connect-op nil
                 :exec-op nil
                 :current-op nil})
-  (local operation-id (ssh.connect (connect-options host timeout-ms)))
+  (local operation-id (ssh.connect (connect-options host timeout-ms) (enqueue-event event-queue)))
   (set state.connect-op operation-id)
   (set state.current-op operation-id)
   (set (. op-states operation-id) state)
   (table.insert active state))
 
-(fn start-ready-hosts [hosts opts next-index active op-states]
+(fn start-ready-hosts [hosts opts next-index active op-states event-queue]
   (local concurrency (positive-integer opts.concurrency 4))
   (var index next-index)
   (while (and (<= index (length hosts)) (< (length active) concurrency))
-    (start-host (. hosts index) index opts active op-states)
+    (start-host (. hosts index) index opts active op-states event-queue)
     (set index (+ index 1)))
   index)
 
-(fn handle-event [event opts results active op-states]
+(fn handle-event [event opts results active op-states event-queue]
   (local state (. op-states event.operation-id))
   (when state
     (if (= event.kind "connected")
         (do
           (set state.session-id event.session-id)
           (set state.phase :exec)
-          (local exec-op (ssh.exec event.session-id (exec-options opts state.timeout-ms)))
+          (local exec-op (ssh.exec event.session-id (exec-options opts state.timeout-ms) (enqueue-event event-queue)))
           (set state.exec-op exec-op)
         (set state.current-op exec-op)
         (set (. op-states exec-op) state))
@@ -185,17 +281,26 @@
     (finish state results active op-states false "timeout" "operation timed out")))
 
 (fn exec [hosts opts]
-  (assert (= (type hosts) :table) "ssh.fleet.exec requires hosts")
   (local run-opts (if (= opts nil) {} opts))
+  (validate-inputs hosts run-opts)
   (local results [])
   (local active [])
   (local op-states {})
-  (var next-index (start-ready-hosts hosts run-opts 1 active op-states))
-  (while (or (<= next-index (length hosts)) (> (length active) 0))
-    (each [_ event (ipairs (ssh.poll))]
-      (handle-event event run-opts results active op-states))
+  (local event-queue [])
+  (var next-index (start-ready-hosts hosts run-opts 1 active op-states event-queue))
+  (while (has-work? hosts next-index active)
+    (while (> (length event-queue) 0)
+      (local event (table.remove event-queue 1))
+      (handle-event event run-opts results active op-states event-queue))
     (enforce-timeouts results active op-states)
-    (set next-index (start-ready-hosts hosts run-opts next-index active op-states)))
+    (set next-index (start-ready-hosts hosts run-opts next-index active op-states event-queue))
+    (when (and (= (length event-queue) 0) (> (length active) 0))
+      (callbacks.run-loop {:poll-jobs false
+                           :poll-http false
+                           :poll-process false
+                           :sleep-ms 0
+                           :timeout-ms 1
+                           :until (event-queued? event-queue)})))
   results)
 
 (fn cancel [token-or-operation-id]
