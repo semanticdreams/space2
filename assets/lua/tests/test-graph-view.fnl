@@ -4762,6 +4762,161 @@
 (table.insert tests {:name "GraphView selected preview commands operate only on selection"
                        :fn graph-selected-preview-commands-operate-only-on-selection})
 
+(table.insert tests {:name "GraphView focused action slots share context menu actions"
+                     :fn (fn []
+                         (with-temp-data-dir
+                             (fn [_root]
+                                 (fn action-names [actions]
+                                     (icollect [_ action (ipairs actions)]
+                                         (if action.name
+                                             action.name
+                                             action.type
+                                             action.type
+                                             nil)))
+                                 (fn assert-array-eq [actual expected message]
+                                     (assert (= (length actual) (length expected))
+                                             (.. message " length mismatch; expected " (length expected) " got " (length actual)))
+                                     (for [i 1 (length expected)]
+                                         (assert (= (. actual i) (. expected i))
+                                                 (.. message " mismatch at index " i))))
+            (local ctx (make-ctx))
+            (local graph (make-test-graph-map))
+            (var opened nil)
+            (var custom-a-runs 0)
+            (var custom-b-runs 0)
+            (local original-menu-manager app.menu-manager)
+            (set app.menu-manager {:open (fn [_self opts]
+                                            (set opened opts))})
+            (local node (Graph.GraphNode {:key "focused-actions"
+                                          :actions [{:name "Custom A"
+                                                     :fn (fn [_button _event]
+                                                           (set custom-a-runs (+ custom-a-runs 1)))}
+                                                    {:name "Custom B"
+                                                     :fn (fn [_button _event]
+                                                           (set custom-b-runs (+ custom-b-runs 1)))}]}))
+            (local view (GraphView {:graph-map graph :ctx ctx}))
+            (graph:add-node node {:position (glm.vec3 4 5 0)})
+            (local point (. view.points node))
+            (point:on-right-click {:point (glm.vec3 9 10 0)})
+            (assert opened "Pointer context menu should open for the fixture node")
+            (local focus-node (. view.focus-nodes node))
+            (focus-node:request-focus)
+            (local focused-actions (view:focused-node-actions))
+            (assert-array-eq (action-names focused-actions)
+                             (action-names opened.actions)
+                             "Focused action list should share pointer context menu action order")
+            (assert (= (. focused-actions 7 :name) "Custom A")
+                    "Fixture should place Custom A after graph actions and separator")
+            (assert (= (view:run-focused-node-action-slot 7) true)
+                    "Focused action slot should run the indexed custom action")
+            (assert (= custom-a-runs 1) "Custom A should run once through action slot")
+            (assert (= custom-b-runs 0) "Custom B should not run while invoking Custom A slot")
+            (view:drop)
+            (graph:drop)
+            (set app.menu-manager original-menu-manager))))})
+
+(table.insert tests {:name "GraphView focused node command methods require focus"
+                     :fn (fn []
+                         (with-temp-data-dir
+                             (fn [_root]
+            (local ctx (make-ctx))
+            (local graph (make-test-graph))
+            (register-graph-map-test-loaders graph ["command-focus"])
+            (local graph-map (GraphMap.GraphMap {:graph graph :id "focused-command-methods"}))
+            (local original-menu-manager app.menu-manager)
+            (local gl (require :gl))
+            (local original-clipboard-set gl.clipboard-set)
+            (var copied nil)
+            (var opened nil)
+            (set app.menu-manager {:open (fn [_self opts]
+                                            (set opened opts))})
+            (set gl.clipboard-set (fn [value] (set copied value)))
+            (local backing {:deleted? false})
+            (local node (Graph.GraphNode {:key "command-focus"
+                                          :backing backing
+                                          :preview (tracked-preview {})}))
+            (graph-map:add-node node {:position (glm.vec3 12 14 0)})
+            (local camera {:position (glm.vec3 0 0 80)
+                           :set-position (fn [self next-position]
+                                           (set self.position next-position))})
+            (local view (GraphView {:graph-map graph-map
+                                    :ctx ctx
+                                    :camera camera}))
+            (assert (= (length (view:focused-node-actions)) 0)
+                    "Focused node actions should be empty without focus")
+            (assert (= (view:run-focused-node-action-slot 1) false)
+                    "Action slot should not run without focus")
+            (assert (= (view:open-focused-node-menu) false)
+                    "Focused node menu should require focus")
+            (assert (= (view:toggle-focused-node-preview) false)
+                    "Focused preview toggle should require focus")
+            (assert (= (view:copy-focused-node-key) false)
+                    "Copy focused node key should require focus")
+            (assert (= (view:remove-focused-node-from-map) false)
+                    "Remove focused node should require focus")
+            (assert (= (view:reveal-focused-node) false)
+                    "Reveal focused node should require focus")
+            (local focus-node (. view.focus-nodes node))
+            (focus-node:request-focus)
+            (assert (> (length (view:focused-node-actions)) 0)
+                    "Focused node actions should resolve for focused node")
+            (assert (= (view:open-focused-node-menu) true)
+                    "Focused node menu should open with focus and menu manager")
+            (assert opened "Focused node menu should pass options to menu manager")
+            (assert (= (view:toggle-focused-node-preview) true)
+                    "Focused preview toggle should expand compact preview")
+            (assert (. view.points node :_card-size)
+                    "Focused preview toggle should use the presentation toggle path")
+            (assert (= (view:copy-focused-node-key) true)
+                    "Copy focused node key should report success")
+            (assert (= copied "command-focus")
+                    "Copy focused node key should use existing clipboard behavior")
+            (assert (= (view:reveal-focused-node) true)
+                    "Reveal focused node should report success")
+            (assert (= (view:remove-focused-node-from-map) true)
+                    "Remove focused node from map should remove the map-local node")
+            (assert (not (graph-map:lookup "command-focus"))
+                    "Remove focused node from map should remove the node from GraphMap")
+            (assert (= backing.deleted? false)
+                    "Remove focused node from map must not mutate the shared backing object")
+            (view:drop)
+            (graph-map:drop)
+            (graph:drop)
+            (set app.menu-manager original-menu-manager)
+            (set gl.clipboard-set original-clipboard-set))))})
+
+(table.insert tests {:name "GraphView reveal focused node centers through reveal path"
+                     :fn (fn []
+    (local graph (make-test-graph))
+    (local graph-map (GraphMap.GraphMap {:graph graph :id "focused-reveal" :name "Focused Reveal"}))
+    (register-graph-map-test-loaders graph ["test:focused-reveal"])
+    (local node (Graph.GraphNode {:key "test:focused-reveal" :label "Focused Reveal"}))
+    (graph-map:add-node node)
+    (local camera (make-test-camera (glm.vec3 1 2 99)))
+    (local ctx (make-ctx))
+    (local view (GraphView {:graph-map graph-map
+                            :ctx ctx
+                            :camera camera
+                            :data-dir "/tmp/space/tests/graph-view-focused-reveal"}))
+    (local point (. view.points node))
+    (point:set-position (glm.vec3 33 44 0))
+    (local focus-node (. view.focus-nodes node))
+    (focus-node:request-focus)
+    (assert (= (view:reveal-focused-node) true)
+            "Reveal focused node should report success when focus exists")
+    (assert (= (length view.selection.selected-nodes) 1)
+            "Reveal focused node should select through reveal-node")
+    (assert (= (. view.selection.selected-nodes 1) node)
+            "Reveal focused node should select the focused node")
+    (assert (= camera.position.x 33) "Reveal focused node should center camera x through reveal-node")
+    (assert (= camera.position.y 44) "Reveal focused node should center camera y through reveal-node")
+    (assert (= camera.position.z 99) "Reveal focused node should preserve camera z")
+    (view.layout:stop)
+    (view:start-layout)
+    (assert view.layout.active "GraphView start-layout should start the graph layout path")
+    (view:drop)
+    (graph-map:drop)
+    (graph:drop))})
 
 (local main
   (fn []

@@ -808,6 +808,38 @@
         (maps-will-change:clear)
         (set active-id nil))
 
+    (fn create-and-switch-map! [self opts]
+        (local options (if (= opts nil) {} opts))
+        (assert (= (type options) :table)
+                "GraphMapManager.create-and-switch-map! opts must be a table when provided")
+        (var id (.. "map-" (tostring next-id)))
+        (while (. entries id)
+            (set next-id (+ next-id 1))
+            (set id (.. "map-" (tostring next-id))))
+        (assert-safe-map-id id "GraphMapManager.create-and-switch-map!")
+        (local state (or options.state {}))
+        (assert (= (type state) :table)
+                "GraphMapManager.create-and-switch-map! :state must be a table when provided")
+        (local name (if (= options.name nil) id options.name))
+        (assert (= (type name) :string)
+                "GraphMapManager.create-and-switch-map! :name must be a string when provided")
+        (set (. entries id) {:id id
+                             :name name
+                             :nodes (if (= state.nodes nil) [] state.nodes)
+                             :edges (if (= state.edges nil) [] state.edges)
+                             :islands (if (= state.islands nil) [] state.islands)
+                             :next_island_id state.next_island_id
+                             :selected_node_keys (if (= state.selected_node_keys nil) [] state.selected_node_keys)
+                             :focused_node_key state.focused_node_key
+                             :restored-from-state? true
+                             :seed-start? false
+                             :map nil})
+        (set next-id (+ next-id 1))
+        (set self.next-map-id next-id)
+        (maps-changed:emit {:created-id id :active-id active-id})
+        (self:switch-map! id)
+        (self:get-active-map))
+
     (local self {:graph shared-graph
                  :data-dir data-dir
                  :maps-changed maps-changed
@@ -822,6 +854,7 @@
     (set self.list-maps list-maps)
     (set self.switch-map! switch-map!)
     (set self.create-map! create-map!)
+    (set self.create-and-switch-map! create-and-switch-map!)
     (set self.rename-map! rename-map!)
     (set self.delete-map! delete-map!)
     (set self.capture-state capture-state)
