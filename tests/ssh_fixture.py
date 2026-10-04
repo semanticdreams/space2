@@ -81,6 +81,7 @@ def write_sshd_config(path: Path, *, port: int, host_key: Path, authorized_keys:
                 "KbdInteractiveAuthentication no",
                 "ChallengeResponseAuthentication no",
                 "PubkeyAuthentication yes",
+                "AcceptEnv SPACE_SSH_ENV_PROBE",
                 "PermitRootLogin yes",
                 "UsePAM no",
                 "StrictModes no",
