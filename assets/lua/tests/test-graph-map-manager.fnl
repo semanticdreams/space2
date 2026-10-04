@@ -1387,6 +1387,91 @@
 
 (table.insert tests {:name "GraphMapManager switch emits maps-will-change before drop" :fn manager-switch-emits-will-change-before-drop})
 
+(fn manager-create-and-switch-empty-map-does-not-seed-start []
+    (local graph (Graph {:with-start false}))
+    (graph:register-key-loader "start"
+        (fn [_key]
+            (Graph.GraphNode {:key "start"})))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph :state {}}))
+    (local created (manager:create-and-switch-map! {:name "Empty"}))
+    (assert (= created (manager:get-active-map))
+            "create-and-switch-map! should return the active map")
+    (assert (= created.id "map-2")
+            "create-and-switch-map! should allocate map id from next-map-id")
+    (assert (= created.name "Empty")
+            "create-and-switch-map! should apply the requested name")
+    (assert (= (created:node-count) 0)
+            "Empty create-and-switch map should not seed start")
+    (local captured (manager:capture-state))
+    (assert (= captured.active_map_id "map-2")
+            "Capture should mark the new map active")
+    (var empty-entry nil)
+    (each [_ entry (ipairs captured.maps) &until empty-entry]
+        (when (= entry.id "map-2")
+            (set empty-entry entry)))
+    (assert empty-entry "Capture should include the new empty map")
+    (assert (= empty-entry.name "Empty")
+            "Captured empty map should preserve requested name")
+    (assert (= (length (or empty-entry.nodes [])) 0)
+            "Captured empty map should have no nodes")
+    (assert (= (length (or empty-entry.edges [])) 0)
+            "Captured empty map should have no edges")
+    (manager:drop)
+    (graph:drop))
+
+(fn manager-create-and-switch-map-from-state []
+    (local graph (Graph {:with-start false}))
+    (graph:register-key-loader "test"
+        (fn [key]
+            (Graph.GraphNode {:key key})))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (local state {:nodes ["test:a" "test:b"]
+                  :edges [{:source "test:a" :target "test:b"}]
+                  :islands [{:id "island-1"
+                             :kind "ordered-list"
+                             :members ["test:a" "test:b"]
+                             :state {:list-key "test:a" :collapsed false}}]
+                  :next_island_id 2
+                  :selected_node_keys ["test:a"]
+                  :focused_node_key "test:a"})
+    (local created (manager:create-and-switch-map! {:name "Selection" :state state}))
+    (assert (= created (manager:get-active-map))
+            "State-backed create-and-switch should return the active map")
+    (assert (= created.id "map-2")
+            "State-backed create-and-switch should allocate map id from next-map-id")
+    (assert (= created.name "Selection")
+            "State-backed create-and-switch should use requested name")
+    (assert (created:lookup "test:a")
+            "State-backed map should restore test:a")
+    (assert (created:lookup "test:b")
+            "State-backed map should restore test:b")
+    (assert (= (created:edge-count) 1)
+            "State-backed map should restore explicit edge")
+    (local islands (created:list-islands))
+    (assert (= (length islands) 1)
+            "State-backed map should restore island")
+    (assert (= (. islands 1 :id) "island-1")
+            "Restored island should keep id")
+    (assert (= (length created.selected_node_keys) 1)
+            "State-backed map should restore selection")
+    (assert (= (. created.selected_node_keys 1) "test:a")
+            "State-backed map should restore selected key")
+    (assert (= created.focused_node_key "test:a")
+            "State-backed map should restore focus")
+    (local maps (manager:list-maps))
+    (var has-main? false)
+    (each [_ entry (ipairs maps)]
+        (when (= entry.id "main")
+            (set has-main? true)))
+    (assert has-main? "Previous active map should still exist after create-and-switch")
+    (manager:drop)
+    (graph:drop))
+
+(table.insert tests {:name "GraphMapManager create-and-switch empty map does not seed start"
+                     :fn manager-create-and-switch-empty-map-does-not-seed-start})
+(table.insert tests {:name "GraphMapManager create-and-switch map from state"
+                     :fn manager-create-and-switch-map-from-state})
+
 (local main
     (fn []
         (local runner (require :tests/runner))
