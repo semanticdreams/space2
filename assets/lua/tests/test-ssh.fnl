@@ -43,6 +43,23 @@
   (fn []
     (not (= (get-terminal) nil))))
 
+(fn read-file! [path]
+  (local file (assert (io.open path :r) (.. "failed to open " path)))
+  (local contents (assert (file:read :*a) (.. "failed to read " path)))
+  (file:close)
+  contents)
+
+(fn cmake-cache-enabled? [contents key]
+  (not (= (string.match contents (.. key ":BOOL=ON")) nil)))
+
+(fn cmake-cache-found? [contents key]
+  (not (= (string.match contents (.. key ":INTERNAL=1")) nil)))
+
+(fn ssh-backend-available-from-cmake-cache? []
+  (local contents (read-file! "build/CMakeCache.txt"))
+  (and (cmake-cache-enabled? contents "SPACE_ENABLE_SSH")
+       (cmake-cache-found? contents "LIBSSH_FOUND")))
+
 (fn unavailable-backend-callback-result-is-structured []
   (local ssh (require :ssh))
   (local callbacks (require :callbacks))
@@ -60,7 +77,7 @@
   (assert completed "ssh connect should produce a terminal callback event")
   (assert (= terminal.operation-id operation-id)
           "terminal backend event should include the operation id")
-  (when (= terminal.error-code "unavailable-backend")
+  (when (not (ssh-backend-available-from-cmake-cache?))
     (assert (= terminal.kind "operation-error")
             "unavailable backend should be reported as operation-error")
     (assert (= terminal.error-code "unavailable-backend")
