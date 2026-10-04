@@ -2760,6 +2760,59 @@
       (assert (= (. transitions (# transitions)) :normal)
               "Unavailable graph selection command should return to normal"))))
 
+(fn run-graph-leader-sequence [provider sequence]
+  (with-state-recorder
+    (fn [transitions install-state]
+      (with-activity-leader-providers
+        [provider]
+        (fn []
+          (local state (install-state :leader (LeaderState)))
+          (each [_ key (ipairs sequence)]
+            (state.on-key-down {:key (string.byte key)}))))
+      (. transitions (# transitions)))))
+
+(fn leader-state-graph-node-command-routes-to-provider []
+  (local GraphCommands (require :graph/commands))
+  (local calls {:open 0})
+  (local graph-view {:has-focused-node? (fn [_self] true)
+                     :open-focused-node (fn [_self]
+                                          (set calls.open (+ calls.open 1))
+                                          true)})
+  (local last-transition
+    (run-graph-leader-sequence (GraphCommands.provider {:graph-view (fn [] graph-view)})
+                               ["g" "n" "o"]))
+  (assert (= calls.open 1) "SPC g n o should open focused graph node")
+  (assert (= last-transition :normal) "Graph node command should return to normal"))
+
+(fn leader-state-graph-view-command-routes-to-provider []
+  (local GraphCommands (require :graph/commands))
+  (local calls {:layout 0})
+  (local graph-view {:start-layout (fn [_self]
+                                    (set calls.layout (+ calls.layout 1))
+                                    true)})
+  (local last-transition
+    (run-graph-leader-sequence (GraphCommands.provider {:graph-view (fn [] graph-view)})
+                               ["g" "v" "l"]))
+  (assert (= calls.layout 1) "SPC g v l should start graph layout")
+  (assert (= last-transition :normal) "Graph view command should return to normal"))
+
+(fn leader-state-graph-map-command-routes-to-provider []
+  (local GraphCommands (require :graph/commands))
+  (local calls {:create 0})
+  (local graph-view {})
+  (local graph-map {})
+  (local manager {:create-and-switch-map! (fn [_self opts]
+                                           (set calls.create (+ calls.create 1))
+                                           (assert (= opts.name nil) "new empty map should pass nil name")
+                                           true)})
+  (local last-transition
+    (run-graph-leader-sequence (GraphCommands.provider {:graph-view (fn [] graph-view)
+                                                        :graph-map (fn [] graph-map)
+                                                        :graph-map-manager (fn [] manager)})
+                               ["g" "m" "n"]))
+  (assert (= calls.create 1) "SPC g m n should create a new map")
+  (assert (= last-transition :normal) "Graph map command should return to normal"))
+
 (fn leader-state-graph-preview-idempotent-command-closes-hints []
   (local GraphCommands (require :graph/commands))
   (local original-states app.states)
@@ -2821,7 +2874,13 @@
 (table.insert tests {:name "Leader state graph selection command routes to provider"
                        :fn leader-state-graph-selection-command-routes-to-provider})
 (table.insert tests {:name "Leader state graph selection unavailable command does not mutate"
-                       :fn leader-state-graph-selection-unavailable-command-does-not-mutate})
+                        :fn leader-state-graph-selection-unavailable-command-does-not-mutate})
+(table.insert tests {:name "Leader state graph node command routes to provider"
+                       :fn leader-state-graph-node-command-routes-to-provider})
+(table.insert tests {:name "Leader state graph view command routes to provider"
+                       :fn leader-state-graph-view-command-routes-to-provider})
+(table.insert tests {:name "Leader state graph map command routes to provider"
+                       :fn leader-state-graph-map-command-routes-to-provider})
 (table.insert tests {:name "Leader state graph preview idempotent command closes hints"
                         :fn leader-state-graph-preview-idempotent-command-closes-hints})
 (table.insert tests {:name "Camera state F enters fpc state" :fn camera-state-f-enters-fpc-state})

@@ -4,6 +4,7 @@
 (local Activities (require :activities))
 (local Graph (require :graph/init))
 (local GraphMap (require :graph/map)) (local GraphMapManager (require :graph/map-manager))
+(local Commands (require :commands/core))
 (local Scene (require :scene))
 (local Canvas (require :canvas))
 (local Camera (require :camera))
@@ -74,6 +75,20 @@
     (when (= object.pointer-target target)
       (set count (+ count 1))))
   count)
+
+(fn assert-graph-provider-resolves-runtime-map [runtime]
+  (local runtime-map-calls {:add-start 0})
+  (local runtime-map {:add-start-node! (fn [_self]
+                                        (set runtime-map-calls.add-start (+ runtime-map-calls.add-start 1))
+                                        true)})
+  (local runtime-manager {:get-active-map (fn [_self] runtime-map)})
+  (set runtime.graph-map-manager runtime-manager)
+  (set runtime.graph-map runtime-map)
+  (local composed (Commands.compose app.activity-leader-command-providers {}))
+  (assert (Commands.run composed "graph.map.add-start" {})
+          "Graph activity leader provider should run map command")
+  (assert (= runtime-map-calls.add-start 1)
+          "Graph activity provider should resolve current runtime active map at run time"))
 
 (fn graph-activity-builds-view-in-canvas-slot []
   (local app-keys [:active-world-runtime
@@ -151,6 +166,9 @@
         (assert (= slot.pointer-target.canvas-target-kind :graph-view)
                 "Graph activity slot should expose graph view target kind")
         (assert app.graph-view "Graph activity should create a graph view") (assert (> (length (assert app.activity-leader-command-providers "Graph activity should install graph leader command providers")) 0) "Graph activity should install graph leader command providers")
+        (assert-graph-provider-resolves-runtime-map runtime)
+        (set runtime.graph-map-manager graph-map-manager)
+        (set runtime.graph-map graph-map)
         (assert (= app.graph-view.ctx slot.ctx)
                 "Graph view should be built with the graph slot context")
         (assert (= app.graph-view.ctx.pointer-target slot.pointer-target)
