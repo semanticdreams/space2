@@ -3,7 +3,7 @@ description: Runs only guarded OpenCode home config verification for project-sup
 mode: subagent
 model: openai/gpt-5.5
 temperature: 0.1
-steps: 30
+steps: 15
 permission:
   read:
     "*": deny

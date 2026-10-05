@@ -3,7 +3,7 @@ description: Runs only guarded Space Windows CI local reproduction wrapper opera
 mode: subagent
 model: openai/gpt-5.5
 temperature: 0.1
-steps: 30
+steps: 20
 permission:
   read: deny
   glob: deny

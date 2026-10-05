@@ -272,10 +272,10 @@ blocking check, and available evidence.
 
 | Subagent | Use for | Model |
 |----------|---------|-------|
-| **explorer** | Codebase search, file discovery, information gathering | deepseek |
+| **explorer** | Codebase search, file discovery, information gathering | gpt-5.5 |
 | **planner** | Architectural reasoning, spec evaluation, plan creation | gpt-5.5 (high) |
 | **debug-advisor** | Diagnostic judgment: validates root cause + proposed fix before implementation | gpt-5.5 (high) |
-| **implementer** | Task implementation, TDD, fix rounds | deepseek |
+| **implementer** | Task implementation, TDD, fix rounds | gpt-5.5 |
 | **reviewer** | Spec compliance + code quality review, re-review | gpt-5.5 (high) |
 | **adjudicator** | Breaker cap: accept/park/escalate findings | gpt-5.5 (high) |
 | **git-integrator** | Guarded current-branch Git status, fetch, safe merge from origin/main, follow-up branch creation, and push wrappers | gpt-5.5 |
@@ -284,6 +284,8 @@ blocking check, and available evidence.
 | **config-auditor** | Guarded OpenCode home config verification for project-supplied non-secret support links | gpt-5.5 |
 | **windows-ci-reproducer** | Guarded local Windows CI preflight, setup-host, and Linux cross-build + Wine reproduction | gpt-5.5 |
 | **fast-dev** | Primary peer selected by users for interactive small work; the strict supervisor does not dispatch it as an implementation worker | gpt-5.5 (medium) |
+
+Faster-model swaps for deterministic/search/wrapper agents require exact approved provider/model-id values. Do not use shorthand model names or infer availability from comments.
 
 For subagents, dispatch with the `task` tool and the appropriate
 `subagent_type`. Provide each subagent exactly what it needs — never paste your

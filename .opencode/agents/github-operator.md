@@ -3,7 +3,7 @@ description: Runs only guarded Space GitHub PR wrapper operations for auth, prot
 mode: subagent
 model: openai/gpt-5.5
 temperature: 0.1
-steps: 40
+steps: 25
 permission:
   read: deny
   glob: deny

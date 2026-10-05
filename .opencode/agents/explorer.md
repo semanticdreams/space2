@@ -4,7 +4,7 @@ mode: subagent
 model: openai/gpt-5.5
 variant: medium
 temperature: 0.7
-steps: 30
+steps: 20
 permission:
   read:
     "*": allow
