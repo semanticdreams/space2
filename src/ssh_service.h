@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -17,10 +18,16 @@
 namespace space::ssh
 {
 
+struct ServiceOptions
+{
+    uint64_t channel_write_timeout_ms { 60000 };
+};
+
 class Service : private OperationSink
 {
 public:
     explicit Service(std::unique_ptr<Backend> backend);
+    Service(std::unique_ptr<Backend> backend, ServiceOptions options);
     ~Service();
 
     Service(const Service&) = delete;
@@ -72,6 +79,7 @@ private:
 
     mutable std::mutex mutex_;
     std::unique_ptr<Backend> backend_;
+    ServiceOptions options_;
     OperationId next_operation_id_ { 1 };
     SessionId next_session_id_ { 1 };
     ChannelId next_channel_id_ { 1 };

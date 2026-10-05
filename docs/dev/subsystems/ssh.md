@@ -24,6 +24,18 @@ Space owns a backend-neutral SSH transport service for asynchronous SSH client o
 
 SSH support is optional and controlled by `SPACE_ENABLE_SSH` (default `ON`). CMake discovers `libssh` through pkg-config. If `libssh` is unavailable, Space still builds and the SSH API returns structured `operation-error` events with `error-code="unavailable-backend"`.
 
+Install the platform package that provides the `libssh` pkg-config module when
+you need the real backend:
+
+- Linux/Ubuntu CI and local OpenSSH fixture tests: `libssh-dev` plus
+  `openssh-server` and `openssh-client` for disposable fixture tools such as
+  `sshd`, `ssh-keygen`, and `ssh-keyscan`.
+- macOS/Homebrew: `brew install libssh`. This slice documents the macOS
+  dependency only; there is no macOS CI workflow for SSH real-backend validation
+  yet.
+- Windows cross-builds: `scripts/build-windows.sh` requests vcpkg `libssh` by
+  default and checks that pkg-config can resolve `libssh` before CMake runs.
+
 ## Public C++ concepts
 
 - `OperationId` identifies every long-running operation.
@@ -35,6 +47,8 @@ SSH support is optional and controlled by `SPACE_ENABLE_SSH` (default `ON`). CMa
 ## Lua API
 
 The native `ssh` module uses canonical kebab-case keys only and rejects malformed or unknown options loudly.
+
+The SDK module reference is [`ssh`](/sdk/modules/ssh). Its low-level exec and fleet exec examples are covered by named Fennel tests in `assets/lua/tests/test-ssh-integration.fnl` and `assets/lua/tests/test-ssh-fleet.fnl`.
 
 - `connect(opts[, callback]) -> operation-id`
 - `resolve-known-host(operation-id, decision) -> boolean`

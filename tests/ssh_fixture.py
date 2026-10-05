@@ -13,11 +13,16 @@ import sys
 import tempfile
 import threading
 import time
+import unittest
 from pathlib import Path
 
 
 def find_tool(name: str) -> str | None:
     return shutil.which(name)
+
+
+def env_enabled(name: str) -> bool:
+    return os.environ.get(name) == "1"
 
 
 def allocate_port() -> int:
@@ -143,19 +148,68 @@ def stop_and_collect_start_failure(process: subprocess.Popen[str]) -> tuple[int 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--self-test", action="store_true", help="run fixture harness self-tests")
     parser.add_argument("--space", required=True, help="Space executable to run")
     parser.add_argument("--assets", required=True, help="Space assets directory")
     parser.add_argument("--module", required=True, help="Fennel module entry point")
     return parser.parse_args()
 
 
+def run_self_tests() -> int:
+    suite = unittest.defaultTestLoader.loadTestsFromTestCase(FixtureStrictModeTests)
+    result = unittest.TextTestRunner(verbosity=2).run(suite)
+    return 0 if result.wasSuccessful() else 1
+
+
+class FixtureStrictModeTests(unittest.TestCase):
+    def run_fixture_without_tools(self, *, require_fixture: bool) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["PATH"] = "/tmp/space/tests/missing-openssh-tools"
+        if require_fixture:
+            env["SPACE_TEST_REQUIRE_SSH_FIXTURE"] = "1"
+        else:
+            env.pop("SPACE_TEST_REQUIRE_SSH_FIXTURE", None)
+        return subprocess.run(
+            [sys.executable, __file__, "--space", "unused", "--assets", ".", "--module", "unused"],
+            check=False,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+    def test_missing_fixture_tools_skip_by_default(self) -> None:
+        result = self.run_fixture_without_tools(require_fixture=False)
+
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("SKIP space_ssh_integration:", result.stdout)
+
+    def test_missing_fixture_tools_fail_when_required(self) -> None:
+        result = self.run_fixture_without_tools(require_fixture=True)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ERROR space_ssh_integration: missing required fixture tool:", result.stderr)
+        self.assertIn("sshd", result.stderr)
+        self.assertIn("ssh-keygen", result.stderr)
+        self.assertIn("ssh-keyscan", result.stderr)
+
+
 def main() -> int:
+    if "--self-test" in sys.argv[1:]:
+        return run_self_tests()
+
     args = parse_args()
     sshd = find_tool("sshd")
     ssh_keygen = find_tool("ssh-keygen")
     ssh_keyscan = find_tool("ssh-keyscan")
     missing = [name for name, value in [("sshd", sshd), ("ssh-keygen", ssh_keygen), ("ssh-keyscan", ssh_keyscan)] if not value]
     if missing:
+        if env_enabled("SPACE_TEST_REQUIRE_SSH_FIXTURE"):
+            print(
+                f"ERROR space_ssh_integration: missing required fixture tool: {', '.join(missing)}",
+                file=sys.stderr,
+            )
+            return 1
         print(f"SKIP space_ssh_integration: missing OpenSSH fixture dependencies: {', '.join(missing)}")
         return 0
 

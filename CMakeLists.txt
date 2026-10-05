@@ -624,7 +624,7 @@ if(WIN32)
     target_compile_definitions(${PROJECT_NAME}_lib PUBLIC TRAY_WINAPI=1)
     target_compile_definitions(${PROJECT_NAME}_lib PUBLIC TRAY_BACKEND_NAME=\"winapi\")
     target_compile_definitions(${PROJECT_NAME}_lib PUBLIC TRAY_BACKEND_REASON=\"\")
-    target_link_libraries(${PROJECT_NAME}_lib user32 shell32 advapi32 psapi)
+    target_link_libraries(${PROJECT_NAME}_lib user32 shell32 advapi32 psapi ws2_32)
 elseif(APPLE)
     find_library(APPKIT_FRAMEWORK AppKit)
     find_library(FOUNDATION_FRAMEWORK Foundation)
@@ -828,6 +828,13 @@ set_tests_properties(space_ssh_integration PROPERTIES
     ENVIRONMENT "SKIP_KEYRING_TESTS=1;XDG_DATA_HOME=/tmp/space/tests/xdg-data;SPACE_DISABLE_AUDIO=1;SPACE_LOG_DIR=/tmp/space/tests/log;SPACE_ASSETS_PATH=${CMAKE_SOURCE_DIR}/assets;FENNEL_PATH=${CMAKE_SOURCE_DIR}/assets/lua/?.fnl\;${CMAKE_SOURCE_DIR}/assets/lua/?/init.fnl;FENNEL_MACRO_PATH=${CMAKE_SOURCE_DIR}/assets/lua/?.fnl\;${CMAKE_SOURCE_DIR}/assets/lua/?/init.fnl"
 )
 
+add_test(NAME ssh_fixture_strict_mode
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/ssh_fixture.py --self-test
+)
+set_tests_properties(ssh_fixture_strict_mode PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
 add_test(NAME ${PROJECT_NAME}_constraints
     COMMAND $<TARGET_FILE:${SPACE_TEST_COMMAND_TARGET}> -m constraints.runner:main -- --output summary --target repo
 )
@@ -874,6 +881,9 @@ add_executable(test_ssh_service
 target_include_directories(test_ssh_service PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 if(SPACE_HAS_LIBSSH)
     target_link_libraries(test_ssh_service PkgConfig::LIBSSH)
+    if(WIN32)
+        target_link_libraries(test_ssh_service ws2_32)
+    endif()
     target_compile_definitions(test_ssh_service PRIVATE SPACE_HAS_LIBSSH=1)
 endif()
 add_test(NAME test_ssh_service COMMAND test_ssh_service)
@@ -892,6 +902,9 @@ target_include_directories(test_lua_ssh_binding PRIVATE ${CMAKE_CURRENT_SOURCE_D
 target_link_libraries(test_lua_ssh_binding lua)
 if(SPACE_HAS_LIBSSH)
     target_link_libraries(test_lua_ssh_binding PkgConfig::LIBSSH)
+    if(WIN32)
+        target_link_libraries(test_lua_ssh_binding ws2_32)
+    endif()
     target_compile_definitions(test_lua_ssh_binding PRIVATE SPACE_HAS_LIBSSH=1)
 endif()
 add_test(NAME test_lua_ssh_binding COMMAND test_lua_ssh_binding)
