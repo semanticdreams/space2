@@ -356,12 +356,130 @@
         (assert (= terminal.kind "operation-error") "remote tunnel failure should be structured")
         (assert (= terminal.error-code "unsupported") "remote tunnel unsupported should be explicit"))))
 
+(fn exec-start-marker? [operation-id marker event]
+  (and (= event.operation-id operation-id)
+       (= event.kind "exec-stdout")
+       event.fields
+       event.fields.data
+       (string.find event.fields.data marker 1 true)))
+
+(fn terminal-detail [event]
+  (local message (if event.message
+                     event.message
+                     (and event.fields event.fields.message)
+                     event.fields.message
+                     nil))
+  (.. "kind=" (tostring event.kind)
+      " error-code=" (tostring event.error-code)
+      " message=" (tostring message)))
+
+(fn wait-for-exec-start-marker [ssh operation-id marker]
+  (local (event events)
+    (wait-for ssh
+              (fn [candidate _events]
+                (and (= candidate.operation-id operation-id)
+                     (or (exec-start-marker? operation-id marker candidate)
+                         (terminal-event? candidate))))
+              "cancelled exec should emit readiness marker before cancellation"
+              10000))
+  (if (terminal-event? event)
+      (error (.. "cancelled exec reached terminal state before readiness marker: " (terminal-detail event)))
+      (values event events)))
+
 (fn cancel-long-running-exec [ssh session-id]
-  (local op (ssh.exec session-id {:command "sleep 30" :timeout-ms 60000}))
+  (local marker "cancel-ready")
+  (local op (ssh.exec session-id {:command "printf cancel-ready; sleep 30" :timeout-ms 60000}))
+  (wait-for-exec-start-marker ssh op marker)
   (assert (ssh.cancel op) "cancel should accept active long-running exec")
   (local (terminal) (wait-for-terminal ssh op "cancelled exec should finish"))
   (assert (= terminal.kind "operation-cancelled") "cancelled exec should emit operation-cancelled")
   (assert (= terminal.error-code "cancelled") "cancelled exec should use cancelled error-code"))
+
+(fn cancel-long-running-exec-on-fresh-session [ssh fixture]
+  (local connect-op (ssh.connect (connect-options fixture "accept-once")))
+  (local (connect-terminal connect-events)
+    (wait-for-terminal ssh connect-op "fresh cancellation connect should finish"))
+  (assert-success connect-terminal "fresh cancellation connect should succeed")
+  (local connected (find-event connect-events connect-op "connected"))
+  (assert connected "fresh cancellation connect should emit connected event")
+  (local (ok err) (pcall cancel-long-running-exec ssh connected.session-id))
+  (ssh.close-session connected.session-id)
+  (when (not ok)
+    (error err)))
+
+(fn cancel-long-running-exec-waits-for-remote-start-marker []
+  (local marker-seen {:value false})
+  (local cancel-called {:value false})
+  (local poll-count {:value 0})
+  (local polls [[{:operation-id "exec-op" :kind "exec-stdout" :fields {:data "cancel-ready"}}]
+                [{:operation-id "exec-op" :kind "operation-cancelled" :error-code "cancelled"}]])
+  (local ssh {:exec (fn [_session-id options]
+                     (assert (= options.command "printf cancel-ready; sleep 30") "cancel exec command should emit readiness marker before sleeping")
+                     "exec-op")
+              :cancel (fn [operation-id]
+                        (assert (= operation-id "exec-op") "cancel should target long-running exec operation")
+                        (set cancel-called.value true)
+                        marker-seen.value)
+              :poll (fn []
+                      (set poll-count.value (+ poll-count.value 1))
+                      (local events (. polls poll-count.value))
+                      (assert events "scripted cancel poll should have events for marker and terminal wait")
+                      (each [_ event (ipairs events)]
+                        (when (and (= event.operation-id "exec-op")
+                                   (= event.kind "exec-stdout")
+                                   event.fields
+                                   (string.find event.fields.data "cancel-ready" 1 true))
+                          (set marker-seen.value true)))
+                      events)})
+  (cancel-long-running-exec ssh "session-1")
+  (assert cancel-called.value "cancel should be requested after readiness marker is observed"))
+
+(fn cancel-start-marker-wait-reports-pre-marker-terminal []
+  (local ssh {:poll (fn [] [{:operation-id "exec-op"
+                             :kind "operation-error"
+                             :error-code "boom"
+                             :message "failed early"}])})
+  (local (ok message) (pcall wait-for-exec-start-marker ssh "exec-op" "cancel-ready"))
+  (assert (not ok) "pre-marker terminal event should fail loudly")
+  (assert (string.find (tostring message) "operation-error" 1 true)
+          "pre-marker terminal failure should report terminal kind")
+  (assert (string.find (tostring message) "boom" 1 true)
+          "pre-marker terminal failure should report error code")
+  (assert (string.find (tostring message) "failed early" 1 true)
+          "pre-marker terminal failure should report message"))
+
+(fn cancellation-coverage-uses-fresh-session []
+  (local closed-session {:value nil})
+  (local poll-count {:value 0})
+  (local polls [[{:operation-id "connect-op" :kind "connected" :session-id "fresh-session"}
+                 {:operation-id "connect-op" :kind "operation-success"}]
+                [{:operation-id "exec-op" :kind "exec-stdout" :fields {:data "cancel-ready"}}]
+                [{:operation-id "exec-op" :kind "operation-cancelled" :error-code "cancelled"}]])
+  (local fixture {:host "fixture-host"
+                  :port 22
+                  :username "fixture-user"
+                  :key-path "/tmp/key"
+                  :known-hosts-path "/tmp/known_hosts"})
+  (local ssh {:connect (fn [options]
+                         (assert (= options.known-host-policy "accept-once")
+                                 "fresh cancellation session should use explicit accepted connection")
+                         "connect-op")
+              :exec (fn [session-id _options]
+                      (assert (= session-id "fresh-session")
+                              "cancellation should run on freshly connected session")
+                      "exec-op")
+              :cancel (fn [_operation-id]
+                        true)
+              :close-session (fn [session-id]
+                               (set closed-session.value session-id))
+              :poll (fn []
+                      (set poll-count.value (+ poll-count.value 1))
+                      (local events (. polls poll-count.value))
+                      (assert events "scripted fresh cancellation poll should have connect, marker, and terminal events")
+                      events)})
+  (cancel-long-running-exec-on-fresh-session ssh fixture)
+  (assert (= closed-session.value "fresh-session")
+          "fresh cancellation session should be closed after cancellation"))
 
 (fn sdk-low-level-exec-example-runs-command []
   (local (fixture skip-message) (fixture-config))
@@ -403,7 +521,7 @@
           (maybe-shell-round-trip ssh session-id)
           (local-tunnel-round-trip ssh fixture session-id)
           (remote-tunnel ssh fixture session-id)
-          (cancel-long-running-exec ssh session-id)
+          (cancel-long-running-exec-on-fresh-session ssh fixture)
           (ssh.close-session session-id)))))
 
 (fn unavailable-backend-strict-mode-fails-loudly []
@@ -437,7 +555,16 @@
                      :fn shell-round-trip-preserves-output-wait-close-events})
 
 (table.insert tests {:name "SSH shell round trip defaults to opt-in skip"
-                     :fn shell-round-trip-defaults-to-opt-in-skip})
+                      :fn shell-round-trip-defaults-to-opt-in-skip})
+
+(table.insert tests {:name "SSH cancel waits for remote start marker"
+                     :fn cancel-long-running-exec-waits-for-remote-start-marker})
+
+(table.insert tests {:name "SSH cancel reports pre-marker terminal state"
+                      :fn cancel-start-marker-wait-reports-pre-marker-terminal})
+
+(table.insert tests {:name "SSH cancel coverage uses a fresh accepted session"
+                     :fn cancellation-coverage-uses-fresh-session})
 
 (local main
   (fn []
