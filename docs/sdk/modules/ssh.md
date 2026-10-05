@@ -91,16 +91,16 @@ Covered by the Fennel test named `SDK fleet exec example returns structured per-
 ```fennel
 (local fleet (require :ssh.fleet))
 
-(local hosts [{:host "web-1.example.test"
-               :port 22
-               :username "deploy"
+(local hosts [{:host (os.getenv "SPACE_SSH_FLEET_HOST_1")
+               :port (tonumber (os.getenv "SPACE_SSH_FLEET_PORT_1"))
+               :username (os.getenv "SPACE_SSH_USER")
                :auth-methods [{:type "private-key"
                                :key-path (os.getenv "SPACE_SSH_KEY_PATH")}]
                :known-host-policy "accept-once"
                :known-hosts-path (os.getenv "SPACE_SSH_KNOWN_HOSTS_PATH")}
-              {:host "web-2.example.test"
-               :port 2222
-               :username "deploy"
+              {:host (os.getenv "SPACE_SSH_FLEET_HOST_2")
+               :port (tonumber (os.getenv "SPACE_SSH_FLEET_PORT_2"))
+               :username (os.getenv "SPACE_SSH_USER")
                :auth-methods [{:type "private-key"
                                :key-path (os.getenv "SPACE_SSH_KEY_PATH")}]
                :known-host-policy "accept-once"
