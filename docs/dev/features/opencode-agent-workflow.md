@@ -182,6 +182,67 @@ Once your agent environment is connected to a Space checkout, these repository c
 - **PR CI** is the full integration gate. Do not claim ready-to-merge until the applicable PR CI gate is green.
 - **Required validation failures**: see [Validation continuation and current base](#validation-continuation-and-current-base) for the full contract.
 
+### Fast interactive development flow
+
+`supervisor` remains the default OpenCode agent for Space. It owns the strict
+workflow, high-risk development, branch finishing, PR creation, and merge-queue
+follow-through. `fast-dev` is a second primary agent that users may select for
+interactive exploration, quick local iteration, and small scoped changes when the
+work is clearly bounded.
+
+Fast mode is lower ceremony, not lower rigor:
+
+- `fast-dev` may perform read-only exploration directly and may use `explorer`
+  for targeted repository searches.
+- Before edits, `fast-dev` performs a micro-design assessment that names the
+  desired behavior, owning abstraction, pattern to follow, design risks, and
+  validation surface.
+- `fast-dev` does not edit repository files directly. Repository mutations still
+  route through `implementer` -> `reviewer` -> pass before completion.
+- `fast-dev` does not create PRs, push branches, enable auto-merge, or poll merge
+  queues by default.
+- Final integration stays with the strict `supervisor` and finishing workflow
+  unless the human explicitly requests a different path under a later approved
+  design.
+
+Fast mode is eligible only when the user asks for interactive development, a
+small scoped change, a targeted bugfix, a focused refactor, or read-only
+exploration; the ownership boundary is clear or can be clarified with a brief
+micro-design note; the validation surface is targeted and local; no new
+product/API/data/architecture decision is required; and the task does not require
+final integration, PR creation, merge-queue operation, or privileged repository
+recovery.
+
+Escalate from `fast-dev` to the strict `supervisor` when clean design requires
+broad refactoring or a new abstraction, multiple subsystems or independent tasks
+are involved, the user asks for branch finishing or ready-to-merge work, the
+reviewer flags design-integrity issues that cannot be fixed locally, validation
+failure diagnosis requires the full `systematic-debugging` workflow, or the task
+touches high-risk workflow policy, capability boundaries, auth, secrets, graph
+topology/persistence, broad runtime initialization, packaging, or release
+behavior.
+
+### Strict-flow low-ceremony paths
+
+The strict `supervisor` also has opt-in low-ceremony paths for work that does
+not need a full planning session:
+
+- **Read-only audit path:** inspect repository state, summarize findings, and do
+  not mutate files.
+- **Tiny change path:** for a narrowly scoped, low-risk mutation, use a short
+  micro-design handoff instead of a full plan, then route implementation and
+  review normally.
+- **Quick Debugging Triage:** gather symptoms, run the narrowest meaningful
+  diagnostic commands, and escalate to full `systematic-debugging` when the
+  failure is not immediately bounded.
+- **Single-Task Low-Risk Path:** execute one small SDD task without expanding it
+  into a multi-agent program when there are no independent subtasks.
+
+No low-ceremony path skips independent review for mutations, and no path claims
+ready-to-merge before finishing validation and PR CI.
+
+Restart OpenCode after `.opencode/**` changes. Agent definitions, skill instructions, and permission rules are loaded at startup and are not hot-reloaded.
+
 ### Internal Space agent artifact handoffs
 
 Internal Space agent sessions get a session-scoped artifact directory under
@@ -215,6 +276,26 @@ Space uses guarded capabilities to reduce routine OpenCode permission friction w
 - **Role-breaking or destructive/ambiguous operations** remain denied. Reviewer edit/bash, implementer push or external-directory access, web-researcher local read/bash, force-push, reset/clean, direct `origin/main` pushes, credential access, and similarly unsafe requests surface as `HUMAN_DECISION_REQUIRED` rather than being auto-approved.
 - **Wrapper JSON evidence is the reviewable handoff.** Capability wrappers emit structured JSON with `status`, `action`, `message`, and `evidence` so supervisors, reviewers, and weekly automation can inspect what happened without granting a broad shell or GitHub capability.
 - **OpenCode must be restarted after `.opencode/**` changes.** Agent definitions, skill instructions, and permission rules are startup-loaded, so restart OpenCode before relying on changed capability agents or policy rules.
+
+### CI latency expectations
+
+The PR workflow includes targeted latency improvements while keeping PR CI as the
+authoritative integration gate:
+
+- Linux CI builds with `make BUILD_JOBS=$(nproc) build`.
+- CTest runs in parallel in CI.
+- Constraints are not run as a separate duplicated workflow step because CTest
+  owns the constraints fixture.
+- PR workflow `cancel-in-progress` cancels superseded PR runs but not
+  `merge_group` runs.
+- `sccache` binary installation is skipped when a restored cache already provides
+  the command.
+- Removing or weakening the required Windows installer path remains
+  `HUMAN_DECISION_REQUIRED`.
+
+Deterministic, search, and wrapper agents may move to faster models only when an
+exact approved provider/model-id value is supplied. Shorthand model names are not
+valid OpenCode config values.
 
 ### Stale merged PR follow-up recovery
 
