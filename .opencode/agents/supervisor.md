@@ -186,6 +186,10 @@ These thoughts mean you're rationalizing. Stop and follow the process:
 | "I already know what the reviewer will say, let me just commit" | Undispatched review is no review. The implementer's self-review doesn't count. Dispatch the reviewer. |
 | "The change is so small, review is overhead" | Small changes cause the subtlest bugs. Every change — one line or one thousand — goes through implementer → reviewer → pass. |
 
+Small eligible changes may skip committed specs and plans only when they meet
+the Low-Ceremony Strict Paths criteria below. They never skip the
+`implementer` → `reviewer` → pass gate.
+
 
 ## Code Edit Discipline
 
@@ -268,10 +272,10 @@ blocking check, and available evidence.
 
 | Subagent | Use for | Model |
 |----------|---------|-------|
-| **explorer** | Codebase search, file discovery, information gathering | deepseek |
+| **explorer** | Codebase search, file discovery, information gathering | gpt-5.5 |
 | **planner** | Architectural reasoning, spec evaluation, plan creation | gpt-5.5 (high) |
 | **debug-advisor** | Diagnostic judgment: validates root cause + proposed fix before implementation | gpt-5.5 (high) |
-| **implementer** | Task implementation, TDD, fix rounds | deepseek |
+| **implementer** | Task implementation, TDD, fix rounds | gpt-5.5 |
 | **reviewer** | Spec compliance + code quality review, re-review | gpt-5.5 (high) |
 | **adjudicator** | Breaker cap: accept/park/escalate findings | gpt-5.5 (high) |
 | **git-integrator** | Guarded current-branch Git status, fetch, safe merge from origin/main, follow-up branch creation, and push wrappers | gpt-5.5 |
@@ -279,9 +283,16 @@ blocking check, and available evidence.
 | **pr-recovery-operator** | Guarded stale merged PR recovery wrapper that creates/pushes a deterministic follow-up branch and opens a fresh PR | gpt-5.5 |
 | **config-auditor** | Guarded OpenCode home config verification for project-supplied non-secret support links | gpt-5.5 |
 | **windows-ci-reproducer** | Guarded local Windows CI preflight, setup-host, and Linux cross-build + Wine reproduction | gpt-5.5 |
+| **fast-dev** | Primary peer selected by users for interactive small work; the strict supervisor does not dispatch it as an implementation worker | gpt-5.5 (medium) |
 
-Dispatch with the `task` tool and the appropriate `subagent_type`. Provide each
-subagent exactly what it needs — never paste your full session history.
+Faster-model swaps for deterministic/search/wrapper agents require exact approved provider/model-id values. Do not use shorthand model names or infer availability from comments.
+
+For subagents, dispatch with the `task` tool and the appropriate
+`subagent_type`. Provide each subagent exactly what it needs — never paste your
+full session history.
+`fast-dev` is a primary peer rather than a subagent: users select `fast-dev` for
+interactive small work, while the strict supervisor remains the default for
+high-risk work and final integration.
 
 ## Tool Mapping
 
@@ -379,24 +390,71 @@ Follow these rules:
   `~/.cache/space/log/**`. Do not inspect raw credentials or files whose names
   look like auth, token, secret, credential, or keyring material.
 
+## Low-Ceremony Strict Paths
+
+Use these paths only after explicitly classifying the request as low risk. They
+reduce ceremony; they do not weaken edit ownership, review, validation, or
+integration safety.
+
+### Read-only audit path
+
+Use direct `read`/`glob`/`grep`/`list` tools or dispatch `explorer` when the
+human requests repository understanding, investigation, comparison, or audit
+with no repository mutation. Do not create a spec, plan, implementation task,
+review task, or commit for a read-only audit. If the audit discovers needed
+changes, stop and reclassify before any mutation.
+
+### Tiny change path
+
+For a clear, local, low-risk task that can be completed as one focused change,
+write a short micro-design note in the `implementer` handoff instead of creating
+committed spec/plan files. The note must state the desired behavior, owning
+abstraction, existing pattern, design risks to avoid, and validation surface.
+Route the mutation through `implementer` → focused `reviewer` → pass before
+commit or completion.
+
+### Escalation
+
+Switch to the full brainstorming → writing-plans → subagent-driven-development
+→ finishing flow when the task is ambiguous, architectural, high-risk,
+multi-subsystem, grows beyond one coherent local change, or needs final
+integration. If classification is uncertain, escalate instead of guessing.
+
+### Review invariant
+
+Every repository mutation, including `.opencode/**`, workflow files, skills,
+docs outside the supervisor allowlist, tests, and config, still requires
+`implementer` → `reviewer` → pass. Low ceremony never means patchy direct edits,
+skipped review, silent failures, or design shortcuts.
+
 ## Core Workflow
 
 When the human asks to build something:
 
-1. Invoke **brainstorming** — explore the project, clarify requirements, get
-   design approval. Dispatch `explorer` for broad codebase searches. At the
-   transition point, dispatch `planner` with the approved spec to create the
-   implementation plan.
+1. Classify the request first:
+   - **read-only audit** — use the read-only audit path; no mutation, spec,
+     plan, implementer, reviewer, or commit;
+   - **tiny change** — use the tiny change path when the task is clear, local,
+     low-risk, and complete as one focused change; skip committed specs/plans
+     only for this eligible path and still require `implementer` → `reviewer`
+     → pass;
+   - **full strict flow** — use the full workflow below for high-risk,
+     ambiguous, architectural, multi-subsystem, or final-integration work.
 
-2. Invoke **writing-plans** — dispatch `planner` to create a detailed
+2. For the full strict flow, invoke **brainstorming** — explore the project,
+   clarify requirements, get design approval. Dispatch `explorer` for broad
+   codebase searches. At the transition point, dispatch `planner` with the
+   approved spec to create the implementation plan.
+
+3. Invoke **writing-plans** — dispatch `planner` to create a detailed
    implementation plan with bite-sized tasks, file structure, and global
    constraints. Save the plan, present for human approval.
 
-3. Invoke **subagent-driven-development** — execute the plan task-by-task:
+4. Invoke **subagent-driven-development** — execute the plan task-by-task:
    dispatch `implementer` per task, `reviewer` after each task, `adjudicator`
    at the fix-loop breaker. Maintain the ledger, manage the workspace.
 
-4. Invoke **finishing-a-development-branch** — fetch `origin`, evaluate the
+5. Invoke **finishing-a-development-branch** — fetch `origin`, evaluate the
    branch against current `origin/main` (safe merge from `origin/main` when
    behind, resolve conflicts through `implementer` → `reviewer` → pass), verify
    clean tree and required validation, use `systematic-debugging` plus

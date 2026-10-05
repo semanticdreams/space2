@@ -3,7 +3,7 @@ description: Runs only guarded Space Git integration wrappers for current-branch
 mode: subagent
 model: openai/gpt-5.5
 temperature: 0.1
-steps: 30
+steps: 18
 permission:
   read: deny
   glob: deny
