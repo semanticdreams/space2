@@ -231,7 +231,7 @@
   (local opened (find-event events shell-op "shell-opened"))
   (assert opened "shell should emit shell-opened")
   (local channel-id opened.channel-id)
-  (local write-op (ssh.channel-write channel-id "printf shell-ok\\n\nexit\n"))
+  (local write-op (ssh.channel-write channel-id "printf 'shell-%s\\n' ok\nexit\n"))
   (local (write-terminal write-events) (wait-for-terminal ssh write-op "shell write should finish" 65000))
   (assert-success write-terminal "shell write should succeed")
   (when (not (find-channel-data-containing write-events channel-id "shell-ok"))
