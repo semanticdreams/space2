@@ -8,7 +8,7 @@ VCPKG_TRIPLET="${VCPKG_TARGET_TRIPLET:-x64-mingw-dynamic-posix}"
 VCPKG_OVERLAY_TRIPLETS="${VCPKG_OVERLAY_TRIPLETS:-${ROOT_DIR}/scripts/vcpkg-triplets}"
 VCPKG_OVERLAY_PORTS="${VCPKG_OVERLAY_PORTS:-${ROOT_DIR}/scripts/vcpkg-ports}"
 VCPKG_BUILD_TYPE="${VCPKG_BUILD_TYPE:-release}"
-VCPKG_PACKAGES="${VCPKG_PACKAGES:-sdl3 libepoxy bullet3 glm openal-soft curl zeromq cppzmq portaudio aubio xapian libpng freetype sqlite3 boost-headers boost-uuid ffmpeg[openssl] libtorrent}"
+VCPKG_PACKAGES="${VCPKG_PACKAGES:-sdl3 libepoxy bullet3 glm openal-soft curl zeromq cppzmq portaudio aubio xapian libpng freetype sqlite3 boost-headers boost-uuid ffmpeg[openssl] libtorrent libssh}"
 CROSS_CC="${CROSS_CC:-x86_64-w64-mingw32-gcc-posix}"
 CROSS_CXX="${CROSS_CXX:-x86_64-w64-mingw32-g++-posix}"
 RUST_TARGET="${RUST_TARGET:-x86_64-pc-windows-gnu}"
@@ -247,7 +247,7 @@ if [ -d "${triplet_lib_dir}" ]; then
 fi
 
 if command -v pkg-config >/dev/null 2>&1; then
-    required_pc_modules=(libzmq portaudio-2.0 epoxy xapian-core)
+    required_pc_modules=(libzmq portaudio-2.0 epoxy xapian-core libssh)
     for module in "${required_pc_modules[@]}"; do
         if ! pkg-config --exists "${module}"; then
             echo "Missing pkg-config module '${module}' for triplet '${VCPKG_TRIPLET}'." >&2

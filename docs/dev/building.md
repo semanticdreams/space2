@@ -136,6 +136,22 @@ sudo zypper install \
   libpng16-devel
 ```
 
+### SSH backend dependencies
+
+SSH support is optional for local builds, but a real backend requires the
+`libssh` development package that provides the `libssh` pkg-config module.
+Linux integration tests that exercise the real backend also need OpenSSH
+fixture tools.
+
+- Ubuntu/Pop!_OS: `libssh-dev openssh-server openssh-client` (included in the
+  CI dependency block above).
+- macOS/Homebrew: `brew install libssh`. This slice documents macOS dependency
+  expectations only; there is no macOS CI workflow for SSH real-backend
+  validation yet.
+- Windows cross-builds: `scripts/build-windows.sh` requests the vcpkg `libssh`
+  port by default and requires the `libssh` pkg-config module before CMake
+  configuration.
+
 Build and run for normal local development:
 
 ```bash
