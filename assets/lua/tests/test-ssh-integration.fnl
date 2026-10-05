@@ -395,6 +395,18 @@
   (assert (= terminal.kind "operation-cancelled") "cancelled exec should emit operation-cancelled")
   (assert (= terminal.error-code "cancelled") "cancelled exec should use cancelled error-code"))
 
+(fn cancel-long-running-exec-on-fresh-session [ssh fixture]
+  (local connect-op (ssh.connect (connect-options fixture "accept-once")))
+  (local (connect-terminal connect-events)
+    (wait-for-terminal ssh connect-op "fresh cancellation connect should finish"))
+  (assert-success connect-terminal "fresh cancellation connect should succeed")
+  (local connected (find-event connect-events connect-op "connected"))
+  (assert connected "fresh cancellation connect should emit connected event")
+  (local (ok err) (pcall cancel-long-running-exec ssh connected.session-id))
+  (ssh.close-session connected.session-id)
+  (when (not ok)
+    (error err)))
+
 (fn cancel-long-running-exec-waits-for-remote-start-marker []
   (local marker-seen {:value false})
   (local cancel-called {:value false})
@@ -436,6 +448,39 @@
   (assert (string.find (tostring message) "failed early" 1 true)
           "pre-marker terminal failure should report message"))
 
+(fn cancellation-coverage-uses-fresh-session []
+  (local closed-session {:value nil})
+  (local poll-count {:value 0})
+  (local polls [[{:operation-id "connect-op" :kind "connected" :session-id "fresh-session"}
+                 {:operation-id "connect-op" :kind "operation-success"}]
+                [{:operation-id "exec-op" :kind "exec-stdout" :fields {:data "cancel-ready"}}]
+                [{:operation-id "exec-op" :kind "operation-cancelled" :error-code "cancelled"}]])
+  (local fixture {:host "fixture-host"
+                  :port 22
+                  :username "fixture-user"
+                  :key-path "/tmp/key"
+                  :known-hosts-path "/tmp/known_hosts"})
+  (local ssh {:connect (fn [options]
+                         (assert (= options.known-host-policy "accept-once")
+                                 "fresh cancellation session should use explicit accepted connection")
+                         "connect-op")
+              :exec (fn [session-id _options]
+                      (assert (= session-id "fresh-session")
+                              "cancellation should run on freshly connected session")
+                      "exec-op")
+              :cancel (fn [_operation-id]
+                        true)
+              :close-session (fn [session-id]
+                               (set closed-session.value session-id))
+              :poll (fn []
+                      (set poll-count.value (+ poll-count.value 1))
+                      (local events (. polls poll-count.value))
+                      (assert events "scripted fresh cancellation poll should have connect, marker, and terminal events")
+                      events)})
+  (cancel-long-running-exec-on-fresh-session ssh fixture)
+  (assert (= closed-session.value "fresh-session")
+          "fresh cancellation session should be closed after cancellation"))
+
 (fn sdk-low-level-exec-example-runs-command []
   (local (fixture skip-message) (fixture-config))
   (if (not fixture)
@@ -476,7 +521,7 @@
           (maybe-shell-round-trip ssh session-id)
           (local-tunnel-round-trip ssh fixture session-id)
           (remote-tunnel ssh fixture session-id)
-          (cancel-long-running-exec ssh session-id)
+          (cancel-long-running-exec-on-fresh-session ssh fixture)
           (ssh.close-session session-id)))))
 
 (fn unavailable-backend-strict-mode-fails-loudly []
@@ -516,7 +561,10 @@
                      :fn cancel-long-running-exec-waits-for-remote-start-marker})
 
 (table.insert tests {:name "SSH cancel reports pre-marker terminal state"
-                     :fn cancel-start-marker-wait-reports-pre-marker-terminal})
+                      :fn cancel-start-marker-wait-reports-pre-marker-terminal})
+
+(table.insert tests {:name "SSH cancel coverage uses a fresh accepted session"
+                     :fn cancellation-coverage-uses-fresh-session})
 
 (local main
   (fn []
