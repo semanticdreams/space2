@@ -75,6 +75,7 @@
        :tests.test-activity-presentation
       :tests.test-activity-surface-boundary
       :tests.test-activity-camera-state
+     :tests.test-fpc-command-hints
       :tests.test-canvas-controls
       :tests.test-canvas-activity-slots
       :tests.test-scene-activity-slots
