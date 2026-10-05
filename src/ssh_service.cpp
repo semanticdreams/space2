@@ -30,6 +30,8 @@ bool secret_field_name(const std::string& key)
         key.find("private-key") != std::string::npos;
 }
 
+constexpr uint64_t ChannelWriteTimeoutMs = 500;
+
 std::map<std::string, std::string> error_fields(ErrorCode code)
 {
     return {{ "error-code", error_code_to_string(code) }};
@@ -329,8 +331,8 @@ OperationId Service::channel_write(ChannelId channel_id, const std::string& data
     {
         return enqueue_error(ErrorCode::InvalidId, "unknown SSH channel id");
     }
-    const OperationId operation_id = start_operation(0);
-    dispatch(operation_id, 0, [this, channel_id, data](OperationContext& context) {
+    const OperationId operation_id = start_operation(ChannelWriteTimeoutMs);
+    dispatch(operation_id, ChannelWriteTimeoutMs, [this, channel_id, data](OperationContext& context) {
         backend_->channel_write(context, channel_id, data);
     });
     return operation_id;

@@ -1098,7 +1098,17 @@ public:
             int next = -1;
             {
                 std::lock_guard<std::mutex> channel_lock(channel->mutex);
-                next = channel->handle.value ? ssh_channel_write(channel->handle.value, data.data() + written, static_cast<uint32_t>(data.size() - written)) : -1;
+                if (channel->handle.value)
+                {
+                    ssh_channel_set_blocking(channel->handle.value, 0);
+                    next = ssh_channel_write(channel->handle.value, data.data() + written, static_cast<uint32_t>(data.size() - written));
+                    ssh_channel_set_blocking(channel->handle.value, 1);
+                }
+            }
+            if (next == SSH_AGAIN)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                continue;
             }
             if (next <= 0)
             {

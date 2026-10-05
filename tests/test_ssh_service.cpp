@@ -132,7 +132,8 @@ public:
         RemoteTunnelUnsupported,
         LocalTunnelBindFailure,
         RemoteShellCloses,
-        LongLivedResources
+        LongLivedResources,
+        BlockingChannelWrite
     };
 
     explicit FakeBackend(Mode mode)
@@ -354,6 +355,14 @@ public:
     }
     void channel_write(OperationContext& context, ChannelId channel_id, const std::string&) override
     {
+        if (mode_ == Mode::BlockingChannelWrite)
+        {
+            while (!context.token().is_cancelled())
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            return;
+        }
         context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), 0, channel_id });
     }
     void channel_resize(OperationContext& context, ChannelId channel_id, uint32_t, uint32_t) override
@@ -936,6 +945,24 @@ void shutdown_cancels_sessions_channels_tunnels_and_workers()
     expect_eq(backend_ptr->cancelled_operations(), 1, "shutdown asks backend to cancel active worker once");
 }
 
+void channel_write_timeout_emits_terminal_event()
+{
+    auto backend = std::make_unique<FakeBackend>(FakeBackend::Mode::BlockingChannelWrite);
+    FakeBackend* backend_ptr = backend.get();
+    Service service(std::move(backend));
+    const SessionId session_id = connect_session(service);
+    service.open_shell(session_id, ShellOptions{});
+    const ChannelId channel_id = find_kind(poll_until(service, 2), EventKind::ShellOpened)->channel_id;
+
+    service.channel_write(channel_id, "blocked write");
+    auto events = poll_until(service, 1);
+
+    expect_eq(events.size(), std::size_t{ 1 }, "channel write should produce a terminal event");
+    expect_eq(events[0].kind, EventKind::OperationTimeout, "blocked channel write should time out");
+    expect_eq(events[0].error_code, ErrorCode::Timeout, "blocked channel write timeout code");
+    expect_eq(backend_ptr->cancelled_operations(), 1, "channel write timeout should notify backend cleanup");
+}
+
 void run(const std::string& name, void (*test)())
 {
     test();
@@ -980,6 +1007,7 @@ int main()
         run("remote_tunnel_unsupported_is_structured", remote_tunnel_unsupported_is_structured);
         run("local_tunnel_bind_failure_is_structured", local_tunnel_bind_failure_is_structured);
         run("shutdown_cancels_sessions_channels_tunnels_and_workers", shutdown_cancels_sessions_channels_tunnels_and_workers);
+        run("channel_write_timeout_emits_terminal_event", channel_write_timeout_emits_terminal_event);
     }
     catch (const std::exception& ex)
     {
