@@ -161,6 +161,39 @@
       (assert (not (contains? result.error "p.a$s[%]")) "pattern-like password should be redacted from result error")
       (assert (not (contains? result.error "secret")) "secret should be redacted from result error"))))
 
+(fn sdk-fleet-exec-example-returns-structured-per-host-results []
+  (local fake (make-success-fake))
+  (install-fake fake
+    (fn []
+      (local fleet (require :ssh.fleet))
+      (local hosts [{:host "web-1.example.test"
+                     :port 22
+                     :username "deploy"
+                     :known-host-policy "accept-once"
+                     :known-hosts-path "/tmp/space-sdk-known-hosts"}
+                    {:host "web-2.example.test"
+                     :port 2222
+                     :username "deploy"}])
+      (local results (fleet.exec hosts {:command "uname -s"
+                                        :concurrency 2
+                                        :timeout-ms 10000
+                                        :env {:SPACE_SSH_EXAMPLE "1"}}))
+      (assert (= (length results) 2) "fleet example should return one result per host")
+      (each [index result (ipairs results)]
+        (local host (. hosts index))
+        (assert (= result.host host.host) "fleet example should preserve result host")
+        (assert (= result.port host.port) "fleet example should preserve result port")
+        (assert (= result.username host.username) "fleet example should preserve username")
+        (assert (= result.ok true) "fleet example should mark successful hosts ok")
+        (assert (= result.exit-status 7) "fleet example should expose exit status")
+        (assert (= result.stdout "out") "fleet example should capture stdout")
+        (assert (= result.stderr "err") "fleet example should capture stderr")
+        (assert (= result.error-code nil) "fleet example should not set error-code on success")
+        (assert (= result.error nil) "fleet example should not set error on success")
+        (assert (= (type result.duration-ms) :number) "fleet example should include duration-ms"))
+      (assert (= (. fake.exec-options 1 :command) "uname -s") "fleet example should pass command to ssh.exec")
+      (assert (= (. fake.exec-options 1 :env :SPACE_SSH_EXAMPLE) "1") "fleet example should pass env to ssh.exec"))))
+
 (var validation-fleet nil)
 (var validation-hosts nil)
 (var validation-opts nil)
@@ -194,6 +227,7 @@
 (table.insert tests {:name "SSH fleet per-host timeout cancels active operation" :fn per-host-timeout-cancels-operation})
 (table.insert tests {:name "SSH fleet cancellation produces cancelled result" :fn cancellation-produces-cancelled-result})
 (table.insert tests {:name "SSH fleet omits credential material from results" :fn credential-material-is-redacted-from-results})
+(table.insert tests {:name "SDK fleet exec example returns structured per-host results" :fn sdk-fleet-exec-example-returns-structured-per-host-results})
 (table.insert tests {:name "SSH fleet rejects malformed and noncanonical options" :fn malformed-fleet-options-raise})
 
 (local main

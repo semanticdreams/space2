@@ -48,6 +48,8 @@ you need the real backend:
 
 The native `ssh` module uses canonical kebab-case keys only and rejects malformed or unknown options loudly.
 
+The SDK module reference is [`ssh`](/sdk/modules/ssh). Its low-level exec and fleet exec examples are covered by named Fennel tests in `assets/lua/tests/test-ssh-integration.fnl` and `assets/lua/tests/test-ssh-fleet.fnl`.
+
 - `connect(opts[, callback]) -> operation-id`
 - `resolve-known-host(operation-id, decision) -> boolean`
 - `close-session(session-id) -> operation-id`

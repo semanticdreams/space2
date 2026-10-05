@@ -71,6 +71,7 @@ For non-canonical names, see [Module Aliases and Search Terms](/sdk/modules/alia
 
 - [http](/sdk/modules/http)
 - [http_server](/sdk/modules/http-server)
+- [ssh](/sdk/modules/ssh)
 - [zmq](/sdk/modules/zmq)
 - [realtime](/sdk/modules/realtime)
 - [libtorrent](/sdk/modules/libtorrent)

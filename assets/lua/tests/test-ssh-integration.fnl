@@ -272,6 +272,32 @@
   (assert (= terminal.kind "operation-cancelled") "cancelled exec should emit operation-cancelled")
   (assert (= terminal.error-code "cancelled") "cancelled exec should use cancelled error-code"))
 
+(fn sdk-low-level-exec-example-runs-command []
+  (local (fixture skip-message) (fixture-config))
+  (if (not fixture)
+      (print (.. "SKIP " skip-message))
+      (do
+        (local ssh (require :ssh))
+        (local connect-op (ssh.connect (connect-options fixture "accept-once")))
+        (local (connect-terminal connect-events) (wait-for-terminal ssh connect-op "SDK low-level connect should finish"))
+        (if (maybe-skip-unavailable connect-terminal)
+            true
+            (do
+              (assert-success connect-terminal "SDK low-level connect should succeed")
+              (local connected (find-event connect-events connect-op "connected"))
+              (assert connected "SDK low-level connect should emit connected event")
+              (local exec-op (ssh.exec connected.session-id {:command "printf sdk-ssh-ok" :timeout-ms 10000}))
+              (local (_exec-terminal exec-events) (wait-for-terminal ssh exec-op "SDK low-level exec should finish"))
+              (local stdout (find-event exec-events exec-op "exec-stdout"))
+              (local complete (find-event exec-events exec-op "exec-complete"))
+              (local success (find-event exec-events exec-op "operation-success"))
+              (assert stdout "SDK low-level exec should emit stdout")
+              (assert complete "SDK low-level exec should emit completion")
+              (assert-success success "SDK low-level exec should succeed")
+              (assert (= stdout.fields.data "sdk-ssh-ok") "SDK low-level exec stdout should match")
+              (assert (= complete.fields.exit-status "0") "SDK low-level exec exit status should be zero")
+              (ssh.close-session connected.session-id))))))
+
 (fn real-ssh-fixture-covers-foundation []
   (local (fixture skip-message) (fixture-config))
   (if (not fixture)
@@ -306,6 +332,9 @@
 
 (table.insert tests {:name "SSH integration fixture covers real SSH operations or skips clearly"
                       :fn real-ssh-fixture-covers-foundation})
+
+(table.insert tests {:name "SDK low-level exec example runs command"
+                     :fn sdk-low-level-exec-example-runs-command})
 
 (table.insert tests {:name "SSH unavailable backend strict mode fails loudly"
                      :fn unavailable-backend-strict-mode-fails-loudly})
