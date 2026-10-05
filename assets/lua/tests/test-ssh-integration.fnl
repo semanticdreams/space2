@@ -6,6 +6,9 @@
 (fn env [name]
   (os.getenv name))
 
+(fn env-enabled? [name]
+  (= (env name) "1"))
+
 (fn fixture-config []
   (local missing [])
   (each [_ name (ipairs required-env)]
@@ -74,6 +77,33 @@
       (set found event)))
   found)
 
+(fn channel-data-containing? [event channel-id needle]
+  (and (= event.kind "channel-data")
+       (= event.channel-id channel-id)
+       event.fields
+       event.fields.data
+       (string.find event.fields.data needle 1 true)))
+
+(fn find-channel-data-containing [events channel-id needle]
+  (var found nil)
+  (each [_ event (ipairs events)]
+    (when (and (not found)
+               (channel-data-containing? event channel-id needle))
+      (set found event)))
+  found)
+
+(fn append-events [target events]
+  (each [_ event (ipairs events)]
+    (table.insert target event)))
+
+(fn shell-channel-closed? [events channel-id]
+  (var closed? false)
+  (each [_ event (ipairs events)]
+    (when (and (= event.kind "channel-closed")
+               (= event.channel-id channel-id))
+      (set closed? true)))
+  closed?)
+
 (fn poll-ssh-until-match [ssh predicate collected state]
   (local events (ssh.poll))
   (each [_ event (ipairs events)]
@@ -113,11 +143,12 @@
               (kind-matches? operation-id kind event))
             message))
 
-(fn wait-for-terminal [ssh operation-id message]
+(fn wait-for-terminal [ssh operation-id message timeout-ms]
   (wait-for ssh
             (fn [event _events]
               (terminal-matches? operation-id event))
-            message))
+            message
+            timeout-ms))
 
 (fn connect-options [fixture policy]
   (local options {:target {:host fixture.host :port fixture.port :username fixture.username}
@@ -130,12 +161,27 @@
 
 (fn maybe-skip-unavailable [terminal]
   (when (and (= terminal.kind "operation-error")
-             (= terminal.error-code "unavailable-backend"))
-    (print "SKIP SSH integration fixture: SSH backend unavailable in this build")
-    true))
+              (= terminal.error-code "unavailable-backend"))
+    (if (env-enabled? "SPACE_TEST_REQUIRE_SSH_BACKEND")
+        (error "SPACE_TEST_REQUIRE_SSH_BACKEND=1 but SSH backend reported unavailable-backend")
+        (do
+          (print "SKIP SSH integration fixture: SSH backend unavailable in this build")
+          true))))
 
 (fn assert-success [event message]
   (assert (= event.kind "operation-success") (.. message ": " (tostring event.kind) " " (tostring event.error-code))))
+
+(fn close-shell-channel [ssh channel-id events]
+  (when (not (shell-channel-closed? events channel-id))
+    (local close-op (ssh.channel-close channel-id))
+    (local (close-terminal) (wait-for-terminal ssh close-op "shell close should finish"))
+    (assert-success close-terminal "shell close should succeed")))
+
+(fn wait-for-shell-output [ssh channel-id]
+  (wait-for ssh
+            (fn [event _events]
+              (channel-data-containing? event channel-id "shell-ok"))
+            "shell should return command output"))
 
 (fn connect-with-known-host-acceptance [ssh fixture]
   (local rejected-op (ssh.connect (connect-options fixture nil)))
@@ -204,25 +250,58 @@
   (assert (= (read-file download-path) payload) "sftp binary payload should round trip exactly"))
 
 (fn shell-round-trip [ssh session-id]
-  (local shell-op (ssh.open-shell session-id {:request-pty false :timeout-ms 10000}))
+  (local shell-op (ssh.open-shell session-id {:request-pty true :timeout-ms 10000}))
   (local (_terminal events) (wait-for-terminal ssh shell-op "shell open should finish"))
   (local opened (find-event events shell-op "shell-opened"))
   (assert opened "shell should emit shell-opened")
   (local channel-id opened.channel-id)
-  (local write-op (ssh.channel-write channel-id "printf shell-ok\\n\nexit\n"))
-  (local (write-terminal) (wait-for-terminal ssh write-op "shell write should finish"))
+  (local write-op (ssh.channel-write channel-id "printf 'shell-%s\\n' ok\nexit\n"))
+  (local (write-terminal write-events) (wait-for-terminal ssh write-op "shell write should finish" 65000))
+  (local shell-events [])
+  (append-events shell-events write-events)
   (assert-success write-terminal "shell write should succeed")
-  (wait-for ssh
-            (fn [event _events]
-              (and (= event.kind "channel-data")
-                   (= event.channel-id channel-id)
-                   event.fields
-                   event.fields.data
-                   (string.find event.fields.data "shell-ok" 1 true)))
-            "shell should return command output")
-  (local close-op (ssh.channel-close channel-id))
-  (local (close-terminal) (wait-for-terminal ssh close-op "shell close should finish"))
-  (assert-success close-terminal "shell close should succeed"))
+  (when (not (find-channel-data-containing write-events channel-id "shell-ok"))
+    (local (_output output-events)
+      (wait-for-shell-output ssh channel-id))
+    (append-events shell-events output-events))
+  (close-shell-channel ssh channel-id shell-events))
+
+(fn shell-close-skips-explicit-close-after-observed-channel-closed []
+  (local close-called {:value false})
+  (local ssh {:channel-close (fn [_channel-id]
+                              (set close-called.value true)
+                              "close-op")
+              :poll (fn [] [{:operation-id "close-op"
+                             :kind "operation-error"
+                             :error-code "invalid-id"}])})
+  (close-shell-channel ssh "channel-1" [{:kind "channel-closed" :channel-id "channel-1"}])
+  (assert (not close-called.value) "already-closed shell cleanup should not request channel-close"))
+
+(fn shell-round-trip-preserves-output-wait-close-events []
+  (local close-called {:value false})
+  (local poll-count {:value 0})
+  (local polls [[{:operation-id "open-op" :kind "shell-opened" :channel-id "channel-1"}
+                 {:operation-id "open-op" :kind "operation-success"}]
+                [{:operation-id "write-op" :kind "operation-success"}]
+                [{:kind "channel-data" :channel-id "channel-1" :fields {:data "shell-ok\n"}}
+                 {:kind "channel-closed" :channel-id "channel-1"}]])
+  (fn open-shell [_session-id _options]
+    "open-op")
+  (fn channel-write [_channel-id _data]
+    "write-op")
+  (fn channel-close [_channel-id]
+    (set close-called.value true)
+    "close-op")
+  (fn poll []
+    (set poll-count.value (+ poll-count.value 1))
+    (local events (. polls poll-count.value))
+    (assert events "scripted shell poll should have events for every wait"))
+  (local ssh {:open-shell open-shell
+              :channel-write channel-write
+              :channel-close channel-close
+              :poll poll})
+  (shell-round-trip ssh "session-1")
+  (assert (not close-called.value) "shell output wait channel-closed event should complete cleanup"))
 
 (fn local-tunnel-round-trip [ssh fixture session-id]
   (if (not (and fixture.echo-host fixture.echo-port fixture.local-tunnel-port))
@@ -266,6 +345,32 @@
   (assert (= terminal.kind "operation-cancelled") "cancelled exec should emit operation-cancelled")
   (assert (= terminal.error-code "cancelled") "cancelled exec should use cancelled error-code"))
 
+(fn sdk-low-level-exec-example-runs-command []
+  (local (fixture skip-message) (fixture-config))
+  (if (not fixture)
+      (print (.. "SKIP " skip-message))
+      (do
+        (local ssh (require :ssh))
+        (local connect-op (ssh.connect (connect-options fixture "accept-once")))
+        (local (connect-terminal connect-events) (wait-for-terminal ssh connect-op "SDK low-level connect should finish"))
+        (if (maybe-skip-unavailable connect-terminal)
+            true
+            (do
+              (assert-success connect-terminal "SDK low-level connect should succeed")
+              (local connected (find-event connect-events connect-op "connected"))
+              (assert connected "SDK low-level connect should emit connected event")
+              (local exec-op (ssh.exec connected.session-id {:command "printf sdk-ssh-ok" :timeout-ms 10000}))
+              (local (_exec-terminal exec-events) (wait-for-terminal ssh exec-op "SDK low-level exec should finish"))
+              (local stdout (find-event exec-events exec-op "exec-stdout"))
+              (local complete (find-event exec-events exec-op "exec-complete"))
+              (local success (find-event exec-events exec-op "operation-success"))
+              (assert stdout "SDK low-level exec should emit stdout")
+              (assert complete "SDK low-level exec should emit completion")
+              (assert-success success "SDK low-level exec should succeed")
+              (assert (= stdout.fields.data "sdk-ssh-ok") "SDK low-level exec stdout should match")
+              (assert (= complete.fields.exit-status "0") "SDK low-level exec exit status should be zero")
+              (ssh.close-session connected.session-id))))))
+
 (fn real-ssh-fixture-covers-foundation []
   (local (fixture skip-message) (fixture-config))
   (if (not fixture)
@@ -283,8 +388,35 @@
           (cancel-long-running-exec ssh session-id)
           (ssh.close-session session-id)))))
 
+(fn unavailable-backend-strict-mode-fails-loudly []
+  (when (env "SPACE_TEST_EXERCISE_UNAVAILABLE_BACKEND")
+    (local terminal {:kind "operation-error" :error-code "unavailable-backend"})
+    (local (ok message) (pcall maybe-skip-unavailable terminal))
+    (if (env-enabled? "SPACE_TEST_REQUIRE_SSH_BACKEND")
+        (do
+          (assert (not ok) "strict backend mode should fail on unavailable-backend")
+          (assert (string.find (tostring message) "unavailable-backend" 1 true)
+                  "strict backend failure should name unavailable-backend")
+          (assert (string.find (tostring message) "SPACE_TEST_REQUIRE_SSH_BACKEND" 1 true)
+                  "strict backend failure should name SPACE_TEST_REQUIRE_SSH_BACKEND"))
+        (do
+          (assert ok "default backend mode should skip unavailable-backend")
+          (assert message "default backend mode should return a skip signal")))))
+
 (table.insert tests {:name "SSH integration fixture covers real SSH operations or skips clearly"
-                     :fn real-ssh-fixture-covers-foundation})
+                      :fn real-ssh-fixture-covers-foundation})
+
+(table.insert tests {:name "SDK low-level exec example runs command"
+                     :fn sdk-low-level-exec-example-runs-command})
+
+(table.insert tests {:name "SSH unavailable backend strict mode fails loudly"
+                     :fn unavailable-backend-strict-mode-fails-loudly})
+
+(table.insert tests {:name "SSH shell cleanup treats observed channel close as complete"
+                     :fn shell-close-skips-explicit-close-after-observed-channel-closed})
+
+(table.insert tests {:name "SSH shell output wait preserves channel close event"
+                     :fn shell-round-trip-preserves-output-wait-close-events})
 
 (local main
   (fn []

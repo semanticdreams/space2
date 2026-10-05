@@ -8,16 +8,26 @@
 #include <vector>
 
 #if SPACE_HAS_LIBSSH
-#include <arpa/inet.h>
-#include <cerrno>
-#include <cstring>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <fcntl.h>
-#include <libssh/libssh.h>
-#include <libssh/sftp.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#endif
+
+#include <cerrno>
+#include <cstring>
+#include <libssh/libssh.h>
+#include <libssh/sftp.h>
 
 #include <atomic>
 #include <chrono>
@@ -48,6 +58,97 @@ void emit_unsupported(OperationContext& context)
 }
 
 #if SPACE_HAS_LIBSSH
+
+#ifdef _WIN32
+using SocketFd = SOCKET;
+using SocketLength = int;
+constexpr SocketFd InvalidSocketFd = INVALID_SOCKET;
+constexpr int SocketShutdownBoth = SD_BOTH;
+
+bool ensure_winsock_initialized()
+{
+    static const bool initialized = []() {
+        WSADATA data {};
+        return WSAStartup(MAKEWORD(2, 2), &data) == 0;
+    }();
+    return initialized;
+}
+
+int last_socket_error()
+{
+    return WSAGetLastError();
+}
+
+bool is_transient_socket_error(int error)
+{
+    return error == WSAEWOULDBLOCK || error == WSAEINTR;
+}
+
+bool set_socket_nonblocking(SocketFd fd)
+{
+    u_long mode = 1;
+    return ioctlsocket(fd, FIONBIO, &mode) == 0;
+}
+
+void close_socket(SocketFd fd)
+{
+    if (fd != InvalidSocketFd)
+    {
+        closesocket(fd);
+    }
+}
+
+void shutdown_and_close_socket(SocketFd fd)
+{
+    if (fd != InvalidSocketFd)
+    {
+        shutdown(fd, SocketShutdownBoth);
+        closesocket(fd);
+    }
+}
+#else
+using SocketFd = int;
+using SocketLength = socklen_t;
+constexpr SocketFd InvalidSocketFd = -1;
+constexpr int SocketShutdownBoth = SHUT_RDWR;
+
+bool ensure_winsock_initialized()
+{
+    return true;
+}
+
+int last_socket_error()
+{
+    return errno;
+}
+
+bool is_transient_socket_error(int error)
+{
+    return error == EAGAIN || error == EWOULDBLOCK || error == EINTR;
+}
+
+bool set_socket_nonblocking(SocketFd fd)
+{
+    return fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK) == 0;
+}
+
+void close_socket(SocketFd fd)
+{
+    if (fd != InvalidSocketFd)
+    {
+        close(fd);
+    }
+}
+
+void shutdown_and_close_socket(SocketFd fd)
+{
+    if (fd != InvalidSocketFd)
+    {
+        shutdown(fd, SocketShutdownBoth);
+        close(fd);
+    }
+}
+#endif
 
 struct SessionHandle
 {
@@ -162,11 +263,11 @@ struct SftpHandle
 
 struct TunnelHandle
 {
-    int listener_fd { -1 };
+    SocketFd listener_fd { InvalidSocketFd };
     std::atomic<bool> running { true };
 
     TunnelHandle() = default;
-    explicit TunnelHandle(int listener)
+    explicit TunnelHandle(SocketFd listener)
         : listener_fd(listener)
     {
     }
@@ -178,7 +279,7 @@ struct TunnelHandle
         : listener_fd(other.listener_fd)
         , running(other.running.load())
     {
-        other.listener_fd = -1;
+        other.listener_fd = InvalidSocketFd;
         other.running.store(false);
     }
 
@@ -189,7 +290,7 @@ struct TunnelHandle
             stop();
             listener_fd = other.listener_fd;
             running.store(other.running.load());
-            other.listener_fd = -1;
+            other.listener_fd = InvalidSocketFd;
             other.running.store(false);
         }
         return *this;
@@ -203,11 +304,10 @@ struct TunnelHandle
     void stop()
     {
         running.store(false);
-        if (listener_fd >= 0)
+        if (listener_fd != InvalidSocketFd)
         {
-            shutdown(listener_fd, SHUT_RDWR);
-            close(listener_fd);
-            listener_fd = -1;
+            shutdown_and_close_socket(listener_fd);
+            listener_fd = InvalidSocketFd;
         }
     }
 };
@@ -327,7 +427,7 @@ struct SftpFileResource
 
 struct RelayResource
 {
-    RelayResource(int accepted_client, ChannelHandle remote_channel)
+    RelayResource(SocketFd accepted_client, ChannelHandle remote_channel)
         : client_fd(accepted_client)
         , remote(std::move(remote_channel))
     {
@@ -346,7 +446,7 @@ struct RelayResource
         return active.load();
     }
 
-    int client()
+    SocketFd client()
     {
         std::lock_guard<std::mutex> lock(client_mutex);
         return client_fd;
@@ -363,16 +463,15 @@ struct RelayResource
     void close_client()
     {
         std::lock_guard<std::mutex> lock(client_mutex);
-        if (client_fd >= 0)
+        if (client_fd != InvalidSocketFd)
         {
-            shutdown(client_fd, SHUT_RDWR);
-            close(client_fd);
-            client_fd = -1;
+            shutdown_and_close_socket(client_fd);
+            client_fd = InvalidSocketFd;
         }
     }
 
     std::mutex client_mutex;
-    int client_fd { -1 };
+    SocketFd client_fd { InvalidSocketFd };
     std::mutex remote_mutex;
     ChannelHandle remote;
     std::atomic<bool> active { true };
@@ -380,7 +479,7 @@ struct RelayResource
 
 struct TunnelResource
 {
-    explicit TunnelResource(int listener)
+    explicit TunnelResource(SocketFd listener)
         : handle(listener)
     {
     }
@@ -999,7 +1098,17 @@ public:
             int next = -1;
             {
                 std::lock_guard<std::mutex> channel_lock(channel->mutex);
-                next = channel->handle.value ? ssh_channel_write(channel->handle.value, data.data() + written, static_cast<uint32_t>(data.size() - written)) : -1;
+                if (channel->handle.value)
+                {
+                    ssh_channel_set_blocking(channel->handle.value, 0);
+                    next = ssh_channel_write(channel->handle.value, data.data() + written, static_cast<uint32_t>(data.size() - written));
+                    ssh_channel_set_blocking(channel->handle.value, 1);
+                }
+            }
+            if (next == SSH_AGAIN)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                continue;
             }
             if (next <= 0)
             {
@@ -1072,8 +1181,8 @@ public:
             return;
         }
 
-        int listener = bind_local_listener(options);
-        if (listener < 0)
+        SocketFd listener = bind_local_listener(options);
+        if (listener == InvalidSocketFd)
         {
             context.sink().emit(error_event(context.operation_id(), ErrorCode::TunnelBindFailed, "SSH local tunnel could not bind listener"));
             return;
@@ -1301,25 +1410,29 @@ private:
         }
     }
 
-    int bind_local_listener(const TunnelOptions& options)
+    SocketFd bind_local_listener(const TunnelOptions& options)
     {
-        int listener = socket(AF_INET, SOCK_STREAM, 0);
-        if (listener < 0)
+        if (!ensure_winsock_initialized())
         {
-            return -1;
+            return InvalidSocketFd;
+        }
+        SocketFd listener = socket(AF_INET, SOCK_STREAM, 0);
+        if (listener == InvalidSocketFd)
+        {
+            return InvalidSocketFd;
         }
         int yes = 1;
-        setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+        setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
         sockaddr_in address {};
         address.sin_family = AF_INET;
         address.sin_port = htons(options.local_port);
         const std::string host = options.local_host.empty() ? "127.0.0.1" : options.local_host;
         if (inet_pton(AF_INET, host.c_str(), &address.sin_addr) != 1 || bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 || listen(listener, 16) != 0)
         {
-            close(listener);
-            return -1;
+            close_socket(listener);
+            return InvalidSocketFd;
         }
-        fcntl(listener, F_SETFL, fcntl(listener, F_GETFL, 0) | O_NONBLOCK);
+        set_socket_nonblocking(listener);
         return listener;
     }
 
@@ -1332,24 +1445,24 @@ private:
     {
         while (tunnel_running(tunnel_id, tunnel))
         {
-            int listener = tunnel_listener(tunnel_id, tunnel);
-            if (listener < 0)
+            SocketFd listener = tunnel_listener(tunnel_id, tunnel);
+            if (listener == InvalidSocketFd)
             {
                 break;
             }
             sockaddr_in client_address {};
-            socklen_t client_length = sizeof(client_address);
-            int client = accept(listener, reinterpret_cast<sockaddr*>(&client_address), &client_length);
-            if (client < 0)
+            SocketLength client_length = sizeof(client_address);
+            SocketFd client = accept(listener, reinterpret_cast<sockaddr*>(&client_address), &client_length);
+            if (client == InvalidSocketFd)
             {
-                if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+                if (is_transient_socket_error(last_socket_error()))
                 {
                     std::this_thread::sleep_for(std::chrono::milliseconds(10));
                     continue;
                 }
                 break;
             }
-            fcntl(client, F_SETFL, fcntl(client, F_GETFL, 0) | O_NONBLOCK);
+            set_socket_nonblocking(client);
             ChannelHandle remote;
             {
                 std::lock_guard<std::mutex> session_lock(session->mutex);
@@ -1357,7 +1470,7 @@ private:
             }
             if (!remote.value)
             {
-                close(client);
+                close_socket(client);
                 continue;
             }
             ssh_channel_set_blocking(remote.value, 0);
@@ -1427,11 +1540,11 @@ private:
         return it != tunnels_.end() && it->second == tunnel && tunnel->handle.running.load();
     }
 
-    int tunnel_listener(TunnelId tunnel_id, const std::shared_ptr<TunnelResource>& tunnel)
+    SocketFd tunnel_listener(TunnelId tunnel_id, const std::shared_ptr<TunnelResource>& tunnel)
     {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = tunnels_.find(tunnel_id);
-        return it == tunnels_.end() || it->second != tunnel ? -1 : tunnel->handle.listener_fd;
+        return it == tunnels_.end() || it->second != tunnel ? InvalidSocketFd : tunnel->handle.listener_fd;
     }
 
     void relay_tunnel_connection(const std::shared_ptr<RelayResource>& relay, TunnelId tunnel_id, const std::shared_ptr<TunnelResource>& tunnel)
@@ -1439,8 +1552,8 @@ private:
         std::vector<char> buffer(8192);
         while (relay->running() && tunnel_running(tunnel_id, tunnel))
         {
-            int client = relay->client();
-            if (client < 0)
+            SocketFd client = relay->client();
+            if (client == InvalidSocketFd)
             {
                 break;
             }
@@ -1461,11 +1574,11 @@ private:
             FD_ZERO(&reads);
             FD_SET(client, &reads);
             timeval timeout { 0, 25000 };
-            const int ready = select(client + 1, &reads, nullptr, nullptr, &timeout);
+            const int ready = select(static_cast<int>(client + 1), &reads, nullptr, nullptr, &timeout);
             if (ready > 0 && FD_ISSET(client, &reads))
             {
-                const ssize_t received = recv(client, buffer.data(), buffer.size(), 0);
-                if (received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR))
+                const auto received = recv(client, buffer.data(), static_cast<int>(buffer.size()), 0);
+                if (received < 0 && is_transient_socket_error(last_socket_error()))
                 {
                     continue;
                 }
@@ -1512,12 +1625,12 @@ private:
                 while (sent < static_cast<std::size_t>(remote_read) && relay->running() && tunnel_running(tunnel_id, tunnel))
                 {
                     client = relay->client();
-                    if (client < 0)
+                    if (client == InvalidSocketFd)
                     {
                         return;
                     }
-                    const ssize_t written = send(client, buffer.data() + sent, static_cast<size_t>(remote_read) - sent, 0);
-                    if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR))
+                    const auto written = send(client, buffer.data() + sent, static_cast<int>(static_cast<std::size_t>(remote_read) - sent), 0);
+                    if (written < 0 && is_transient_socket_error(last_socket_error()))
                     {
                         std::this_thread::sleep_for(std::chrono::milliseconds(1));
                         continue;
