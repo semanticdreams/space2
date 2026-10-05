@@ -9,6 +9,10 @@ on:
       - main
   merge_group:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -56,8 +60,19 @@ jobs:
           deps=$(echo "$deps" | sed 's/\bsccache\b//g')
           sudo apt-get install -y ${deps} ccache
 
+      - name: Restore sccache binary
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin/sccache
+          key: sccache-bin-${{ runner.os }}-0.16.0
+
       - name: Install sccache
-        run: cargo install sccache --version 0.16.0 --locked
+        run: |
+          if command -v sccache >/dev/null 2>&1; then
+            sccache --version
+          else
+            cargo install sccache --version 0.16.0 --locked
+          fi
 
       - name: Configure git for test directories
         run: |
@@ -82,10 +97,7 @@ jobs:
         env:
           CMAKE_C_COMPILER_LAUNCHER: ccache
           CMAKE_CXX_COMPILER_LAUNCHER: ccache
-        run: make build
-
-      - name: Run constraints
-        run: make constraints
+        run: make BUILD_JOBS=$(nproc) build
 
       - name: ccache stats
         run: ccache -s
@@ -102,7 +114,7 @@ jobs:
           SPACE_ASSETS_PATH: ${{ github.workspace }}/assets
           SPACE_TEST_REQUIRE_SSH_FIXTURE: 1
           SPACE_TEST_REQUIRE_SSH_BACKEND: 1
-        run: xvfb-run -a ctest --test-dir build --output-on-failure -V
+        run: xvfb-run -a ctest --test-dir build --output-on-failure -V --parallel "$(nproc)"
 
       - name: Run e2e test suite
         run: make test-e2e
