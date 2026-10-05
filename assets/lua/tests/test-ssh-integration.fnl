@@ -226,7 +226,7 @@
   (assert (= (read-file download-path) payload) "sftp binary payload should round trip exactly"))
 
 (fn shell-round-trip [ssh session-id]
-  (local shell-op (ssh.open-shell session-id {:request-pty false :timeout-ms 10000}))
+  (local shell-op (ssh.open-shell session-id {:request-pty true :timeout-ms 10000}))
   (local (_terminal events) (wait-for-terminal ssh shell-op "shell open should finish"))
   (local opened (find-event events shell-op "shell-opened"))
   (assert opened "shell should emit shell-opened")
