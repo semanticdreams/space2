@@ -14,6 +14,7 @@
 #include "lua_engine.h"
 #include "lua_http.h"
 #include "lua_http_server.h"
+#include "lua_ssh.h"
 #include "lua_temporal_core.h"
 #include "lua_ray_box.h"
 #include "lua_notify.h"
@@ -23,6 +24,7 @@
 #include "lua_gccjit.h"
 #include "lua_xapian.h"
 #include "log.h"
+#include "ssh_service.h"
 #if defined(SPACE_ENABLE_WALLET_CORE)
 #include "lua_wallet_core.h"
 #endif
@@ -125,6 +127,7 @@ void LuaRuntime::init()
                        sol::lib::io, sol::lib::os, sol::lib::utf8);
     lua.require("lsqlite3", luaopen_lsqlite3);
     http = std::make_unique<HttpClient>();
+    ssh = std::make_shared<space::ssh::Service>(space::ssh::make_default_backend());
     install_base_bindings();
     configure_package_paths();
     lua["package"]["preload"]["runtime"] = [this](sol::this_state ts) -> sol::object {
@@ -327,6 +330,7 @@ void LuaRuntime::install_base_bindings()
     }
 #endif
     lua_bind_libtorrent(lua);
+    lua_bind_ssh(lua, ssh);
     lua_bind_temporal_core(lua);
     lua_bind_engine(lua);
     lua_bind_ray_box(lua);
@@ -350,6 +354,10 @@ LuaRuntime::~LuaRuntime()
     if (http) {
         http->shutdown();
         lua_http_drop(lua);
+    }
+    if (ssh) {
+        lua_ssh_drop(lua);
+        ssh.reset();
     }
 }
 

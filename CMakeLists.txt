@@ -104,6 +104,7 @@ option(SPACE_ENABLE_WALLET_CORE "Build wallet-core integration" OFF)
 option(SPACE_ENABLE_LIBTORRENT "Build libtorrent-rasterbar integration" ON)
 option(SPACE_ENABLE_FFMPEG "Build FFmpeg-backed in-world video support" ON)
 option(SPACE_ENABLE_CEF "Enable CEF embedded browser support" ${SPACE_DEFAULT_ENABLE_CEF})
+option(SPACE_ENABLE_SSH "Build SSH integration when libssh is available" ON)
 set(SPACE_BUILD_PROFILE "full" CACHE STRING "Build profile (full|minimal)")
 set_property(CACHE SPACE_BUILD_PROFILE PROPERTY STRINGS full minimal)
 set(SPACE_MINIMAL_DISABLED_OPTIONS "SPACE_ENABLE_CEF" CACHE STRING
@@ -208,6 +209,15 @@ include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/external/cgltf)
 include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/external/cppzmq)
 find_package(PkgConfig REQUIRED)
 set(SPACE_HAS_VTERM OFF)
+set(SPACE_HAS_LIBSSH OFF)
+if(SPACE_ENABLE_SSH)
+    pkg_check_modules(LIBSSH IMPORTED_TARGET libssh)
+    if(LIBSSH_FOUND)
+        set(SPACE_HAS_LIBSSH ON)
+    else()
+        message(WARNING "SPACE_ENABLE_SSH is ON but libssh was not found; SSH backend will report unavailable")
+    endif()
+endif()
 if(UNIX AND NOT APPLE)
     pkg_check_modules(VTERM REQUIRED IMPORTED_TARGET vterm)
     set(SPACE_HAS_VTERM ON)
@@ -561,6 +571,10 @@ endif()
 if(SPACE_HAS_VTERM)
     target_link_libraries(${PROJECT_NAME}_lib PkgConfig::VTERM)
 endif()
+if(SPACE_HAS_LIBSSH)
+    target_link_libraries(${PROJECT_NAME}_lib PkgConfig::LIBSSH)
+    target_compile_definitions(${PROJECT_NAME}_lib PUBLIC SPACE_HAS_LIBSSH=1)
+endif()
 if(UNIX AND NOT APPLE)
     if(LIBGCCJIT_FOUND)
         target_link_libraries(${PROJECT_NAME}_lib PkgConfig::LIBGCCJIT)
@@ -805,6 +819,15 @@ set_tests_properties(${PROJECT_NAME}_fnl_tests_integration PROPERTIES
     ENVIRONMENT "SKIP_KEYRING_TESTS=1;XDG_DATA_HOME=/tmp/space/tests/xdg-data;SPACE_DISABLE_AUDIO=1;SPACE_LOG_DIR=/tmp/space/tests/log;SPACE_ASSETS_PATH=${CMAKE_SOURCE_DIR}/assets;FENNEL_PATH=${CMAKE_SOURCE_DIR}/assets/lua/?.fnl\;${CMAKE_SOURCE_DIR}/assets/lua/?/init.fnl;FENNEL_MACRO_PATH=${CMAKE_SOURCE_DIR}/assets/lua/?.fnl\;${CMAKE_SOURCE_DIR}/assets/lua/?/init.fnl"
 )
 
+add_test(NAME space_ssh_integration
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/ssh_fixture.py --space $<TARGET_FILE:${SPACE_TEST_COMMAND_TARGET}> --assets ${CMAKE_SOURCE_DIR}/assets --module tests.test-ssh-integration:main
+)
+set_tests_properties(space_ssh_integration PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    FIXTURES_REQUIRED space_constraints
+    ENVIRONMENT "SKIP_KEYRING_TESTS=1;XDG_DATA_HOME=/tmp/space/tests/xdg-data;SPACE_DISABLE_AUDIO=1;SPACE_LOG_DIR=/tmp/space/tests/log;SPACE_ASSETS_PATH=${CMAKE_SOURCE_DIR}/assets;FENNEL_PATH=${CMAKE_SOURCE_DIR}/assets/lua/?.fnl\;${CMAKE_SOURCE_DIR}/assets/lua/?/init.fnl;FENNEL_MACRO_PATH=${CMAKE_SOURCE_DIR}/assets/lua/?.fnl\;${CMAKE_SOURCE_DIR}/assets/lua/?/init.fnl"
+)
+
 add_test(NAME ${PROJECT_NAME}_constraints
     COMMAND $<TARGET_FILE:${SPACE_TEST_COMMAND_TARGET}> -m constraints.runner:main -- --output summary --target repo
 )
@@ -839,6 +862,40 @@ target_include_directories(test_temporal_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_link_libraries(test_temporal_core date::date-tz)
 add_test(NAME test_temporal_core COMMAND test_temporal_core)
 set_tests_properties(test_temporal_core PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+add_executable(test_ssh_service
+    tests/test_ssh_service.cpp
+    src/ssh_service.cpp
+    src/ssh_backend_unavailable.cpp
+    src/ssh_backend_libssh.cpp
+)
+target_include_directories(test_ssh_service PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+if(SPACE_HAS_LIBSSH)
+    target_link_libraries(test_ssh_service PkgConfig::LIBSSH)
+    target_compile_definitions(test_ssh_service PRIVATE SPACE_HAS_LIBSSH=1)
+endif()
+add_test(NAME test_ssh_service COMMAND test_ssh_service)
+set_tests_properties(test_ssh_service PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+add_executable(test_lua_ssh_binding
+    tests/test_lua_ssh_binding.cpp
+    src/lua_ssh.cpp
+    src/ssh_service.cpp
+    src/ssh_backend_unavailable.cpp
+    src/ssh_backend_libssh.cpp
+)
+target_include_directories(test_lua_ssh_binding PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(test_lua_ssh_binding lua)
+if(SPACE_HAS_LIBSSH)
+    target_link_libraries(test_lua_ssh_binding PkgConfig::LIBSSH)
+    target_compile_definitions(test_lua_ssh_binding PRIVATE SPACE_HAS_LIBSSH=1)
+endif()
+add_test(NAME test_lua_ssh_binding COMMAND test_lua_ssh_binding)
+set_tests_properties(test_lua_ssh_binding PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 

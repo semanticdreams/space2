@@ -40,6 +40,7 @@
     :tests.test-external-editor
     :tests.test-fs
     :tests.test-fs-view
+    :tests.test-ssh-integration
     :tests.test-xapian
     :tests.test-xdg-icon-browser
     :tests.test-jpeg-texture-decode

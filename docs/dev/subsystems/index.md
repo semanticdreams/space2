@@ -10,7 +10,7 @@ tags:
 
 # Subsystems
 
-Space is organized into these major subsystems. Detailed subsystem pages: [Rendering](/dev/subsystems/rendering), [Input](/dev/subsystems/input), [Audio](/dev/subsystems/audio), [Networking](/dev/subsystems/networking), [Build](/dev/subsystems/build), [Process](/dev/subsystems/process), [Cross Platform](/dev/subsystems/cross-platform).
+Space is organized into these major subsystems. Detailed subsystem pages: [Rendering](/dev/subsystems/rendering), [Input](/dev/subsystems/input), [Audio](/dev/subsystems/audio), [Networking](/dev/subsystems/networking), [SSH](/dev/subsystems/ssh), [Build](/dev/subsystems/build), [Process](/dev/subsystems/process), [Cross Platform](/dev/subsystems/cross-platform).
 
 See [Concepts](/dev/concepts) for the VitePress concept docs, and [Dev Notes](/dev/notes/) for detailed architecture notes.
 
@@ -30,6 +30,7 @@ See [Concepts](/dev/concepts) for the VitePress concept docs, and [Dev Notes](/d
 - **Matrix** — Matrix bridge foundation for federation/chat
 - **Realtime Networking** — yojimbo-based client/server with feature protocol, auth ticketing, reliable/unreliable messaging. See [Networking](/dev/subsystems/networking)
 - **HTTP** — Multi-threaded libcurl HTTP client and embedded HTTP server
+- **SSH** — Space-owned async SSH client transport with optional `libssh` backend, known-host policy, SFTP, shell, and tunnel primitives. See [SSH](/dev/subsystems/ssh)
 - **Color Science** — Comprehensive color library: 15+ color spaces, Delta-E (1976/1994/2000/CMC), CIECAM02, CVD simulation. See [Cross Platform](/dev/subsystems/cross-platform)
 - **Force Layout** — Physics-based graph layout algorithm (spring/repulsion, pinning, stabilization). See [Force Layout Barnes Hut](/dev/notes/force-layout-barnes-hut)
 - **Job System** — Thread pool for async work (texture/audio loading, glTF parsing). See [Process](/dev/subsystems/process)

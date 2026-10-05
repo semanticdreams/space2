@@ -5,6 +5,7 @@
 #include "lua_http.h"
 #include "lua_http_server.h"
 #include "lua_process.h"
+#include "lua_ssh.h"
 #include "cgltf_jobs.h"
 #include "lua_jobs.h"
 #include "lua_keyring.h"
@@ -589,6 +590,7 @@ void Engine::run() {
         }
         lua_http_dispatch(*lua_state);
         lua_process_dispatch(*lua_state);
+        lua_ssh_dispatch(*lua_state);
         lua_http_server_dispatch(*lua_state);
         lua_callbacks_dispatch(*lua_state);
     };
@@ -1503,6 +1505,7 @@ void Engine::shutdown() {
     lua_jobs_clear_callbacks();
     lua_keyring_drop(*lua_state);
     lua_process_drop(*lua_state);
+    lua_ssh_drop(*lua_state);
     lua_http_server_shutdown_all();
     lua_callbacks_shutdown();
     video_manager.drop_all();
