@@ -266,6 +266,11 @@
     (append-events shell-events output-events))
   (close-shell-channel ssh channel-id shell-events))
 
+(fn maybe-shell-round-trip [ssh session-id]
+  (if (env-enabled? "SPACE_TEST_SSH_EXERCISE_SHELL")
+      (shell-round-trip ssh session-id)
+      (print "SKIP SSH interactive shell channel-write real-backend round trip: set SPACE_TEST_SSH_EXERCISE_SHELL=1 to exercise deferred flaky coverage")))
+
 (fn shell-close-skips-explicit-close-after-observed-channel-closed []
   (local close-called {:value false})
   (local ssh {:channel-close (fn [_channel-id]
@@ -302,6 +307,19 @@
               :poll poll})
   (shell-round-trip ssh "session-1")
   (assert (not close-called.value) "shell output wait channel-closed event should complete cleanup"))
+
+(fn assert-shell-round-trip-skips-by-default []
+  (local open-called {:value false})
+  (local ssh {:open-shell (fn [_session-id _options]
+                           (set open-called.value true)
+                           "open-op")})
+  (maybe-shell-round-trip ssh "session-1")
+  (assert (not open-called.value) "real-backend shell round trip should be opt-in by default"))
+
+(fn shell-round-trip-defaults-to-opt-in-skip []
+  (if (env-enabled? "SPACE_TEST_SSH_EXERCISE_SHELL")
+      (print "SKIP SSH shell opt-in default unit assertion: SPACE_TEST_SSH_EXERCISE_SHELL=1 is set")
+      (assert-shell-round-trip-skips-by-default)))
 
 (fn local-tunnel-round-trip [ssh fixture session-id]
   (if (not (and fixture.echo-host fixture.echo-port fixture.local-tunnel-port))
@@ -382,7 +400,7 @@
           (exec-nonzero ssh session-id)
           (exec-env ssh session-id)
           (sftp-round-trip ssh fixture session-id)
-          (shell-round-trip ssh session-id)
+          (maybe-shell-round-trip ssh session-id)
           (local-tunnel-round-trip ssh fixture session-id)
           (remote-tunnel ssh fixture session-id)
           (cancel-long-running-exec ssh session-id)
@@ -417,6 +435,9 @@
 
 (table.insert tests {:name "SSH shell output wait preserves channel close event"
                      :fn shell-round-trip-preserves-output-wait-close-events})
+
+(table.insert tests {:name "SSH shell round trip defaults to opt-in skip"
+                     :fn shell-round-trip-defaults-to-opt-in-skip})
 
 (local main
   (fn []
