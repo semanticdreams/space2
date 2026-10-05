@@ -20,6 +20,13 @@ Assume they are a skilled developer, but know almost nothing about our toolset o
 
 If the spec covers multiple independent subsystems, it should have been broken into sub-project specs during brainstorming. If it wasn't, suggest breaking this into separate plans — one per subsystem. Each plan should produce working, testable software on its own.
 
+Writing-plans is required for approved specs, multi-step tasks, architectural
+changes, ambiguous work, high-risk changes, and normal strict-flow
+implementation. Do not invoke writing-plans for read-only audits. Do not invoke
+writing-plans for supervisor-classified tiny changes that use a micro-design
+note and still route mutation through `implementer` -> `reviewer` -> pass. If a
+tiny change grows beyond one coherent local change, stop and create a plan.
+
 ## File Structure
 
 Before defining tasks, map out which files will be created or modified and what each one is responsible for. This is where decomposition decisions get locked in.

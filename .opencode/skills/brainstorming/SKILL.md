@@ -1,6 +1,6 @@
 ---
 name: brainstorming
-description: "You MUST use this before any creative work — creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation."
+description: "Use before full creative feature work, architectural changes, ambiguous changes, broad refactors, and high-risk work. Not required for read-only audits or supervisor-classified tiny changes that still route through implementer -> reviewer -> pass."
 ---
 
 # Brainstorming Ideas Into Designs
@@ -10,12 +10,22 @@ Help turn ideas into fully formed designs and specs through natural collaborativ
 Start by understanding the current project context, then ask questions one at a time to refine the idea. Once you understand what you're building, present the design and proceed unless a blocking ambiguity remains.
 
 <HARD-GATE>
-Do NOT invoke any implementation skill, write any code, scaffold any project, or take any implementation action until the design has been captured in a committed, self-reviewed spec and the implementation plan has been captured in a committed, self-reviewed plan. Stop for the user only on unresolved ambiguity, explicit user-requested checkpoints, permission prompts, or blockers. This applies to EVERY project regardless of perceived simplicity.
+Do NOT invoke any implementation skill, write any code, scaffold any project, or take any implementation action for normal full-flow work until the design has been captured in a committed, self-reviewed spec and the implementation plan has been captured in a committed, self-reviewed plan. Stop for the user only on unresolved ambiguity, explicit user-requested checkpoints, permission prompts, or blockers; brainstorming remains mandatory before full creative feature work, architectural changes, ambiguous changes, broad refactors, and high-risk work.
 </HARD-GATE>
 
 ## Anti-Pattern: "This Is Too Simple To Need A Design"
 
-Every project goes through this process. A todo list, a single-function utility, a config change — all of them. "Simple" projects are where unexamined assumptions cause the most wasted work. The design can be short (a few sentences for truly simple projects), but you MUST present it, commit a self-reviewed spec, and self-transition to implementation planning.
+Full-flow projects go through this process. A todo list, a single-function utility, a config change — all of them need this when they are creative, architectural, ambiguous, broad, high-risk, or not explicitly classified for a lower-ceremony path. "Simple" projects are where unexamined assumptions cause the most wasted work. The design can be short (a few sentences for truly simple projects), but for normal full-flow work you MUST present it, commit a self-reviewed spec, and self-transition to implementation planning.
+
+## Low-Risk Exclusions
+
+Brainstorming is not required for read-only audits where the user requests no
+repository mutation. Brainstorming is also not required for a tiny change path
+that the supervisor has explicitly classified as eligible and that still routes
+every mutation through `implementer` -> `reviewer` -> pass. Any uncertainty
+about whether the work is low-risk, local, or complete as one focused change
+escalates back to brainstorming, preserving the committed spec/plan hard gate
+for normal full-flow work.
 
 ## Checklist
 
