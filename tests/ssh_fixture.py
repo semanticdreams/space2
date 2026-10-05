@@ -148,10 +148,17 @@ def stop_and_collect_start_failure(process: subprocess.Popen[str]) -> tuple[int 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--self-test", action="store_true", help="run fixture harness self-tests")
     parser.add_argument("--space", required=True, help="Space executable to run")
     parser.add_argument("--assets", required=True, help="Space assets directory")
     parser.add_argument("--module", required=True, help="Fennel module entry point")
     return parser.parse_args()
+
+
+def run_self_tests() -> int:
+    suite = unittest.defaultTestLoader.loadTestsFromTestCase(FixtureStrictModeTests)
+    result = unittest.TextTestRunner(verbosity=2).run(suite)
+    return 0 if result.wasSuccessful() else 1
 
 
 class FixtureStrictModeTests(unittest.TestCase):
@@ -188,6 +195,9 @@ class FixtureStrictModeTests(unittest.TestCase):
 
 
 def main() -> int:
+    if "--self-test" in sys.argv[1:]:
+        return run_self_tests()
+
     args = parse_args()
     sshd = find_tool("sshd")
     ssh_keygen = find_tool("ssh-keygen")
