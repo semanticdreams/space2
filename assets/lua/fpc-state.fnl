@@ -20,12 +20,13 @@
           (.. "FpcState first-person-controls missing handler for " action))
   (handler controls payload))
 
-(fn control-entry [action label priority opts]
+(fn command-hints-keymap []
   (local controls (require-controls "command hints"))
-  (local keymap (assert controls.key-mapping
-                        "FpcState command hints require first-person-controls.key-mapping"))
+  controls.key-mapping)
+
+(fn control-entry [keymap action label priority opts]
   (local key (assert (. keymap action)
-                     (.. "FpcState command hints missing key mapping for " (tostring action))))
+                      (.. "FpcState command hints missing key mapping for " (tostring action))))
   (local options (or opts {}))
   (entry (key-label key)
          label
@@ -44,17 +45,21 @@
       ((. ctx :mark-command-executed!)))
     handled)
   (fn fpc-command-sections []
-    (local entries [(entry "esc" "normal-mode" {:priority 10})])
-    (append-entry! entries (control-entry :move-forward "move-forward" 20))
-    (append-entry! entries (control-entry :move-left "move-left" 21))
-    (append-entry! entries (control-entry :move-backward "move-backward" 22))
-    (append-entry! entries (control-entry :move-right "move-right" 23))
-    (append-entry! entries (control-entry :look-up "look-up" 30 {:show-collapsed? false}))
-    (append-entry! entries (control-entry :look-down "look-down" 31 {:show-collapsed? false}))
-    (append-entry! entries (control-entry :look-left "look-left" 32 {:show-collapsed? false}))
-    (append-entry! entries (control-entry :look-right "look-right" 33 {:show-collapsed? false}))
-    (append-entry! entries (control-entry :speed "speed-boost" 40))
-    [(section :mode "MODE" entries)])
+    (local keymap (command-hints-keymap))
+    (if keymap
+        (do
+          (local entries [(entry "esc" "normal-mode" {:priority 10})])
+          (append-entry! entries (control-entry keymap :move-forward "move-forward" 20))
+          (append-entry! entries (control-entry keymap :move-left "move-left" 21))
+          (append-entry! entries (control-entry keymap :move-backward "move-backward" 22))
+          (append-entry! entries (control-entry keymap :move-right "move-right" 23))
+          (append-entry! entries (control-entry keymap :look-up "look-up" 30 {:show-collapsed? false}))
+          (append-entry! entries (control-entry keymap :look-down "look-down" 31 {:show-collapsed? false}))
+          (append-entry! entries (control-entry keymap :look-left "look-left" 32 {:show-collapsed? false}))
+          (append-entry! entries (control-entry keymap :look-right "look-right" 33 {:show-collapsed? false}))
+          (append-entry! entries (control-entry keymap :speed "speed-boost" 40))
+          [(section :mode "MODE" entries)])
+        []))
 
   (local ControlsOnly
     {:text-input (fn [_ctx _payload] false)
