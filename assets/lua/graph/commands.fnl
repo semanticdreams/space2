@@ -156,6 +156,14 @@
        graph-map
        graph-map.add-start-node!))
 
+(fn focus-start-available? [opts]
+  (local graph-view (resolve-graph-view opts))
+  (local graph-map (resolve-active-map opts))
+  (and graph-view
+       graph-map
+       graph-view.reveal-node
+       graph-map.add-start-node!))
+
 (fn map-new-empty-available? [opts]
   (local manager (resolve-map-manager opts))
   (and (graph-map-deps-available? opts)
@@ -181,6 +189,20 @@
   (local graph-map (require-active-map opts))
   (assert graph-map.add-start-node! "GraphCommands requires active graph map add-start-node!")
   (graph-map:add-start-node!))
+
+(fn run-focus-start [opts]
+  (local graph-view (require-graph-view opts))
+  (local graph-map (require-active-map opts))
+  (assert graph-map.add-start-node!
+          "GraphCommands requires active graph map add-start-node!")
+  (assert graph-view.reveal-node
+          "GraphCommands requires graph view reveal-node")
+  (local node (assert (graph-map:add-start-node!)
+                      "GraphCommands focus-start requires add-start-node! to return start node"))
+  (assert (graph-view:reveal-node node {:select? true
+                                        :focus? true
+                                        :center? true})
+          "GraphCommands focus-start failed to reveal start node"))
 
 (fn run-new-empty [opts]
   (require-graph-view opts)
@@ -250,6 +272,8 @@
      (make-graph-view-command options "graph.view.center-focused" "center" :reveal-focused-node #(graph-view-focused-method-available? $1 :reveal-focused-node))
      "graph.view.start-layout"
      (make-graph-view-command options "graph.view.start-layout" "layout" :start-layout #(graph-view-method-available? $1 :start-layout))
+     "graph.view.focus-start"
+     (make-map-command options "graph.view.focus-start" "start" focus-start-available? run-focus-start)
      "graph.map.add-start"
      (make-map-command options "graph.map.add-start" "add-start" map-add-start-available? run-add-start)
      "graph.map.new-empty"
@@ -274,6 +298,7 @@
                    {:keys ["g" "n" "r"] :command "graph.node.remove-focused-from-map" :label "remove" :priority 50}
                    {:keys ["g" "v" "c"] :command "graph.view.center-focused" :label "center" :priority 10}
                    {:keys ["g" "v" "l"] :command "graph.view.start-layout" :label "layout" :priority 20}
+                   {:keys ["g" "v" "s"] :command "graph.view.focus-start" :label "start" :priority 30}
                    {:keys ["g" "m" "a"] :command "graph.map.add-start" :label "add-start" :priority 10}
                    {:keys ["g" "m" "n"] :command "graph.map.new-empty" :label "new" :priority 20}
                    {:keys ["g" "m" "s"] :command "graph.map.from-selection" :label "selection" :priority 30}
