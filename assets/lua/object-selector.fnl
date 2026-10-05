@@ -274,6 +274,7 @@
       :toggle toggle
       :enabled? (fn [_self] enabled?)
       :pointer-target (fn [_self] (resolve-pointer-target))
+       :project project
       :active? (fn [_self] (box:active?))
       :set-selectables set-selectables
       :add-selectables add-selectables
