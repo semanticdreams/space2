@@ -131,11 +131,12 @@
               (kind-matches? operation-id kind event))
             message))
 
-(fn wait-for-terminal [ssh operation-id message]
+(fn wait-for-terminal [ssh operation-id message timeout-ms]
   (wait-for ssh
             (fn [event _events]
               (terminal-matches? operation-id event))
-            message))
+            message
+            timeout-ms))
 
 (fn connect-options [fixture policy]
   (local options {:target {:host fixture.host :port fixture.port :username fixture.username}
@@ -231,7 +232,7 @@
   (assert opened "shell should emit shell-opened")
   (local channel-id opened.channel-id)
   (local write-op (ssh.channel-write channel-id "printf shell-ok\\n\nexit\n"))
-  (local (write-terminal write-events) (wait-for-terminal ssh write-op "shell write should finish"))
+  (local (write-terminal write-events) (wait-for-terminal ssh write-op "shell write should finish" 65000))
   (assert-success write-terminal "shell write should succeed")
   (when (not (find-channel-data-containing write-events channel-id "shell-ok"))
     (wait-for ssh

@@ -44,6 +44,13 @@ ConnectOptions connect_options(uint64_t timeout_ms = 0)
     return options;
 }
 
+Service service_with_channel_write_timeout(std::unique_ptr<Backend> backend, uint64_t timeout_ms)
+{
+    ServiceOptions options;
+    options.channel_write_timeout_ms = timeout_ms;
+    return Service(std::move(backend), options);
+}
+
 ExecOptions exec_options()
 {
     ExecOptions options;
@@ -955,7 +962,7 @@ void channel_write_timeout_emits_terminal_event()
 {
     auto backend = std::make_unique<FakeBackend>(FakeBackend::Mode::BlockingChannelWrite);
     FakeBackend* backend_ptr = backend.get();
-    Service service(std::move(backend));
+    Service service = service_with_channel_write_timeout(std::move(backend), 25);
     const SessionId session_id = connect_session(service);
     service.open_shell(session_id, ShellOptions{});
     const ChannelId channel_id = find_kind(poll_until(service, 2), EventKind::ShellOpened)->channel_id;
@@ -971,7 +978,7 @@ void channel_write_timeout_emits_terminal_event()
 
 void delayed_channel_write_succeeds_within_integration_wait_budget()
 {
-    Service service(std::make_unique<FakeBackend>(FakeBackend::Mode::DelayedChannelWrite));
+    Service service = service_with_channel_write_timeout(std::make_unique<FakeBackend>(FakeBackend::Mode::DelayedChannelWrite), 1000);
     const SessionId session_id = connect_session(service);
     service.open_shell(session_id, ShellOptions{});
     const ChannelId channel_id = find_kind(poll_until(service, 2), EventKind::ShellOpened)->channel_id;
