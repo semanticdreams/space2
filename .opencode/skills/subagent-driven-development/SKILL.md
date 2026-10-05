@@ -125,6 +125,29 @@ with the reviewer's status recorded:
 
 Mark the todo complete only after the ledger entry is written.
 
+## Single-Task Low-Risk Path
+
+This low-ceremony path is eligible only when one focused task covers the
+complete diff and the plan or controller explicitly marked the run as
+single-task low-risk. It is not available for high-risk surfaces, multi-task
+plans, parked findings, or unclear task boundaries.
+
+The task loop does not change: each task still dispatches `implementer`, each
+task still dispatches `reviewer`, and the fix loop and adjudicator rules remain
+unchanged. The single-task path only affects whether an additional final
+whole-branch review is required after that reviewed task completes.
+
+The final whole-branch review may be skipped only when all of these are true:
+
+- the single task covers the complete branch diff;
+- the task reviewer passed;
+- there are no parked findings;
+- the reviewer did not request broader review;
+- there is no high-risk surface;
+- the plan or controller explicitly marked the run single-task low-risk.
+
+If any condition fails, run the normal final whole-branch review.
+
 ## Final Whole-Branch Review
 
 After all tasks, dispatch the **reviewer** in FULL REVIEW MODE with the complete branch diff (`.opencode/skills/subagent-driven-development/scripts/review-package PLAN_FILE MERGE_BASE HEAD`) and the ledger's deferred-minor and parked findings for triage.
@@ -138,6 +161,9 @@ not report implementation complete merely because final review passed. Final
 review passing does not mean ready-to-merge — the finishing skill chooses the
 required final validation from `AGENTS.md` for the changed surface, and **PR CI**
 remains the authoritative full integration gate before any ready-to-merge claim.
+If the single-task low-risk path skipped final whole-branch review, that skip is
+only a review de-duplication decision: it is not a ready-to-merge claim and does
+not skip finishing validation, current-base checks, or **PR CI**.
 
 OpenCode users must restart after `.opencode/**` changes for the updated
 agent and skill instructions to take effect.

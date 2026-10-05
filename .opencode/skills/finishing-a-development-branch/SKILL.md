@@ -144,6 +144,24 @@ Do not claim ready-to-merge until the applicable **PR CI** gate is green.
 
 **If validation passes:** continue to Step 2.
 
+### Freshness Evidence Reuse
+
+Step 1 remains the final `origin/main` freshness gate before validation. During
+the current finishing pass, record the wrapper evidence from the most recent
+`git-integrator fetch-origin` + `status` check: wrapper action, branch, HEAD,
+`origin/main`, merge-base/current-base verdict, timestamp or command ordering,
+and whether the tree was clean.
+
+Before integration, reuse that evidence only when you can prove no validation,
+fix, push, PR creation, merge, or meaningful time gap occurred after it. This
+prevents immediate back-to-back duplicate fetch/status checks without weakening
+the current-base gate.
+
+Re-fetch and recheck before integration when validation ran after the check,
+origin evidence is missing, push or PR creation failed, or the supervisor cannot
+prove the prior check is still the latest integration gate. Never rebase or
+force-push. The post-PR freshness remains the merge queue's job.
+
 ## Step 2: Consult Project Policy
 
 Check `AGENTS.md` (or the project's equivalent integration-policy file) for default
@@ -157,14 +175,18 @@ current branch and create a pull request targeting `main`"):
   2. Confirm the branch is safe for automatic integration (clean tree, required
      validation passing — already confirmed in Steps 0–1).
 
-Before any automatic push or PR creation, re-fetch and recheck the base:
+Before any automatic push or PR creation, apply Freshness Evidence Reuse. Reuse
+the recorded Step 1 `git-integrator fetch-origin` + `status` evidence only when
+it is still the latest integration gate; otherwise re-fetch and recheck the
+base:
 
 ```bash
 git fetch origin main
 git merge-base --is-ancestor origin/main HEAD
 ```
 
-Dispatch `git-integrator` for the re-fetch/status check and current-branch push.
+Dispatch `git-integrator` for any required re-fetch/status check and the
+current-branch push.
 Dispatch `github-operator` for PR creation, main protection checks, auto-merge
 enablement, and merge-queue polling.
 
@@ -274,16 +296,18 @@ workflow. Do not request branch-deletion permission.
 
 ### Option 2: Push and Create PR
 
-Before pushing or creating a PR, re-fetch and recheck the base:
+Before pushing or creating a PR, apply Freshness Evidence Reuse. Reuse the
+recorded Step 1 `git-integrator fetch-origin` + `status` evidence only when it
+is still the latest integration gate; otherwise re-fetch and recheck the base:
 
 ```bash
 git fetch origin main
 git merge-base --is-ancestor origin/main HEAD
 ```
 
-Dispatch `git-integrator` for the re-fetch/status check and push. Dispatch
-`github-operator` for PR creation, protection checks, auto-merge enablement, and
-merge-queue polling.
+Dispatch `git-integrator` for any required re-fetch/status check and push.
+Dispatch `github-operator` for PR creation, protection checks, auto-merge
+enablement, and merge-queue polling.
 
 If the branch is no longer current with `origin/main`, do not push or create a
 PR. Safe-merge `origin/main` when permitted, route conflicts or resulting fixes

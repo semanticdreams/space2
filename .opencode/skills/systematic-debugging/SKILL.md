@@ -41,6 +41,29 @@ Use for ANY technical issue:
 - You're in a hurry (rushing guarantees rework)
 - Manager wants it fixed NOW (systematic is faster than thrashing)
 
+## Quick Debugging Triage
+
+For failures that appear obvious and localized, a brief read-only triage pass is
+allowed before entering the full four phases. This pass may only reproduce the
+failure and inspect existing evidence: read error output, rerun the exact
+failing command when safe, inspect relevant files, compare recent diffs, and
+state one localized hypothesis. It may not edit code, tests, configuration,
+workflows, prompts, or repository files.
+
+Escalate immediately into the full four phases when any of these occur:
+
+- root cause is unclear;
+- reproduction is not consistent;
+- the first localized hypothesis fails;
+- the surface is high-risk;
+- the fix would touch multiple subsystems;
+- any code/config/test/workflow edit is needed.
+
+The iron law still applies: no repository fix without root cause investigation
+and no unreviewed fixes. Quick triage can shorten obvious evidence gathering;
+it cannot skip diagnosis, `implementer` routing, reviewer verification, or the
+normal failure-recovery gates.
+
 ## The Four Phases
 
 You MUST complete each phase before proceeding to the next.
