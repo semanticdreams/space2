@@ -77,6 +77,21 @@
       (set found event)))
   found)
 
+(fn channel-data-containing? [event channel-id needle]
+  (and (= event.kind "channel-data")
+       (= event.channel-id channel-id)
+       event.fields
+       event.fields.data
+       (string.find event.fields.data needle 1 true)))
+
+(fn find-channel-data-containing [events channel-id needle]
+  (var found nil)
+  (each [_ event (ipairs events)]
+    (when (and (not found)
+               (channel-data-containing? event channel-id needle))
+      (set found event)))
+  found)
+
 (fn poll-ssh-until-match [ssh predicate collected state]
   (local events (ssh.poll))
   (each [_ event (ipairs events)]
@@ -216,16 +231,13 @@
   (assert opened "shell should emit shell-opened")
   (local channel-id opened.channel-id)
   (local write-op (ssh.channel-write channel-id "printf shell-ok\\n\nexit\n"))
-  (local (write-terminal) (wait-for-terminal ssh write-op "shell write should finish"))
+  (local (write-terminal write-events) (wait-for-terminal ssh write-op "shell write should finish"))
   (assert-success write-terminal "shell write should succeed")
-  (wait-for ssh
-            (fn [event _events]
-              (and (= event.kind "channel-data")
-                   (= event.channel-id channel-id)
-                   event.fields
-                   event.fields.data
-                   (string.find event.fields.data "shell-ok" 1 true)))
-            "shell should return command output")
+  (when (not (find-channel-data-containing write-events channel-id "shell-ok"))
+    (wait-for ssh
+              (fn [event _events]
+                (channel-data-containing? event channel-id "shell-ok"))
+              "shell should return command output"))
   (local close-op (ssh.channel-close channel-id))
   (local (close-terminal) (wait-for-terminal ssh close-op "shell close should finish"))
   (assert-success close-terminal "shell close should succeed"))
