@@ -30,7 +30,7 @@ bool secret_field_name(const std::string& key)
         key.find("private-key") != std::string::npos;
 }
 
-constexpr uint64_t ChannelWriteTimeoutMs = 500;
+constexpr uint64_t ChannelWriteTimeoutMs = 9000;
 
 std::map<std::string, std::string> error_fields(ErrorCode code)
 {

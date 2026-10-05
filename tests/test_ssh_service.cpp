@@ -133,7 +133,8 @@ public:
         LocalTunnelBindFailure,
         RemoteShellCloses,
         LongLivedResources,
-        BlockingChannelWrite
+        BlockingChannelWrite,
+        DelayedChannelWrite
     };
 
     explicit FakeBackend(Mode mode)
@@ -149,7 +150,8 @@ public:
             mode_ == Mode::RemoteTunnelUnsupported ||
             mode_ == Mode::LocalTunnelBindFailure ||
             mode_ == Mode::RemoteShellCloses ||
-            mode_ == Mode::LongLivedResources)
+            mode_ == Mode::LongLivedResources ||
+            mode_ == Mode::DelayedChannelWrite)
         {
             const SessionId session_id = context.sink().allocate_session();
             last_session_id_.store(session_id);
@@ -362,6 +364,10 @@ public:
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
             }
             return;
+        }
+        if (mode_ == Mode::DelayedChannelWrite)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(750));
         }
         context.sink().emit(Event{ EventKind::OperationSuccess, context.operation_id(), 0, channel_id });
     }
@@ -955,12 +961,26 @@ void channel_write_timeout_emits_terminal_event()
     const ChannelId channel_id = find_kind(poll_until(service, 2), EventKind::ShellOpened)->channel_id;
 
     service.channel_write(channel_id, "blocked write");
-    auto events = poll_until(service, 1);
+    auto events = poll_until(service, 1, 2200);
 
     expect_eq(events.size(), std::size_t{ 1 }, "channel write should produce a terminal event");
     expect_eq(events[0].kind, EventKind::OperationTimeout, "blocked channel write should time out");
     expect_eq(events[0].error_code, ErrorCode::Timeout, "blocked channel write timeout code");
     expect_eq(backend_ptr->cancelled_operations(), 1, "channel write timeout should notify backend cleanup");
+}
+
+void delayed_channel_write_succeeds_within_integration_wait_budget()
+{
+    Service service(std::make_unique<FakeBackend>(FakeBackend::Mode::DelayedChannelWrite));
+    const SessionId session_id = connect_session(service);
+    service.open_shell(session_id, ShellOptions{});
+    const ChannelId channel_id = find_kind(poll_until(service, 2), EventKind::ShellOpened)->channel_id;
+
+    service.channel_write(channel_id, "eventual write");
+    auto events = poll_until(service, 1, 2200);
+
+    expect_eq(events.size(), std::size_t{ 1 }, "delayed channel write should produce a terminal event");
+    expect_eq(events[0].kind, EventKind::OperationSuccess, "delayed channel write should succeed before timeout");
 }
 
 void run(const std::string& name, void (*test)())
@@ -1008,6 +1028,7 @@ int main()
         run("local_tunnel_bind_failure_is_structured", local_tunnel_bind_failure_is_structured);
         run("shutdown_cancels_sessions_channels_tunnels_and_workers", shutdown_cancels_sessions_channels_tunnels_and_workers);
         run("channel_write_timeout_emits_terminal_event", channel_write_timeout_emits_terminal_event);
+        run("delayed_channel_write_succeeds_within_integration_wait_budget", delayed_channel_write_succeeds_within_integration_wait_budget);
     }
     catch (const std::exception& ex)
     {
