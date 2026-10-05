@@ -238,7 +238,9 @@
                   (set calls.focus-start (+ calls.focus-start 1))
                   (set calls.last-reveal-node node)
                   (set calls.last-reveal-opts opts)
-                  true)
+                  (if options.reveal-fails?
+                      false
+                      true))
    :start-layout (fn [_self] (set calls.layout (+ calls.layout 1)) true)})
 
 (fn default-expanded-map-options [opts]
@@ -255,7 +257,9 @@
    :focused_node_key options.focused-node-key
    :add-start-node! (fn [_self]
                       (set calls.add-start (+ calls.add-start 1))
-                      (if options.start-node
+                      (if options.missing-start?
+                          nil
+                          options.start-node
                           options.start-node
                           {:key "start"}))
    :clear! (fn [_self]
@@ -373,6 +377,29 @@
                                     "graph.view.focus-start" {}))
           "focus-start should require GraphMap:add-start-node!"))
 
+(fn graph-provider-focus-start-fails-loudly-when-start-missing []
+  (local view (make-expanded-graph-view-stub))
+  (local graph-map (make-expanded-map-stub {:missing-start? true}))
+  (local manager (make-expanded-manager-stub))
+  (local composed (expanded-graph-composed view graph-map manager))
+  (local (ok err) (pcall #(Commands.run composed "graph.view.focus-start" {})))
+  (assert (not ok) "focus-start should raise when add-start returns nil")
+  (assert (string.find (tostring err) "start node" 1 true)
+          "focus-start failure should explain missing start node"))
+
+(fn graph-provider-focus-start-fails-loudly-when-reveal-fails []
+  (local start-node {:key "start"})
+  (local view (make-expanded-graph-view-stub {:reveal-fails? true}))
+  (local graph-map (make-expanded-map-stub {:start-node start-node}))
+  (local manager (make-expanded-manager-stub))
+  (local composed (expanded-graph-composed view graph-map manager))
+  (local (ok err) (pcall #(Commands.run composed "graph.view.focus-start" {})))
+  (assert (not ok) "focus-start should raise when reveal-node returns false")
+  (assert (string.find (tostring err) "reveal" 1 true)
+          "focus-start failure should explain reveal failure")
+  (assert (= view.calls.last-reveal-node start-node)
+          "focus-start should try to reveal the returned start node before failing"))
+
 (fn graph-provider-view-prefix-hints-include-focus-start []
   (local view (make-expanded-graph-view-stub))
   (local graph-map (make-expanded-map-stub {:focused-node-key "focus" :clearable? true}))
@@ -457,6 +484,10 @@
           graph-provider-view-commands-route-to-graph-view)
 (add-test "Graph provider focus-start ensures start and reveals"
           graph-provider-focus-start-ensures-start-and-reveals)
+(add-test "Graph provider focus-start fails loudly when start missing"
+          graph-provider-focus-start-fails-loudly-when-start-missing)
+(add-test "Graph provider focus-start fails loudly when reveal fails"
+          graph-provider-focus-start-fails-loudly-when-reveal-fails)
 (add-test "Graph provider view prefix hints include focus-start"
           graph-provider-view-prefix-hints-include-focus-start)
 (add-test "Graph provider map commands route to active map and manager"

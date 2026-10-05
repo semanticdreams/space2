@@ -197,10 +197,12 @@
           "GraphCommands requires active graph map add-start-node!")
   (assert graph-view.reveal-node
           "GraphCommands requires graph view reveal-node")
-  (local node (graph-map:add-start-node!))
-  (graph-view:reveal-node node {:select? true
-                                :focus? true
-                                :center? true}))
+  (local node (assert (graph-map:add-start-node!)
+                      "GraphCommands focus-start requires add-start-node! to return start node"))
+  (assert (graph-view:reveal-node node {:select? true
+                                        :focus? true
+                                        :center? true})
+          "GraphCommands focus-start failed to reveal start node"))
 
 (fn run-new-empty [opts]
   (require-graph-view opts)
