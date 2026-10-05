@@ -2796,6 +2796,30 @@
   (assert (= calls.layout 1) "SPC g v l should start graph layout")
   (assert (= last-transition :normal) "Graph view command should return to normal"))
 
+(fn leader-state-graph-view-focus-start-routes-to-provider []
+  (local GraphCommands (require :graph/commands))
+  (local start-node {:key "start"})
+  (local calls {:add-start 0 :reveal 0 :node nil :opts nil})
+  (local graph-view {:reveal-node (fn [_self node opts]
+                                    (set calls.reveal (+ calls.reveal 1))
+                                    (set calls.node node)
+                                    (set calls.opts opts)
+                                    true)})
+  (local graph-map {:add-start-node! (fn [_self]
+                                       (set calls.add-start (+ calls.add-start 1))
+                                       start-node)})
+  (local last-transition
+    (run-graph-leader-sequence (GraphCommands.provider {:graph-view (fn [] graph-view)
+                                                        :graph-map (fn [] graph-map)})
+                               ["g" "v" "s"]))
+  (assert (= calls.add-start 1) "SPC g v s should ensure start once")
+  (assert (= calls.reveal 1) "SPC g v s should reveal once")
+  (assert (= calls.node start-node) "SPC g v s should reveal returned start node")
+  (assert (= (. calls.opts :select?) true) "SPC g v s should select")
+  (assert (= (. calls.opts :focus?) true) "SPC g v s should focus")
+  (assert (= (. calls.opts :center?) true) "SPC g v s should center")
+  (assert (= last-transition :normal) "Graph focus-start command should return to normal"))
+
 (fn leader-state-graph-map-command-routes-to-provider []
   (local GraphCommands (require :graph/commands))
   (local calls {:create 0})
@@ -2879,6 +2903,8 @@
                        :fn leader-state-graph-node-command-routes-to-provider})
 (table.insert tests {:name "Leader state graph view command routes to provider"
                        :fn leader-state-graph-view-command-routes-to-provider})
+(table.insert tests {:name "Leader state graph view focus-start routes to provider"
+                       :fn leader-state-graph-view-focus-start-routes-to-provider})
 (table.insert tests {:name "Leader state graph map command routes to provider"
                        :fn leader-state-graph-map-command-routes-to-provider})
 (table.insert tests {:name "Leader state graph preview idempotent command closes hints"

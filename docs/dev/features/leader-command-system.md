@@ -51,6 +51,7 @@ Graph view commands operate on the active graph view:
 | --- | --- |
 | `SPC g v c` | center/reveal the focused node in the graph view. |
 | `SPC g v l` | start graph layout. |
+| `SPC g v s` | ensure the `start` node is in the active map, then select, focus, and center it in the graph view. |
 
 Graph map commands operate on the active graph map and map manager:
 

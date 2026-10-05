@@ -492,6 +492,8 @@ Do not silently delete backing objects when removing from a map.
 
 `Add Start` is map membership recovery, not automatic start-node re-seeding. It uses the registry-installed `start` key loader through the active `GraphMap` and does not delete or mutate backing domain objects.
 
+`SPC g v s` is a graph view navigation command for the same canonical `start` node. It uses the active `GraphMap:add-start-node!` path first, so missing start membership is recovered the same way as the sidebar **Add Start** action, then it reveals the returned node through `GraphView:reveal-node` with select, focus, and center enabled.
+
 ### Leader map commands
 
 Leader graph map commands live under `SPC g m ...` and operate on the active map:

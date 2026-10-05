@@ -217,7 +217,8 @@
 
 (fn make-expanded-graph-view-stub [opts]
   (local options (if opts opts {}))
-  (local calls {:open 0 :menu 0 :toggle 0 :copy 0 :remove 0 :slot [] :center 0 :layout 0})
+  (local calls {:open 0 :menu 0 :toggle 0 :copy 0 :remove 0 :slot [] :center 0 :layout 0
+                :focus-start 0 :last-reveal-node nil :last-reveal-opts nil})
   {:calls calls
     :selected-node-count (fn [_self] 1)
     :has-focused-node? (fn [_self] true)
@@ -233,6 +234,11 @@
                                    (table.insert calls.slot index)
                                    true)
    :reveal-focused-node (fn [_self] (set calls.center (+ calls.center 1)) true)
+   :reveal-node (fn [_self node opts]
+                  (set calls.focus-start (+ calls.focus-start 1))
+                  (set calls.last-reveal-node node)
+                  (set calls.last-reveal-opts opts)
+                  true)
    :start-layout (fn [_self] (set calls.layout (+ calls.layout 1)) true)})
 
 (fn default-expanded-map-options [opts]
@@ -249,7 +255,9 @@
    :focused_node_key options.focused-node-key
    :add-start-node! (fn [_self]
                       (set calls.add-start (+ calls.add-start 1))
-                      true)
+                      (if options.start-node
+                          options.start-node
+                          {:key "start"}))
    :clear! (fn [_self]
              (set calls.clear (+ calls.clear 1))
              true)
@@ -323,6 +331,59 @@
   (assert (= view.calls.center 1) "center-focused should reveal focused node")
   (assert (= view.calls.layout 1) "start-layout should route to graph view"))
 
+(fn graph-provider-focus-start-ensures-start-and-reveals []
+  (local start-node {:key "start"})
+  (local view (make-expanded-graph-view-stub))
+  (local graph-map (make-expanded-map-stub {:start-node start-node
+                                            :focused-node-key "stale-focus"
+                                            :clearable? true}))
+  (local manager (make-expanded-manager-stub))
+  (local composed (expanded-graph-composed view graph-map manager))
+  (assert (Commands.available? composed "graph.view.focus-start" {})
+          "focus-start should be available with graph view reveal-node and map add-start-node!")
+  (assert (Commands.run composed "graph.view.focus-start" {})
+          "focus-start should run")
+  (assert (= graph-map.calls.add-start 1)
+          "focus-start should ensure start through active graph map")
+  (assert (= view.calls.focus-start 1)
+          "focus-start should reveal exactly once")
+  (assert (= view.calls.last-reveal-node start-node)
+          "focus-start should reveal the node returned by add-start-node!")
+  (local reveal-opts view.calls.last-reveal-opts)
+  (assert (= (. reveal-opts :select?) true)
+          "focus-start should explicitly select the start node")
+  (assert (= (. reveal-opts :focus?) true)
+          "focus-start should explicitly focus the start node")
+  (assert (= (. reveal-opts :center?) true)
+          "focus-start should explicitly center the start node")
+  (assert (not (Commands.available? (expanded-graph-composed nil graph-map manager)
+                                    "graph.view.focus-start" {}))
+          "focus-start should require active graph view")
+  (assert (not (Commands.available? (expanded-graph-composed view nil manager)
+                                    "graph.view.focus-start" {}))
+          "focus-start should require active graph map")
+  (local no-reveal-view (make-expanded-graph-view-stub))
+  (set no-reveal-view.reveal-node nil)
+  (assert (not (Commands.available? (expanded-graph-composed no-reveal-view graph-map manager)
+                                    "graph.view.focus-start" {}))
+          "focus-start should require GraphView:reveal-node")
+  (local no-add-map (make-expanded-map-stub {:focused-node-key "focus"}))
+  (set no-add-map.add-start-node! nil)
+  (assert (not (Commands.available? (expanded-graph-composed view no-add-map manager)
+                                    "graph.view.focus-start" {}))
+          "focus-start should require GraphMap:add-start-node!"))
+
+(fn graph-provider-view-prefix-hints-include-focus-start []
+  (local view (make-expanded-graph-view-stub))
+  (local graph-map (make-expanded-map-stub {:focused-node-key "focus" :clearable? true}))
+  (local manager (make-expanded-manager-stub))
+  (local composed (expanded-graph-composed view graph-map manager))
+  (local view-section (Commands.hint-section composed ["g" "v"] {} {:id :mode :title "MODE"}))
+  (assert view-section "Graph provider view hints should exist")
+  (assert-hint view-section "c" "center")
+  (assert-hint view-section "l" "layout")
+  (assert-hint view-section "s" "start"))
+
 (fn graph-provider-map-commands-route-to-active-map-and-manager []
   (local view (make-expanded-graph-view-stub {:focused-node {:key "current-focus"}}))
   (local graph-map (make-expanded-map-stub {:focused-node-key "stale-focus" :clearable? true}))
@@ -394,6 +455,10 @@
           graph-provider-node-commands-route-to-graph-view)
 (add-test "Graph provider view commands route to graph view"
           graph-provider-view-commands-route-to-graph-view)
+(add-test "Graph provider focus-start ensures start and reveals"
+          graph-provider-focus-start-ensures-start-and-reveals)
+(add-test "Graph provider view prefix hints include focus-start"
+          graph-provider-view-prefix-hints-include-focus-start)
 (add-test "Graph provider map commands route to active map and manager"
           graph-provider-map-commands-route-to-active-map-and-manager)
 (add-test "Command hints hide prefixes without available descendants"
