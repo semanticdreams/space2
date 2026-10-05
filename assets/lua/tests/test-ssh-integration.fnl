@@ -92,6 +92,18 @@
       (set found event)))
   found)
 
+(fn append-events [target events]
+  (each [_ event (ipairs events)]
+    (table.insert target event)))
+
+(fn shell-channel-closed? [events channel-id]
+  (var closed? false)
+  (each [_ event (ipairs events)]
+    (when (and (= event.kind "channel-closed")
+               (= event.channel-id channel-id))
+      (set closed? true)))
+  closed?)
+
 (fn poll-ssh-until-match [ssh predicate collected state]
   (local events (ssh.poll))
   (each [_ event (ipairs events)]
@@ -158,6 +170,18 @@
 
 (fn assert-success [event message]
   (assert (= event.kind "operation-success") (.. message ": " (tostring event.kind) " " (tostring event.error-code))))
+
+(fn close-shell-channel [ssh channel-id events]
+  (when (not (shell-channel-closed? events channel-id))
+    (local close-op (ssh.channel-close channel-id))
+    (local (close-terminal) (wait-for-terminal ssh close-op "shell close should finish"))
+    (assert-success close-terminal "shell close should succeed")))
+
+(fn wait-for-shell-output [ssh channel-id]
+  (wait-for ssh
+            (fn [event _events]
+              (channel-data-containing? event channel-id "shell-ok"))
+            "shell should return command output"))
 
 (fn connect-with-known-host-acceptance [ssh fixture]
   (local rejected-op (ssh.connect (connect-options fixture nil)))
@@ -233,15 +257,51 @@
   (local channel-id opened.channel-id)
   (local write-op (ssh.channel-write channel-id "printf 'shell-%s\\n' ok\nexit\n"))
   (local (write-terminal write-events) (wait-for-terminal ssh write-op "shell write should finish" 65000))
+  (local shell-events [])
+  (append-events shell-events write-events)
   (assert-success write-terminal "shell write should succeed")
   (when (not (find-channel-data-containing write-events channel-id "shell-ok"))
-    (wait-for ssh
-              (fn [event _events]
-                (channel-data-containing? event channel-id "shell-ok"))
-              "shell should return command output"))
-  (local close-op (ssh.channel-close channel-id))
-  (local (close-terminal) (wait-for-terminal ssh close-op "shell close should finish"))
-  (assert-success close-terminal "shell close should succeed"))
+    (local (_output output-events)
+      (wait-for-shell-output ssh channel-id))
+    (append-events shell-events output-events))
+  (close-shell-channel ssh channel-id shell-events))
+
+(fn shell-close-skips-explicit-close-after-observed-channel-closed []
+  (local close-called {:value false})
+  (local ssh {:channel-close (fn [_channel-id]
+                              (set close-called.value true)
+                              "close-op")
+              :poll (fn [] [{:operation-id "close-op"
+                             :kind "operation-error"
+                             :error-code "invalid-id"}])})
+  (close-shell-channel ssh "channel-1" [{:kind "channel-closed" :channel-id "channel-1"}])
+  (assert (not close-called.value) "already-closed shell cleanup should not request channel-close"))
+
+(fn shell-round-trip-preserves-output-wait-close-events []
+  (local close-called {:value false})
+  (local poll-count {:value 0})
+  (local polls [[{:operation-id "open-op" :kind "shell-opened" :channel-id "channel-1"}
+                 {:operation-id "open-op" :kind "operation-success"}]
+                [{:operation-id "write-op" :kind "operation-success"}]
+                [{:kind "channel-data" :channel-id "channel-1" :fields {:data "shell-ok\n"}}
+                 {:kind "channel-closed" :channel-id "channel-1"}]])
+  (fn open-shell [_session-id _options]
+    "open-op")
+  (fn channel-write [_channel-id _data]
+    "write-op")
+  (fn channel-close [_channel-id]
+    (set close-called.value true)
+    "close-op")
+  (fn poll []
+    (set poll-count.value (+ poll-count.value 1))
+    (local events (. polls poll-count.value))
+    (assert events "scripted shell poll should have events for every wait"))
+  (local ssh {:open-shell open-shell
+              :channel-write channel-write
+              :channel-close channel-close
+              :poll poll})
+  (shell-round-trip ssh "session-1")
+  (assert (not close-called.value) "shell output wait channel-closed event should complete cleanup"))
 
 (fn local-tunnel-round-trip [ssh fixture session-id]
   (if (not (and fixture.echo-host fixture.echo-port fixture.local-tunnel-port))
@@ -351,6 +411,12 @@
 
 (table.insert tests {:name "SSH unavailable backend strict mode fails loudly"
                      :fn unavailable-backend-strict-mode-fails-loudly})
+
+(table.insert tests {:name "SSH shell cleanup treats observed channel close as complete"
+                     :fn shell-close-skips-explicit-close-after-observed-channel-closed})
+
+(table.insert tests {:name "SSH shell output wait preserves channel close event"
+                     :fn shell-round-trip-preserves-output-wait-close-events})
 
 (local main
   (fn []
