@@ -1570,10 +1570,11 @@
         {:assert-not-dropped assert-not-dropped
          :build-node-actions build-node-actions
          :focused-node (fn [] focused-node)
-         :get-menu-manager get-menu-manager
-         :get-position get-position
-         :toggle-node-presentation toggle-node-presentation
-         :graph-map graph-map})
+          :get-menu-manager get-menu-manager
+          :get-position get-position
+          :pointer-target (or options.pointer-target (and ctx ctx.pointer-target))
+          :toggle-node-presentation toggle-node-presentation
+          :graph-map graph-map})
     (GraphViewSelectionEditing.install! view {:assert-not-dropped assert-not-dropped :focused-node (fn [] focused-node) :selected-node? (fn [node] (and node (rawget selected-set node))) :selected-nodes selected-nodes :points registry.points :selector selector :selection selection})
     (SelectedPreviewCommands.install! view assert-not-dropped toggle-node-presentation expanded-nodes)
     (set view.reveal-node
@@ -1853,6 +1854,29 @@
               (when (not capture-ok)
                   (error capture-err))))
     view)
+
+(fn resolve-keyboard-node-menu-position [deps node]
+    (local graph-position ((. deps :get-position) nil node))
+    (local pointer-target (. deps :pointer-target))
+    (assert pointer-target
+            "GraphView focused node menu requires pointer target")
+    (assert (= (type pointer-target.project) :function)
+            "GraphView focused node menu requires pointer target project")
+    (assert (and app.hud app.hud.screen-pos-ray)
+            "GraphView focused node menu requires HUD screen-pos-ray")
+    (local screen (pointer-target.project graph-position {}))
+    (assert (and screen screen.x screen.y)
+            "GraphView focused node menu project must return screen coordinates")
+    (local ray (app.hud:screen-pos-ray {:x screen.x
+                                        :y screen.y}))
+    (assert (and ray ray.origin ray.direction)
+            "GraphView focused node menu HUD screen-pos-ray must return a ray")
+    (local dz (or ray.direction.z 0))
+    (assert (not (= dz 0))
+            "GraphView focused node menu HUD ray must intersect the HUD plane")
+    (local t (/ (- 0 ray.origin.z) dz))
+    (+ ray.origin (* ray.direction t)))
+
 (set install-focused-node-action-methods!
      (fn [view deps]
          (set view.node-actions
@@ -1884,7 +1908,7 @@
                   (if (and node manager)
                       (do
                           (manager:open {:actions (self:focused-node-actions)
-                                         :position ((. deps :get-position) nil node)})
+                                         :position (resolve-keyboard-node-menu-position deps node)})
                           true)
                       false)))
          (set view.toggle-focused-node-preview

@@ -2773,16 +2773,24 @@
 
 (fn leader-state-graph-node-command-routes-to-provider []
   (local GraphCommands (require :graph/commands))
-  (local calls {:open 0})
+  (local calls {:open 0 :menu 0})
   (local graph-view {:has-focused-node? (fn [_self] true)
-                     :open-focused-node (fn [_self]
-                                          (set calls.open (+ calls.open 1))
-                                          true)})
+                      :open-focused-node (fn [_self]
+                                           (set calls.open (+ calls.open 1))
+                                           true)
+                      :open-focused-node-menu (fn [_self]
+                                                (set calls.menu (+ calls.menu 1))
+                                                true)})
   (local last-transition
     (run-graph-leader-sequence (GraphCommands.provider {:graph-view (fn [] graph-view)})
                                ["g" "n" "o"]))
   (assert (= calls.open 1) "SPC g n o should open focused graph node")
-  (assert (= last-transition :normal) "Graph node command should return to normal"))
+  (assert (= last-transition :normal) "Graph node open command should return to normal")
+  (local menu-transition
+    (run-graph-leader-sequence (GraphCommands.provider {:graph-view (fn [] graph-view)})
+                               ["g" "n" "m"]))
+  (assert (= calls.menu 1) "SPC g n m should open focused graph node menu")
+  (assert (= menu-transition :normal) "Graph node menu command should return to normal"))
 
 (fn leader-state-graph-view-command-routes-to-provider []
   (local GraphCommands (require :graph/commands))

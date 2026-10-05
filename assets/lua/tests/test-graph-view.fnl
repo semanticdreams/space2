@@ -4824,13 +4824,23 @@
             (register-graph-map-test-loaders graph ["command-focus"])
             (local graph-map (GraphMap.GraphMap {:graph graph :id "focused-command-methods"}))
             (local original-menu-manager app.menu-manager)
+            (local original-hud app.hud)
             (local gl (require :gl))
             (local original-clipboard-set gl.clipboard-set)
             (var copied nil)
             (var opened nil)
             (set app.menu-manager {:open (fn [_self opts]
                                             (set opened opts))})
+            (set app.hud {:screen-pos-ray (fn [_self screen]
+                                            {:origin (glm.vec3 (+ screen.x 100)
+                                                               (+ screen.y 200)
+                                                               10)
+                                             :direction (glm.vec3 0 0 -1)})})
             (set gl.clipboard-set (fn [value] (set copied value)))
+            (set ctx.pointer-target {:project (fn [position _opts]
+                                                (glm.vec3 (* position.x 10)
+                                                          (* position.y 10)
+                                                          0))})
             (local backing {:deleted? false})
             (local node (Graph.GraphNode {:key "command-focus"
                                           :backing backing
@@ -4842,6 +4852,8 @@
             (local view (GraphView {:graph-map graph-map
                                     :ctx ctx
                                     :camera camera}))
+            (local point (. view.points node))
+            (point:set-position (glm.vec3 12 14 0))
             (assert (= (length (view:focused-node-actions)) 0)
                     "Focused node actions should be empty without focus")
             (assert (= (view:run-focused-node-action-slot 1) false)
@@ -4863,6 +4875,12 @@
             (assert (= (view:open-focused-node-menu) true)
                     "Focused node menu should open with focus and menu manager")
             (assert opened "Focused node menu should pass options to menu manager")
+            (assert (= opened.position.x 220)
+                    "Focused node menu should convert graph x to HUD/menu space")
+            (assert (= opened.position.y 340)
+                    "Focused node menu should convert graph y to HUD/menu space")
+            (assert (= opened.position.z 0)
+                    "Focused node menu should place menu on HUD plane")
             (assert (= (view:toggle-focused-node-preview) true)
                     "Focused preview toggle should expand compact preview")
             (assert (. view.points node :_card-size)
@@ -4883,6 +4901,7 @@
             (graph-map:drop)
             (graph:drop)
             (set app.menu-manager original-menu-manager)
+            (set app.hud original-hud)
             (set gl.clipboard-set original-clipboard-set))))})
 
 (table.insert tests {:name "GraphView reveal focused node centers through reveal path"
