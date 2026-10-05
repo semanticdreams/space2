@@ -94,6 +94,21 @@ SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO
 
 The fixture creates all files under `/tmp/space/tests/ssh-fixture-*`, generates ephemeral user and host keys, supplies fixture environment variables to `tests.test-ssh-integration:main`, including positive preallocated local and remote tunnel listen ports, and exits successfully with a clear skip message only when OpenSSH tools are unavailable. After the tools are present, fixture startup failures are reported as nonzero errors.
 
+## Current status and future work
+
+The SSH subsystem is ready for the current supported slice and initial product use, but it is not ecosystem-level complete. Linux PR CI proves the real backend with strict fixture/backend environment checks. Optional local builds without `libssh` remain supported through structured `unavailable-backend` errors. Windows dependency and build wiring is present, but native Windows real-backend fixture coverage is not yet in scope. SDK docs and examples exist and are backed by tests.
+
+Future work:
+
+- Add macOS `libssh` CI coverage.
+- Add native Windows real SSH fixture testing.
+- Decide, document, and fix non-PTY shell stdin semantics (`request-pty=false`), including whether that mode is supported or explicitly unsupported.
+- Consider a public/configurable channel-write timeout, or provide clearer shell/channel lifecycle documentation.
+- Harden SSH agent, passphrase, and auth-method handling.
+- Add jump hosts/proxy commands and SCP/rsync helpers if product requirements need them.
+- Add stress tests for cancellation, timeouts, concurrent sessions, and concurrent channels.
+- Maintain a compatibility matrix across supported OpenSSH and `libssh` versions.
+
 ## Phase 1 non-goals
 
 Phase 1 does not implement a Space SSH server, jump hosts, SCP, rsync, X11 forwarding, GSSAPI/Kerberos, hardware-token UX, OpenSSH config emulation, long-term secret storage, or main UI onboarding for SSH hosts.
