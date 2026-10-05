@@ -100,6 +100,8 @@ jobs:
       - name: Run test suite
         env:
           SPACE_ASSETS_PATH: ${{ github.workspace }}/assets
+          SPACE_TEST_REQUIRE_SSH_FIXTURE: 1
+          SPACE_TEST_REQUIRE_SSH_BACKEND: 1
         run: xvfb-run -a ctest --test-dir build --output-on-failure -V
 
       - name: Run e2e test suite

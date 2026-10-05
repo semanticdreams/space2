@@ -46,7 +46,7 @@ Ubuntu/Pop!_OS:
 
 <!-- CI_DEPS_START -->
 ```bash
-sudo apt install cmake libbullet-dev libglm-dev libopenal-dev libepoxy-dev portaudio19-dev libvterm-dev libnotify-dev libcurl4-openssl-dev libzmq3-dev python3 python3-pytest python3-pil python3-zmq cargo sccache libaubio-dev libboost-dev libxapian-dev libtorrent-rasterbar-dev ripgrep ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libgccjit-11-dev libsecret-1-dev libfreetype-dev libwayland-dev libegl1-mesa-dev libxkbcommon-dev libxi-dev xvfb
+sudo apt install cmake libbullet-dev libglm-dev libopenal-dev libepoxy-dev portaudio19-dev libvterm-dev libnotify-dev libcurl4-openssl-dev libzmq3-dev python3 python3-pytest python3-pil python3-zmq cargo sccache libaubio-dev libboost-dev libxapian-dev libtorrent-rasterbar-dev ripgrep ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libgccjit-11-dev libsecret-1-dev libfreetype-dev libwayland-dev libegl1-mesa-dev libxkbcommon-dev libxi-dev xvfb libssh-dev openssh-server openssh-client
 ```
 <!-- CI_DEPS_END -->
 

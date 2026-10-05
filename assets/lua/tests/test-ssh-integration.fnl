@@ -6,6 +6,9 @@
 (fn env [name]
   (os.getenv name))
 
+(fn env-enabled? [name]
+  (= (env name) "1"))
+
 (fn fixture-config []
   (local missing [])
   (each [_ name (ipairs required-env)]
@@ -130,9 +133,12 @@
 
 (fn maybe-skip-unavailable [terminal]
   (when (and (= terminal.kind "operation-error")
-             (= terminal.error-code "unavailable-backend"))
-    (print "SKIP SSH integration fixture: SSH backend unavailable in this build")
-    true))
+              (= terminal.error-code "unavailable-backend"))
+    (if (env-enabled? "SPACE_TEST_REQUIRE_SSH_BACKEND")
+        (error "SPACE_TEST_REQUIRE_SSH_BACKEND=1 but SSH backend reported unavailable-backend")
+        (do
+          (print "SKIP SSH integration fixture: SSH backend unavailable in this build")
+          true))))
 
 (fn assert-success [event message]
   (assert (= event.kind "operation-success") (.. message ": " (tostring event.kind) " " (tostring event.error-code))))
@@ -283,8 +289,26 @@
           (cancel-long-running-exec ssh session-id)
           (ssh.close-session session-id)))))
 
+(fn unavailable-backend-strict-mode-fails-loudly []
+  (when (env "SPACE_TEST_EXERCISE_UNAVAILABLE_BACKEND")
+    (local terminal {:kind "operation-error" :error-code "unavailable-backend"})
+    (local (ok message) (pcall maybe-skip-unavailable terminal))
+    (if (env-enabled? "SPACE_TEST_REQUIRE_SSH_BACKEND")
+        (do
+          (assert (not ok) "strict backend mode should fail on unavailable-backend")
+          (assert (string.find (tostring message) "unavailable-backend" 1 true)
+                  "strict backend failure should name unavailable-backend")
+          (assert (string.find (tostring message) "SPACE_TEST_REQUIRE_SSH_BACKEND" 1 true)
+                  "strict backend failure should name SPACE_TEST_REQUIRE_SSH_BACKEND"))
+        (do
+          (assert ok "default backend mode should skip unavailable-backend")
+          (assert message "default backend mode should return a skip signal")))))
+
 (table.insert tests {:name "SSH integration fixture covers real SSH operations or skips clearly"
-                     :fn real-ssh-fixture-covers-foundation})
+                      :fn real-ssh-fixture-covers-foundation})
+
+(table.insert tests {:name "SSH unavailable backend strict mode fails loudly"
+                     :fn unavailable-backend-strict-mode-fails-loudly})
 
 (local main
   (fn []
