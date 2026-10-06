@@ -222,6 +222,51 @@ touches high-risk workflow policy, capability boundaries, auth, secrets, graph
 topology/persistence, broad runtime initialization, packaging, or release
 behavior.
 
+#### Local main wrap-up
+
+Fast interactive development may happen on local `main` when the human chooses
+that workflow, but local `main` is only a workspace. It is not an integration
+target and must never be pushed directly or used as the head of a pull request.
+Reviewed local-main commits are wrapped up by converting them to a deterministic
+feature branch through the guarded Git capability:
+
+```bash
+python3 scripts/opencode_git_integrate.py create-local-main-wrapup-branch --repo-root .
+```
+
+The deterministic branch name is:
+
+```text
+fast-dev/local-main-<short-head-sha>
+```
+
+The conversion wrapper fetches `origin/main`, compares current local `main`
+`HEAD` against current `origin/main`, creates the feature branch at the current
+`HEAD`, and does not push or merge. It refuses dirty worktrees, detached `HEAD`,
+non-`main` branches, no local work beyond `origin/main`, duplicate local or
+remote targets, unsafe target names, and fetch/compare failure states.
+
+After conversion, the strict `supervisor` continues normal finishing from the new
+feature branch: current-base validation, push through `git-integrator`, PR
+creation through `github-operator`, auto-merge/queue setup, and merge-queue
+polling. Raw privileged Git/GitHub commands, direct `main` pushes, rebase, reset,
+force-push, clean, and branch deletion remain forbidden.
+
+#### Vertical slice handoff
+
+When `fast-dev` completes a bounded vertical slice that should inform broader
+work, it hands off to the strict `supervisor` instead of expanding scope in place.
+The handoff records:
+
+- branch or commit range;
+- problem solved by the vertical slice;
+- current abstraction ownership;
+- validation evidence;
+- design risks already avoided;
+- known limits and proposed expansion seams;
+- whether the slice is ready for PR integration or should become input to a new
+  strict supervisor spec/plan.
+
 ### Strict-flow low-ceremony paths
 
 The strict `supervisor` also has opt-in low-ceremony paths for work that does
