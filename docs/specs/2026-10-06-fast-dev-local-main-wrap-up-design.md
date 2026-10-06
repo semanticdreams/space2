@@ -89,14 +89,12 @@ When local `main` contains reviewed local commits, wrap-up creates a determinist
 feature branch from the current local `main` `HEAD` before any push:
 
 ```text
-fast-dev/<topic>-<short-head-sha>
+fast-dev/local-main-<short-head-sha>
 ```
 
-If the user provided no topic, use a conservative slug such as
-`fast-dev/local-main-<short-head-sha>`. The implementation may use an existing
-guarded follow-up branch capability if it can safely support this case; otherwise
-it should extend the Git integration wrapper with a bounded local-main conversion
-action.
+Topic support is deferred and out of scope for this workflow. The conversion uses
+the dedicated `create-local-main-wrapup-branch` Git integration wrapper; it does
+not reuse the existing follow-up branch capability.
 
 The conversion must refuse when:
 
