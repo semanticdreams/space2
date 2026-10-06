@@ -4825,17 +4825,18 @@
             (local graph-map (GraphMap.GraphMap {:graph graph :id "focused-command-methods"}))
             (local original-menu-manager app.menu-manager)
             (local original-hud app.hud)
+            (local original-engine app.engine)
+            (local original-viewport app.viewport)
             (local gl (require :gl))
             (local original-clipboard-set gl.clipboard-set)
             (var copied nil)
             (var opened nil)
+            (var hud-pos nil)
+            (set app.engine {:width 100 :height 50})
+            (set app.viewport {:x 0 :y 0 :width 200 :height 100})
             (set app.menu-manager {:open (fn [_self opts]
-                                            (set opened opts))})
-            (set app.hud {:screen-pos-ray (fn [_self screen]
-                                            {:origin (glm.vec3 (+ screen.x 100)
-                                                               (+ screen.y 200)
-                                                               10)
-                                             :direction (glm.vec3 0 0 -1)})})
+                                             (set opened opts))})
+            (set app.hud {:screen-pos-ray (fn [_self screen] (set hud-pos screen) {:origin (glm.vec3 (+ screen.x 100) (+ screen.y 200) 10) :direction (glm.vec3 0 0 -1)})})
             (set gl.clipboard-set (fn [value] (set copied value)))
             (local backing {:deleted? false})
             (local node (Graph.GraphNode {:key "command-focus"
@@ -4845,14 +4846,8 @@
             (local camera {:position (glm.vec3 0 0 80)
                            :set-position (fn [self next-position]
                                             (set self.position next-position))})
-            (local selector (ObjectSelector {:ctx ctx
-                                             :project (fn [position _opts]
-                                                       (glm.vec3 (* position.x 10)
-                                                                 (* position.y 10)
-                                                                 0))}))
-            (local pointer-target {:screen-pos-ray (fn [_target _screen _opts]
-                                                    {:origin (glm.vec3 0 0 10)
-                                                     :direction (glm.vec3 0 0 -1)})})
+            (local selector (ObjectSelector {:ctx ctx :project (fn [_position _opts] (glm.vec3 120 40 0))}))
+            (local pointer-target {:screen-pos-ray (fn [_target _screen _opts] {:origin (glm.vec3 0 0 10) :direction (glm.vec3 0 0 -1)})})
             (assert (= pointer-target.project nil)
                     "Production graph activity pointer targets do not provide project")
             (local view (GraphView {:graph-map graph-map
@@ -4883,11 +4878,14 @@
             (assert (= (view:open-focused-node-menu) true)
                     "Focused node menu should open with focus and menu manager")
             (assert opened "Focused node menu should pass options to menu manager")
-            (local projected (selector.project (glm.vec3 12 14 0) {}))
-            (assert (= opened.position.x (+ projected.x 100))
+            (assert hud-pos "Focused node menu should ask HUD for a ray")
+            (assert (= hud-pos.x 60)
+                    "Focused node menu should pass inverse logical x to HUD, not projected viewport x")
+            (assert (= hud-pos.y 20)
+                    "Focused node menu should pass inverse logical y to HUD, not projected viewport y")
+            (assert (= opened.position.x (+ 60 100))
                     "Focused node menu should convert graph x to HUD/menu space")
-            (assert (= opened.position.y (+ projected.y 200))
-                    "Focused node menu should convert graph y to HUD/menu space")
+            (assert (= opened.position.y (+ 20 200)) "Focused node menu should convert graph y to HUD/menu space")
             (assert (= opened.position.z 0)
                     "Focused node menu should place menu on HUD plane")
             (assert (= (view:toggle-focused-node-preview) true)
@@ -4912,6 +4910,8 @@
             (graph:drop)
             (set app.menu-manager original-menu-manager)
             (set app.hud original-hud)
+            (set app.engine original-engine)
+            (set app.viewport original-viewport)
             (set gl.clipboard-set original-clipboard-set))))})
 
 (table.insert tests {:name "GraphView reveal focused node centers through reveal path"

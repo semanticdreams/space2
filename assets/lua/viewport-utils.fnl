@@ -37,6 +37,24 @@
              :y (+ viewport.y (* (/ (- py viewport.y) logical-height) viewport.height))}
             {:x px :y py}))))
 
+(fn viewport-pos->input-pos [pos viewport engine]
+  (assert pos "viewport-pos->input-pos requires a position")
+  (assert viewport "viewport-pos->input-pos requires a viewport")
+  (local px (if (not (= pos.x nil)) pos.x viewport.x))
+  (local py (if (not (= pos.y nil)) pos.y viewport.y))
+  (local logical-width (if (and engine engine.width) engine.width 0))
+  (local logical-height (if (and engine engine.height) engine.height 0))
+  (if (and (> logical-width 0)
+           (> logical-height 0)
+           (> viewport.width 0)
+           (> viewport.height 0)
+           (or (not (= logical-width viewport.width))
+               (not (= logical-height viewport.height))))
+      {:x (+ viewport.x (* (/ (- px viewport.x) viewport.width) logical-width))
+       :y (+ viewport.y (* (/ (- py viewport.y) viewport.height) logical-height))}
+      {:x px :y py}))
+
 {:to-table to-table
- :to-glm-vec4 to-glm-vec4
- :input-pos->viewport-pos input-pos->viewport-pos}
+  :to-glm-vec4 to-glm-vec4
+  :input-pos->viewport-pos input-pos->viewport-pos
+  :viewport-pos->input-pos viewport-pos->input-pos}
