@@ -52,6 +52,23 @@ def _derive_followup_branch_name(source_branch: str, short_head_sha: str) -> str
     return f"{source_branch}-followup-{short_head_sha}"
 
 
+def _derive_local_main_wrapup_branch_name(short_head_sha: str) -> str:
+    return f"fast-dev/local-main-{short_head_sha}"
+
+
+def _local_commits_beyond_origin_main(repo: Path) -> int:
+    args = ["git", "rev-list", "--count", "origin/main..HEAD"]
+    raw = run_command(args, repo).stdout.strip()
+    try:
+        return int(raw)
+    except ValueError as error:
+        raise CapabilityError(
+            "command_failed",
+            "Command failed while evaluating local-main wrap-up commit range",
+            {"args": args, "stdout": raw},
+        ) from error
+
+
 def _local_branch_exists(repo: Path, branch: str) -> bool:
     ref = f"refs/heads/{branch}"
     result = run_command(["git", "show-ref", "--verify", "--quiet", ref], repo, check=False)
@@ -202,10 +219,64 @@ def create_followup_branch(repo_root: Path) -> dict[str, object]:
         return failure(action, error.message, {"code": error.code, "details": error.details})
 
 
+def create_local_main_wrapup_branch(repo_root: Path) -> dict[str, object]:
+    action = "create_local_main_wrapup_branch"
+    try:
+        repo = ensure_space_repo(repo_root)
+        dirty = _dirty_output(repo).strip()
+        branch = _current_branch(repo)
+        if dirty:
+            return human_decision(action, "Worktree is dirty; local-main wrap-up requires a clean tree", {"branch": branch, "dirty": True})
+        if not branch:
+            return human_decision(action, "Refusing local-main wrap-up branch creation from detached HEAD", {"branch": branch})
+        if branch != "main":
+            return human_decision(action, "Refusing local-main wrap-up branch creation from non-main branch", {"branch": branch})
+
+        run_command(["git", "fetch", "origin", "main"], repo)
+        short_head_sha = run_command(["git", "rev-parse", "--short=7", "HEAD"], repo).stdout.strip()
+        source_head_sha = run_command(["git", "rev-parse", "HEAD"], repo).stdout.strip()
+        origin_main_sha = run_command(["git", "rev-parse", "origin/main"], repo).stdout.strip()
+        local_commits = _local_commits_beyond_origin_main(repo)
+        if local_commits == 0:
+            return human_decision(
+                action,
+                "Local main has no commits beyond origin/main; no wrap-up branch is needed",
+                {"branch": branch, "origin_main_sha": origin_main_sha, "source_head_sha": source_head_sha, "local_commits_beyond_origin_main": local_commits},
+            )
+
+        target_branch = _derive_local_main_wrapup_branch_name(short_head_sha)
+        try:
+            validate_branch_name(target_branch)
+        except CapabilityError as error:
+            return human_decision(action, error.message, {"code": error.code, "details": error.details, "wrapup_branch": target_branch})
+
+        if _local_branch_exists(repo, target_branch):
+            return human_decision(action, "Local-main wrap-up branch already exists locally", {"wrapup_branch": target_branch})
+        if _remote_branch_exists(repo, target_branch):
+            return human_decision(action, "Local-main wrap-up branch already exists on origin", {"wrapup_branch": target_branch})
+
+        switch = run_command(["git", "switch", "-c", target_branch], repo)
+        return success(
+            action,
+            "Created and switched to deterministic local-main wrap-up branch",
+            {
+                "source_branch": branch,
+                "wrapup_branch": target_branch,
+                "short_head_sha": short_head_sha,
+                "source_head_sha": source_head_sha,
+                "origin_main_sha": origin_main_sha,
+                "local_commits_beyond_origin_main": local_commits,
+                "args": switch.args,
+            },
+        )
+    except CapabilityError as error:
+        return failure(action, error.message, {"code": error.code, "details": error.details})
+
+
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    for command in ("status", "fetch-origin", "merge-origin-main", "push-current", "create-followup-branch"):
+    for command in ("status", "fetch-origin", "merge-origin-main", "push-current", "create-followup-branch", "create-local-main-wrapup-branch"):
         subparser = subparsers.add_parser(command)
         subparser.add_argument("--repo-root", required=True, type=Path)
     return parser.parse_args(argv)
@@ -219,6 +290,7 @@ def main(argv: list[str] | None = None) -> int:
         "merge-origin-main": merge_origin_main,
         "push-current": push_current,
         "create-followup-branch": create_followup_branch,
+        "create-local-main-wrapup-branch": create_local_main_wrapup_branch,
     }
     try:
         result = operations[args.command](args.repo_root)

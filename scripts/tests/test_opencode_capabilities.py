@@ -61,6 +61,7 @@ def test_ensure_space_repo_rejects_repo_without_space_markers(tmp_path: Path) ->
         "fix/permission-capabilities",
         "docs/opencode-capabilities",
         "chore/opencode-capabilities",
+        "fast-dev/local-main-caad43f",
         "juicyrebel/weever",
         "juicyrebel/hud-right-rail-strip-fix",
     ],

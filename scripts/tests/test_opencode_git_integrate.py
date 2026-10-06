@@ -28,6 +28,12 @@ class GitRunner:
         self.checks.append(check)
         output = self.outputs.get(tuple(args), "")
         if isinstance(output, capabilities.CommandResult):
+            if check and output.returncode != 0:
+                raise capabilities.CapabilityError(
+                    "command_failed",
+                    "Command failed while evaluating capability guard",
+                    {"args": output.args, "returncode": output.returncode, "stderr": output.stderr.strip()},
+                )
             return output
         return command_result(args, output)
 
@@ -220,6 +226,236 @@ def test_derive_followup_branch_name_appends_followup_suffix() -> None:
         git_integrate._derive_followup_branch_name("juicyrebel/test-workflow-artifact-names", "caad43f")
         == "juicyrebel/test-workflow-artifact-names-followup-caad43f"
     )
+
+
+def test_derive_local_main_wrapup_branch_name_uses_fast_dev_local_main_prefix() -> None:
+    assert git_integrate._derive_local_main_wrapup_branch_name("caad43f") == "fast-dev/local-main-caad43f"
+
+
+def test_create_local_main_wrapup_branch_switches_to_deterministic_branch_from_clean_main(monkeypatch, trusted_repo: Path) -> None:
+    target = "fast-dev/local-main-caad43f"
+    runner = GitRunner(
+        {
+            ("git", "status", "--porcelain"): "",
+            ("git", "branch", "--show-current"): "main\n",
+            ("git", "fetch", "origin", "main"): "",
+            ("git", "rev-parse", "--short=7", "HEAD"): "caad43f\n",
+            ("git", "rev-parse", "HEAD"): "caad43fabc123\n",
+            ("git", "rev-parse", "origin/main"): "base456def789\n",
+            ("git", "rev-list", "--count", "origin/main..HEAD"): "2\n",
+            ("git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"): command_result(
+                ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"],
+                returncode=1,
+            ),
+            ("git", "ls-remote", "--exit-code", "--heads", "origin", target): command_result(
+                ["git", "ls-remote", "--exit-code", "--heads", "origin", target],
+                returncode=2,
+            ),
+            ("git", "switch", "-c", target): "",
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    result = git_integrate.create_local_main_wrapup_branch(trusted_repo)
+
+    assert result["status"] == "pass"
+    assert result["evidence"] == {
+        "source_branch": "main",
+        "wrapup_branch": target,
+        "short_head_sha": "caad43f",
+        "source_head_sha": "caad43fabc123",
+        "origin_main_sha": "base456def789",
+        "local_commits_beyond_origin_main": 2,
+        "args": ["git", "switch", "-c", target],
+    }
+    assert runner.calls == [
+        ["git", "status", "--porcelain"],
+        ["git", "branch", "--show-current"],
+        ["git", "fetch", "origin", "main"],
+        ["git", "rev-parse", "--short=7", "HEAD"],
+        ["git", "rev-parse", "HEAD"],
+        ["git", "rev-parse", "origin/main"],
+        ["git", "rev-list", "--count", "origin/main..HEAD"],
+        ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"],
+        ["git", "ls-remote", "--exit-code", "--heads", "origin", target],
+        ["git", "switch", "-c", target],
+    ]
+    forbidden = {"push", "merge", "rebase", "reset", "clean"}
+    assert [call for call in runner.calls if len(call) > 1 and call[0] == "git" and call[1] in forbidden] == []
+    assert [call for call in runner.calls if call[:3] == ["git", "branch", "-d"]] == []
+
+
+def test_create_local_main_wrapup_branch_refuses_dirty_worktree(monkeypatch, trusted_repo: Path) -> None:
+    runner = GitRunner({("git", "status", "--porcelain"): " M task.py\n", ("git", "branch", "--show-current"): "main\n"})
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    result = git_integrate.create_local_main_wrapup_branch(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert [call for call in runner.calls if call[:3] == ["git", "switch", "-c"]] == []
+
+
+def test_create_local_main_wrapup_branch_refuses_detached_head(monkeypatch, trusted_repo: Path) -> None:
+    runner = GitRunner({("git", "status", "--porcelain"): "", ("git", "branch", "--show-current"): "\n"})
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    result = git_integrate.create_local_main_wrapup_branch(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert [call for call in runner.calls if call[:3] == ["git", "switch", "-c"]] == []
+
+
+def test_create_local_main_wrapup_branch_refuses_non_main_branch(monkeypatch, trusted_repo: Path) -> None:
+    runner = GitRunner({("git", "status", "--porcelain"): "", ("git", "branch", "--show-current"): "feature/work\n"})
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    result = git_integrate.create_local_main_wrapup_branch(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert [call for call in runner.calls if call[:3] == ["git", "switch", "-c"]] == []
+
+
+def test_create_local_main_wrapup_branch_refuses_zero_local_commits(monkeypatch, trusted_repo: Path) -> None:
+    runner = GitRunner(
+        {
+            ("git", "status", "--porcelain"): "",
+            ("git", "branch", "--show-current"): "main\n",
+            ("git", "fetch", "origin", "main"): "",
+            ("git", "rev-parse", "--short=7", "HEAD"): "caad43f\n",
+            ("git", "rev-parse", "HEAD"): "caad43fabc123\n",
+            ("git", "rev-parse", "origin/main"): "caad43fabc123\n",
+            ("git", "rev-list", "--count", "origin/main..HEAD"): "0\n",
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    result = git_integrate.create_local_main_wrapup_branch(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert [call for call in runner.calls if call[:3] == ["git", "switch", "-c"]] == []
+
+
+def test_create_local_main_wrapup_branch_refuses_unsafe_derived_target(monkeypatch, trusted_repo: Path) -> None:
+    target = "fast-dev/local main caad43f"
+    runner = GitRunner(
+        {
+            ("git", "status", "--porcelain"): "",
+            ("git", "branch", "--show-current"): "main\n",
+            ("git", "fetch", "origin", "main"): "",
+            ("git", "rev-parse", "--short=7", "HEAD"): "caad43f\n",
+            ("git", "rev-parse", "HEAD"): "caad43fabc123\n",
+            ("git", "rev-parse", "origin/main"): "base456def789\n",
+            ("git", "rev-list", "--count", "origin/main..HEAD"): "1\n",
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+    monkeypatch.setattr(git_integrate, "_derive_local_main_wrapup_branch_name", lambda _sha: target)
+
+    result = git_integrate.create_local_main_wrapup_branch(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert result["evidence"]["code"] == "invalid_branch"
+    assert result["evidence"]["wrapup_branch"] == target
+    assert [call for call in runner.calls if call[:3] == ["git", "switch", "-c"]] == []
+
+
+def test_create_local_main_wrapup_branch_refuses_when_local_target_exists(monkeypatch, trusted_repo: Path) -> None:
+    target = "fast-dev/local-main-caad43f"
+    runner = GitRunner(
+        {
+            ("git", "status", "--porcelain"): "",
+            ("git", "branch", "--show-current"): "main\n",
+            ("git", "fetch", "origin", "main"): "",
+            ("git", "rev-parse", "--short=7", "HEAD"): "caad43f\n",
+            ("git", "rev-parse", "HEAD"): "caad43fabc123\n",
+            ("git", "rev-parse", "origin/main"): "base456def789\n",
+            ("git", "rev-list", "--count", "origin/main..HEAD"): "1\n",
+            ("git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"): command_result(
+                ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"],
+                returncode=0,
+            ),
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    result = git_integrate.create_local_main_wrapup_branch(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert [call for call in runner.calls if call[:3] == ["git", "switch", "-c"]] == []
+
+
+def test_create_local_main_wrapup_branch_refuses_when_remote_target_exists(monkeypatch, trusted_repo: Path) -> None:
+    target = "fast-dev/local-main-caad43f"
+    runner = GitRunner(
+        {
+            ("git", "status", "--porcelain"): "",
+            ("git", "branch", "--show-current"): "main\n",
+            ("git", "fetch", "origin", "main"): "",
+            ("git", "rev-parse", "--short=7", "HEAD"): "caad43f\n",
+            ("git", "rev-parse", "HEAD"): "caad43fabc123\n",
+            ("git", "rev-parse", "origin/main"): "base456def789\n",
+            ("git", "rev-list", "--count", "origin/main..HEAD"): "1\n",
+            ("git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"): command_result(
+                ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"],
+                returncode=1,
+            ),
+            ("git", "ls-remote", "--exit-code", "--heads", "origin", target): command_result(
+                ["git", "ls-remote", "--exit-code", "--heads", "origin", target],
+                returncode=0,
+            ),
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    result = git_integrate.create_local_main_wrapup_branch(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert [call for call in runner.calls if call[:3] == ["git", "switch", "-c"]] == []
+
+
+def test_create_local_main_wrapup_branch_fails_when_fetch_fails(monkeypatch, trusted_repo: Path) -> None:
+    runner = GitRunner(
+        {
+            ("git", "status", "--porcelain"): "",
+            ("git", "branch", "--show-current"): "main\n",
+            ("git", "fetch", "origin", "main"): command_result(
+                ["git", "fetch", "origin", "main"], returncode=128, stderr="fatal: fetch failed\n"
+            ),
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    result = git_integrate.create_local_main_wrapup_branch(trusted_repo)
+
+    assert result["status"] == "fail"
+    assert [call for call in runner.calls if call[:3] == ["git", "switch", "-c"]] == []
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        command_result(["git", "rev-list", "--count", "origin/main..HEAD"], returncode=128, stderr="fatal: bad revision\n"),
+        "not-a-count\n",
+    ],
+)
+def test_create_local_main_wrapup_branch_fails_when_local_commit_count_unavailable(monkeypatch, trusted_repo: Path, output) -> None:
+    runner = GitRunner(
+        {
+            ("git", "status", "--porcelain"): "",
+            ("git", "branch", "--show-current"): "main\n",
+            ("git", "fetch", "origin", "main"): "",
+            ("git", "rev-parse", "--short=7", "HEAD"): "caad43f\n",
+            ("git", "rev-parse", "HEAD"): "caad43fabc123\n",
+            ("git", "rev-parse", "origin/main"): "base456def789\n",
+            ("git", "rev-list", "--count", "origin/main..HEAD"): output,
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    result = git_integrate.create_local_main_wrapup_branch(trusted_repo)
+
+    assert result["status"] == "fail"
+    assert [call for call in runner.calls if call[:3] == ["git", "switch", "-c"]] == []
 
 
 def test_create_followup_branch_refuses_dirty_worktree(monkeypatch, trusted_repo: Path) -> None:
@@ -461,6 +697,39 @@ def test_cli_create_followup_branch_emits_json_and_returns_success(monkeypatch, 
     assert payload["status"] == "pass"
     assert payload["action"] == "create_followup_branch"
     assert payload["evidence"]["followup_branch"] == target
+
+
+def test_cli_create_local_main_wrapup_branch_emits_json_and_returns_success(monkeypatch, trusted_repo: Path, capsys) -> None:
+    target = "fast-dev/local-main-caad43f"
+    runner = GitRunner(
+        {
+            ("git", "status", "--porcelain"): "",
+            ("git", "branch", "--show-current"): "main\n",
+            ("git", "fetch", "origin", "main"): "",
+            ("git", "rev-parse", "--short=7", "HEAD"): "caad43f\n",
+            ("git", "rev-parse", "HEAD"): "caad43fabc123\n",
+            ("git", "rev-parse", "origin/main"): "base456def789\n",
+            ("git", "rev-list", "--count", "origin/main..HEAD"): "1\n",
+            ("git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"): command_result(
+                ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"],
+                returncode=1,
+            ),
+            ("git", "ls-remote", "--exit-code", "--heads", "origin", target): command_result(
+                ["git", "ls-remote", "--exit-code", "--heads", "origin", target],
+                returncode=2,
+            ),
+            ("git", "switch", "-c", target): "",
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    exit_code = git_integrate.main(["create-local-main-wrapup-branch", "--repo-root", str(trusted_repo)])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["status"] == "pass"
+    assert payload["action"] == "create_local_main_wrapup_branch"
+    assert payload["evidence"]["wrapup_branch"] == target
 
 
 def test_cli_emits_json_and_returns_nonzero_on_unsafe_state(monkeypatch, trusted_repo: Path, capsys) -> None:
