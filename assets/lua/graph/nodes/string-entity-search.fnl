@@ -52,11 +52,13 @@
   (local options (resolve-options opts))
   (local store (resolve-store options))
   (local backend (resolve-backend options store))
+  (local StringEntitySearchNodeView (require :graph/view/views/string-entity-search))
   (local node (GraphNode {:key KEY
                           :label "string entity text search"
                           :color GREEN
                           :sub-color GREEN_ACCENT
-                          :size 8.0}))
+                          :size 8.0
+                          :view StringEntitySearchNodeView}))
   (set node.store store)
   (set node.backend backend)
   (set node.query "")

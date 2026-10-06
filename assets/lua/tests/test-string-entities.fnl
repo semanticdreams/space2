@@ -1,9 +1,19 @@
 (local fs (require :fs))
+(local BuildContext (require :build-context))
 
 (local tests [])
 
 (var temp-counter 0)
 (local temp-root (fs.join-path "/tmp/space/tests" "string-entities"))
+
+(fn make-icons-stub []
+  {:resolve (fn [_self _name]
+              nil)})
+
+(fn make-ctx []
+  (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+                 :hoverables (assert app.hoverables "test requires app.hoverables")
+                 :icons (make-icons-stub)}))
 
 (fn make-temp-dir []
   (set temp-counter (+ temp-counter 1))
@@ -171,6 +181,37 @@
   (assert node.add-entity-node "should have add-entity-node method")
   (assert node.create-entity "should have create-entity method"))
 
+(fn string-entity-list-node-adds-search-node []
+  (local StringEntityListNode (require :graph/nodes/string-entity-list))
+  (local loaded [])
+  (local edges [])
+  (local node (StringEntityListNode {}))
+  (set node.graph {:load-by-key (fn [_self key]
+                                  (table.insert loaded key)
+                                  {:key key})
+                   :add-edge (fn [_self edge]
+                               (table.insert edges edge)
+                               edge)})
+  (local search-node (node:add-search-node))
+  (assert (= search-node.key "string-entity-search"))
+  (assert (= (. loaded 1) "string-entity-search"))
+  (assert (= (length edges) 1))
+  (node:drop))
+
+(fn string-entity-list-view-search-text-button-invokes-target []
+  (local View (require :graph/view/views/string-entity-list))
+  (local called {:count 0})
+  (local target {:items-changed {:connect (fn [] nil) :disconnect (fn [] nil)}
+                 :emit-items (fn [] [])
+                 :add-search-node (fn [_self]
+                                    (set called.count (+ called.count 1))
+                                    {:key "string-entity-search"})})
+  (local view ((View target) (make-ctx)))
+  (assert view.search-text-button)
+  (view.search-text-button:on-click {:button 1})
+  (assert (= called.count 1))
+  (view:drop))
+
 (fn string-entity-node-loads []
   (local {:StringEntityNode StringEntityNode} (require :graph/nodes/string-entity))
   (assert StringEntityNode "StringEntityNode should load")
@@ -230,9 +271,13 @@
 (table.insert tests {:name "string entity list node loads"
                      :fn string-entity-list-node-loads})
 (table.insert tests {:name "string entity list node creates with correct properties"
-                     :fn string-entity-list-node-creates-with-correct-properties})
+                      :fn string-entity-list-node-creates-with-correct-properties})
+(table.insert tests {:name "string entity list node adds search node"
+                     :fn string-entity-list-node-adds-search-node})
+(table.insert tests {:name "string entity list view Search Text button invokes target"
+                     :fn string-entity-list-view-search-text-button-invokes-target})
 (table.insert tests {:name "string entity node loads"
-                     :fn string-entity-node-loads})
+                      :fn string-entity-node-loads})
 (table.insert tests {:name "string entity node creates with correct properties"
                      :fn string-entity-node-creates-with-correct-properties})
 (table.insert tests {:name "entities node view loads"

@@ -1,9 +1,19 @@
 (local fs (require :fs))
+(local BuildContext (require :build-context))
 
 (local tests [])
 
 (var temp-counter 0)
 (local temp-root (fs.join-path "/tmp/space/tests" "string-entity-search"))
+
+(fn make-icons-stub []
+  {:resolve (fn [_self _name]
+              nil)})
+
+(fn make-ctx []
+  (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+                 :hoverables (assert app.hoverables "test requires app.hoverables")
+                 :icons (make-icons-stub)}))
 
 (fn make-temp-dir []
   (set temp-counter (+ temp-counter 1))
@@ -76,6 +86,19 @@
 
 (fn capture-emitted-results [holder results]
   (set holder.results results))
+
+(fn fake-search-node-for-view []
+  (local Signal (require :signal))
+  {:results []
+   :status "Ready"
+   :results-changed (Signal)
+   :status-changed (Signal)
+   :searched []
+   :opened []
+   :search-text (fn [self query] (table.insert self.searched query))
+   :open-result (fn [self result]
+                  (table.insert self.opened result)
+                  {:key (.. "string-entity:" result.entity-id)})})
 
 (fn state-contains-string? [value needle seen]
   (if (= (type value) :string)
@@ -181,6 +204,7 @@
                                        :backend (fake-backend)}))
   (assert (= node.key "string-entity-search"))
   (assert (= node.label "string entity text search"))
+  (assert (= (type node.view) "function"))
   (assert node.results-changed)
   (assert node.status-changed)
   (node:drop))
@@ -269,6 +293,29 @@
   (assert-state-omits-string state "distinct persisted leak")
   (graph-map:drop))
 
+(fn search-node-view-click-search-submits-input []
+  (local View (require :graph/view/views/string-entity-search))
+  (local node (fake-search-node-for-view))
+  (local view ((View node) (make-ctx)))
+  (view.input:set-text "needle")
+  (view.search-button:on-click {:button 1})
+  (assert (= (. node.searched 1) "needle"))
+  (view:drop))
+
+(fn search-node-view-refreshes-results-and-opens-row []
+  (local View (require :graph/view/views/string-entity-search))
+  (local node (fake-search-node-for-view))
+  (local view ((View node) (make-ctx)))
+  (local result {:entity-id "abc" :entity {:value "Alpha body"} :matches [{:text "Alpha body"}] :match-count 1})
+  (node.results-changed:emit [result])
+  (assert (= (length view.results-list.items) 1))
+  (local row-builder view.results-list.builder)
+  (local row (row-builder [result "Alpha body"] (make-ctx)))
+  (row:on-click {:button 1})
+  (assert (= (. (. node.opened 1) :entity-id) "abc"))
+  (row:drop)
+  (view:drop))
+
 (table.insert tests {:name "backend passes literal ignore-case ripgrep options"
                      :fn backend-passes-ripgrep-options})
 (table.insert tests {:name "backend blank query does not invoke ripgrep"
@@ -290,7 +337,11 @@
 (table.insert tests {:name "search node open result loads string entity key"
                      :fn search-node-open-result-loads-string-entity-key})
 (table.insert tests {:name "search node capture state omits query text"
-                     :fn search-node-capture-state-omits-query-text})
+                      :fn search-node-capture-state-omits-query-text})
+(table.insert tests {:name "search node view click Search submits input"
+                     :fn search-node-view-click-search-submits-input})
+(table.insert tests {:name "search node view refreshes results and opens row"
+                     :fn search-node-view-refreshes-results-and-opens-row})
 
 (local main
   (fn []

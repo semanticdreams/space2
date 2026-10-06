@@ -52,8 +52,18 @@
          (when (and graph entity entity.id)
            (local entity-node (StringEntityNode {:entity-id entity.id
                                                  :store self.store}))
-           (graph:add-edge (GraphEdge {:source self
-                                       :target entity-node})))))
+            (graph:add-edge (GraphEdge {:source self
+                                        :target entity-node})))))
+
+  (set node.add-search-node
+       (fn [self]
+         (local graph (assert self.graph "StringEntityListNode.add-search-node requires mounted GraphMap"))
+         (assert graph.load-by-key "StringEntityListNode.add-search-node requires GraphMap:load-by-key")
+         (assert graph.add-edge "StringEntityListNode.add-search-node requires GraphMap:add-edge")
+         (local search-node (graph:load-by-key "string-entity-search"))
+         (assert search-node "StringEntityListNode.add-search-node failed to load string-entity-search")
+         (graph:add-edge (GraphEdge {:source self :target search-node}))
+         search-node))
 
   (set node.create-entity
        (fn [self opts]
@@ -66,10 +76,14 @@
          :icon "refresh"
          :fn (fn [_button _event]
                  (node:emit-items))}
-        {:name "New String"
-         :icon "note_add"
-         :fn (fn [_button _event]
-                 (node:create-entity {}))}])
+         {:name "New String"
+          :icon "note_add"
+          :fn (fn [_button _event]
+                  (node:create-entity {}))}
+         {:name "Search Text"
+          :icon "search"
+          :fn (fn [_button _event]
+                  (node:add-search-node))}])
 
   (var created-handler nil)
   (var updated-handler nil)
