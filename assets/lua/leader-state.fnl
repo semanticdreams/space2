@@ -31,6 +31,10 @@
   (and (= (type command-id) :string)
        (= (string.sub command-id 1 5) "core.")))
 
+(fn active-state-name [ctx]
+  (local states ((. ctx :states)))
+  (states:active-name))
+
 (fn exit-leader [ctx reset-sequence! result]
   (reset-sequence!)
   ((. ctx :set-state) :normal)
@@ -42,7 +46,15 @@
     (Commands.run composed resolved.command-id ctx)
     ((. ctx :mark-command-executed!)))
   (reset-sequence!)
-  (when (not (core-command? resolved.command-id))
+  (local active-name (active-state-name ctx))
+  (local should-return-normal
+    (if (= active-name :leader)
+        true
+        (= active-name nil)
+        true
+        false))
+  (when (and (not (core-command? resolved.command-id))
+             should-return-normal)
     ((. ctx :set-state) :normal))
   true)
 

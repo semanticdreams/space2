@@ -7,6 +7,7 @@
 (local IdentityNodeModule (require :graph/nodes/identity))
 (local NotebookNodeModule (require :graph/nodes/notebook))
 (local StringEntityListNode (require :graph/nodes/string-entity-list))
+(local StringEntitySearchNodeModule (require :graph/nodes/string-entity-search))
 (local ListEntityListNode (require :graph/nodes/list-entity-list))
 (local LinkEntityListNode (require :graph/nodes/link-entity-list))
 (local EntitiesNode (require :graph/nodes/entities))
@@ -17,7 +18,7 @@
 
 (local entity-schemes
   ["string-entity" "code-entity" "list-entity" "link-entity" "identity" "notebook"
-   "string-entity-list" "list-entity-list" "link-entity-list" "entities" "notebooks"])
+   "string-entity-list" "string-entity-search" "list-entity-list" "link-entity-list" "entities" "notebooks"])
 (local static-schemes ["start" "quit" "class"])
 
 (fn loader-opts [ctx]
@@ -64,6 +65,8 @@
                                           :identity-store identity-store
                                           :string-store string-store}))))
   (fn make-string-entity-list [] (StringEntityListNode {:store string-store}))
+  (fn make-string-entity-search []
+    (StringEntitySearchNodeModule.StringEntitySearchNode {:store string-store}))
   (fn make-list-entity-list [] (ListEntityListNode {:store list-store}))
   (fn make-link-entity-list [] (LinkEntityListNode {:store link-store}))
   (fn make-entities [] (EntitiesNode {}))
@@ -84,6 +87,10 @@
   (add! (graph:register-key-loader "string-entity-list"
       (Common.exact-key-loader "string-entity-list"
         make-string-entity-list)
+      (loader-opts ctx)))
+  (add! (graph:register-key-loader "string-entity-search"
+      (Common.exact-key-loader "string-entity-search"
+        make-string-entity-search)
       (loader-opts ctx)))
   (add! (graph:register-key-loader "list-entity-list"
       (Common.exact-key-loader "list-entity-list"

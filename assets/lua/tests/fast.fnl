@@ -44,6 +44,7 @@
     :tests.test-graph-node-cube
     :tests.test-menu
     :tests.test-menu-separators
+    :tests.test-context-menu-state
     :tests.test-sized
     :tests.test-container
     :tests.test-flex
@@ -143,6 +144,7 @@
     :tests.test-sql-builder
     :tests.test-string-utils
     :tests.test-string-entities
+    :tests.test-string-entity-search
     :tests.test-string-entity-create-child
     :tests.test-code-entities
     :tests.test-identity-entities
