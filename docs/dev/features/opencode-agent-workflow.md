@@ -471,7 +471,14 @@ repository is `https://github.com/semanticdreams/space2`.
 - Pull requests target `main`.
 - Final validation and PR creation require a branch that is current with `origin/main`. Diff/base checks always use `origin/main`, not local `main`. Local `main` may be stale or contain unrelated local commits.
 - Before final validation, PR creation, or a ready-to-merge claim, fetch `origin` and evaluate the branch against current `origin/main`. If the branch is behind, use a safe merge from `origin/main` when permitted, route resulting fixes through review, and rerun validation.
-- Do not push directly to `main`. Always work on a feature branch and open a pull request.
+- Do not push directly to `main`, and never open a pull request from `main`.
+  Agent-driven integration work must happen on a feature branch. The only
+  exception is the documented human-selected `fast-dev` local-main workspace:
+  local `main` may hold reviewed local commits temporarily, but before final
+  validation, push, or PR integration it must be converted through
+  `create-local-main-wrapup-branch` into
+  `fast-dev/local-main-<short-head-sha>` and then follow the normal feature
+  branch pull-request flow.
 
 ### Post-PR merge queue
 
