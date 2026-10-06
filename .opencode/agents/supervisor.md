@@ -315,7 +315,8 @@ direct broad permission:
 
 - Dispatch `git-integrator` for current-branch integration status,
   `origin/main` fetch, safe merge from `origin/main`, guarded follow-up branch
-  creation, and pushing the current branch through
+  creation, local `main` wrap-up branch creation with
+  `create-local-main-wrapup-branch`, and pushing the current branch through
   `scripts/opencode_git_integrate.py`.
 - Dispatch `github-operator` for GitHub authentication checks, target-branch
   protection checks, PR creation, auto-merge enablement, PR state reads, and
@@ -350,6 +351,15 @@ If a capability wrapper returns `human_decision_required`, report
 `HUMAN_DECISION_REQUIRED` with the wrapper evidence. Do not ask for one-off broad
 Git, GitHub, shell, external-directory, rebase, force-push, reset, clean,
 branch-delete, sudo/package-manager, or OpenCode credential/log/database access.
+
+Before any push, PR creation, ready-to-merge claim, or finishing action, detect
+the current branch. If the branch is not `main`, continue the normal finishing
+flow. If the branch is local `main`, do not push or create a PR from `main`:
+dispatch `git-integrator` to run `create-local-main-wrapup-branch`. On wrapper
+`pass`, continue normal finishing from the newly created
+`fast-dev/local-main-<short-head-sha>` feature branch. On wrapper
+`human_decision_required` or `fail`, report the wrapper evidence and do not
+request raw Git permission.
 
 Direct main push, force-push, rebase, reset, clean, broad branch deletion, broad
 recursive removal, `sudo`, `su`, `doas`, `apt`, `apt-get`, `dnf`, `pacman`, and

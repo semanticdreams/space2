@@ -65,6 +65,7 @@ def write_capability_files(root: Path) -> None:
         '    "python3 scripts/opencode_git_integrate.py merge-origin-main --repo-root .": allow\n'
         '    "python3 scripts/opencode_git_integrate.py push-current --repo-root .": allow\n'
         '    "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .": allow\n'
+        '    "python3 scripts/opencode_git_integrate.py create-local-main-wrapup-branch --repo-root .": allow\n'
     )
     write_file(
         root / ".opencode" / "agents" / "git-integrator.md",
@@ -146,6 +147,7 @@ def test_git_integrator_allows_exact_guarded_git_wrapper_commands():
         "python3 scripts/opencode_git_integrate.py merge-origin-main --repo-root .",
         "python3 scripts/opencode_git_integrate.py push-current --repo-root .",
         "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .",
+        "python3 scripts/opencode_git_integrate.py create-local-main-wrapup-branch --repo-root .",
     }
 
 
@@ -288,6 +290,40 @@ def test_stale_merged_pr_recovery_routes_through_recovery_operator():
         assert missing_terms == [], f"{path.relative_to(REPO_ROOT)} missing {missing_terms}"
 
 
+def test_local_main_wrapup_and_vertical_slice_handoff_are_documented():
+    required = {
+        REPO_ROOT / ".opencode" / "agents" / "fast-dev.md": [
+            "local `main`",
+            "feature branch",
+            "strict supervisor",
+            "vertical slice handoff",
+        ],
+        REPO_ROOT / ".opencode" / "agents" / "supervisor.md": [
+            "create-local-main-wrapup-branch",
+            "fast-dev/local-main-",
+            "local `main`",
+            "git-integrator",
+        ],
+        REPO_ROOT / ".opencode" / "skills" / "finishing-a-development-branch" / "SKILL.md": [
+            "create-local-main-wrapup-branch",
+            "fast-dev/local-main-",
+            "local `main`",
+            "Do not push",
+        ],
+        REPO_ROOT / "docs" / "dev" / "features" / "opencode-agent-workflow.md": [
+            "Local main wrap-up",
+            "create-local-main-wrapup-branch",
+            "fast-dev/local-main-<short-head-sha>",
+            "Vertical slice handoff",
+        ],
+    }
+
+    for path, terms in required.items():
+        text = path.read_text(encoding="utf-8")
+        missing = [term for term in terms if term not in text]
+        assert missing == [], f"{path.relative_to(REPO_ROOT)} missing {missing}"
+
+
 def test_workflow_docs_do_not_recommend_raw_github_polling_commands():
     forbidden_commands = [
         "gh pr view",
@@ -324,7 +360,7 @@ def test_git_integrator_rejects_extra_bash_allow(tmp_path: Path):
     agent_path.write_text(
         agent_text.replace(
             '    "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .": allow\n',
-            '    "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .": allow\n    "git switch -c *": allow\n',
+            '    "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .": allow\n    "python3 scripts/opencode_git_integrate.py create-local-main-wrapup-branch --repo-root .": allow\n    "git switch -c *": allow\n',
         ),
         encoding="utf-8",
     )
@@ -348,7 +384,7 @@ def test_git_integrator_rejects_extra_bash_allow_or_ask_with_quotes_or_comments(
     agent_path.write_text(
         agent_text.replace(
             '    "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .": allow\n',
-            '    "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .": allow\n' + extra_entry,
+            '    "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .": allow\n    "python3 scripts/opencode_git_integrate.py create-local-main-wrapup-branch --repo-root .": allow\n' + extra_entry,
         ),
         encoding="utf-8",
     )

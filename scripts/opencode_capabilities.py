@@ -103,6 +103,7 @@ _BRANCH_PATTERNS = [
     re.compile(r"^automation/weekly-agent-workflow/\d{4}-W\d{2}$"),
     re.compile(r"^opencode/workflow-debug/[A-Za-z0-9][A-Za-z0-9._-]*$"),
     re.compile(r"^opencode/workflow-debug-pr/[A-Za-z0-9][A-Za-z0-9._-]*$"),
+    re.compile(r"^fast-dev/local-main-[A-Fa-f0-9]{7}$"),
     re.compile(r"^(feature|fix|docs|chore)/[A-Za-z0-9][A-Za-z0-9._/-]*$"),
     re.compile(r"^juicyrebel/[A-Za-z0-9][A-Za-z0-9._/-]*$"),
 ]

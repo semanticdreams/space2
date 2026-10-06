@@ -44,7 +44,32 @@ restart OpenCode before relying on updated permissions or workflow text.
 git status --porcelain
 ```
 
-**If output is empty:** Continue to Step 1.
+**If output is empty:** Identify the current branch before continuing:
+
+```bash
+git branch --show-current
+```
+
+If the current branch is `main`, this is a local `main` wrap-up case. Do not
+push, create a PR, or run any integration action from `main`. Dispatch
+`git-integrator` to run `create-local-main-wrapup-branch`, which invokes:
+
+```bash
+python3 scripts/opencode_git_integrate.py create-local-main-wrapup-branch --repo-root .
+```
+
+On wrapper `pass`, continue finishing from the newly created
+`fast-dev/local-main-<short-head-sha>` feature branch by restarting this skill
+from Step 0 so clean-tree and current-base checks run on that branch. If wrapper
+evidence says there are no local commits beyond `origin/main`, report that there
+is no local work to wrap up and stop. If the wrapper returns
+`human_decision_required` or `fail`, report its evidence and do not request raw
+Git permission.
+
+Keep rebase, reset, force-push, clean, and branch deletion forbidden throughout
+this conversion path.
+
+If the current branch is not `main`, continue to Step 1.
 
 **If output is non-empty:** The working tree is not clean. Report the files and **stop here**. Do not proceed to testing, the menu, or any integration action. Tell the user:
 

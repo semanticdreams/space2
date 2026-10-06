@@ -27,6 +27,7 @@ GIT_INTEGRATOR_ALLOWED_WRAPPER_COMMANDS = {
     "python3 scripts/opencode_git_integrate.py merge-origin-main --repo-root .",
     "python3 scripts/opencode_git_integrate.py push-current --repo-root .",
     "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .",
+    "python3 scripts/opencode_git_integrate.py create-local-main-wrapup-branch --repo-root .",
 }
 GITHUB_OPERATOR_ALLOWED_WRAPPER_COMMANDS = {
     "python3 scripts/opencode_pr_operator.py auth-status --repo-root .",

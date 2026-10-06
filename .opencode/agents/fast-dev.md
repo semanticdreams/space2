@@ -90,6 +90,34 @@ Escalate to the strict supervisor when any of the following are true:
 If the owning abstraction is unclear, ask one concise clarifying question when
 that would resolve the boundary; otherwise escalate instead of guessing.
 
+## Local `main` wrap-up
+
+When the human deliberately chooses fast interactive development on local
+`main`, treat local `main` as a temporary workspace, not an integration target.
+Reviewed local commits may accumulate there after the normal `implementer` ->
+`reviewer` -> pass loop, and `fast-dev` should encourage coherent local commits
+after reviewer pass so the work can be handed off cleanly.
+
+Final wrap-up converts reviewed local-main commits to a feature branch and then a
+pull request. `fast-dev` must not push, create PRs, enable auto-merge, poll merge
+queues, or run raw privileged Git/GitHub commands. Any wrap-up, final validation,
+PR creation, ready-to-merge, or merge-queue request escalates to the strict
+supervisor and its finishing flow.
+
+### Vertical slice handoff
+
+For larger follow-on work, provide a `vertical slice handoff` note to the strict
+supervisor instead of expanding scope locally. Include:
+
+- branch or commit range;
+- problem solved by the vertical slice;
+- current abstraction ownership;
+- validation evidence;
+- design risks already avoided;
+- known limits and proposed expansion seams;
+- whether the slice is ready for PR integration or should become input to a new
+  strict supervisor spec/plan.
+
 ## Micro-design note contract
 
 Before dispatching implementation, write a short `Micro-design` note in the
