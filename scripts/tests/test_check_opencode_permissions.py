@@ -65,6 +65,7 @@ def write_capability_files(root: Path) -> None:
         '    "python3 scripts/opencode_git_integrate.py merge-origin-main --repo-root .": allow\n'
         '    "python3 scripts/opencode_git_integrate.py push-current --repo-root .": allow\n'
         '    "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .": allow\n'
+        '    "python3 scripts/opencode_git_integrate.py create-local-main-wrapup-branch --repo-root .": allow\n'
     )
     write_file(
         root / ".opencode" / "agents" / "git-integrator.md",
@@ -146,6 +147,7 @@ def test_git_integrator_allows_exact_guarded_git_wrapper_commands():
         "python3 scripts/opencode_git_integrate.py merge-origin-main --repo-root .",
         "python3 scripts/opencode_git_integrate.py push-current --repo-root .",
         "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .",
+        "python3 scripts/opencode_git_integrate.py create-local-main-wrapup-branch --repo-root .",
     }
 
 
@@ -324,7 +326,7 @@ def test_git_integrator_rejects_extra_bash_allow(tmp_path: Path):
     agent_path.write_text(
         agent_text.replace(
             '    "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .": allow\n',
-            '    "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .": allow\n    "git switch -c *": allow\n',
+            '    "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .": allow\n    "python3 scripts/opencode_git_integrate.py create-local-main-wrapup-branch --repo-root .": allow\n    "git switch -c *": allow\n',
         ),
         encoding="utf-8",
     )
@@ -348,7 +350,7 @@ def test_git_integrator_rejects_extra_bash_allow_or_ask_with_quotes_or_comments(
     agent_path.write_text(
         agent_text.replace(
             '    "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .": allow\n',
-            '    "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .": allow\n' + extra_entry,
+            '    "python3 scripts/opencode_git_integrate.py create-followup-branch --repo-root .": allow\n    "python3 scripts/opencode_git_integrate.py create-local-main-wrapup-branch --repo-root .": allow\n' + extra_entry,
         ),
         encoding="utf-8",
     )
