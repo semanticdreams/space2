@@ -44,6 +44,7 @@
     :tests.test-graph-node-cube
     :tests.test-menu
     :tests.test-menu-separators
+    :tests.test-context-menu-state
     :tests.test-sized
     :tests.test-container
     :tests.test-flex
