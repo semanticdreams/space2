@@ -86,6 +86,7 @@
   (StateSystemBindings.bind-states-host app.states)
   (app.states:add-state :normal ((require :normal-state)))
   (app.states:add-state :leader ((require :leader-state)))
+  (app.states:add-state :context-menu ((require :context-menu-state)))
   (app.states:add-state :quit ((require :quit-state)))
   (app.states:add-state :text ((require :text-state)))
   (app.states:add-state :insert ((require :insert-state)))

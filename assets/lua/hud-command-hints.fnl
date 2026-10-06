@@ -270,24 +270,96 @@
     content)
   (fn build-card [inner-ctx]
     ((Card
-       {:child
-        (Padding {:edge-insets [0.6 0.45]
-                  :child build-content})})
+        {:child
+         (Padding {:edge-insets [0.6 0.45]
+                   :child build-content})})
      inner-ctx)))
 
-(fn overlay-builder [manager]
-  (local ScrollArea (require :scroll-area))
+(fn overlay-target-size [content-size available]
+  (glm.vec3 available.x
+            (math.min content-size.y available.y)
+            content-size.z))
+
+(fn overlay-available-size [hud]
+  (local root (assert (and hud hud.middle-overlay-root)
+                      "CommandHints overlay sizing requires a middle overlay root"))
+  (local layout (assert root.layout
+                        "CommandHints overlay sizing requires middle overlay layout"))
+  (local size (assert layout.size
+                     "CommandHints overlay sizing requires laid-out middle overlay size"))
+  (assert (> size.x 0)
+          "CommandHints overlay sizing requires positive middle overlay width")
+  (assert (> size.y 0)
+          "CommandHints overlay sizing requires positive middle overlay height")
+  size)
+
+(fn SizedCommandHintsOverlay [opts]
+  (assert opts.child "SizedCommandHintsOverlay requires :child")
+  (assert opts.hud "SizedCommandHintsOverlay requires :hud")
   (fn build [ctx]
-    (var text-entity nil)
-    (local content
-      ((Text {:text (overlay-text manager.sections)}) ctx))
-    (set text-entity content)
-    (local clipped ((ScrollArea {:name "command-hints-clip"
-                                 :child (command-hints-card-builder content)}) ctx))
-    (set clipped.set-text
-         (fn [_self text]
-           (text-entity:set-text text)))
-    clipped))
+    (local child (opts.child ctx))
+
+    (fn measurer [self]
+      (child.layout:measurer)
+      (local measured (assert child.layout.measure
+                              "SizedCommandHintsOverlay requires child measure"))
+      (local available (overlay-available-size opts.hud))
+      (set self.measure (overlay-target-size measured available)))
+
+    (fn layouter [self]
+      (local assigned-size (assert self.size
+                                   "SizedCommandHintsOverlay requires assigned layout size"))
+      (local available (overlay-available-size opts.hud))
+      (set self.size (overlay-target-size assigned-size available))
+      (set child.layout.size self.size)
+      (set child.layout.position self.position)
+      (set child.layout.rotation self.rotation)
+      (set child.layout.depth-offset-index self.depth-offset-index)
+      (set child.layout.clip-region self.clip-region)
+      (child.layout:layouter)
+      (set self.clip-region child.layout.clip-region))
+
+    (local {: Layout} (require :layout))
+    (local layout
+      (Layout {:name "command-hints-overlay-size"
+               : measurer : layouter
+               :children [child.layout]}))
+
+    (fn drop [self]
+      (self.layout:drop)
+      (child:drop))
+
+    {:child child
+     :layout layout
+     :drop drop
+     :set-text (fn [_self text]
+                 (assert child.set-text
+                         "SizedCommandHintsOverlay child must expose :set-text")
+                 (child:set-text text))
+     :update (fn [_self]
+               (when (and child child.update)
+                 (child:update)))}))
+
+(fn build-command-hints-scroll [ctx text]
+  (local ScrollArea (require :scroll-area))
+  (local content
+    ((Text {:text text}) ctx))
+  (local clipped
+    ((ScrollArea {:name "command-hints-clip"
+                  :child (command-hints-card-builder content)}) ctx))
+  (set clipped.set-text
+       (fn [_self updated-text]
+         (content:set-text updated-text)))
+  clipped)
+
+(fn overlay-builder [manager]
+  (fn build [ctx]
+    (fn build-scroll [inner-ctx]
+      (build-command-hints-scroll inner-ctx (overlay-text manager.sections)))
+    ((SizedCommandHintsOverlay
+       {:hud manager.hud
+        :child build-scroll})
+     ctx)))
 
 (fn passive-event? [event-name]
   (or (= event-name :updated)
@@ -316,10 +388,10 @@
     (if self.expanded?
         (do
           (if (not self.overlay-element)
-              (set self.overlay-element
-                   (self.hud:add-overlay-child {:builder (overlay-builder self)
-                                                 :layer :middle :fill-parent? true
-                                                 :depth-offset-index 200})))
+               (set self.overlay-element
+                    (self.hud:add-overlay-child {:builder (overlay-builder self)
+                                                  :layer :middle
+                                                  :depth-offset-index 200})))
           (when self.overlay-element.set-text
             (self.overlay-element:set-text (overlay-text self.sections))))
         (when self.overlay-element

@@ -872,6 +872,80 @@
   (set app.hud original-hud)
   (set-app-states! original-states))
 
+(fn expanded-overlay-shrinks-to-small-content-height []
+  (local original-states app.states)
+  (local original-hud app.hud)
+  (local states (States))
+  (states:add-state :normal (state-with-hints :normal [(entry "space" "leader" {:priority 10})]))
+  (states:set-state :normal)
+  (set-app-states! states)
+  (local hud (build-test-hud states))
+  (set app.hud hud)
+  (assert (hud.command-hints:toggle-overlay))
+  (hud:update)
+  (local overlay hud.command-hints.overlay-element)
+  (local middle-overlay hud.middle-overlay-root)
+  (assert overlay)
+  (assert (<= (math.abs (- overlay.layout.size.x middle-overlay.layout.size.x)) 0.001) "small command hints overlay should fill middle overlay width")
+  (assert (< overlay.layout.size.y (* middle-overlay.layout.size.y 0.5)))
+  (assert (<= (math.abs (- overlay.layout.size.y overlay.layout.measure.y)) 0.001))
+  (hud:drop) (set app.hud original-hud) (set-app-states! original-states))
+(fn expanded-overlay-caps-tall-content-to-middle-height []
+  (local original-states app.states)
+  (local original-hud app.hud)
+  (local states (States))
+  (local hints [])
+  (for [idx 1 80] (table.insert hints (entry (.. "k" idx) (.. "command-" idx) {:priority idx})))
+  (states:add-state :normal (state-with-hints :normal hints))
+  (states:set-state :normal)
+  (set-app-states! states)
+  (local hud (build-test-hud states))
+  (set app.hud hud)
+  (assert (hud.command-hints:toggle-overlay))
+  (hud:update)
+  (local overlay hud.command-hints.overlay-element)
+  (local middle-overlay hud.middle-overlay-root)
+  (local content-size (and overlay overlay.child overlay.child.get-content-size
+                            (overlay.child:get-content-size)))
+  (assert overlay)
+  (assert (<= (math.abs (- overlay.layout.size.x middle-overlay.layout.size.x)) 0.001) "tall command hints overlay should fill middle overlay width")
+  (assert (<= overlay.layout.size.y (+ middle-overlay.layout.size.y 0.001)))
+  (assert content-size)
+  (assert (> content-size.y overlay.layout.size.y))
+  (hud:drop) (set app.hud original-hud) (set-app-states! original-states))
+(fn expanded-overlay-recaps-tall-content-when-middle-height-shrinks []
+  (local original-states app.states)
+  (local original-hud app.hud)
+  (local states (States))
+  (local hints [])
+  (var status-height 2)
+  (fn status-builder [_ctx]
+    (local layout
+      (Layout {:name "shrinking-status"
+               :measurer (fn [self] (set self.measure (glm.vec3 8 status-height 0)))
+               :layouter (fn [self] (set self.size self.measure))}))
+    {:layout layout :drop (fn [_self] (layout:drop))})
+  (for [idx 1 80] (table.insert hints (entry (.. "k" idx) (.. "command-" idx) {:priority idx})))
+  (states:add-state :normal (state-with-hints :normal hints))
+  (states:set-state :normal)
+  (set-app-states! states)
+  (local hud (build-test-hud states {:status-builder status-builder}))
+  (set app.hud hud)
+  (assert (hud.command-hints:toggle-overlay))
+  (hud:update)
+  (local overlay hud.command-hints.overlay-element)
+  (assert overlay)
+  (set status-height 40)
+  (hud.entity.status-root.layout:mark-measure-dirty)
+  (hud:update)
+  (local middle-overlay hud.middle-overlay-root)
+  (local content-size (and overlay.child overlay.child.get-content-size
+                            (overlay.child:get-content-size)))
+  (assert (<= (math.abs (- overlay.layout.size.x middle-overlay.layout.size.x)) 0.001) "resized command hints overlay should keep filling current middle overlay width")
+  (assert (<= overlay.layout.size.y (+ middle-overlay.layout.size.y 0.001)))
+  (assert content-size)
+  (assert (> content-size.y overlay.layout.size.y))
+  (hud:drop) (set app.hud original-hud) (set-app-states! original-states))
 (fn width-path-preserves-f1-toggle []
   (local original-states app.states)
   (local original-hud app.hud)
@@ -1006,7 +1080,7 @@
                :font font})
    :get (fn [_self _name] 4242)})
 
-(fn overlay-may-overlap-expanded-sidebar-panel-but-not-rail []
+(fn overlay-stays-left-of-expanded-sidebar-rail []
   (local HudExtendedSidebar (require :hud-extended-sidebar))
   (local HudExtendedSidebarView (require :hud-extended-sidebar-view))
   (local original-states app.states)
@@ -1032,16 +1106,9 @@
   (hud:update)
   (local overlay hud.command-hints.overlay-element)
   (local right-dock hud.entity.right-dock-root)
-  (local panel-layout (. right-dock.layout.children 1))
   (local rail-layout (. right-dock.layout.children 2))
   (local overlay-right (+ overlay.layout.position.x overlay.layout.size.x))
-  (local panel-left panel-layout.position.x)
   (local rail-left rail-layout.position.x)
-  (assert (> overlay-right panel-left)
-          (.. "command hints overlay may overlap the expanded right sidebar flyout panel; overlay-right "
-              overlay-right
-              " panel-left "
-              panel-left))
   (assert (<= overlay-right rail-left)
           (.. "command hints overlay should not cross into the right rail when sidebar is expanded; overlay-right "
               overlay-right
@@ -1102,9 +1169,14 @@
 (table.insert tests {:name "Overlay reanchors while open"
                      :fn overlay-reanchors-while-open})
 (table.insert tests {:name "Overlay defaults to HUD local origin"
-                     :fn overlay-defaults-to-hud-local-origin})
+                      :fn overlay-defaults-to-hud-local-origin})
+(table.insert tests {:name "Expanded overlay shrinks to small content height" :fn expanded-overlay-shrinks-to-small-content-height})
+(table.insert tests {:name "Expanded overlay caps tall content to middle height"
+                      :fn expanded-overlay-caps-tall-content-to-middle-height})
+(table.insert tests {:name "Expanded overlay re-caps tall content when middle height shrinks"
+                      :fn expanded-overlay-recaps-tall-content-when-middle-height-shrinks})
 (table.insert tests {:name "Width path preserves the F1 toggle"
-                     :fn width-path-preserves-f1-toggle})
+                      :fn width-path-preserves-f1-toggle})
 (table.insert tests {:name "Width path preserves the F1 toggle with status body"
                      :fn width-path-preserves-f1-toggle-with-status-body})
 (table.insert tests {:name "Collapsed strip preserves room for the F1 toggle"
@@ -1113,8 +1185,8 @@
                       :fn overlay-right-edge-stays-left-of-right-rail})
 (table.insert tests {:name "Long command hint text is clipped to rail-safe overlay"
                      :fn long-command-hint-text-is-clipped-to-rail-safe-overlay})
-(table.insert tests {:name "Overlay may overlap expanded sidebar panel but not rail"
-                      :fn overlay-may-overlap-expanded-sidebar-panel-but-not-rail})
+(table.insert tests {:name "Overlay stays left of expanded sidebar rail"
+                       :fn overlay-stays-left-of-expanded-sidebar-rail})
 
 (local main
   (fn []
