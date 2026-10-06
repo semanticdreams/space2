@@ -20,7 +20,7 @@
    "list-entity-list" "llm" "llm-conversation" "llm-conversations" "llm-message"
    "llm-model" "llm-provider" "llm-tool" "llm-tool-call" "llm-tool-result"
    "llm-tools" "notebook" "notebooks" "quit" "start" "string-entity"
-   "string-entity-list" "table" "text-module" "workflow-definition" "workflow-run"
+    "string-entity-list" "string-entity-search" "table" "text-module" "workflow-definition" "workflow-run"
    "workflow-run-event" "workflow-run-explorer" "workflow-run-step" "workflow-run-timeline"
    "workflow-step" "workflow-step-explorer" "workflows" "world" "world-activities"
    "world-activity" "worlds"])
@@ -177,6 +177,7 @@
   (registry:install-runtime runtime)
   (assert-loads graph "start")
   (assert-loads graph "string-entity-list")
+  (assert-loads graph "string-entity-search")
   (assert-loads graph (.. "fs:" temp-dir.path))
   (assert-loads graph "llm")
   (assert-loads graph "hosted-app-launcher:workspace")
