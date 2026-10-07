@@ -11,6 +11,7 @@
 (local Commands (require :commands/core))
 (local Keymap (require :commands/keymap))
 (local CoreLeader (require :commands/providers/core-leader))
+(local FocusLeader (require :commands/providers/focus))
 
 (local KEY
   {:escape 27})
@@ -19,7 +20,7 @@
   (if (= items nil) [] items))
 
 (fn active-providers []
-  (local providers [(CoreLeader.provider)])
+  (local providers [(CoreLeader.provider) (FocusLeader.provider)])
   (each [_ provider (ipairs (list-or-empty app.activity-leader-command-providers))]
     (table.insert providers provider))
   providers)
