@@ -47,7 +47,9 @@
   (while parent
     (set parent.descendant-has-focus? true)
     (when parent.is-scope?
-      (set parent.focused-child child))
+      (set parent.focused-child child)
+      (when (not node.is-scope?)
+        (set parent.last-focused-descendant node)))
     (set child parent)
     (set parent child.parent)))
 
@@ -60,16 +62,51 @@
           (table.insert out node))))
   out)
 
+(fn collect-focusables-pruned [node out active-scope]
+  (when node
+    (if node.is-scope?
+        (if (= node active-scope)
+            (each [_ child (ipairs node.children)]
+              (collect-focusables-pruned child out active-scope))
+            (when (not node.exit-node)
+              (each [_ child (ipairs node.children)]
+                (collect-focusables-pruned child out active-scope))))
+        (when (and node.can-request-focus? (not node.skip-traversal?))
+          (table.insert out node))))
+  out)
+
 (fn ordered-focusables [manager]
   (local list [])
-  (collect-focusables manager.root list)
+  (collect-focusables-pruned manager.root list manager.root)
   list)
 
 (fn ordered-focusables-in-scope [manager scope]
   (local list [])
-  (local root (or scope manager.root))
-  (collect-focusables root list)
+  (local root (if scope scope manager.root))
+  (collect-focusables-pruned root list root)
   list)
+
+(fn node-descendant-of-scope? [node scope]
+  (var current node)
+  (var found false)
+  (while (and current (not found))
+    (when (= current scope)
+      (set found true))
+    (set current current.parent))
+  found)
+
+(fn find-node-index-in-list [nodes node]
+  (if (not node)
+      nil
+      (do
+        (var i 1)
+        (var found nil)
+        (local count (length nodes))
+        (while (and (<= i count) (not found))
+          (when (= (. nodes i) node)
+            (set found i))
+          (set i (+ i 1)))
+        found)))
 
 (fn ensure-vec3 [value fallback]
   (if value
@@ -337,7 +374,7 @@
   (when focused
     (local axes (resolve-direction-axes opts))
     (when axes
-      (local scope (manager:_find-directional-boundary focused))
+      (local scope (manager:_find-active-directional-scope focused))
       (local angle (or (and opts opts.frustum-angle) (/ math.pi 4)))
       (local scroll-controller (resolve-scroll-controller focused))
       (var result nil)
@@ -349,6 +386,40 @@
               (set result (pick-directional-candidate manager focused axes angle scope nil true)))))
       result)))
 
+(fn assert-same-manager [manager linked message]
+  (assert linked message)
+  (assert (= linked.manager manager) "Focus hierarchy link belongs to another manager"))
+
+(fn set-node-entry-scope [node scope]
+  (when scope
+    (assert-same-manager node.manager scope "FocusNode:set-entry-scope expected a scope")
+    (assert scope.is-scope? "FocusNode:set-entry-scope expected a FocusScope"))
+  (local previous node.entry-scope)
+  (when (and previous (not (= previous scope)) (= previous.exit-node node))
+    (set previous.exit-node nil))
+  (when (and scope scope.exit-node (not (= scope.exit-node node))
+             (= scope.exit-node.entry-scope scope))
+    (set scope.exit-node.entry-scope nil))
+  (set node.entry-scope scope)
+  (when scope
+    (set scope.exit-node node))
+  node)
+
+(fn set-scope-exit-node [scope node]
+  (when node
+    (assert-same-manager scope.manager node "FocusScope:set-exit-node expected a node")
+    (assert (not node.is-scope?) "FocusScope:set-exit-node expected a FocusNode"))
+  (local previous scope.exit-node)
+  (when (and previous (not (= previous node)) (= previous.entry-scope scope))
+    (set previous.entry-scope nil))
+  (when (and node node.entry-scope (not (= node.entry-scope scope))
+             (= node.entry-scope.exit-node node))
+    (set node.entry-scope.exit-node nil))
+  (set scope.exit-node node)
+  (when node
+    (set node.entry-scope scope))
+  scope)
+
 (fn new-focus-node [manager opts]
   (assert manager "FocusNode requires a manager")
   (local options (or opts {}))
@@ -359,10 +430,16 @@
      :children []
      :is-scope? (and (= options.is-scope? true))
      :is-root? false
-     :focused? false
-     :descendant-has-focus? false
-     :can-request-focus? (not (= options.can-request-focus? false))
-     :skip-traversal? (and (= options.skip-traversal? true))})
+      :focused? false
+      :descendant-has-focus? false
+      :entry-scope nil
+      :can-request-focus? (not (= options.can-request-focus? false))
+      :skip-traversal? (and (= options.skip-traversal? true))})
+
+  (set node.set-entry-scope
+       (fn [self scope]
+         (assert self.manager "FocusNode missing manager")
+         (set-node-entry-scope self scope)))
 
   (set node.request-focus
        (fn [self opts]
@@ -397,8 +474,14 @@
   (set scope.is-scope? true)
   (set scope.children [])
   (set scope.focused-child nil)
+  (set scope.exit-node nil)
+  (set scope.last-focused-descendant nil)
   (set scope.directional-traversal-boundary?
-       (and (= options.directional-traversal-boundary? true)))
+        (and (= options.directional-traversal-boundary? true)))
+  (set scope.set-exit-node
+       (fn [self node]
+         (assert self.manager "FocusScope missing manager")
+         (set-scope-exit-node self node)))
   scope)
 
 (fn ensure-node [manager node]
@@ -412,13 +495,124 @@
 (fn branch-has-focus? [node]
   (and node (or node.focused? node.descendant-has-focus?)))
 
+(fn nearest-entry-scope [manager node]
+  (var current (and node node.parent))
+  (var found nil)
+  (while (and current (not found))
+    (when (and current.is-scope? current.exit-node)
+      (set found current))
+    (set current current.parent))
+  (if found found manager.root))
+
+(fn active-directional-scope [manager node]
+  (local active (nearest-entry-scope manager node))
+  (local boundary (manager:_find-directional-boundary node))
+  (if (and boundary (not (= boundary manager.root))
+           (node-descendant-of-scope? boundary active))
+      boundary
+      active))
+
+(fn first-traversable-in-scope [manager scope]
+  (local nodes (manager:_get-focusables-in-scope scope))
+  (var found nil)
+  (var i 1)
+  (while (and (<= i (length nodes)) (not found))
+    (local node (. nodes i))
+    (when (manager:_can-traverse node)
+      (set found node))
+    (set i (+ i 1)))
+  found)
+
+(fn focusable-descendant-in-scope? [manager node scope]
+  (and node
+       (node-descendant-of-scope? node scope)
+       (manager:_can-traverse node)))
+
+(fn find-exit-node [manager focused]
+  (var current (and focused focused.parent))
+  (var found nil)
+  (while (and current (not found))
+    (when (and current.is-scope? current.exit-node
+               (manager:_can-traverse current.exit-node))
+      (set found current.exit-node))
+    (set current current.parent))
+  found)
+
+(fn focus-reason [opts default-reason]
+  (if (and opts opts.reason)
+      opts.reason
+      default-reason))
+
+(fn manager-can-focus-into? [manager]
+  (local focused manager.focused-node)
+  (local scope (and focused focused.entry-scope))
+  (if (not scope)
+      false
+      (if (focusable-descendant-in-scope? manager scope.last-focused-descendant scope)
+          true
+          (not (not (first-traversable-in-scope manager scope))))))
+
+(fn manager-focus-into [manager opts]
+  (local focused manager.focused-node)
+  (local scope (and focused focused.entry-scope))
+  (when scope
+    (local remembered scope.last-focused-descendant)
+    (local target (if (focusable-descendant-in-scope? manager remembered scope)
+                      remembered
+                      (first-traversable-in-scope manager scope)))
+    (when target
+      (target:request-focus {:reason (focus-reason opts :focus-into)})
+      target)))
+
+(fn manager-can-focus-out? [manager]
+  (not (not (find-exit-node manager manager.focused-node))))
+
+(fn manager-focus-out [manager opts]
+  (local target (find-exit-node manager manager.focused-node))
+  (when target
+    (target:request-focus {:reason (focus-reason opts :focus-out)})
+    target))
+
 (fn positive-mod [value modulus]
   (if (= modulus 0)
       0
-      (let [result (math.fmod value modulus)]
+      (do
+        (local result (math.fmod value modulus))
         (if (< result 0)
             (+ result modulus)
             result))))
+
+(fn manager-focus-next [manager opts]
+  (local active-scope (manager:_find-active-traversal-scope manager.focused-node))
+  (local nodes (manager:_get-focusables-in-scope active-scope))
+  (local count (length nodes))
+  (if (<= count 0)
+      nil
+      (do
+        (local backwards? (and opts opts.backwards?))
+        (local direction (if backwards? -1 1))
+        (local current-index (find-node-index-in-list nodes manager.focused-node))
+        (local baseline (if current-index current-index manager.last-focus-index))
+        (local detached-last?
+          (and manager.last-focused-node
+               (not (if manager.last-focused-node.parent
+                        true
+                        manager.last-focused-node.is-root?))))
+        (local start (if baseline
+                         (if (and (not current-index) detached-last?)
+                             baseline
+                             (- baseline 1))
+                         -1))
+        (var step 1)
+        (var chosen nil)
+        (while (and (<= step count) (not chosen))
+          (local idx (positive-mod (+ start (* direction step)) count))
+          (local candidate (. nodes (+ idx 1)))
+          (when (manager:_can-traverse candidate)
+            (candidate:request-focus {:reason :tab})
+            (set chosen candidate))
+          (set step (+ step 1)))
+        chosen)))
 
 (fn attach-node-at [manager node parent index]
   (ensure-node manager node)
@@ -537,14 +731,20 @@
        (fn [self scope]
          (ordered-focusables-in-scope self scope)))
   (set manager._find-directional-boundary
-       (fn [self node]
-         (var current (and node node.parent))
-         (var boundary nil)
+        (fn [self node]
+          (var current (and node node.parent))
+          (var boundary nil)
          (while (and current (not boundary))
            (when (and current.is-scope? current.directional-traversal-boundary?)
              (set boundary current))
-           (set current current.parent))
-         (or boundary self.root)))
+            (set current current.parent))
+          (or boundary self.root)))
+  (set manager._find-active-traversal-scope
+       (fn [self node]
+         (nearest-entry-scope self node)))
+  (set manager._find-active-directional-scope
+       (fn [self node]
+         (active-directional-scope self node)))
   (set manager.arm-auto-focus
        (fn [self opts]
          (local event (and opts opts.event))
@@ -599,38 +799,28 @@
          (new-focus-scope self opts)))
 
   (set manager.request-focus
-       (fn [self node opts]
-         (request-focus self node opts)))
+        (fn [self node opts]
+          (request-focus self node opts)))
+
+  (set manager.can-focus-into?
+       (fn [self]
+         (manager-can-focus-into? self)))
+
+  (set manager.focus-into
+       (fn [self opts]
+         (manager-focus-into self opts)))
+
+  (set manager.can-focus-out?
+       (fn [self]
+         (manager-can-focus-out? self)))
+
+  (set manager.focus-out
+       (fn [self opts]
+         (manager-focus-out self opts)))
 
   (set manager.focus-next
        (fn [self opts]
-         (local nodes (self:_get-focusables))
-         (local count (length nodes))
-         (if (<= count 0)
-             nil
-             (let [backwards? (and opts opts.backwards?)
-                   direction (if backwards? -1 1)
-                   current-index (self:_find-node-index self.focused-node)
-                   baseline (or current-index self.last-focus-index)
-                   detached-last?
-                     (and self.last-focused-node
-                          (not (or self.last-focused-node.parent
-                                   self.last-focused-node.is-root?)))
-                   start (if baseline
-                             (if (and (not current-index) detached-last?)
-                                 baseline
-                                 (- baseline 1))
-                             -1)]
-               (var step 1)
-               (var chosen nil)
-               (while (and (<= step count) (not chosen))
-                (local idx (positive-mod (+ start (* direction step)) count))
-                (local candidate (. nodes (+ idx 1)))
-                (when (self:_can-traverse candidate)
-                  (candidate:request-focus {:reason :tab})
-                  (set chosen candidate))
-                (set step (+ step 1)))
-              chosen))))
+         (manager-focus-next self opts)))
 
   (set manager.activate-focused
        (fn [self opts]

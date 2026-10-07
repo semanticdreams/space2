@@ -342,6 +342,129 @@
     (manager:drop)))
 
 (add-test
+  "focus into enters first traversable child"
+  (fn []
+    (local manager (FocusManager {:root-name "root"}))
+    (local root (manager:get-root-scope))
+    (local owner (manager:create-node {:name "owner"}))
+    (local sibling (manager:create-node {:name "sibling"}))
+    (local inner (manager:create-scope {:name "inner"}))
+    (local child-a (manager:create-node {:name "child-a"}))
+    (local child-b (manager:create-node {:name "child-b"}))
+    (manager:attach owner root)
+    (manager:attach inner root)
+    (manager:attach sibling root)
+    (manager:attach child-a inner)
+    (manager:attach child-b inner)
+    (owner:set-entry-scope inner)
+    (owner:request-focus)
+    (assert (manager:can-focus-into?))
+    (assert (= (manager:focus-into {}) child-a))
+    (assert (= (manager:get-focused-node) child-a))
+    (assert (not (manager:can-focus-into?)))
+    (manager:drop)))
+
+(add-test
+  "focus into restores remembered descendant"
+  (fn []
+    (local manager (FocusManager {:root-name "root"}))
+    (local root (manager:get-root-scope))
+    (local owner (manager:create-node {:name "owner"}))
+    (local inner (manager:create-scope {:name "inner"}))
+    (local child-a (manager:create-node {:name "child-a"}))
+    (local child-b (manager:create-node {:name "child-b"}))
+    (manager:attach owner root)
+    (manager:attach inner root)
+    (manager:attach child-a inner)
+    (manager:attach child-b inner)
+    (owner:set-entry-scope inner)
+    (child-b:request-focus)
+    (owner:request-focus)
+    (assert (= (manager:focus-into {}) child-b)
+            "Entry should restore the scope's remembered focused descendant")
+    (assert (= (manager:get-focused-node) child-b))
+    (manager:drop)))
+
+(add-test
+  "focus out returns nearest exit node through nesting"
+  (fn []
+    (local manager (FocusManager {:root-name "root"}))
+    (local root (manager:get-root-scope))
+    (local outer-owner (manager:create-node {:name "outer-owner"}))
+    (local outer-scope (manager:create-scope {:name "outer-scope"}))
+    (local inner-owner (manager:create-node {:name "inner-owner"}))
+    (local inner-scope (manager:create-scope {:name "inner-scope"}))
+    (local inner-child (manager:create-node {:name "inner-child"}))
+    (manager:attach outer-owner root)
+    (manager:attach outer-scope root)
+    (manager:attach inner-owner outer-scope)
+    (manager:attach inner-scope outer-scope)
+    (manager:attach inner-child inner-scope)
+    (outer-owner:set-entry-scope outer-scope)
+    (inner-owner:set-entry-scope inner-scope)
+    (inner-child:request-focus)
+    (assert (manager:can-focus-out?))
+    (assert (= (manager:focus-out {}) inner-owner)
+            "First exit should return to the nearest owner")
+    (assert (= (manager:get-focused-node) inner-owner))
+    (assert (manager:can-focus-out?))
+    (assert (= (manager:focus-out {}) outer-owner)
+            "Second exit should return to the outer owner")
+    (assert (= (manager:get-focused-node) outer-owner))
+    (assert (not (manager:can-focus-out?)))
+    (manager:drop)))
+
+(add-test
+  "focus traversal skips unopened entry scopes"
+  (fn []
+    (local manager (FocusManager {:root-name "root"}))
+    (local root (manager:get-root-scope))
+    (local before (manager:create-node {:name "before"}))
+    (local owner (manager:create-node {:name "owner"}))
+    (local inner (manager:create-scope {:name "inner"}))
+    (local child (manager:create-node {:name "child"}))
+    (local after (manager:create-node {:name "after"}))
+    (manager:attach before root)
+    (manager:attach owner root)
+    (manager:attach inner root)
+    (manager:attach after root)
+    (manager:attach child inner)
+    (owner:set-entry-scope inner)
+    (before:request-focus)
+    (assert (= (manager:focus-next {}) owner))
+    (assert (= (manager:focus-next {}) after)
+            "Parent traversal should skip unopened entry scope children")
+    (assert (= (manager:get-focused-node) after))
+    (manager:drop)))
+
+(add-test
+  "directional focus honors active entry scope"
+  (fn []
+    (local manager (FocusManager {:root-name "root"}))
+    (local root (manager:get-root-scope))
+    (local owner (attach-bounds-node manager root "owner"
+                                     (glm.vec3 0 0 0)
+                                     (glm.vec3 1 1 1)))
+    (local outside (attach-bounds-node manager root "outside"
+                                       (glm.vec3 2 0 0)
+                                       (glm.vec3 1 1 1)))
+    (local inner (manager:create-scope {:name "inner"}))
+    (manager:attach inner root)
+    (local current (attach-bounds-node manager inner "current"
+                                       (glm.vec3 0 0 0)
+                                       (glm.vec3 1 1 1)))
+    (local inside (attach-bounds-node manager inner "inside"
+                                      (glm.vec3 5 0 0)
+                                      (glm.vec3 1 1 1)))
+    (owner:set-entry-scope inner)
+    (current:request-focus)
+    (manager:focus-direction {:direction :right})
+    (assert (= (manager:get-focused-node) inside)
+            "Directional focus inside an entry scope should ignore parent-level candidates")
+    (assert (= outside.parent root))
+    (manager:drop)))
+
+(add-test
   "directional focus allows partial candidates when entering scroll view"
   (fn []
     (local manager (FocusManager {:root-name "root"}))
