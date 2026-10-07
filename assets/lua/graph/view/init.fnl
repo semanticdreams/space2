@@ -1614,7 +1614,7 @@
           :selector selector
           :toggle-node-presentation toggle-node-presentation
           :graph-map graph-map})
-    (GraphViewSelectionEditing.install! view {:assert-not-dropped assert-not-dropped :focused-node (fn [] focused-node) :selected-node? (fn [node] (and node (rawget selected-set node))) :selected-nodes selected-nodes :points registry.points :selector selector :selection selection})
+    (GraphViewSelectionEditing.install! view {:assert-not-dropped assert-not-dropped :focused-node (fn [] focused-node) :selected-node? (fn [node] (and node (rawget selected-set node))) :selected-nodes selected-nodes :points registry.points :selector selector :selection selection :focus-nodes focus-nodes})
     (SelectedPreviewCommands.install! view assert-not-dropped toggle-node-presentation expanded-nodes)
     (set view.reveal-node
          (fn [_self node-or-key opts]
