@@ -34,20 +34,26 @@
   ;; We keep focus/clickables lightweight because the crash repro is about edge creation.
   (local clickables {:register (fn []) :register-double-click (fn [])
                      :unregister (fn []) :unregister-double-click (fn [])})
-  (local focus-manager {:create-scope (fn [_self _opts] {})
-                        :attach (fn [_self] nil)
-                        :create-node (fn [_self _opts] {})
-                        :focus-focus {:connect (fn [_sig _cb] nil)}
-                        :focus-blur {:connect (fn [_sig _cb] nil)}
-                        :get-focused-node (fn [_self] nil)
-                        :arm-auto-focus (fn [_self _opts] nil)
-                        :clear-auto-focus (fn [_self] nil)})
+  (local focus-manager {:create-scope (fn [_self _opts] {:children []
+                                                         :set-exit-node (fn [_scope _node] nil)})
+                         :attach (fn [_self] nil)
+                         :create-node (fn [_self _opts] {:children []
+                                                        :set-entry-scope (fn [_node _scope] nil)})
+                         :focus-focus {:connect (fn [_sig _cb] nil)}
+                         :focus-blur {:connect (fn [_sig _cb] nil)}
+                         :get-focused-node (fn [_self] nil)
+                         :arm-auto-focus (fn [_self _opts] nil)
+                         :clear-auto-focus (fn [_self] nil)})
   (local focus {:manager focus-manager
-                :create-scope (fn [_self _opts] {:attach-bounds (fn [_scope _spec] nil)
-                                                :drop (fn [_scope] nil)})
-                :create-node (fn [_self _opts] {:request-focus (fn [_node] nil)
-                                               :drop (fn [_node] nil)})
-                :attach-bounds (fn [_self _node _spec] nil)})
+                 :create-scope (fn [_self _opts] {:children []
+                                                 :attach-bounds (fn [_scope _spec] nil)
+                                                 :set-exit-node (fn [_scope _node] nil)
+                                                 :drop (fn [_scope] nil)})
+                 :create-node (fn [_self _opts] {:children []
+                                                :request-focus (fn [_node] nil)
+                                                :set-entry-scope (fn [_node _scope] nil)
+                                                :drop (fn [_node] nil)})
+                 :attach-bounds (fn [_self _node _spec] nil)})
   (local theme {:graph {:selection-border-color (glm.vec4 1 0 0 1)
                         :label-color (glm.vec4 1 1 1 1)
                         :edge-color (glm.vec4 0.5 0.5 0.5 1)}
