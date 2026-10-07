@@ -53,6 +53,38 @@
     (manager:drop)))
 
 (add-test
+  "build context focus with-scope restores scope"
+  (fn []
+    (local manager (FocusManager {:root-name "root"}))
+    (local root (manager:get-root-scope))
+    (local original-scope (manager:create-scope {:name "original"}))
+    (manager:attach original-scope root)
+    (local ctx
+      (BuildContext {:focus-manager manager
+                     :focus-scope original-scope}))
+    (local nested-scope (ctx.focus:create-scope {:name "nested"}))
+    (fn create-nested-node []
+      (ctx.focus:create-node {:name "nested-node"}))
+    (fn raise-boom []
+      (error "boom"))
+    (fn run-failing-with-scope []
+      (ctx.focus:with-scope nested-scope raise-boom))
+    (local node
+      (ctx.focus:with-scope nested-scope create-nested-node))
+    (assert (= node.parent nested-scope)
+            "with-scope should attach callback-created nodes to the nested scope")
+    (assert (= (ctx.focus:get-scope) original-scope)
+            "with-scope should restore the original scope after success")
+    (local (ok err)
+      (pcall run-failing-with-scope))
+    (assert (not ok) "with-scope should rethrow callback failures")
+    (assert (string.find err "boom" 1 true)
+            "with-scope should preserve callback failure details")
+    (assert (= (ctx.focus:get-scope) original-scope)
+            "with-scope should restore the original scope after failure")
+    (manager:drop)))
+
+(add-test
   "focus manager cycles focus order"
   (fn []
     (local manager (FocusManager {:root-name "root"}))

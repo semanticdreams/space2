@@ -214,14 +214,14 @@
         (if parent
             (ensure-scope-belongs parent)
             (ensure-scope-belongs self.scope))))
-    (local focus-ctx {:manager focus-manager
-                      :scope focus-scope})
+    (local focus-ctx {:manager focus-manager :scope focus-scope})
     (set focus-ctx.get-scope (fn [self] self.scope))
     (set focus-ctx.set-scope
          (fn [self scope]
            (ensure-scope-belongs scope)
            (set self.scope scope)
            self))
+    (set focus-ctx.with-scope (fn [self scope f] (ensure-scope-belongs scope) (assert f "Focus context with-scope requires a callback") (local previous-scope self.scope) (self:set-scope scope) (local result (table.pack (pcall f))) (self:set-scope previous-scope) (if (. result 1) (table.unpack result 2 result.n) (error (. result 2)))))
     (set focus-ctx.attach
          (fn [self node parent]
            (ensure-node-belongs node)
