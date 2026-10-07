@@ -15,6 +15,9 @@
 (fn fake-render-targets [_self]
   [:target])
 
+(fn fake-active-theme []
+  {:font :test-font})
+
 (fn scheduled-update [_self delta-ms state]
   (set state.updated-delta delta-ms))
 
@@ -83,10 +86,15 @@
   (fn init-renderers [_render-options]
     (table.insert events :renderer-init)
     renderer)
+  (fn init-themes []
+    (table.insert events :theme-init)
+    (set app.themes {:get-active-theme fake-active-theme})
+    app.themes)
   {:engine engine
    :renderer renderer
    :engine-module {:Engine engine-factory}
-   :bootstrap-module {:init-renderers init-renderers}})
+   :bootstrap-module {:init-renderers init-renderers
+                      :init-themes init-themes}})
 
 (fn runtime-module []
   (fn create-runtime [_host]
@@ -106,6 +114,16 @@
 (fn runtime-module-with-scheduled-once [calls]
   (set scheduled-calls calls)
   {:create create-runtime-with-scheduled-once})
+
+(var theme-runtime-events nil)
+
+(fn create-runtime-requiring-theme [_host]
+  (table.insert theme-runtime-events :runtime-create)
+  (assert (and app.themes app.themes.get-active-theme)
+          "standalone runtime must initialize app.themes before mounting hostable apps")
+  (assert (= (. (app.themes.get-active-theme) :font) :test-font)
+          "standalone runtime must expose the active theme before hostable UI builds text")
+  {:presentation {:render-targets fake-render-targets}})
 
 (fn run-with-deps [StandaloneRuntime deps module]
   (StandaloneRuntime.run {:module module
@@ -259,6 +277,25 @@
   (assert (< start-index renderer-index)
           "run must start engine before initializing GL-backed renderers"))
 
+(fn test-run-initializes-themes-before-mounting-runtime []
+  (local StandaloneRuntime (load-module :standalone-app-runtime))
+  (local events [])
+  (local deps (make-run-deps events))
+  (local original-themes app.themes)
+  (set theme-runtime-events events)
+  (local module {:create create-runtime-requiring-theme})
+  (set app.themes nil)
+  (local (ok err) (pcall run-with-deps StandaloneRuntime deps module))
+  (set app.themes original-themes)
+  (when (not ok)
+    (error err))
+  (local theme-index (index-of events :theme-init))
+  (local create-index (index-of events :runtime-create))
+  (assert theme-index "run must initialize themes")
+  (assert create-index "run must mount the hostable runtime")
+  (assert (< theme-index create-index)
+          "run must initialize themes before mounting hostable runtime"))
+
 (fn test-run-cleans-up-after_controller_mount_failure []
   (local StandaloneRuntime (load-module :standalone-app-runtime))
   (local events [])
@@ -296,7 +333,8 @@
     (table.insert events :renderer-init)
     (tset app renderer-field deps.renderer)
     (error "renderer init failed"))
-  (set deps.bootstrap-module {:init-renderers init-renderers})
+  (set deps.bootstrap-module {:init-renderers init-renderers
+                              :init-themes deps.bootstrap-module.init-themes})
   (set app.renderers previous-renderers)
   (local (protected-ok result)
     (pcall run-and-observe-renderers StandaloneRuntime deps))
@@ -374,9 +412,11 @@
 (table.insert tests {:name "standalone controller pause and step control typed scheduled callbacks"
                        :fn test-controller_pause_and_step_control_typed_scheduled_callbacks})
 (table.insert tests {:name "standalone run starts engine before renderer init"
-                     :fn test-run-starts-engine-before-renderer-init})
+                      :fn test-run-starts-engine-before-renderer-init})
+(table.insert tests {:name "standalone run initializes themes before mounting runtime"
+                      :fn test-run-initializes-themes-before-mounting-runtime})
 (table.insert tests {:name "standalone run cleans up after controller mount failure"
-                     :fn test-run-cleans-up-after_controller_mount_failure})
+                      :fn test-run-cleans-up-after_controller_mount_failure})
 (table.insert tests {:name "standalone run reports cleanup failure explicitly"
                      :fn test-run_reports_cleanup_failure_explicitly})
 (table.insert tests {:name "standalone run drops partial renderer after init failure"

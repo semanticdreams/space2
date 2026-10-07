@@ -111,6 +111,7 @@
   (local previous-renderers app.renderers)
   (local previous-viewport app.viewport)
   (local previous-runtime app.active-world-runtime)
+  (local previous-themes app.themes)
   (local engine-options (if options.engine-options options.engine-options {}))
   (local engine (EngineModule.Engine engine-options))
   (set app.engine engine)
@@ -162,6 +163,9 @@
   (fn clear-runtime []
     (set app.active-world-runtime previous-runtime))
 
+  (fn clear-themes []
+    (set app.themes previous-themes))
+
   (fn clear-engine []
     (when (= app.engine engine)
       (set app.engine previous-engine)))
@@ -175,6 +179,7 @@
     (cleanup-step drop-renderers)
     (cleanup-step clear-viewport)
     (cleanup-step clear-runtime)
+    (cleanup-step clear-themes)
     (cleanup-step shutdown-engine)
     (cleanup-step clear-engine)
     (when cleanup-error
@@ -186,6 +191,7 @@
         (when (not (engine:start))
           (host-error "engine failed to start"))
         (set app.viewport viewport)
+        (AppBootstrap.init-themes)
         (set renderers (AppBootstrap.init-renderers {:viewport viewport}))
          (set host (create-host {:engine engine
                                  :renderers renderers

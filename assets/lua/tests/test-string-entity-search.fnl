@@ -44,6 +44,9 @@
        search-async)
   state)
 
+(fn with-backslashes [path]
+  (string.gsub path "/" "\\"))
+
 (fn capture-payload [seen payload]
   (table.insert seen payload))
 
@@ -198,6 +201,29 @@
 (fn backend-ignores-non-entity-matches []
   (with-temp-store exercise-backend-ignores-non-entity-matches))
 
+(fn exercise-backend-maps-windows-style-entity-paths [store root]
+  (local entity (store:create-entity {:id "backslash" :value "needle\nneedle"}))
+  (local kept-path (with-backslashes (fs.join-path store.entities-dir (.. entity.id ".md"))))
+  (local other-path (with-backslashes (fs.join-path root "outside.md")))
+  (local txt-path (with-backslashes (fs.join-path store.entities-dir "note.txt")))
+  (local missing-path (with-backslashes (fs.join-path store.entities-dir "missing.md")))
+  (local rg (fake-ripgrep [{:path kept-path :line 5 :column 1 :text "needle"}
+                           {:path kept-path :line 6 :column 1 :text "needle again"}
+                           {:path other-path :line 1 :column 1 :text "needle"}
+                           {:path txt-path :line 1 :column 1 :text "needle"}
+                           {:path missing-path :line 1 :column 1 :text "needle"}]))
+  (local Search (require :entities/string-search))
+  (local backend (Search.RipgrepStringEntitySearchBackend {:store store :ripgrep rg}))
+  (local seen [])
+  (backend:search-text "needle" (fn [payload] (capture-payload seen payload)))
+  (local payload (. seen 1))
+  (assert (= (length payload.results) 1))
+  (assert (= (. (. payload.results 1) :entity-id) "backslash"))
+  (assert (= (. (. payload.results 1) :match-count) 2)))
+
+(fn backend-maps-windows-style-entity-paths []
+  (with-temp-store exercise-backend-maps-windows-style-entity-paths))
+
 (fn search-node-creates-with-exact-key []
   (local {:StringEntitySearchNode StringEntitySearchNode} (require :graph/nodes/string-entity-search))
   (local node (StringEntitySearchNode {:store (fake-node-store)
@@ -323,9 +349,11 @@
 (table.insert tests {:name "backend dedupes multiple matches per entity"
                      :fn backend-dedupes-multiple-matches-per-entity})
 (table.insert tests {:name "backend ignores non-entity matches"
-                      :fn backend-ignores-non-entity-matches})
+                       :fn backend-ignores-non-entity-matches})
+(table.insert tests {:name "backend maps Windows-style entity paths"
+                     :fn backend-maps-windows-style-entity-paths})
 (table.insert tests {:name "search node creates with exact key"
-                     :fn search-node-creates-with-exact-key})
+                      :fn search-node-creates-with-exact-key})
 (table.insert tests {:name "search node delegates and emits results"
                      :fn search-node-delegates-and-emits-results})
 (table.insert tests {:name "search node cancels previous token"
