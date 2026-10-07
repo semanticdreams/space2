@@ -62,6 +62,7 @@ def test_ensure_space_repo_rejects_repo_without_space_markers(tmp_path: Path) ->
         "docs/opencode-capabilities",
         "chore/opencode-capabilities",
         "fast-dev/local-main-caad43f",
+        "fast-dev/local-main-caad43f-followup-deadbee",
         "juicyrebel/weever",
         "juicyrebel/hud-right-rail-strip-fix",
     ],
@@ -83,6 +84,7 @@ def test_validate_branch_name_accepts_allowed_policy(branch: str) -> None:
         "juicyrebel/bad lock",
         "juicyrebel/name.lock",
         "juicyrebel/",
+        "fast-dev/local-main-caad43f-followup-notasha",
         "other/weever",
     ],
 )
