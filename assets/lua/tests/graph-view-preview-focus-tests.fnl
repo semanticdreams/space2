@@ -84,6 +84,13 @@
     (fn [preview-ctx]
       (preview-widget state node preview-ctx))))
 
+(fn failing-focus-child-preview [state]
+  (fn [_node _opts]
+    (fn [preview-ctx]
+      (local child (preview-ctx.focus:create-node {:name "failed-preview-child"}))
+      (set state.failed-focus-child child)
+      (error "preview build failed after focus child"))))
+
 (fn make-fixture []
   (set fixture-counter (+ fixture-counter 1))
   (local ctx (make-ctx))
@@ -163,12 +170,43 @@
           "Collapsing preview should leave shell entry scope linked for future expansions")
   (drop-fixture fixture))
 
+(fn failed-preview-build-clears-partial-focus-descendants []
+  (set fixture-counter (+ fixture-counter 1))
+  (local ctx (make-ctx))
+  (local graph-map (make-test-graph-map))
+  (local state {})
+  (local node (Graph.GraphNode {:key "failed-focus-preview-node"
+                                :preview (failing-focus-child-preview state)}))
+  (local view (GraphView {:graph-map graph-map
+                          :ctx ctx
+                          :data-dir (.. "/tmp/space/tests/graph-view-preview-focus-failed-" (os.time) "-" fixture-counter)}))
+  (graph-map:add-node node {:position (glm.vec3 0 0 0)})
+  (local shell (. view.focus-nodes node))
+  (local point (. view.points node))
+  (local (ok err) (pcall (fn [] (point:on-double-click {}))))
+  (assert (not ok) "Failed preview expansion should rethrow the builder error")
+  (assert (string.find (tostring err) "preview build failed after focus child" 1 true)
+          "Failed preview expansion should preserve the builder error")
+  (local preview-scope shell.entry-scope)
+  (assert preview-scope "Graph node shell should keep its preview entry scope after failed build")
+  (assert (= (length preview-scope.children) 0)
+          "Failed preview expansion should remove partially-created preview focus children")
+  (shell:request-focus)
+  (assert (= (ctx.focus.manager:focus-into {}) nil)
+          "Focus into should not enter stale invisible preview focus after failed build")
+  (assert (not (= (ctx.focus.manager:get-focused-node) state.failed-focus-child))
+          "Failed preview child should not remain focused after cleanup")
+  (view:drop)
+  (graph-map:drop))
+
 (local tests [{:name "GraphView expanded preview children attach to node preview scope"
                :fn expanded-preview-children-attach-to-node-preview-scope}
               {:name "GraphView graph node commands require shell focus when preview child focused"
                :fn graph-node-commands-require-shell-focus-when-preview-child-focused}
-              {:name "GraphView collapse clears preview focus descendants"
-               :fn collapse-clears-preview-focus-descendants}])
+               {:name "GraphView collapse clears preview focus descendants"
+                :fn collapse-clears-preview-focus-descendants}
+               {:name "GraphView failed preview build clears partial focus descendants"
+                :fn failed-preview-build-clears-partial-focus-descendants}])
 
 (fn append-tests [target]
   (each [_ entry (ipairs tests)]

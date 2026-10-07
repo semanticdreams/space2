@@ -764,7 +764,13 @@
                                           (when manager
                                                (manager:open {:actions (view:node-actions node)
                                                               :position (resolve-menu-position event)})))}))
-        (ctx.focus:with-scope preview-scope (fn [] (card-builder ctx))))
+        (local (ok presentation-or-err)
+               (pcall (fn []
+                        (ctx.focus:with-scope preview-scope (fn [] (card-builder ctx))))))
+        (when (not ok)
+            (clear-preview-focus-descendants! options._preview-scopes focus node)
+            (error presentation-or-err))
+        presentation-or-err)
     (fn attach-presentation-events [node presentation]
         (set presentation.on-click
              (fn [_self _event]
