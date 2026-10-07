@@ -4957,4 +4957,4 @@
                                   "graph-view focused test requires logging level control"))})
     (runner.run-tests {:name "graph-view" :tests tests})))
 
-{:name "graph-view" :tests tests :main main}
+{:name "graph-view" :tests ((. (require :tests.graph-view-preview-focus-tests) :append-tests) tests) :main main}

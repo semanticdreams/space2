@@ -6,7 +6,9 @@
 (local tests [])
 
 (local KEY_C (string.byte "c"))
+(local KEY_F (string.byte "f"))
 (local KEY_G (string.byte "g"))
+(local KEY_N (string.byte "n"))
 (local KEY_Z (string.byte "z"))
 (local KEY_F1 1073741882)
 
@@ -104,12 +106,53 @@
   (when (not ok)
     (error err)))
 
+(fn make-recording-focus-manager []
+  (local calls {:next []})
+  {:calls calls
+   :can-focus-into? (fn [_self] false)
+   :can-focus-out? (fn [_self] false)
+   :focus-next (fn [_self opts]
+                 (table.insert calls.next opts)
+                 true)
+   :focus-direction (fn [_self _opts] true)})
+
+(fn assert-focus-next-leader-command [transitions states]
+  (local original-focus app.focus)
+  (local manager (make-recording-focus-manager))
+  (set app.focus manager)
+  (local (ok err)
+    (pcall
+      (fn []
+        (local state (install-state states :leader (LeaderState)))
+        (local handled-prefix (state.on-key-down {:key KEY_F}))
+        (assert handled-prefix "Space f should enter the one-shot focus prefix")
+        (assert (= (# manager.calls.next) 0)
+                "Space f prefix should not run focus-next yet")
+        (assert (= (# transitions) 0)
+                "Space f prefix should stay in leader state")
+        (local handled-command (state.on-key-down {:key KEY_N}))
+        (assert handled-command "Space f n should run focus.next")
+        (assert (= (# manager.calls.next) 1)
+                "Space f n should call focus-next once")
+        (assert (not (. manager.calls.next 1 :backwards?))
+                "Space f n should call forward focus-next")
+        (assert (= (. transitions 1) :normal)
+                "Space f n should return to normal through one-shot command handling"))))
+  (set app.focus original-focus)
+  (when (not ok)
+    (error err)))
+
+(fn leader-state-runs-focus-next-one-shot []
+  (with-state-recorder assert-focus-next-leader-command))
+
 (table.insert tests {:name "Leader state unknown key stays in leader"
                      :fn leader-state-unknown-key-stays-in-leader})
 (table.insert tests {:name "Leader state F1 stays in leader"
                      :fn leader-state-f1-stays-in-leader})
 (table.insert tests {:name "Leader state unknown nested key clears sequence"
-                     :fn leader-state-unknown-nested-key-clears-sequence})
+                      :fn leader-state-unknown-nested-key-clears-sequence})
+(table.insert tests {:name "Leader state runs Space f n as one-shot focus command"
+                     :fn leader-state-runs-focus-next-one-shot})
 
 (local main
   (fn []

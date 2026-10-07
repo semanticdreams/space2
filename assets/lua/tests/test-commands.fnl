@@ -109,6 +109,130 @@
   (fn graph-view-resolver [] view)
   (Commands.compose [(GraphCommands.provider {:graph-view graph-view-resolver})] {}))
 
+(fn make-focus-manager-stub [opts]
+  (local options (if opts opts {}))
+  (local calls {:into 0 :out 0 :next [] :direction []})
+  {:calls calls
+   :can-focus-into? (fn [_self] (= options.can-into? true))
+   :can-focus-out? (fn [_self] (= options.can-out? true))
+   :focus-into (fn [_self _opts]
+                 (set calls.into (+ calls.into 1))
+                 (if (= options.into-result nil) true options.into-result))
+   :focus-out (fn [_self _opts]
+                (set calls.out (+ calls.out 1))
+                (if (= options.out-result nil) true options.out-result))
+   :focus-next (fn [_self focus-opts]
+                 (table.insert calls.next focus-opts)
+                 (if (= options.next-result nil) true options.next-result))
+   :focus-direction (fn [_self focus-opts]
+                      (table.insert calls.direction focus-opts)
+                      (if (= options.direction-result nil) true options.direction-result))})
+
+(fn focus-command-ctx [manager active-input]
+  {:focus-manager (fn [] manager)
+   :active-input (fn [] active-input)})
+
+(fn focus-composed [manager active-input]
+  (local FocusCommands (require :commands/providers/focus))
+  (Commands.compose [(FocusCommands.provider)] (focus-command-ctx manager active-input)))
+
+(fn focus-provider-root-hints-include-focus-prefix []
+  (local manager (make-focus-manager-stub {:can-into? true :can-out? true}))
+  (local ctx (focus-command-ctx manager nil))
+  (local composed (focus-composed manager nil))
+  (local root-section (Commands.hint-section composed [] ctx {:id :mode :title "MODE"}))
+  (assert root-section "Focus provider root hint section should exist")
+  (assert-hint root-section "f" "focus"))
+
+(fn focus-provider-prefix-hints-follow-availability []
+  (local manager (make-focus-manager-stub {:can-into? true :can-out? true}))
+  (local ctx (focus-command-ctx manager nil))
+  (local composed (focus-composed manager nil))
+  (local section (Commands.hint-section composed ["f"] ctx {:id :mode :title "MODE"}))
+  (assert section "Focus provider nested hint section should exist")
+  (assert-hint section "i" "into")
+  (assert-hint section "o" "out")
+  (assert-hint section "n" "next")
+  (assert-hint section "p" "prev")
+  (assert-hint section "h" "left")
+  (assert-hint section "j" "down")
+  (assert-hint section "k" "up")
+  (assert-hint section "l" "right"))
+
+(fn focus-provider-hides-unavailable-entry-and-exit []
+  (local manager (make-focus-manager-stub {:can-into? false :can-out? false}))
+  (local ctx (focus-command-ctx manager nil))
+  (local composed (focus-composed manager nil))
+  (assert (not (Commands.available? composed "focus.into" ctx))
+          "focus.into should require can-focus-into?")
+  (assert (not (Commands.available? composed "focus.out" ctx))
+          "focus.out should require can-focus-out?")
+  (local section (Commands.hint-section composed ["f"] ctx {:id :mode :title "MODE"}))
+  (assert section "Focus prefix should remain visible for traversal commands")
+  (assert (not (find-hint-entry section "i")) "into hint should be hidden when unavailable")
+  (assert (not (find-hint-entry section "o")) "out hint should be hidden when unavailable"))
+
+(fn focus-provider-hides-all-commands-without-manager []
+  (local ctx (focus-command-ctx nil nil))
+  (local composed (focus-composed nil nil))
+  (each [_ id (ipairs ["focus.into" "focus.out" "focus.next" "focus.previous"
+                       "focus.left" "focus.down" "focus.up" "focus.right"])]
+    (assert (not (Commands.available? composed id ctx))
+            (.. id " should be unavailable without a focus manager")))
+  (local root-section (Commands.hint-section composed [] ctx {:id :mode :title "MODE"}))
+  (assert (not root-section) "Focus prefix should be hidden without a focus manager"))
+
+(fn focus-provider-hides-commands-with-missing-manager-methods []
+  (local manager {:focus-next (fn [_self _opts] true)})
+  (local ctx (focus-command-ctx manager nil))
+  (local composed (focus-composed manager nil))
+  (assert (not (Commands.available? composed "focus.into" ctx))
+          "focus.into should be unavailable without can-focus-into?")
+  (assert (not (Commands.available? composed "focus.out" ctx))
+          "focus.out should be unavailable without can-focus-out?")
+  (assert (not (Commands.available? composed "focus.left" ctx))
+          "focus.left should be unavailable without focus-direction")
+  (assert (Commands.available? composed "focus.next" ctx)
+          "focus.next should remain available when focus-next exists")
+  (local section (Commands.hint-section composed ["f"] ctx {:id :mode :title "MODE"}))
+  (assert section "Focus prefix should remain visible for available traversal commands")
+  (assert (not (find-hint-entry section "i")) "into hint should be hidden without can-focus-into?")
+  (assert (not (find-hint-entry section "o")) "out hint should be hidden without can-focus-out?")
+  (assert (not (find-hint-entry section "h")) "left hint should be hidden without focus-direction")
+  (assert-hint section "n" "next"))
+
+(fn focus-provider-hides-directional-commands-during-active-input []
+  (local manager (make-focus-manager-stub {:can-into? true :can-out? true}))
+  (local ctx (focus-command-ctx manager {:active true}))
+  (local composed (focus-composed manager {:active true}))
+  (each [_ id (ipairs ["focus.left" "focus.down" "focus.up" "focus.right"])]
+    (assert (not (Commands.available? composed id ctx))
+            (.. id " should be unavailable while an input is active")))
+  (local section (Commands.hint-section composed ["f"] ctx {:id :mode :title "MODE"}))
+  (assert section "Focus prefix should remain visible for non-directional commands")
+  (each [_ key (ipairs ["h" "j" "k" "l"])]
+    (assert (not (find-hint-entry section key))
+            (.. key " direction hint should be hidden while an input is active"))))
+
+(fn focus-provider-runs-previous-and-directional-commands []
+  (local manager (make-focus-manager-stub {:can-into? true :can-out? true}))
+  (local ctx (focus-command-ctx manager nil))
+  (local composed (focus-composed manager nil))
+  (local original-presentation-camera app.presentation-camera)
+  (local camera {:id :focus-provider-camera})
+  (set app.presentation-camera (fn [_opts] camera))
+  (assert (Commands.run composed "focus.previous" ctx) "focus.previous should run")
+  (assert (= (# manager.calls.next) 1) "focus.previous should call focus-next once")
+  (assert (= (. manager.calls.next 1 :backwards?) true)
+          "focus.previous should pass backwards? true")
+  (assert (Commands.run composed "focus.left" ctx) "focus.left should run")
+  (assert (= (# manager.calls.direction) 1) "focus.left should call focus-direction once")
+  (assert (= (. manager.calls.direction 1 :direction) :left)
+          "focus.left should pass left direction")
+  (assert (= (. manager.calls.direction 1 :camera) camera)
+          "focus.left should pass presentation camera")
+  (set app.presentation-camera original-presentation-camera))
+
 (fn command-hints-derive-from-availability-and-prefix []
   (local provider {:commands {"demo.a" {:id "demo.a"
                                           :label "alpha"
@@ -468,6 +592,20 @@
           commands-execute-only-available-commands)
 (add-test "Command hints derive from availability and prefix"
           command-hints-derive-from-availability-and-prefix)
+(add-test "Focus provider root hints include focus prefix"
+          focus-provider-root-hints-include-focus-prefix)
+(add-test "Focus provider prefix hints follow availability"
+          focus-provider-prefix-hints-follow-availability)
+(add-test "Focus provider hides unavailable entry and exit"
+          focus-provider-hides-unavailable-entry-and-exit)
+(add-test "Focus provider hides all commands without manager"
+          focus-provider-hides-all-commands-without-manager)
+(add-test "Focus provider hides commands with missing manager methods"
+          focus-provider-hides-commands-with-missing-manager-methods)
+(add-test "Focus provider hides directional commands during active input"
+          focus-provider-hides-directional-commands-during-active-input)
+(add-test "Focus provider runs previous and directional commands"
+          focus-provider-runs-previous-and-directional-commands)
 (add-test "Graph provider prefix hints use prefix labels"
           graph-provider-prefix-hints-use-prefix-labels)
 (add-test "Graph provider selection prefix hints include selection commands"
