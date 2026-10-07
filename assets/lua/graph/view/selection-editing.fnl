@@ -35,7 +35,9 @@
     (local points (assert options.points
                           "SelectionEditing.install! requires points"))
     (local selection (assert options.selection
-                             "SelectionEditing.install! requires selection"))
+                              "SelectionEditing.install! requires selection"))
+    (local focus-nodes (assert options.focus-nodes
+                               "SelectionEditing.install! requires focus-nodes"))
     (local selector options.selector)
 
     (fn points-for [nodes]
@@ -101,9 +103,20 @@
                          (apply-selection! next-selection)))
                  false)))
     (set view.clear-selection
+          (fn [_self]
+              (if (> (length selected-nodes) 0)
+                  (apply-selection! [])
+                  false)))
+    (set view.focus-selected-node
          (fn [_self]
-             (if (> (length selected-nodes) 0)
-                 (apply-selection! [])
+             (assert-not-dropped "focus-selected-node")
+             (if (= (length selected-nodes) 1)
+                 (do
+                     (local node (. selected-nodes 1))
+                     (local focus-node (. focus-nodes node))
+                     (assert focus-node "GraphView focus-selected-node requires focus node")
+                     (focus-node:request-focus)
+                     true)
                  false)))
     view)
 

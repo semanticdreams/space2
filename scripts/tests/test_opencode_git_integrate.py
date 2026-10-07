@@ -666,6 +666,38 @@ def test_create_followup_branch_switches_to_deterministic_absent_target(monkeypa
     ]
 
 
+def test_create_followup_branch_switches_from_local_main_wrapup_branch(monkeypatch, trusted_repo: Path) -> None:
+    target = "fast-dev/local-main-caad43f-followup-deadbee"
+    runner = GitRunner(
+        {
+            ("git", "status", "--porcelain"): "",
+            ("git", "branch", "--show-current"): "fast-dev/local-main-caad43f\n",
+            ("git", "rev-parse", "--short=7", "HEAD"): "deadbee\n",
+            ("git", "merge-base", "--is-ancestor", "origin/main", "HEAD"): command_result(
+                ["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"],
+                returncode=0,
+            ),
+            ("git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"): command_result(
+                ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"],
+                returncode=1,
+            ),
+            ("git", "ls-remote", "--exit-code", "--heads", "origin", target): command_result(
+                ["git", "ls-remote", "--exit-code", "--heads", "origin", target],
+                returncode=2,
+            ),
+            ("git", "switch", "-c", target): "",
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    result = git_integrate.create_followup_branch(trusted_repo)
+
+    assert result["status"] == "pass"
+    assert result["evidence"]["source_branch"] == "fast-dev/local-main-caad43f"
+    assert result["evidence"]["followup_branch"] == target
+    assert ["git", "switch", "-c", target] in runner.calls
+
+
 def test_cli_create_followup_branch_emits_json_and_returns_success(monkeypatch, trusted_repo: Path, capsys) -> None:
     target = "feature/opencode-capabilities-followup-caad43f"
     runner = GitRunner(

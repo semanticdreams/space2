@@ -25,6 +25,13 @@
   (local graph-view (resolve-graph-view opts))
   (and graph-view graph-view.selected-node-count (> (graph-view:selected-node-count) 0)))
 
+(fn has-exactly-one-selected-node? [opts]
+  (local graph-view (resolve-graph-view opts))
+  (and graph-view
+       graph-view.selected-node-count
+       (= (graph-view:selected-node-count) 1)
+       graph-view.focus-selected-node))
+
 (fn has-focused-node? [opts]
   (local graph-view (resolve-graph-view opts))
   (and graph-view graph-view.has-focused-node? (graph-view:has-focused-node?)))
@@ -254,11 +261,13 @@
      (make-selection-command options "graph.selection.add-focused" "add" :add-focused-node-to-selection has-focused-node?)
      "graph.selection.remove-focused"
      (make-selection-command options "graph.selection.remove-focused" "remove" :remove-focused-node-from-selection focused-node-selected?)
-     "graph.selection.toggle-focused"
-     (make-selection-command options "graph.selection.toggle-focused" "toggle" :toggle-focused-node-selection has-focused-node?)
-     "graph.selection.clear"
-     (make-selection-command options "graph.selection.clear" "clear" :clear-selection selection-non-empty?)
-     "graph.node.open-focused"
+      "graph.selection.toggle-focused"
+      (make-selection-command options "graph.selection.toggle-focused" "toggle" :toggle-focused-node-selection has-focused-node?)
+      "graph.selection.clear"
+      (make-selection-command options "graph.selection.clear" "clear" :clear-selection selection-non-empty?)
+      "graph.selection.focus-selected"
+      (make-selection-command options "graph.selection.focus-selected" "focus" :focus-selected-node has-exactly-one-selected-node?)
+      "graph.node.open-focused"
      (make-graph-view-command options "graph.node.open-focused" "open" :open-focused-node #(graph-view-focused-method-available? $1 :open-focused-node))
      "graph.node.menu-focused"
      (make-graph-view-command options "graph.node.menu-focused" "menu" :open-focused-node-menu #(graph-view-focused-method-available? $1 :open-focused-node-menu))
@@ -289,9 +298,10 @@
                    {:keys ["g" "s" "s"] :command "graph.selection.select-focused" :label "select" :priority 10}
                    {:keys ["g" "s" "a"] :command "graph.selection.add-focused" :label "add" :priority 20}
                    {:keys ["g" "s" "r"] :command "graph.selection.remove-focused" :label "remove" :priority 30}
-                   {:keys ["g" "s" "t"] :command "graph.selection.toggle-focused" :label "toggle" :priority 40}
-                   {:keys ["g" "s" "c"] :command "graph.selection.clear" :label "clear" :priority 50}
-                   {:keys ["g" "n" "o"] :command "graph.node.open-focused" :label "open" :priority 10}
+                    {:keys ["g" "s" "t"] :command "graph.selection.toggle-focused" :label "toggle" :priority 40}
+                    {:keys ["g" "s" "c"] :command "graph.selection.clear" :label "clear" :priority 50}
+                    {:keys ["g" "s" "f"] :command "graph.selection.focus-selected" :label "focus" :priority 60}
+                    {:keys ["g" "n" "o"] :command "graph.node.open-focused" :label "open" :priority 10}
                    {:keys ["g" "n" "m"] :command "graph.node.menu-focused" :label "menu" :priority 20}
                    {:keys ["g" "n" "t"] :command "graph.node.toggle-focused-preview" :label "toggle-preview" :priority 30}
                    {:keys ["g" "n" "y"] :command "graph.node.copy-focused-key" :label "copy-key" :priority 40}
