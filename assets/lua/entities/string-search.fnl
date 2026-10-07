@@ -7,21 +7,26 @@
       (trim-trailing-slash (string.sub path 1 -2))
       path))
 
+(fn normalize-path-separators [path]
+  (when path
+    (string.gsub path "\\" "/")))
+
 (fn has-prefix? [text prefix]
   (= (string.sub text 1 (string.len prefix)) prefix))
 
 (fn path-under-dir? [dir path]
-  (local normalized-dir (trim-trailing-slash dir))
+  (local normalized-dir (trim-trailing-slash (normalize-path-separators dir)))
+  (local normalized-path (normalize-path-separators path))
   (and normalized-dir
-       path
-       (has-prefix? path (.. normalized-dir "/"))))
+       normalized-path
+       (has-prefix? normalized-path (.. normalized-dir "/"))))
 
 (fn strip-md-extension [name]
   (string.match name "^(.*)%.md$"))
 
 (fn basename [path]
   (assert (= (type path) :string) "path must be a string")
-  (string.match path "([^/]+)$"))
+  (string.match (normalize-path-separators path) "([^/]+)$"))
 
 (fn entity-id-for-path [entities-dir path]
   (when (path-under-dir? entities-dir path)
