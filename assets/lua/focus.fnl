@@ -95,6 +95,15 @@
     (set current current.parent))
   found)
 
+(fn node-reachable-from-root? [manager node]
+  (var current node)
+  (var found false)
+  (while (and current (not found))
+    (when (= current manager.root)
+      (set found true))
+    (set current current.parent))
+  found)
+
 (fn find-node-index-in-list [nodes node]
   (if (not node)
       nil
@@ -495,6 +504,17 @@
 (fn branch-has-focus? [node]
   (and node (or node.focused? node.descendant-has-focus?)))
 
+(fn clear-hierarchy-links-in-branch [node]
+  (when node
+    (when node.entry-scope
+      (node:set-entry-scope nil))
+    (when (and node.is-scope? node.exit-node)
+      (node:set-exit-node nil))
+    (when node.is-scope?
+      (set node.last-focused-descendant nil)
+      (each [_ child (ipairs node.children)]
+        (clear-hierarchy-links-in-branch child)))))
+
 (fn nearest-entry-scope [manager node]
   (var current (and node node.parent))
   (var found nil)
@@ -645,6 +665,7 @@
   (local parent node.parent)
   (when (branch-has-focus? node)
     (manager:_set-focused-node nil))
+  (clear-hierarchy-links-in-branch node)
   (when parent
     (remove-child parent node)
     (set node.parent nil))
@@ -652,7 +673,7 @@
 
 (fn request-focus [manager node opts]
   (ensure-node manager node)
-  (when (not (or node.is-root? node.parent))
+  (when (not (node-reachable-from-root? manager node))
     (error "FocusNode must be attached before requesting focus"))
   (when (not node.can-request-focus?)
     (error "FocusNode cannot request focus"))
@@ -720,11 +741,11 @@
                  (set i (+ i 1)))
                found))))
   (set manager._can-traverse
-       (fn [_self node]
-         (and node
-              node.can-request-focus?
-              (not node.skip-traversal?)
-              (or node.parent node.is-root?))))
+       (fn [self node]
+          (and node
+               node.can-request-focus?
+               (not node.skip-traversal?)
+               (node-reachable-from-root? self node))))
   (set manager._set-focused-node (fn [self node opts] (set-focused-node self node opts)))
   (set manager._get-focusables (fn [self] (ordered-focusables self)))
   (set manager._get-focusables-in-scope

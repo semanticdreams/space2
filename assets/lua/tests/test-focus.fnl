@@ -465,6 +465,56 @@
     (manager:drop)))
 
 (add-test
+  "detaching entry scope clears owner hierarchy link"
+  (fn []
+    (local manager (FocusManager {:root-name "root"}))
+    (local root (manager:get-root-scope))
+    (local owner (manager:create-node {:name "owner"}))
+    (local inner (manager:create-scope {:name "inner"}))
+    (local child (manager:create-node {:name "child"}))
+    (manager:attach owner root)
+    (manager:attach inner root)
+    (manager:attach child inner)
+    (owner:set-entry-scope inner)
+    (owner:request-focus)
+    (inner:detach)
+    (assert (= owner.entry-scope nil)
+            "Detaching an entry scope should clear the owner's entry link")
+    (assert (= inner.exit-node nil)
+            "Detaching an entry scope should clear its exit link")
+    (assert (not (manager:can-focus-into?))
+            "Detached entry scopes should not remain enterable")
+    (assert (= (manager:focus-into {}) nil)
+            "focus-into should not focus nodes from a detached entry scope")
+    (assert (= (manager:get-focused-node) owner))
+    (manager:drop)))
+
+(add-test
+  "detaching owner clears entry scope hierarchy link"
+  (fn []
+    (local manager (FocusManager {:root-name "root"}))
+    (local root (manager:get-root-scope))
+    (local owner (manager:create-node {:name "owner"}))
+    (local before (manager:create-node {:name "before"}))
+    (local inner (manager:create-scope {:name "inner"}))
+    (local child (manager:create-node {:name "child"}))
+    (manager:attach before root)
+    (manager:attach owner root)
+    (manager:attach inner root)
+    (manager:attach child inner)
+    (owner:set-entry-scope inner)
+    (owner:detach)
+    (assert (= owner.entry-scope nil)
+            "Detaching an owner should clear its entry link")
+    (assert (= inner.exit-node nil)
+            "Detaching an owner should clear the entry scope's exit link")
+    (before:request-focus)
+    (assert (= (manager:focus-next {}) child)
+            "An attached former entry scope should not remain pruned by a detached owner")
+    (assert (= (manager:get-focused-node) child))
+    (manager:drop)))
+
+(add-test
   "directional focus allows partial candidates when entering scroll view"
   (fn []
     (local manager (FocusManager {:root-name "root"}))
