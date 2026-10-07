@@ -1268,14 +1268,21 @@ if(SPACE_BUILD_MATRIX)
     endif()
 endif()
 
-# Copying assets to the build folder
-add_custom_command(
-        TARGET ${PROJECT_NAME} POST_BUILD
+# Copy assets during every normal build so asset-only Lua/Fennel fixes refresh
+# even when the executable is already up to date.
+set(SPACE_BUILD_ASSETS_DIR ${CMAKE_BINARY_DIR}/assets)
+if(NOT CMAKE_BINARY_DIR STREQUAL CMAKE_CURRENT_LIST_DIR)
+    set(SPACE_ASSET_CLEAN_COMMAND COMMAND ${CMAKE_COMMAND} -E rm -rf ${SPACE_BUILD_ASSETS_DIR})
+endif()
+add_custom_target(${PROJECT_NAME}_assets ALL
+        ${SPACE_ASSET_CLEAN_COMMAND}
         COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_CURRENT_LIST_DIR}/assets
-        $<TARGET_FILE_DIR:${PROJECT_NAME}>/assets
+        ${SPACE_BUILD_ASSETS_DIR}
         COMMENT "---- Copy Assets"
+        VERBATIM
 )
+add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}_assets)
 
 if(WIN32)
     add_custom_command(
