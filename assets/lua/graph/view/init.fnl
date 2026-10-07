@@ -55,16 +55,16 @@
     (when (and pinned.__before_island (not (. pinned-before-expand node)))
         (set (. pinned.__before_island node) nil))) (var install-focused-node-action-methods! nil) (var update-islands-after-member-drag-end! nil) (fn same-island-state-position? [a b] (local pa (and a a.state a.state.position)) (local pb (and b b.state b.state.position)) (and pa pb (do (local va (ensure-glm-vec3 pa)) (local vb (ensure-glm-vec3 pb)) (and (= va.x vb.x) (= va.y vb.y) (= va.z vb.z)))))
 
+(fn drop-preview-focus-branch! [focus child]
+    (when child
+        (while (and child.children (> (length child.children) 0))
+            (drop-preview-focus-branch! focus (. child.children 1)))
+        (if child.drop (child:drop) (if focus (focus:detach child) (table.remove child.parent.children 1)))))
 (fn clear-preview-focus-descendants! [preview-scopes focus node]
     (local preview-scope (. preview-scopes node))
     (when preview-scope
         (while (> (length preview-scope.children) 0)
-            (local child (. preview-scope.children 1))
-            (if (and child child.drop)
-                (child:drop)
-                (if (and focus child)
-                    (focus:detach child)
-                    (table.remove preview-scope.children 1))))))
+            (drop-preview-focus-branch! focus (. preview-scope.children 1)))))
 
 (fn record-island-layout-position! [runtime island-id position]
     (assert island-id "GraphView island layout position requires island id")

@@ -58,14 +58,26 @@
 (fn preview-widget [state node preview-ctx]
   (set state.built-node node)
   (local child (preview-ctx.focus:create-node {:name "preview-child"}))
+  (local nested-scope (preview-ctx.focus:create-scope {:name "preview-nested-scope"}))
+  (local nested-child (preview-ctx.focus:create-node {:name "preview-nested-child"
+                                                     :parent nested-scope}))
   (set state.focus-child child)
+  (set state.nested-scope nested-scope)
+  (set state.nested-child nested-child)
   (local layout (Layout {:name "focus-child-preview"}))
   {:node node
    :layout layout
    :drop (fn [_self]
-           (set state.dropped? true)
-           (layout:drop)
-           (child:drop))})
+            (set state.dropped? true)
+            (layout:drop)
+            (child:drop))})
+
+(fn focusables-contains? [manager node]
+  (var found false)
+  (each [_ focusable (ipairs manager.focusables)]
+    (when (= focusable node)
+      (set found true)))
+  found)
 
 (fn focus-child-preview [state]
   (fn [node _opts]
@@ -128,20 +140,25 @@
   (local fixture (make-fixture))
   (local ctx fixture.ctx)
   (local shell fixture.shell)
-  (local child fixture.state.focus-child)
+  (local child fixture.state.nested-child)
+  (local nested-scope fixture.state.nested-scope)
   (shell:request-focus)
-  (ctx.focus.manager:focus-into {})
+  (child:request-focus)
   (assert (= (ctx.focus.manager:get-focused-node) child)
-          "Fixture should focus preview child before collapse")
+          "Fixture should focus nested preview child before collapse")
   (local card (. fixture.view.points fixture.node))
   (local collapse-button (. card.header-bar.children 3 :element))
   (collapse-button:on-click {})
   (assert fixture.state.dropped?
           "Collapsing expanded preview should drop the preview widget")
   (assert (= child.parent nil)
-          "Collapsing expanded preview should detach stale preview focus children")
+          "Collapsing expanded preview should detach stale nested preview focus children")
+  (assert (= nested-scope.parent nil)
+          "Collapsing expanded preview should detach stale nested preview scopes")
+  (assert (not (focusables-contains? ctx.focus.manager child))
+          "Collapsing expanded preview should unregister stale nested preview focus children")
   (assert (not (= (ctx.focus.manager:get-focused-node) child))
-          "Stale preview child focus should not remain current after collapse")
+          "Stale nested preview child focus should not remain current after collapse")
   (assert (= shell.entry-scope.exit-node shell)
           "Collapsing preview should leave shell entry scope linked for future expansions")
   (drop-fixture fixture))
