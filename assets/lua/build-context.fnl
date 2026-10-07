@@ -5,8 +5,127 @@
 (local QuadBatcher (require :next-app/quad-batcher))
 
 (local {:VectorBuffer VectorBuffer} (require :vector-buffer))
+
+(fn ensure-focus-scope-belongs [focus-manager scope]
+  (assert scope "Focus context requires a scope")
+  (assert (= scope.manager focus-manager)
+          "Focus scope belongs to another manager")
+  scope)
+
+(fn ensure-focus-node-belongs [focus-manager node]
+  (assert node "Focus context requires a node")
+  (assert (= node.manager focus-manager)
+          "Focus node belongs to another manager")
+  node)
+
+(fn resolve-focus-parent [focus-manager focus-ctx parent]
+  (if parent
+      (ensure-focus-scope-belongs focus-manager parent)
+      (ensure-focus-scope-belongs focus-manager focus-ctx.scope)))
+
+(fn call-with-focus-scope [focus-manager focus-ctx scope f]
+  (ensure-focus-scope-belongs focus-manager scope)
+  (assert f "Focus context with-scope requires a callback")
+  (local previous-scope focus-ctx.scope)
+  (focus-ctx:set-scope scope)
+  (local result (table.pack (pcall f)))
+  (focus-ctx:set-scope previous-scope)
+  (if (. result 1)
+      (table.unpack result 2 result.n)
+      (error (. result 2))))
+
+(fn create-focus-context [options]
+  (local focus-manager options.focus-manager)
+  (local focus-scope options.focus-scope)
+  (when (and focus-manager focus-scope)
+    (local focus-parent
+      (if options.focus-parent
+          options.focus-parent
+          (focus-manager:get-root-scope)))
+    (when (and (not focus-scope.parent) (not focus-scope.is-root?))
+      (focus-manager:attach focus-scope focus-parent))
+    (local focus-ctx {:manager focus-manager :scope focus-scope})
+    (set focus-ctx.get-scope (fn [self] self.scope))
+    (set focus-ctx.set-scope
+         (fn [self scope]
+           (ensure-focus-scope-belongs focus-manager scope)
+           (set self.scope scope)
+           self))
+    (set focus-ctx.with-scope
+         (fn [self scope f]
+           (call-with-focus-scope focus-manager self scope f)))
+    (set focus-ctx.attach
+         (fn [self node parent]
+           (ensure-focus-node-belongs focus-manager node)
+           (focus-manager:attach node (resolve-focus-parent focus-manager self parent))
+           node))
+    (set focus-ctx.attach-at
+         (fn [self node parent index]
+           (ensure-focus-node-belongs focus-manager node)
+           (focus-manager:attach-at node (resolve-focus-parent focus-manager self parent) index)
+           node))
+    (set focus-ctx.detach
+         (fn [_self node]
+           (ensure-focus-node-belongs focus-manager node)
+           (focus-manager:detach node)
+           node))
+    (set focus-ctx.create-node
+         (fn [self opts]
+           (local node (focus-manager:create-node opts))
+           (local parent (and opts opts.parent))
+           (self:attach node parent)
+           (when self._capture
+             (table.insert self._capture node))
+           node))
+    (set focus-ctx.create-scope
+         (fn [self opts]
+           (local scope (focus-manager:create-scope opts))
+           (local parent (and opts opts.parent))
+           (self:attach scope parent)
+           (when self._capture
+             (table.insert self._capture scope))
+           scope))
+    (set focus-ctx.capture
+         (fn [self f]
+           (local nodes [])
+           (set self._capture nodes)
+           (local result (f))
+           (set self._capture nil)
+           (values result nodes)))
+    (set focus-ctx.attach-bounds
+         (fn [_self node opts]
+           (ensure-focus-node-belongs focus-manager node)
+           (local options
+             (if opts
+                 opts
+                 {}))
+           (local layout (and options.layout options.layout))
+           (local get-bounds (and options.get-bounds options.get-bounds))
+           (local position (and options.position options.position))
+           (local size (and options.size options.size))
+           (when layout
+             (set node.layout layout))
+           (if get-bounds
+               (set node.get-focus-bounds get-bounds)
+               (if layout
+                   (set node.get-focus-bounds
+                        (fn [_self]
+                          {:position layout.position
+                           :size layout.size}))
+                   (do
+                     (set node.get-focus-bounds nil)
+                     (when position
+                       (set node.position position))
+                     (when size
+                       (set node.size size)))))
+           node))
+    focus-ctx))
+
 (fn BuildContext [opts]
-  (local options (or opts {}))
+  (local options
+    (if opts
+        opts
+        {}))
   (local triangle-vector (VectorBuffer))
   (local line-vector (VectorBuffer))
   (local point-vector (VectorBuffer))
@@ -127,15 +246,18 @@
                  (fn []
                    (local vector (rectangle-quad-batcher:get-vector))
                    (local batches (rectangle-quad-batcher:get-batches))
-                   (if (or (not vector)
-                           (<= (vector:length) 0)
-                           (not batches)
-                           (<= (# batches) 0))
+                   (if (not vector)
                        []
-                       [{:vector vector
-                         :unlit (= options.quad-unlit? true)
-                         :clip-vector (rectangle-quad-batcher:get-clip-vector)
-                         :clip-group-vector (rectangle-quad-batcher:get-clip-group-vector)
+                       (<= (vector:length) 0)
+                       []
+                       (not batches)
+                       []
+                       (<= (# batches) 0)
+                        []
+                        [{:vector vector
+                          :unlit (= options.quad-unlit? true)
+                          :clip-vector (rectangle-quad-batcher:get-clip-vector)
+                          :clip-group-vector (rectangle-quad-batcher:get-clip-group-vector)
                          :batches batches}]))})
   (set ctx.get-image-batch
        (fn [_self texture]
@@ -191,99 +313,8 @@
          (local batcher (and batch batch.draw-batcher))
          (when batcher
            (batcher:untrack-handle handle))))
-  (local focus-manager options.focus-manager)
-  (local focus-scope options.focus-scope)
-  (when (and focus-manager focus-scope)
-    (local focus-parent (or options.focus-parent (focus-manager:get-root-scope)))
-    (when (and (not focus-scope.parent) (not focus-scope.is-root?))
-      (focus-manager:attach focus-scope focus-parent))
-    (local ensure-scope-belongs
-      (fn [scope]
-        (assert scope "Focus context requires a scope")
-        (assert (= scope.manager focus-manager)
-                "Focus scope belongs to another manager")
-        scope))
-    (local ensure-node-belongs
-      (fn [node]
-        (assert node "Focus context requires a node")
-        (assert (= node.manager focus-manager)
-                "Focus node belongs to another manager")
-        node))
-    (local resolve-parent
-      (fn [self parent]
-        (if parent
-            (ensure-scope-belongs parent)
-            (ensure-scope-belongs self.scope))))
-    (local focus-ctx {:manager focus-manager :scope focus-scope})
-    (set focus-ctx.get-scope (fn [self] self.scope))
-    (set focus-ctx.set-scope
-         (fn [self scope]
-           (ensure-scope-belongs scope)
-           (set self.scope scope)
-           self))
-    (set focus-ctx.with-scope (fn [self scope f] (ensure-scope-belongs scope) (assert f "Focus context with-scope requires a callback") (local previous-scope self.scope) (self:set-scope scope) (local result (table.pack (pcall f))) (self:set-scope previous-scope) (if (. result 1) (table.unpack result 2 result.n) (error (. result 2)))))
-    (set focus-ctx.attach
-         (fn [self node parent]
-           (ensure-node-belongs node)
-           (focus-manager:attach node (resolve-parent self parent))
-           node))
-    (set focus-ctx.attach-at
-         (fn [self node parent index]
-           (ensure-node-belongs node)
-           (focus-manager:attach-at node (resolve-parent self parent) index)
-           node))
-    (set focus-ctx.detach
-         (fn [_self node]
-           (ensure-node-belongs node)
-           (focus-manager:detach node)
-           node))
-    (set focus-ctx.create-node
-         (fn [self opts]
-           (local node (focus-manager:create-node opts))
-           (local parent (and opts opts.parent))
-           (self:attach node parent)
-           (when self._capture
-             (table.insert self._capture node))
-           node))
-    (set focus-ctx.create-scope
-         (fn [self opts]
-           (local scope (focus-manager:create-scope opts))
-           (local parent (and opts opts.parent))
-           (self:attach scope parent)
-           (when self._capture
-             (table.insert self._capture scope))
-           scope))
-    (set focus-ctx.capture
-         (fn [self f]
-           (local nodes [])
-           (set self._capture nodes)
-           (local result (f))
-           (set self._capture nil)
-           (values result nodes)))
-    (set focus-ctx.attach-bounds
-         (fn [_self node opts]
-           (ensure-node-belongs node)
-           (local options (or opts {}))
-           (local layout (and options.layout options.layout))
-           (local get-bounds (and options.get-bounds options.get-bounds))
-           (local position (and options.position options.position))
-           (local size (and options.size options.size))
-           (when layout
-             (set node.layout layout))
-           (if get-bounds
-               (set node.get-focus-bounds get-bounds)
-               (if layout
-                   (set node.get-focus-bounds
-                        (fn [_self]
-                          {:position layout.position
-                           :size layout.size}))
-                   (do
-                     (set node.get-focus-bounds nil)
-                     (when position
-                       (set node.position position))
-                     (when size
-                       (set node.size size)))))
-           node))
+  (local focus-ctx (create-focus-context options))
+  (when focus-ctx
     (set ctx.focus focus-ctx))
   ctx)
 
