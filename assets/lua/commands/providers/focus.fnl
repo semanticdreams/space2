@@ -6,24 +6,32 @@
 (fn active-input [ctx]
   (and ctx ctx.active-input (ctx.active-input)))
 
+(fn presentation-camera []
+  (and app app.presentation-camera (app.presentation-camera)))
+
 (fn focus-manager-available? [ctx method-name]
   (local manager (focus-manager ctx))
-  (and manager (. manager method-name)))
+  (if (and manager (. manager method-name)) true false))
 
 (fn can-focus-into? [ctx]
   (local manager (focus-manager ctx))
-  (and manager manager.can-focus-into? (manager:can-focus-into?)))
+  (if (and manager manager.can-focus-into?)
+      (not (not (manager:can-focus-into?)))
+      false))
 
 (fn can-focus-out? [ctx]
   (local manager (focus-manager ctx))
-  (and manager manager.can-focus-out? (manager:can-focus-out?)))
+  (if (and manager manager.can-focus-out?)
+      (not (not (manager:can-focus-out?)))
+      false))
 
 (fn can-focus-next? [ctx]
   (focus-manager-available? ctx :focus-next))
 
 (fn can-focus-direction? [ctx]
-  (and (not (active-input ctx))
-       (focus-manager-available? ctx :focus-direction)))
+  (if (active-input ctx)
+      false
+      (focus-manager-available? ctx :focus-direction)))
 
 (fn run-focus-into [ctx]
   (local manager (focus-manager ctx))
@@ -46,7 +54,8 @@
 (fn run-focus-direction [ctx direction]
   (local manager (focus-manager ctx))
   (if (and manager manager.focus-direction (not (active-input ctx)))
-      (not (not (manager:focus-direction {:direction direction})))
+      (not (not (manager:focus-direction {:direction direction
+                                           :camera (presentation-camera)})))
       false))
 
 (fn make-direction-command [id label direction]

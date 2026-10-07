@@ -172,6 +172,35 @@
   (assert (not (find-hint-entry section "i")) "into hint should be hidden when unavailable")
   (assert (not (find-hint-entry section "o")) "out hint should be hidden when unavailable"))
 
+(fn focus-provider-hides-all-commands-without-manager []
+  (local ctx (focus-command-ctx nil nil))
+  (local composed (focus-composed nil nil))
+  (each [_ id (ipairs ["focus.into" "focus.out" "focus.next" "focus.previous"
+                       "focus.left" "focus.down" "focus.up" "focus.right"])]
+    (assert (not (Commands.available? composed id ctx))
+            (.. id " should be unavailable without a focus manager")))
+  (local root-section (Commands.hint-section composed [] ctx {:id :mode :title "MODE"}))
+  (assert (not root-section) "Focus prefix should be hidden without a focus manager"))
+
+(fn focus-provider-hides-commands-with-missing-manager-methods []
+  (local manager {:focus-next (fn [_self _opts] true)})
+  (local ctx (focus-command-ctx manager nil))
+  (local composed (focus-composed manager nil))
+  (assert (not (Commands.available? composed "focus.into" ctx))
+          "focus.into should be unavailable without can-focus-into?")
+  (assert (not (Commands.available? composed "focus.out" ctx))
+          "focus.out should be unavailable without can-focus-out?")
+  (assert (not (Commands.available? composed "focus.left" ctx))
+          "focus.left should be unavailable without focus-direction")
+  (assert (Commands.available? composed "focus.next" ctx)
+          "focus.next should remain available when focus-next exists")
+  (local section (Commands.hint-section composed ["f"] ctx {:id :mode :title "MODE"}))
+  (assert section "Focus prefix should remain visible for available traversal commands")
+  (assert (not (find-hint-entry section "i")) "into hint should be hidden without can-focus-into?")
+  (assert (not (find-hint-entry section "o")) "out hint should be hidden without can-focus-out?")
+  (assert (not (find-hint-entry section "h")) "left hint should be hidden without focus-direction")
+  (assert-hint section "n" "next"))
+
 (fn focus-provider-hides-directional-commands-during-active-input []
   (local manager (make-focus-manager-stub {:can-into? true :can-out? true}))
   (local ctx (focus-command-ctx manager {:active true}))
@@ -189,6 +218,9 @@
   (local manager (make-focus-manager-stub {:can-into? true :can-out? true}))
   (local ctx (focus-command-ctx manager nil))
   (local composed (focus-composed manager nil))
+  (local original-presentation-camera app.presentation-camera)
+  (local camera {:id :focus-provider-camera})
+  (set app.presentation-camera (fn [_opts] camera))
   (assert (Commands.run composed "focus.previous" ctx) "focus.previous should run")
   (assert (= (# manager.calls.next) 1) "focus.previous should call focus-next once")
   (assert (= (. manager.calls.next 1 :backwards?) true)
@@ -196,7 +228,10 @@
   (assert (Commands.run composed "focus.left" ctx) "focus.left should run")
   (assert (= (# manager.calls.direction) 1) "focus.left should call focus-direction once")
   (assert (= (. manager.calls.direction 1 :direction) :left)
-          "focus.left should pass left direction"))
+          "focus.left should pass left direction")
+  (assert (= (. manager.calls.direction 1 :camera) camera)
+          "focus.left should pass presentation camera")
+  (set app.presentation-camera original-presentation-camera))
 
 (fn command-hints-derive-from-availability-and-prefix []
   (local provider {:commands {"demo.a" {:id "demo.a"
@@ -563,6 +598,10 @@
           focus-provider-prefix-hints-follow-availability)
 (add-test "Focus provider hides unavailable entry and exit"
           focus-provider-hides-unavailable-entry-and-exit)
+(add-test "Focus provider hides all commands without manager"
+          focus-provider-hides-all-commands-without-manager)
+(add-test "Focus provider hides commands with missing manager methods"
+          focus-provider-hides-commands-with-missing-manager-methods)
 (add-test "Focus provider hides directional commands during active input"
           focus-provider-hides-directional-commands-during-active-input)
 (add-test "Focus provider runs previous and directional commands"
