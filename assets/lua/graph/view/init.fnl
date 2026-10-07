@@ -55,6 +55,17 @@
     (when (and pinned.__before_island (not (. pinned-before-expand node)))
         (set (. pinned.__before_island node) nil))) (var install-focused-node-action-methods! nil) (var update-islands-after-member-drag-end! nil) (fn same-island-state-position? [a b] (local pa (and a a.state a.state.position)) (local pb (and b b.state b.state.position)) (and pa pb (do (local va (ensure-glm-vec3 pa)) (local vb (ensure-glm-vec3 pb)) (and (= va.x vb.x) (= va.y vb.y) (= va.z vb.z)))))
 
+(fn drop-preview-focus-branch! [focus child]
+    (when child
+        (while (and child.children (> (length child.children) 0))
+            (drop-preview-focus-branch! focus (. child.children 1)))
+        (if child.drop (child:drop) (if focus (focus:detach child) (table.remove child.parent.children 1)))))
+(fn clear-preview-focus-descendants! [preview-scopes focus node]
+    (local preview-scope (. preview-scopes node))
+    (when preview-scope
+        (while (> (length preview-scope.children) 0)
+            (drop-preview-focus-branch! focus (. preview-scope.children 1)))))
+
 (fn record-island-layout-position! [runtime island-id position]
     (assert island-id "GraphView island layout position requires island id")
     (local value (ensure-glm-vec3 position))
@@ -500,6 +511,7 @@
                  (labels:refresh-positions registry.points filtered))))
 
      (set options._island-layout-runtime {:positions {}})
+     (set options._preview-scopes {})
 
      (local graph-layout
            (GraphViewLayout {:layout layout
@@ -714,6 +726,9 @@
                        :color node.color}]}))
 
     (fn build-expanded-presentation [node position]
+        (local preview-scope (. options._preview-scopes node))
+        (assert preview-scope "GraphView expanded presentation requires node preview scope")
+        (clear-preview-focus-descendants! options._preview-scopes focus node)
         (local saved-size (persistence:saved-size node))
         (local bounds (PanelBounds.inline-card-bounds))
         (local card-builder (GraphNodePresentation.card-builder
@@ -749,7 +764,13 @@
                                           (when manager
                                                (manager:open {:actions (view:node-actions node)
                                                               :position (resolve-menu-position event)})))}))
-        (card-builder ctx))
+        (local (ok presentation-or-err)
+               (pcall (fn []
+                        (ctx.focus:with-scope preview-scope (fn [] (card-builder ctx))))))
+        (when (not ok)
+            (clear-preview-focus-descendants! options._preview-scopes focus node)
+            (error presentation-or-err))
+        presentation-or-err)
     (fn attach-presentation-events [node presentation]
         (set presentation.on-click
              (fn [_self _event]
@@ -947,8 +968,12 @@
                                              (node-id node)))
                 (local focus-node (focus:create-node {:name (.. "graph-node-" (node-id node))
                                                        :parent points-focus-scope}))
+                (local preview-scope (focus:create-scope {:name (.. "graph-node-preview-" (node-id node))}))
+                (focus-node:set-entry-scope preview-scope)
+                (preview-scope:set-exit-node focus-node)
                 (bind-focus-node-activate node focus-node)
                 (set (. focus-nodes node) focus-node)
+                (set (. options._preview-scopes node) preview-scope)
                 (set (. node-by-focus focus-node) node)
                 (when (and focus-manager focus-node)
                     (local current-focused (focus-manager:get-focused-node))
@@ -1009,6 +1034,7 @@
         (if expanded?
             (do
               (local new-point (build-compact-presentation node pos))
+              (clear-preview-focus-descendants! options._preview-scopes focus node)
               (detach-presentation node current-point)
               (install-presentation node current-point new-point)
               (clear-stale-before-island-pin-on-collapse! pinned pinned-before-expand node)
@@ -1064,6 +1090,13 @@
                 (attach-focus-bounds node)
                 (when (= focused-node existing)
                     (set focused-node node)))
+            (local preview-scope (. options._preview-scopes existing))
+            (when preview-scope
+                (set (. options._preview-scopes existing) nil)
+                (set (. options._preview-scopes node) preview-scope)
+                (when focus-node
+                    (focus-node:set-entry-scope preview-scope)
+                    (preview-scope:set-exit-node focus-node)))
             (local replacement-selection [])
             (each [_ selected (ipairs selected-nodes)]
                 (table.insert replacement-selection
@@ -1150,6 +1183,11 @@
                         (set (. pinned.__island_pinned node) nil))
                     (when pinned.__before_island
                         (set (. pinned.__before_island node) nil))
+                    (local preview-scope (. options._preview-scopes node))
+                    (when preview-scope
+                        (clear-preview-focus-descendants! options._preview-scopes focus node)
+                        (preview-scope:drop)
+                        (set (. options._preview-scopes node) nil))
                     (local focus-node (. focus-nodes node))
                     (when focus-node
                         (focus-node:drop)
@@ -1826,6 +1864,11 @@
                     (app.resizables:unregister point._resize-target))
                 (when point.drop
                     (point:drop)))
+            (each [node preview-scope (pairs options._preview-scopes)]
+                (when preview-scope
+                    (clear-preview-focus-descendants! options._preview-scopes focus node)
+                    (preview-scope:drop))
+                (set (. options._preview-scopes node) nil))
             (each [node focus-node (pairs focus-nodes)]
                 (when focus-node
                     (focus-node:drop))
