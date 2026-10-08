@@ -78,11 +78,11 @@ Graph-selection actions must read active `GraphMap` selection, validate accepted
 
 ### Kind badges
 
-Graph node adapters may expose `kind-badge` presentation metadata for preview-card and full node-view titlebars. Missing metadata derives compact badge text from a stable key scheme before the first `:` when one exists; explicit `false` opts out. Graph core and GraphMap persistence still capture topology only: node keys, edge source/target keys, and map-local interaction state. Badge text and colors remain render-time presentation metadata and must not be written into graph topology state.
+Graph node adapters may expose `kind-badge` presentation metadata for preview-card and full node-view titlebars. Missing metadata derives compact badge text from a stable key scheme before the first `:` when one exists; explicit `false` opts out. Graph core persists only graph topology: node keys and edge source/target keys. `GraphMap:capture-state` separately persists map-local interaction state. Badge text and colors remain render-time presentation metadata and must not be written into graph topology state or map-local interaction state.
 
 ### Compact labels
 
-Graph node adapters may expose `compact-label` presentation metadata for collapsed graph labels. `graph/view/labels` treats `compact-label: false` as an explicit opt-out, a string value as the compact label text base, and missing metadata as the existing fallback to `node.label` or the node key. This metadata is render-time presentation state only; graph core and GraphMap persistence still capture topology only and must not write compact-label metadata into graph topology state.
+Graph node adapters may expose `compact-label` presentation metadata for collapsed graph labels. `graph/view/labels` treats `compact-label: false` as an explicit opt-out, a string value as the compact label text base, and missing metadata as the existing fallback to `node.label` or the node key. This metadata is render-time presentation state only. Graph core persists only graph topology, and `GraphMap:capture-state` separately persists map-local interaction state; neither persistence path writes compact-label metadata.
 
 List entity adapters use this contract to keep raw ids available on non-compact surfaces while suppressing collapsed labels for unnamed lists. Named lists continue to expose their custom name as both the normal node label and compact label text base.
 

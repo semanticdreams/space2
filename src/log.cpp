@@ -324,6 +324,8 @@ void log_init(const LogConfig& config)
     }
     log_output_path = selected_output_path;
 
+    auto stdout_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+    stdout_sink->set_formatter(std::make_unique<ColorKeyValueFormatter>());
     auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
         log_output_path,
         5 * 1024 * 1024,
@@ -331,12 +333,7 @@ void log_init(const LogConfig& config)
     );
     file_sink->set_formatter(std::make_unique<KeyValueFormatter>());
     log_sinks.clear();
-    const char* stdout_env = std::getenv("SPACE_LOG_STDOUT");
-    if (!(stdout_env && stdout_env[0] == '0' && stdout_env[1] == '\0')) {
-        auto stdout_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-        stdout_sink->set_formatter(std::make_unique<ColorKeyValueFormatter>());
-        log_sinks.push_back(stdout_sink);
-    }
+    log_sinks.push_back(stdout_sink);
     log_sinks.push_back(file_sink);
     log_file_sink = file_sink;
 
