@@ -29,7 +29,7 @@
           (input:set-text ""))}])
 
 (fn Input [opts]
-  (local options (or opts {}))
+  (local options (or opts {})) (local LifecycleDiagnostics (require :input-lifecycle-diagnostics))
   (local padding (resolve-padding options.padding))
   (local caret-width (or options.caret-width 0.05))
   (local min-width (or options.min-width 5.0))
@@ -660,11 +660,11 @@
           :prev-cursor-column nil
           :layout-happened? false
           :explicit-scroll? false
-          :caret-explicitly-positioned? false
-          :colors colors
-          :pointer-target pointer-target
-          :changed model.changed
-          :submitted (Signal)})
+           :caret-explicitly-positioned? false
+           :colors colors
+           :pointer-target pointer-target
+           :changed model.changed
+           :submitted (Signal) :__lifecycle-diagnostics {:name (LifecycleDiagnostics.input-debug-name options) :created (LifecycleDiagnostics.capture "Input created")}})
 
     (set input.get-text
          (fn [_self]
@@ -907,11 +907,15 @@
          (fn [_self payload]
            (model:on-key-up payload)))
 
-    (set input.drop
-         (fn [self]
-           (assert (not self.__dropped) "Input dropped twice")
-           (set self.__dropped true)
-            (FocusPolicy.handle-drop self)
+     (set input.drop
+          (fn [self]
+            (when self.__dropped
+              (error (LifecycleDiagnostics.double-drop-message self) 2))
+            (when self.__lifecycle-diagnostics
+              (set self.__lifecycle-diagnostics.first-drop
+                   (LifecycleDiagnostics.capture "Input first drop")))
+            (set self.__dropped true)
+             (FocusPolicy.handle-drop self)
            (clickables:unregister self)
            (clickables:unregister-right-click self)
            (clickables:unregister-double-click self)
