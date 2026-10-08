@@ -402,13 +402,13 @@
   (with-pointer-stubs
     (fn [_stubs]
       (local ctx-info (make-focus-build-ctx _stubs))
-      (local input ((Input {}) ctx-info.ctx))
+      (local input ((Input {:name "diagnostic-input" :placeholder "Search" :text "RAW-SENTINEL-INPUT-TEXT"}) ctx-info.ctx))
       (input:drop)
-      (local (ok err)
-        (pcall (fn []
-                 (input:drop))))
+      (local (ok err) (pcall (fn [] (input:drop))))
       (assert (not ok) "Dropping an input twice should error")
-      (assert (string.find (tostring err) "Input dropped twice" 1 true)))))
+      (local message (tostring err))
+      (assert (and (string.find message "Input dropped twice" 1 true) (string.find message "diagnostic-input" 1 true) (string.find message "created" 1 true) (string.find message "first drop" 1 true) (string.find message "second drop" 1 true) (not (string.find message "RAW-SENTINEL-INPUT-TEXT" 1 true))) (.. "double-drop diagnostic should include lifecycle context without raw text: " message)))))
+
 
 (fn input-caret-switches-shape-with-mode []
       (with-pointer-stubs

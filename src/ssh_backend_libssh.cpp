@@ -1550,6 +1550,7 @@ private:
     void relay_tunnel_connection(const std::shared_ptr<RelayResource>& relay, TunnelId tunnel_id, const std::shared_ptr<TunnelResource>& tunnel)
     {
         std::vector<char> buffer(8192);
+        bool client_input_open = true;
         while (relay->running() && tunnel_running(tunnel_id, tunnel))
         {
             SocketFd client = relay->client();
@@ -1557,6 +1558,62 @@ private:
             {
                 break;
             }
+            if (client_input_open)
+            {
+                fd_set reads;
+                FD_ZERO(&reads);
+                FD_SET(client, &reads);
+                timeval timeout { 0, 25000 };
+                const int ready = select(static_cast<int>(client + 1), &reads, nullptr, nullptr, &timeout);
+                if (ready > 0 && FD_ISSET(client, &reads))
+                {
+                    const auto received = recv(client, buffer.data(), static_cast<int>(buffer.size()), 0);
+                    if (received < 0 && !is_transient_socket_error(last_socket_error()))
+                    {
+                        break;
+                    }
+                    if (received == 0)
+                    {
+                        client_input_open = false;
+                        std::lock_guard<std::mutex> remote_lock(relay->remote_mutex);
+                        if (!relay->remote.value)
+                        {
+                            break;
+                        }
+                        if (ssh_channel_send_eof(relay->remote.value) == SSH_ERROR)
+                        {
+                            break;
+                        }
+                    }
+                    else if (received > 0)
+                    {
+                        std::size_t sent = 0;
+                        while (sent < static_cast<std::size_t>(received) && relay->running() && tunnel_running(tunnel_id, tunnel))
+                        {
+                            int written = SSH_ERROR;
+                            {
+                                std::lock_guard<std::mutex> remote_lock(relay->remote_mutex);
+                                if (!relay->remote.value)
+                                {
+                                    return;
+                                }
+                                written = ssh_channel_write(relay->remote.value, buffer.data() + sent, static_cast<uint32_t>(received - sent));
+                            }
+                            if (written == SSH_AGAIN)
+                            {
+                                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                                continue;
+                            }
+                            if (written <= 0)
+                            {
+                                return;
+                            }
+                            sent += static_cast<std::size_t>(written);
+                        }
+                    }
+                }
+            }
+            int remote_read = SSH_ERROR;
             bool remote_eof = false;
             {
                 std::lock_guard<std::mutex> remote_lock(relay->remote_mutex);
@@ -1564,60 +1621,8 @@ private:
                 {
                     break;
                 }
-                remote_eof = ssh_channel_is_eof(relay->remote.value);
-            }
-            if (remote_eof)
-            {
-                break;
-            }
-            fd_set reads;
-            FD_ZERO(&reads);
-            FD_SET(client, &reads);
-            timeval timeout { 0, 25000 };
-            const int ready = select(static_cast<int>(client + 1), &reads, nullptr, nullptr, &timeout);
-            if (ready > 0 && FD_ISSET(client, &reads))
-            {
-                const auto received = recv(client, buffer.data(), static_cast<int>(buffer.size()), 0);
-                if (received < 0 && is_transient_socket_error(last_socket_error()))
-                {
-                    continue;
-                }
-                if (received <= 0)
-                {
-                    break;
-                }
-                std::size_t sent = 0;
-                while (sent < static_cast<std::size_t>(received) && relay->running() && tunnel_running(tunnel_id, tunnel))
-                {
-                    int written = SSH_ERROR;
-                    {
-                        std::lock_guard<std::mutex> remote_lock(relay->remote_mutex);
-                        if (!relay->remote.value)
-                        {
-                            return;
-                        }
-                        written = ssh_channel_write(relay->remote.value, buffer.data() + sent, static_cast<uint32_t>(received - sent));
-                    }
-                    if (written == SSH_AGAIN)
-                    {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                        continue;
-                    }
-                    if (written <= 0)
-                    {
-                        return;
-                    }
-                    sent += static_cast<std::size_t>(written);
-                }
-            }
-            int remote_read = SSH_ERROR;
-            {
-                std::lock_guard<std::mutex> remote_lock(relay->remote_mutex);
-                if (!relay->remote.value)
-                {
-                    break;
-                }
                 remote_read = ssh_channel_read_timeout(relay->remote.value, buffer.data(), static_cast<uint32_t>(buffer.size()), 0, 1);
+                remote_eof = ssh_channel_is_eof(relay->remote.value);
             }
             if (remote_read > 0)
             {
@@ -1644,9 +1649,21 @@ private:
             }
             else if (remote_read == SSH_AGAIN)
             {
+                if (remote_eof)
+                {
+                    break;
+                }
+                if (!client_input_open)
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
                 continue;
             }
             else if (remote_read == SSH_ERROR || remote_read == SSH_EOF)
+            {
+                break;
+            }
+            if (remote_read == 0 && remote_eof)
             {
                 break;
             }
