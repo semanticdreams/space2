@@ -95,3 +95,19 @@ def test_pr_vcpkg_binary_cache_is_read_only_for_pull_requests() -> None:
     assert "github.event_name == 'pull_request'" in source
     assert "clear;x-gha,read" in source
     assert "clear;x-gha,readwrite" in source
+
+
+def test_build_windows_script_builds_targets_in_parallel() -> None:
+    script = read_repo_text("scripts/build-windows.sh")
+
+    assert "resolve_build_jobs()" in script
+    assert 'BUILD_JOBS="$(resolve_build_jobs)"' in script
+    assert "BUILD_JOBS must be a positive integer" in script
+    assert 'cmake --build "${BUILD_DIR}" --config Release --parallel "${BUILD_JOBS}" --target space space-cli' in script
+
+
+def test_build_windows_script_resets_stale_cache_when_generator_changes() -> None:
+    script = read_repo_text("scripts/build-windows.sh")
+
+    assert 'CMAKE_GENERATOR:INTERNAL=${CMAKE_GENERATOR}' in script
+    assert 'Resetting ${BUILD_DIR} due to stale CMake cache.' in script
