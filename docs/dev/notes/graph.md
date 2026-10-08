@@ -49,8 +49,9 @@ adapters.
 
 `GraphView` chooses the spatial renderer or outline renderer at runtime and owns
 the resulting UI handles, hit targets, focus behavior, and row widgets. Graph
-core still persists topology only: node keys, edge source/target keys, and
-map-local interaction state captured by `GraphMap`.
+core persists only graph topology: node keys and edge source/target keys.
+`GraphMap:capture-state` separately persists map-local interaction state such
+as `view_mode` and `outline_root_keys`.
 
 ### Island member drag handles
 
