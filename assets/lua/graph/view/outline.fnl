@@ -3,11 +3,47 @@
 (local GraphViewNodeViews (require :graph/view/node-views))
 (local GraphNodeActions (require :graph/view/node-actions))
 (local FocusedActions (require :graph/view/focused-actions))
+(local RawRectangle (require :raw-rectangle))
+(local Text (require :text))
+(local TextStyle (require :text-style))
 
 (local row-width 640)
 (local row-height 24)
 (local row-left-padding 8)
 (local row-depth-indent 18)
+(local empty-state-message "No outline roots. Focus a node or select exactly one node, then run Set Outline Root (SPC g o r).")
+
+(fn outline-text-style [ctx color]
+    (TextStyle {:color color
+                :scale 1.0
+                :theme ctx.theme}))
+
+(fn create-rectangle! [ctx color position size depth-offset]
+    (assert depth-offset "GraphOutlineView rectangle visual requires depth offset")
+    (local rectangle ((RawRectangle {:color color}) ctx))
+    (set rectangle.position position)
+    (set rectangle.size size)
+    (set rectangle.rotation (glm.quat 1 0 0 0))
+    (set rectangle.depth-offset-index depth-offset)
+    (rectangle:update)
+    rectangle)
+
+(fn create-text! [ctx text position color]
+    (local label ((Text {:text text
+                         :style (outline-text-style ctx color)}) ctx))
+    (label.layout:measurer)
+    (set label.layout.position position)
+    (set label.layout.rotation (glm.quat 1 0 0 0))
+    (set label.layout.depth-offset-index 1)
+    (label.layout:layouter)
+    label)
+
+(fn drop-handle-list! [handles]
+    (each [_ handle (ipairs handles)]
+        (when (and handle handle.drop)
+            (handle:drop)))
+    (for [idx (length handles) 1 -1]
+        (table.remove handles idx)))
 
 (fn row-title [row]
     (if (and row row.node row.node.label)
@@ -26,7 +62,12 @@
 (fn drop-row-handles! [self]
     (local row-handles (assert self.row-handles "GraphOutlineView requires row handles"))
     (local clickables (assert self.clickables "GraphOutlineView requires clickables for row teardown"))
+    (when self.empty-state-handle
+        (drop-handle-list! self.empty-state-handle.visuals)
+        (set self.empty-state-handle nil))
     (each [_ record (ipairs row-handles)]
+        (when record.visuals
+            (drop-handle-list! record.visuals))
         (local target (assert record.target "GraphOutlineView row handle requires target"))
         (when (and record.double? clickables.unregister-double-click)
             (clickables:unregister-double-click target))
@@ -48,6 +89,13 @@
     (each [_ key (ipairs selected-keys)]
         (set (. selected key) true))
     selected)
+
+(fn visual-color [self row]
+    (if (= self.graph-map.focused_node_key row.key)
+        (glm.vec4 0.20 0.28 0.42 0.78)
+        (. (selected-key-set self.graph-map) row.key)
+        (glm.vec4 0.18 0.32 0.24 0.70)
+        (glm.vec4 0.08 0.08 0.10 0.58)))
 
 (fn graph-map-selected-keys [graph-map]
     (assert graph-map.selected_node_keys
@@ -157,6 +205,31 @@
     (table.insert self.row-handles record)
     record)
 
+(fn refresh-row-visual! [self record]
+    (local row (assert record.row "GraphOutlineView row visual requires row"))
+    (when record.background
+        (set record.background.color (visual-color self row))
+        (record.background:update)))
+
+(fn refresh-row-visuals! [self]
+    (each [_ record (ipairs self.row-handles)]
+        (refresh-row-visual! self record)))
+
+(fn attach-row-visuals! [self row index target]
+    (local position target.position)
+    (local background
+          (create-rectangle! self.ctx
+                             (visual-color self row)
+                             (glm.vec3 position.x (- position.y row-height) -0.04)
+                             (glm.vec2 row-width row-height)
+                             0))
+    (local label
+          (create-text! self.ctx
+                        (row-title row)
+                        (glm.vec3 (row-label-x row) (- position.y row-height -6) 0.02)
+                        (glm.vec4 0.86 0.88 0.92 1)))
+    [background label])
+
 (fn attach-row-handles! [self row index]
     (local clickables (assert self.clickables "GraphOutlineView row handles require clickables"))
     (local target {:key row.key
@@ -167,10 +240,12 @@
     (attach-row-intersect! target (row-hit-position index))
     (set target.on-click
          (fn [_target _event]
-             (select-key! self row.key)))
+              (select-key! self row.key)
+              (refresh-row-visuals! self)))
     (set target.activate
          (fn [_target opts]
              (select-key! self row.key)
+             (refresh-row-visuals! self)
              (open-key! self row.key opts)
              true))
     (set target.on-double-click
@@ -178,13 +253,33 @@
              (target:activate {:event event})))
     (set target.on-right-click
          (fn [_target event]
-             (select-key! self row.key)
-             (local manager (get-menu-manager self.ctx))
+              (select-key! self row.key)
+              (refresh-row-visuals! self)
+              (local manager (get-menu-manager self.ctx))
              (when manager
                   (manager:open {:actions (self:node-actions row.node)
                                  :position (menu-position event)}))))
-    (register-row-clickables! self clickables target)
+    (local record (register-row-clickables! self clickables target))
+    (set record.row row)
+    (set record.visuals (attach-row-visuals! self row index target))
+    (set record.background (. record.visuals 1))
     target)
+
+(fn attach-empty-state! [self]
+    (local background
+          (create-rectangle! self.ctx
+                             (glm.vec4 0.08 0.08 0.10 0.58)
+                             (glm.vec3 0 (- row-height) -0.04)
+                             (glm.vec2 row-width row-height)
+                             0))
+    (local label
+          (create-text! self.ctx
+                        empty-state-message
+                        (glm.vec3 row-left-padding (- 0 row-height -6) 0.02)
+                        (glm.vec4 0.86 0.88 0.92 1)))
+    (set self.empty-state-handle {:message empty-state-message
+                                  :visuals [background label]})
+    self.empty-state-handle)
 
 (fn rebuild-rows! [self]
     (drop-row-handles! self)
@@ -193,6 +288,8 @@
     (each [idx row (ipairs self.rows)]
         (set (. self.row-by-key row.key) row)
         (attach-row-handles! self row idx))
+    (when (= (length self.rows) 0)
+        (attach-empty-state! self))
     self.rows)
 
 (fn connect! [self signal handler]

@@ -38,6 +38,32 @@
 (fn make-drop-handle []
     {:drop drop-noop})
 
+(fn make-test-font []
+    (local glyph {:advance 8
+                  :planeBounds {:left 0 :bottom 0 :right 8 :top 10}
+                  :atlasBounds {:left 0 :bottom 0 :right 8 :top 10}})
+    (local font {:glyph-map {}
+                 :metadata {:metrics {:lineHeight 12 :ascender 10 :descender -2}
+                            :atlas {:distanceRange 4}}})
+    (for [codepoint 32 126]
+        (set (. font.glyph-map codepoint) glyph))
+    (set (. font.glyph-map 65533) glyph)
+    font)
+
+(fn make-text-batcher-stub [events]
+    {:upsert-text (fn [_self _key payload]
+                    (table.insert events {:kind :text-upsert :text payload.codepoints}))
+     :update-text-transform (fn [_self _key _payload]
+                              (table.insert events {:kind :text-transform}))
+     :remove-text (fn [_self _key]
+                    (table.insert events {:kind :text-remove}))})
+
+(fn make-quad-batcher-stub [events]
+    {:upsert-quad (fn [_self _key payload]
+                    (table.insert events {:kind :quad-upsert :color payload.color}))
+     :remove-quad (fn [_self _key]
+                    (table.insert events {:kind :quad-remove}))})
+
 (fn add-render-stub [_self]
     (make-drop-handle))
 
@@ -51,6 +77,9 @@
     (make-drop-handle))
 
 (fn make-render-ctx []
+    (local render-events [])
+    (local text-batcher (make-text-batcher-stub render-events))
+    (local quad-batcher (make-quad-batcher-stub render-events))
     {:triangle-vector {:add add-render-stub}
      :points {:add add-render-stub}
      :clickables {:register register-clickable-stub
@@ -59,7 +88,16 @@
                   :unregister-right-click unregister-clickable-stub
                   :register-double-click register-clickable-stub
                   :unregister-double-click unregister-clickable-stub}
-     :focus {:create-scope create-focus-scope-stub}})
+     :focus {:create-scope create-focus-scope-stub}
+     :theme {:font (make-test-font)
+             :text {:foreground (glm.vec4 0.8 0.8 0.8 1) :scale 1.0}}
+     :render-events render-events
+     :get-text-ssbo-batcher (fn [_self] text-batcher)
+     :get-rectangle-quad-batcher (fn [_self] quad-batcher)})
+
+(fn count-render-events [ctx kind]
+    (accumulate [count 0 _ event (ipairs ctx.render-events)]
+        (if (= event.kind kind) (+ count 1) count)))
 
 (fn with-screen-ray [body]
     (local original app.screen-pos-ray)
@@ -299,6 +337,43 @@
 (fn outline-row-registrations-drop-on-rebuild-and-drop []
     (with-screen-ray outline-row-registrations-body))
 
+(fn outline-view-creates-visual-artifacts-for-projected-rows []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (add-edge! graph-map "test:root" "test:child")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (local ctx (make-render-ctx))
+    (local view (GraphView {:graph-map graph-map :ctx ctx}))
+    (assert (>= (count-render-events ctx :text-upsert) 2)
+            "outline rows should create visible text artifacts")
+    (assert (>= (count-render-events ctx :quad-upsert) 2)
+            "outline rows should create visible row background/focus artifacts")
+    (view:drop)
+    (assert (>= (count-render-events ctx :text-remove) 2)
+            "dropping outline rows should remove text artifacts")
+    (assert (>= (count-render-events ctx :quad-remove) 2)
+            "dropping outline rows should remove row background/focus artifacts")
+    (graph-map:drop)
+    (graph:drop))
+
+(fn outline-view-creates-empty-state-guidance-when-no-roots []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (graph-map:load-by-key "test:orphan")
+    (graph-map:set-view-mode! "outline")
+    (local ctx (make-render-ctx))
+    (local view (GraphView {:graph-map graph-map :ctx ctx}))
+    (assert (= (length view.rows) 0) "outline with no roots should project no rows")
+    (assert view.empty-state-handle "outline with no roots should own an empty-state visual handle")
+    (assert (string.find view.empty-state-handle.message "Set Outline Root")
+            "empty state should guide users to set an outline root")
+    (assert (>= (count-render-events ctx :text-upsert) 1)
+            "empty state should create visible guidance text")
+    (view:drop)
+    (assert (>= (count-render-events ctx :text-remove) 1)
+            "dropping empty state should remove guidance text")
+    (graph-map:drop)
+    (graph:drop))
+
 (fn command-toggle-outline-flips-view-mode []
     (local {:graph graph :graph-map graph-map} (make-map))
     (CommandHelpers.reset!)
@@ -366,6 +441,8 @@
 (table.insert tests {:name "outline row clicks use real hit testing" :fn outline-row-clicks-use-real-hit-testing})
 (table.insert tests {:name "outline row right-click and activation use real hit testing" :fn outline-row-right-click-and-activation-use-real-hit-testing})
 (table.insert tests {:name "outline row registrations drop on rebuild and drop" :fn outline-row-registrations-drop-on-rebuild-and-drop})
+(table.insert tests {:name "outline view creates visual artifacts for projected rows" :fn outline-view-creates-visual-artifacts-for-projected-rows})
+(table.insert tests {:name "outline view creates empty state guidance when no roots" :fn outline-view-creates-empty-state-guidance-when-no-roots})
 (table.insert tests {:name "command toggle outline flips view mode" :fn command-toggle-outline-flips-view-mode})
 (table.insert tests {:name "command set outline root prefers focused node" :fn command-set-outline-root-prefers-focused-node})
 (table.insert tests {:name "command set outline root uses single selection" :fn command-set-outline-root-uses-single-selection})
