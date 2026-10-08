@@ -43,6 +43,10 @@
 (fn selection-non-empty? [opts]
   (has-selection? opts))
 
+(fn has-visible-nodes? [opts]
+  (local graph-view (resolve-graph-view opts))
+  (and graph-view graph-view.has-visible-nodes? (graph-view:has-visible-nodes?)))
+
 (fn focused-action [opts index]
   (local graph-view (resolve-graph-view opts))
   (and graph-view graph-view.focused-node-actions
@@ -108,8 +112,7 @@
         (local method (. graph-view method-name))
         (if method
             (do
-              (method graph-view)
-              true)
+              (method graph-view))
             false))
       false))
 
@@ -264,9 +267,11 @@
       "graph.selection.toggle-focused"
       (make-selection-command options "graph.selection.toggle-focused" "toggle" :toggle-focused-node-selection has-focused-node?)
       "graph.selection.clear"
-      (make-selection-command options "graph.selection.clear" "clear" :clear-selection selection-non-empty?)
-      "graph.selection.focus-selected"
-      (make-selection-command options "graph.selection.focus-selected" "focus" :focus-selected-node has-exactly-one-selected-node?)
+       (make-selection-command options "graph.selection.clear" "clear" :clear-selection selection-non-empty?)
+       "graph.selection.select-all"
+       (make-selection-command options "graph.selection.select-all" "select-all" :select-all-visible-nodes has-visible-nodes?)
+       "graph.selection.focus-selected"
+       (make-selection-command options "graph.selection.focus-selected" "focus" :focus-selected-node has-exactly-one-selected-node?)
       "graph.node.open-focused"
      (make-graph-view-command options "graph.node.open-focused" "open" :open-focused-node #(graph-view-focused-method-available? $1 :open-focused-node))
      "graph.node.menu-focused"
@@ -298,9 +303,10 @@
                    {:keys ["g" "s" "s"] :command "graph.selection.select-focused" :label "select" :priority 10}
                    {:keys ["g" "s" "a"] :command "graph.selection.add-focused" :label "add" :priority 20}
                    {:keys ["g" "s" "r"] :command "graph.selection.remove-focused" :label "remove" :priority 30}
-                    {:keys ["g" "s" "t"] :command "graph.selection.toggle-focused" :label "toggle" :priority 40}
-                    {:keys ["g" "s" "c"] :command "graph.selection.clear" :label "clear" :priority 50}
-                    {:keys ["g" "s" "f"] :command "graph.selection.focus-selected" :label "focus" :priority 60}
+                     {:keys ["g" "s" "t"] :command "graph.selection.toggle-focused" :label "toggle" :priority 40}
+                     {:keys ["g" "s" "c"] :command "graph.selection.clear" :label "clear" :priority 50}
+                     {:keys ["g" "s" "f"] :command "graph.selection.focus-selected" :label "focus" :priority 60}
+                     {:keys ["g" "s" "e"] :command "graph.selection.select-all" :label "select-all" :priority 70}
                     {:keys ["g" "n" "o"] :command "graph.node.open-focused" :label "open" :priority 10}
                    {:keys ["g" "n" "m"] :command "graph.node.menu-focused" :label "menu" :priority 20}
                    {:keys ["g" "n" "t"] :command "graph.node.toggle-focused-preview" :label "toggle-preview" :priority 30}

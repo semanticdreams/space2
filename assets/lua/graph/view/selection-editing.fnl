@@ -21,6 +21,17 @@
             (table.insert remaining candidate)))
     remaining)
 
+(fn visible-nodes [points]
+    (assert (= (type points) :table) "SelectionEditing.visible-nodes requires points table")
+    (local nodes [])
+    (each [node _point (pairs points)]
+        (table.insert nodes node))
+    (table.sort nodes
+                (fn [left right]
+                    (< (tostring (or (and left left.key) left))
+                       (tostring (or (and right right.key) right)))))
+    nodes)
+
 (fn install! [view opts]
     (assert view "SelectionEditing.install! requires view")
     (local options (assert opts "SelectionEditing.install! requires opts"))
@@ -103,9 +114,19 @@
                          (apply-selection! next-selection)))
                  false)))
     (set view.clear-selection
+           (fn [_self]
+               (if (> (length selected-nodes) 0)
+                   (apply-selection! [])
+                   false)))
+    (set view.has-visible-nodes?
           (fn [_self]
-              (if (> (length selected-nodes) 0)
-                  (apply-selection! [])
+              (assert-not-dropped "has-visible-nodes?")
+              (> (length (visible-nodes points)) 0)))
+    (set view.select-all-visible-nodes
+          (fn [_self]
+              (local nodes (visible-nodes points))
+              (if (> (length nodes) 0)
+                  (apply-selection! nodes)
                   false)))
     (set view.focus-selected-node
          (fn [_self]
