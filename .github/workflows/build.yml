@@ -187,6 +187,9 @@ jobs:
 
   build-windows:
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      actions: write
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache-windows
       CCACHE_MAXSIZE: 1G
@@ -194,6 +197,9 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.sccache-windows
       SCCACHE_CACHE_SIZE: 2G
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      CMAKE_GENERATOR: Ninja
+      VCPKG_FEATURE_FLAGS: binarycaching
+      VCPKG_BINARY_SOURCES: clear;x-gha,readwrite
     steps:
       - uses: actions/checkout@v5
 
@@ -214,6 +220,28 @@ jobs:
           restore-keys: |
             sccache-${{ runner.os }}-windows-cross-${{ github.ref }}-
             sccache-${{ runner.os }}-windows-cross-
+
+      - name: Restore sccache binary
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin/sccache
+          key: sccache-bin-${{ runner.os }}-0.16.0
+
+      - name: Install sccache
+        run: |
+          if command -v sccache >/dev/null 2>&1; then
+            sccache --version
+          else
+            cargo install sccache --version 0.16.0 --locked
+          fi
+
+      - name: Export GitHub Actions cache runtime for vcpkg
+        uses: actions/github-script@v8
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
       - name: Setup Windows cross-build host
         run: scripts/setup-windows-build-host.sh

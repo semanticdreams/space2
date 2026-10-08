@@ -65,3 +65,33 @@ def test_release_workflow_keeps_windows_zip_and_installer_packaging_paths() -> N
     assert "choco install innosetup --no-progress -y" in text
     assert "python scripts/build-windows-installer.py" in text
     assert "softprops/action-gh-release@v2" in text
+
+
+def test_windows_cross_build_jobs_enable_ninja_sccache_binary_and_vcpkg_cache() -> None:
+    for workflow_path in [".github/workflows/test.yml", ".github/workflows/build.yml"]:
+        workflow = load_workflow(workflow_path)
+        job = workflow["jobs"]["build-windows"]
+        env = job["env"]
+        text = read_repo_text(workflow_path)
+
+        assert job["permissions"]["contents"] == "read"
+        assert job["permissions"]["actions"] == "write"
+        assert env["CMAKE_GENERATOR"] == "Ninja"
+        assert env["VCPKG_FEATURE_FLAGS"] == "binarycaching"
+        assert "VCPKG_BINARY_SOURCES" in env
+        assert "Restore sccache binary" in text
+        assert "sccache-bin-${{ runner.os }}-0.16.0" in text
+        assert "cargo install sccache --version 0.16.0 --locked" in text
+        assert "Export GitHub Actions cache runtime for vcpkg" in text
+        assert "ACTIONS_CACHE_URL" in text
+        assert "ACTIONS_RESULTS_URL" in text
+        assert "ACTIONS_RUNTIME_TOKEN" in text
+
+
+def test_pr_vcpkg_binary_cache_is_read_only_for_pull_requests() -> None:
+    workflow = load_workflow(".github/workflows/test.yml")
+    source = workflow["jobs"]["build-windows"]["env"]["VCPKG_BINARY_SOURCES"]
+
+    assert "github.event_name == 'pull_request'" in source
+    assert "clear;x-gha,read" in source
+    assert "clear;x-gha,readwrite" in source
