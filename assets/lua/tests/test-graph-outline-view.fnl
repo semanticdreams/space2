@@ -5,9 +5,25 @@
 (local Edge (require :graph/edge))
 (local GraphOutline (require :graph/outline))
 (local GraphView (require :graph/view))
+(local GraphCommands (require :graph/commands))
 (local Clickables (require :clickables))
 
 (local tests [])
+(var command-graph-view nil)
+(var command-graph-map nil)
+
+(fn resolve-command-graph-view []
+    command-graph-view)
+
+(fn resolve-command-graph-map []
+    command-graph-map)
+
+(fn find-binding [bindings expected]
+    (var found nil)
+    (each [_ binding (ipairs bindings) &until found]
+        (when (= binding.command expected)
+            (set found binding)))
+    found)
 
 (fn register-test-loader [graph]
     (graph:register-key-loader "test"
@@ -298,6 +314,65 @@
 (fn outline-row-registrations-drop-on-rebuild-and-drop []
     (with-screen-ray outline-row-registrations-body))
 
+(fn command-toggle-outline-flips-view-mode []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (set command-graph-map graph-map)
+    (set command-graph-view {:graph-map graph-map})
+    (local provider (GraphCommands.provider {:graph-view resolve-command-graph-view
+                                             :graph-map resolve-command-graph-map}))
+    (local binding (assert (find-binding provider.bindings "graph.view.toggle-outline") "outline toggle binding missing"))
+    (assert (= (. binding.keys 1) "g") "outline toggle binding should live under graph leader")
+    (assert (= (table.concat binding.keys " ") "g v o") "outline toggle binding should use SPC g v o")
+    (local command (assert (. provider.commands "graph.view.toggle-outline") "outline toggle command missing"))
+    (assert (= (command:run {}) true) "toggle command should run")
+    (assert (= graph-map.view_mode "outline") "toggle should enter outline mode")
+    (assert (= (command:run {}) true) "toggle command should run twice")
+    (assert (= graph-map.view_mode "spatial") "toggle should return to spatial mode")
+    (set command-graph-map nil)
+    (set command-graph-view nil)
+    (graph-map:drop)
+    (graph:drop))
+
+(fn command-set-outline-root-prefers-focused-node []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (graph-map:load-by-key "test:focused")
+    (graph-map:load-by-key "test:selected")
+    (set graph-map.focused_node_key "test:focused")
+    (graph-map:set-selected-node-keys ["test:selected"])
+    (set command-graph-map graph-map)
+    (set command-graph-view {:graph-map graph-map
+                             :focused-node (fn [_self] (graph-map:lookup graph-map.focused_node_key))})
+    (local provider (GraphCommands.provider {:graph-view resolve-command-graph-view
+                                             :graph-map resolve-command-graph-map}))
+    (local binding (assert (find-binding provider.bindings "graph.outline.set-root-from-current") "outline root binding missing"))
+    (assert (= (table.concat binding.keys " ") "g o r") "outline root binding should use SPC g o r")
+    (local command (assert (. provider.commands "graph.outline.set-root-from-current") "set outline root command missing"))
+    (assert (= (command:run {}) true) "set root command should run with focus")
+    (assert (= (table.concat graph-map.outline_root_keys ",") "test:focused")
+            "set root should prefer focused node over selection")
+    (set command-graph-map nil)
+    (set command-graph-view nil)
+    (graph-map:drop)
+    (graph:drop))
+
+(fn command-set-outline-root-uses-single-selection []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (graph-map:load-by-key "test:selected")
+    (graph-map:set-selected-node-keys ["test:selected"])
+    (set command-graph-map graph-map)
+    (set command-graph-view {:graph-map graph-map
+                             :focused-node (fn [_self] nil)})
+    (local provider (GraphCommands.provider {:graph-view resolve-command-graph-view
+                                             :graph-map resolve-command-graph-map}))
+    (local command (assert (. provider.commands "graph.outline.set-root-from-current") "set outline root command missing"))
+    (assert (= (command:run {}) true) "set root command should run with one selected key")
+    (assert (= (table.concat graph-map.outline_root_keys ",") "test:selected")
+            "set root should use exactly one selected node when focus is absent")
+    (set command-graph-map nil)
+    (set command-graph-view nil)
+    (graph-map:drop)
+    (graph:drop))
+
 (table.insert tests {:name "outline builds reachable outgoing depth-first rows" :fn outline-builds-reachable-outgoing-depth-first-rows})
 (table.insert tests {:name "outline skips incoming-only edges" :fn outline-skips-incoming-only-edges})
 (table.insert tests {:name "outline handles cycles and shared nodes by first occurrence" :fn outline-handles-cycles-and-shared-nodes-by-first-occurrence})
@@ -309,8 +384,11 @@
 (table.insert tests {:name "outline row clicks use real hit testing" :fn outline-row-clicks-use-real-hit-testing})
 (table.insert tests {:name "outline row right-click and activation use real hit testing" :fn outline-row-right-click-and-activation-use-real-hit-testing})
 (table.insert tests {:name "outline row registrations drop on rebuild and drop" :fn outline-row-registrations-drop-on-rebuild-and-drop})
+(table.insert tests {:name "command toggle outline flips view mode" :fn command-toggle-outline-flips-view-mode})
+(table.insert tests {:name "command set outline root prefers focused node" :fn command-set-outline-root-prefers-focused-node})
+(table.insert tests {:name "command set outline root uses single selection" :fn command-set-outline-root-uses-single-selection})
 
 (fn main []
-    {:name "graph-outline-view" :tests tests})
+    ((. (require :tests/runner) :run-tests) {:name "graph-outline-view" :tests tests}))
 
-{:main main}
+{:name "graph-outline-view" :tests tests :main main}
