@@ -1,0 +1,153 @@
+(local Graph (require :graph/init))
+(local GraphMap (require :graph/map))
+(local GraphMapManager (require :graph/map-manager))
+(local Edge (require :graph/edge))
+(local GraphOutline (require :graph/outline))
+
+(local tests [])
+
+(fn register-test-loader [graph]
+    (graph:register-key-loader "test"
+        (fn [key]
+            (Graph.GraphNode {:key key
+                              :label key})))
+    graph)
+
+(fn make-map []
+    (local graph (register-test-loader (Graph {:with-start false})))
+    (local graph-map (GraphMap.GraphMap {:graph graph :id "outline-test" :name "Outline Test"}))
+    {:graph graph :graph-map graph-map})
+
+(fn add-edge! [graph-map source-key target-key]
+    (local source (if (graph-map:lookup source-key)
+                      (graph-map:lookup source-key)
+                      (graph-map:load-by-key source-key)))
+    (local target (if (graph-map:lookup target-key)
+                      (graph-map:lookup target-key)
+                      (graph-map:load-by-key target-key)))
+    (assert source (.. "missing test graph source: " source-key))
+    (assert target (.. "missing test graph target: " target-key))
+    (graph-map:add-edge (Edge.GraphEdge {:source source :target target})))
+
+(fn row-keys [rows]
+    (icollect [_ row (ipairs rows)] row.key))
+
+(fn row-depths [rows]
+    (icollect [_ row (ipairs rows)] row.depth))
+
+(fn outline-builds-reachable-outgoing-depth-first-rows []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (add-edge! graph-map "test:root" "test:a")
+    (add-edge! graph-map "test:a" "test:a1")
+    (add-edge! graph-map "test:root" "test:b")
+    (graph-map:load-by-key "test:unreachable")
+    (local rows (GraphOutline.build-rows graph-map ["test:root"]))
+    (assert (= (table.concat (row-keys rows) ",") "test:root,test:a,test:a1,test:b")
+            "outline should include only outgoing reachable nodes in depth-first order")
+    (assert (= (table.concat (row-depths rows) ",") "0,1,2,1")
+            "outline should assign indentation depth from roots")
+    (graph-map:drop)
+    (graph:drop))
+
+(fn outline-skips-incoming-only-edges []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (add-edge! graph-map "test:parent" "test:root")
+    (local rows (GraphOutline.build-rows graph-map ["test:root"]))
+    (assert (= (table.concat (row-keys rows) ",") "test:root")
+            "outline should not walk incoming edges")
+    (graph-map:drop)
+    (graph:drop))
+
+(fn outline-handles-cycles-and-shared-nodes-by-first-occurrence []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (add-edge! graph-map "test:root" "test:a")
+    (add-edge! graph-map "test:a" "test:root")
+    (add-edge! graph-map "test:root" "test:b")
+    (add-edge! graph-map "test:b" "test:a")
+    (local rows (GraphOutline.build-rows graph-map ["test:root"]))
+    (assert (= (table.concat (row-keys rows) ",") "test:root,test:a,test:b")
+            "outline should emit each key once at first occurrence")
+    (graph-map:drop)
+    (graph:drop))
+
+(fn graph-map-persists-outline-mode-and-roots []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (graph-map:load-by-key "test:root")
+    (graph-map:load-by-key "test:child")
+    (assert (= graph-map.view_mode "spatial") "GraphMap should default to spatial mode")
+    (assert (= (length graph-map.outline_root_keys) 0) "GraphMap should default to no outline roots")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root" "test:missing" "test:root" "test:child"])
+    (assert (= (table.concat graph-map.outline_root_keys ",") "test:root,test:child")
+            "GraphMap should keep visible unique outline roots in input order")
+    (local state (graph-map:capture-state))
+    (local restored (GraphMap.GraphMap {:graph graph :id "restored-outline"}))
+    (restored:restore-state state)
+    (assert (= restored.view_mode "outline") "restore should keep outline mode")
+    (assert (= (table.concat restored.outline_root_keys ",") "test:root,test:child")
+            "restore should keep valid outline roots")
+    (restored:drop)
+    (graph-map:drop)
+    (graph:drop))
+
+(fn graph-map-prunes-removed-outline-roots []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (local root (graph-map:load-by-key "test:root"))
+    (graph-map:load-by-key "test:child")
+    (graph-map:set-outline-root-keys! ["test:root" "test:child"])
+    (graph-map:remove-nodes [root])
+    (assert (= (table.concat graph-map.outline_root_keys ",") "test:child")
+            "removing a node should prune matching outline roots")
+    (graph-map:drop)
+    (graph:drop))
+
+(fn map-manager-persists-outline-state-per-map []
+    (local graph (register-test-loader (Graph {:with-start false})))
+    (local manager (GraphMapManager.GraphMapManager
+                     {:graph graph
+                      :state {:active_map_id "main"
+                              :next_map_id 3
+                              :maps [{:id "main"
+                                      :name "Main"
+                                      :nodes ["test:main-root"]
+                                      :edges []
+                                      :view_mode "outline"
+                                      :outline_root_keys ["test:main-root"]}
+                                     {:id "map-2"
+                                      :name "Second"
+                                      :nodes ["test:second-root"]
+                                      :edges []
+                                      :view_mode "spatial"
+                                      :outline_root_keys ["test:second-root"]}]}}))
+    (local main-map (manager:get-active-map))
+    (assert (= main-map.view_mode "outline") "active map should hydrate persisted outline mode")
+    (assert (= (table.concat main-map.outline_root_keys ",") "test:main-root")
+            "active map should hydrate persisted outline roots")
+    (manager:switch-map! "map-2")
+    (local second-map (manager:get-active-map))
+    (assert (= second-map.view_mode "spatial") "second map should keep its own mode")
+    (second-map:set-view-mode! "outline")
+    (local captured (manager:capture-state))
+    (local by-id {})
+    (each [_ entry (ipairs captured.maps)]
+        (set (. by-id entry.id) entry))
+    (assert (= (. by-id "main" :view_mode) "outline") "inactive map capture should keep outline mode")
+    (assert (= (table.concat (. by-id "main" :outline_root_keys) ",") "test:main-root")
+            "inactive map capture should keep outline roots")
+    (assert (= (. by-id "map-2" :view_mode) "outline") "active map capture should keep changed outline mode")
+    (assert (= (table.concat (. by-id "map-2" :outline_root_keys) ",") "test:second-root")
+            "active map capture should keep outline roots")
+    (manager:drop)
+    (graph:drop))
+
+(table.insert tests {:name "outline builds reachable outgoing depth-first rows" :fn outline-builds-reachable-outgoing-depth-first-rows})
+(table.insert tests {:name "outline skips incoming-only edges" :fn outline-skips-incoming-only-edges})
+(table.insert tests {:name "outline handles cycles and shared nodes by first occurrence" :fn outline-handles-cycles-and-shared-nodes-by-first-occurrence})
+(table.insert tests {:name "graph map persists outline mode and roots" :fn graph-map-persists-outline-mode-and-roots})
+(table.insert tests {:name "graph map prunes removed outline roots" :fn graph-map-prunes-removed-outline-roots})
+(table.insert tests {:name "map manager persists outline state per map" :fn map-manager-persists-outline-state-per-map})
+
+(fn main []
+    {:name "graph-outline-view" :tests tests})
+
+{:main main}

@@ -60,6 +60,8 @@
     (local edge-added (Signal))
     (local edge-removed (Signal))
     (local selection-changed (Signal))
+    (local view-mode-changed (Signal))
+    (local outline-roots-changed (Signal))
     (var unresolved-restored-node-keys [])
     (var unresolved-restored-edge-list [])
     (var next-island-id 1)
@@ -73,8 +75,10 @@
                   :edges edges
                   :edge-map edge-map
                   :islands islands
-                 :selected_node_keys []
-                 :focused_node_key nil
+                  :selected_node_keys []
+                  :focused_node_key nil
+                  :view_mode "spatial"
+                  :outline_root_keys []
                   :island-added island-added
                   :island-updated island-updated
                   :island-removed island-removed
@@ -84,7 +88,9 @@
                  :node-morphed node-morphed
                   :edge-added edge-added
                   :edge-removed edge-removed
-                  :selection-changed selection-changed})
+                  :selection-changed selection-changed
+                  :view-mode-changed view-mode-changed
+                  :outline-roots-changed outline-roots-changed})
 
     (fn canonical-node [_self node context]
         (assert node (string.format "GraphMap missing node for %s" context))
@@ -126,6 +132,53 @@
                     (when (not (= key (. right idx)))
                         (set equal? false)))
                 equal?)))
+
+    (fn copy-array [source]
+        (assert (= (type source) :table) "GraphMap.copy-array requires source table")
+        (icollect [_ value (ipairs source)]
+            value))
+
+    (fn same-array? [left right]
+        (assert (= (type left) :table) "GraphMap array comparison requires left table")
+        (assert (= (type right) :table) "GraphMap array comparison requires right table")
+        (if (not (= (length left) (length right)))
+            false
+            (do
+                (var equal? true)
+                (each [idx value (ipairs left) &until (not equal?)]
+                    (when (not (= value (. right idx)))
+                        (set equal? false)))
+                equal?)))
+
+    (fn normalize-outline-root-keys [_self keys]
+        (assert (= (type keys) :table)
+                "GraphMap.set-outline-root-keys! requires keys table")
+        (local result [])
+        (local seen {})
+        (each [_ key (ipairs keys)]
+            (when (and (= (type key) :string)
+                       (lookup self key)
+                       (not (. seen key)))
+                (set (. seen key) true)
+                (table.insert result key)))
+        result)
+
+    (fn set-view-mode! [_self mode]
+        (assert (or (= mode "spatial") (= mode "outline")) "GraphMap view mode must be spatial or outline")
+        (when (not= self.view_mode mode)
+            (set self.view_mode mode)
+            (view-mode-changed:emit mode))
+        self.view_mode)
+
+    (fn set-outline-root-keys! [_self keys]
+        (local normalized (normalize-outline-root-keys self keys))
+        (when (not (same-array? self.outline_root_keys normalized))
+            (set self.outline_root_keys normalized)
+            (outline-roots-changed:emit (copy-array normalized)))
+        (copy-array self.outline_root_keys))
+
+    (fn get-outline-root-keys [_self]
+        (copy-array self.outline_root_keys))
 
     (fn copy-visible-selected-node-keys [keys]
         (assert (= (type keys) :table)
@@ -423,15 +476,21 @@
                 (each [_ node (ipairs removed)]
                     (when node.key
                         (set (. removed-keys node.key) true)))
-                (when (> (length self.selected_node_keys) 0)
+                 (when (> (length self.selected_node_keys) 0)
                     (local kept-selection [])
                     (each [_ key (ipairs self.selected_node_keys)]
                         (when (not (. removed-keys key))
                             (table.insert kept-selection key)))
                     (set-selected-node-keys self kept-selection))
-                (when (and self.focused_node_key (. removed-keys self.focused_node_key))
-                    (set self.focused_node_key nil))
-                (local valid-node-keys {})
+                 (when (and self.focused_node_key (. removed-keys self.focused_node_key))
+                     (set self.focused_node_key nil))
+                 (when (> (length self.outline_root_keys) 0)
+                     (local kept-outline-roots [])
+                     (each [_ key (ipairs self.outline_root_keys)]
+                         (when (not (. removed-keys key))
+                             (table.insert kept-outline-roots key)))
+                     (set-outline-root-keys! self kept-outline-roots))
+                 (local valid-node-keys {})
                 (each [key _node (pairs nodes)]
                     (set (. valid-node-keys key) true))
                 (prune-islands-for-node-keys self valid-node-keys)
@@ -441,7 +500,10 @@
     (set self.add-edge add-edge)
     (set self.remove-edge remove-edge)
     (set self.remove-nodes remove-nodes)
-    (set self.set-selected-node-keys set-selected-node-keys)
+     (set self.set-selected-node-keys set-selected-node-keys)
+     (set self.set-view-mode! set-view-mode!)
+     (set self.set-outline-root-keys! set-outline-root-keys!)
+     (set self.get-outline-root-keys get-outline-root-keys)
     (set self.create-island create-island)
     (set self.upsert-island upsert-island)
     (set self.update-island update-island)
@@ -583,7 +645,9 @@
               :islands (list-islands self)
               :next_island_id next-island-id
               :selected_node_keys captured-selected-keys
-              :focused_node_key self.focused_node_key}))
+              :focused_node_key self.focused_node_key
+              :view_mode self.view_mode
+              :outline_root_keys (get-outline-root-keys self)}))
 
     (set self.restore-state
         (fn [_self state]
@@ -668,11 +732,17 @@
                     payload.selected_node_keys
                     []))
             (set-selected-node-keys self restored-selected-keys)
-            (set self.focused_node_key
-                 (if (and (= (type payload.focused_node_key) :string)
-                          (lookup self payload.focused_node_key))
-                     payload.focused_node_key nil))
-            true))
+             (set self.focused_node_key
+                  (if (and (= (type payload.focused_node_key) :string)
+                           (lookup self payload.focused_node_key))
+                      payload.focused_node_key nil))
+             (set-view-mode! self (if (= payload.view_mode nil)
+                                      "spatial"
+                                      payload.view_mode))
+             (set-outline-root-keys! self (if (= (type payload.outline_root_keys) :table)
+                                              payload.outline_root_keys
+                                              []))
+             true))
 
     (set self.clear-unresolved-restored-state
         (fn [_self]
@@ -883,17 +953,21 @@
         (fn [_self]
             (or (> (length (icollect [_ _ (pairs nodes)] true)) 0)
                 (> (length edges) 0)
-                (> (length (list-islands self)) 0)
-                (> (length self.selected_node_keys) 0)
-                (not (= self.focused_node_key nil)))))
+                 (> (length (list-islands self)) 0)
+                 (> (length self.selected_node_keys) 0)
+                 (> (length self.outline_root_keys) 0)
+                 (not (= self.view_mode "spatial"))
+                 (not (= self.focused_node_key nil)))))
 
     (set self.clear!
         (fn [_self]
             (self:restore-state {:nodes []
                                  :edges []
-                                 :islands []
-                                 :selected_node_keys []
-                                 :focused_node_key nil})
+                                  :islands []
+                                  :selected_node_keys []
+                                  :focused_node_key nil
+                                  :view_mode "spatial"
+                                  :outline_root_keys []})
             true))
 
     (set self.add-start-node!
@@ -1048,8 +1122,10 @@
             (node-replaced:clear)
             (node-morphed:clear)
             (edge-added:clear)
-            (edge-removed:clear)
-            (selection-changed:clear)))
+             (edge-removed:clear)
+             (selection-changed:clear)
+             (view-mode-changed:clear)
+             (outline-roots-changed:clear)))
 
     self)
 
