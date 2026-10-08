@@ -1,9 +1,11 @@
+(local glm (require :glm))
 (local Graph (require :graph/init))
 (local GraphMap (require :graph/map))
 (local GraphMapManager (require :graph/map-manager))
 (local Edge (require :graph/edge))
 (local GraphOutline (require :graph/outline))
 (local GraphView (require :graph/view))
+(local Clickables (require :clickables))
 
 (local tests [])
 
@@ -41,14 +43,46 @@
 (fn register-clickable-stub [_self _target]
     (make-drop-handle))
 
+(fn unregister-clickable-stub [_self _target]
+    nil)
+
 (fn create-focus-scope-stub [_self _opts]
     (make-drop-handle))
 
 (fn make-render-ctx []
     {:triangle-vector {:add add-render-stub}
      :points {:add add-render-stub}
-     :clickables {:register register-clickable-stub}
+     :clickables {:register register-clickable-stub
+                  :unregister unregister-clickable-stub
+                  :register-right-click register-clickable-stub
+                  :unregister-right-click unregister-clickable-stub
+                  :register-double-click register-clickable-stub
+                  :unregister-double-click unregister-clickable-stub}
      :focus {:create-scope create-focus-scope-stub}})
+
+(fn with-screen-ray [body]
+    (local original app.screen-pos-ray)
+    (set app.screen-pos-ray
+         (fn [pointer]
+             {:origin (glm.vec3 pointer.x pointer.y 10)
+              :direction (glm.vec3 0 0 -1)}))
+    (local (ok result) (pcall body))
+    (set app.screen-pos-ray original)
+    (if ok
+        result
+        (error result)))
+
+(fn make-real-render-ctx [clickables]
+    (assert clickables "outline test requires clickables")
+    (local ctx (make-render-ctx))
+    (set ctx.clickables clickables)
+    (assert ctx.clickables "outline test render ctx requires clickables")
+    ctx)
+
+(fn click-row [clickables x y button timestamp]
+    (local payload {:button button :x x :y y :timestamp timestamp})
+    (clickables:on-mouse-button-down payload)
+    (clickables:on-mouse-button-up payload))
 
 (fn row-keys [rows]
     (icollect [_ row (ipairs rows)] row.key))
@@ -189,6 +223,78 @@
     (graph-map:drop)
     (graph:drop))
 
+(fn outline-row-clicks-body []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (add-edge! graph-map "test:root" "test:child")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (local clickables (Clickables))
+    (assert clickables "outline row click test requires clickables")
+    (local view (GraphView {:graph-map graph-map :ctx (make-real-render-ctx clickables)}))
+    (click-row clickables 20 -24 1 100)
+    (assert (= graph-map.focused_node_key "test:child") "row click should focus hit-tested child row")
+    (assert (= (table.concat graph-map.selected_node_keys ",") "test:child") "row click should select hit-tested child row")
+    (view:drop)
+    (graph-map:drop)
+    (graph:drop))
+
+(fn outline-row-clicks-use-real-hit-testing []
+    (with-screen-ray outline-row-clicks-body))
+
+(fn outline-row-action-body []
+    (local original-menu-manager app.menu-manager)
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (add-edge! graph-map "test:root" "test:child")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (local clickables (Clickables))
+    (assert clickables "outline row action test requires clickables")
+    (var opened-menu nil)
+    (var opened-node-key nil)
+    (set app.menu-manager {:open (fn [_self opts] (set opened-menu opts))})
+    (local view (GraphView {:graph-map graph-map :ctx (make-real-render-ctx clickables)}))
+    (set view.node-views.open
+         (fn [_self node _opts]
+             (set opened-node-key node.key)))
+    (click-row clickables 20 -24 3 200)
+    (assert opened-menu "row right-click should open action menu through clickables")
+    (assert (= graph-map.focused_node_key "test:child") "row right-click should focus hit-tested child row")
+    (click-row clickables 20 -24 1 300)
+    (click-row clickables 20 -24 1 500)
+    (assert (= opened-node-key "test:child") "row double-click should activate/open hit-tested child row")
+    (view:drop)
+    (graph-map:drop)
+    (graph:drop)
+    (set app.menu-manager original-menu-manager))
+
+(fn outline-row-right-click-and-activation-use-real-hit-testing []
+    (with-screen-ray outline-row-action-body))
+
+(fn outline-row-registrations-body []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (add-edge! graph-map "test:root" "test:child")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (local clickables (Clickables))
+    (assert clickables "outline row registration test requires clickables")
+    (local view (GraphView {:graph-map graph-map :ctx (make-real-render-ctx clickables)}))
+    (assert (= (length clickables.left-click-objects) 2) "outline should register one left-click target per visible row")
+    (assert (= (length clickables.right-click-objects) 2) "outline should register one right-click target per visible row")
+    (assert (= (length clickables.double-click-objects) 2) "outline should register one double-click target per visible row")
+    (graph-map:set-outline-root-keys! ["test:child"])
+    (assert (= (length clickables.left-click-objects) 1) "rebuild should unregister stale left-click row targets")
+    (assert (= (length clickables.right-click-objects) 1) "rebuild should unregister stale right-click row targets")
+    (assert (= (length clickables.double-click-objects) 1) "rebuild should unregister stale double-click row targets")
+    (view:drop)
+    (assert (= (length clickables.left-click-objects) 0) "drop should unregister row left-click targets")
+    (assert (= (length clickables.right-click-objects) 0) "drop should unregister row right-click targets")
+    (assert (= (length clickables.double-click-objects) 0) "drop should unregister row double-click targets")
+    (graph-map:drop)
+    (graph:drop))
+
+(fn outline-row-registrations-drop-on-rebuild-and-drop []
+    (with-screen-ray outline-row-registrations-body))
+
 (table.insert tests {:name "outline builds reachable outgoing depth-first rows" :fn outline-builds-reachable-outgoing-depth-first-rows})
 (table.insert tests {:name "outline skips incoming-only edges" :fn outline-skips-incoming-only-edges})
 (table.insert tests {:name "outline handles cycles and shared nodes by first occurrence" :fn outline-handles-cycles-and-shared-nodes-by-first-occurrence})
@@ -197,6 +303,9 @@
 (table.insert tests {:name "map manager persists outline state per map" :fn map-manager-persists-outline-state-per-map})
 (table.insert tests {:name "outline view exposes visible row selection" :fn outline-view-exposes-visible-row-selection})
 (table.insert tests {:name "outline view rejects unreachable reveal" :fn outline-view-rejects-unreachable-reveal})
+(table.insert tests {:name "outline row clicks use real hit testing" :fn outline-row-clicks-use-real-hit-testing})
+(table.insert tests {:name "outline row right-click and activation use real hit testing" :fn outline-row-right-click-and-activation-use-real-hit-testing})
+(table.insert tests {:name "outline row registrations drop on rebuild and drop" :fn outline-row-registrations-drop-on-rebuild-and-drop})
 
 (fn main []
     {:name "graph-outline-view" :tests tests})

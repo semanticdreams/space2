@@ -1,7 +1,13 @@
+(local glm (require :glm))
 (local GraphOutline (require :graph/outline))
 (local GraphViewNodeViews (require :graph/view/node-views))
 (local GraphNodeActions (require :graph/view/node-actions))
 (local FocusedActions (require :graph/view/focused-actions))
+
+(local row-width 640)
+(local row-height 24)
+(local row-left-padding 8)
+(local row-depth-indent 18)
 
 (fn row-title [row]
     (if (and row row.node row.node.label)
@@ -19,9 +25,16 @@
 
 (fn drop-row-handles! [self]
     (local row-handles (assert self.row-handles "GraphOutlineView requires row handles"))
-    (each [_ handle (ipairs row-handles)]
-        (when (and handle handle.drop)
-            (handle:drop)))
+    (local clickables (assert self.clickables "GraphOutlineView requires clickables for row teardown"))
+    (each [_ record (ipairs row-handles)]
+        (local target (assert record.target "GraphOutlineView row handle requires target"))
+        (when (and record.double? clickables.unregister-double-click)
+            (clickables:unregister-double-click target))
+        (when (and record.right? clickables.unregister-right-click)
+            (clickables:unregister-right-click target))
+        (when record.left?
+            (assert clickables.unregister "GraphOutlineView requires clickables.unregister")
+            (clickables:unregister target)))
     (for [idx (length row-handles) 1 -1]
         (table.remove row-handles idx)))
 
@@ -91,12 +104,58 @@
         event.position
         {:x 0 :y 0 :z 0}))
 
-(fn attach-row-handles! [self row]
+(fn row-position [row index]
+    (glm.vec3 (+ row-left-padding (* row-depth-indent row.depth))
+              (- (* (- index 1) row-height))
+              0))
+
+(fn ray-plane-point [ray z]
+    (local direction (assert (and ray ray.direction) "GraphOutlineView row intersect requires ray.direction"))
+    (local origin (assert ray.origin "GraphOutlineView row intersect requires ray.origin"))
+    (if (= direction.z 0)
+        nil
+        (do
+            (local distance (/ (- z origin.z) direction.z))
+            (if (< distance 0)
+                nil
+                (values (+ origin (* direction distance)) distance)))))
+
+(fn point-in-row? [point position]
+    (and (>= point.x position.x)
+         (<= point.x (+ position.x row-width))
+         (<= point.y position.y)
+         (>= point.y (- position.y row-height))))
+
+(fn attach-row-intersect! [target position]
+    (set target.position position)
+    (set target.size (glm.vec3 row-width row-height 0))
+    (set target.intersect
+         (fn [self ray]
+             (local (point distance) (ray-plane-point ray self.position.z))
+             (if (and point (point-in-row? point self.position))
+                 (values true point distance)
+                 (values false nil nil)))))
+
+(fn register-row-clickables! [self clickables target]
+    (assert clickables.unregister "GraphOutlineView requires clickables.unregister")
+    (clickables:register target)
+    (local record {:target target :left? true})
+    (when clickables.register-right-click
+        (clickables:register-right-click target)
+        (set record.right? true))
+    (when clickables.register-double-click
+        (clickables:register-double-click target)
+        (set record.double? true))
+    (table.insert self.row-handles record)
+    record)
+
+(fn attach-row-handles! [self row index]
     (local clickables (assert self.clickables "GraphOutlineView row handles require clickables"))
     (local target {:key row.key
                    :row row
                    :label (row-title row)
                    :depth row.depth})
+    (attach-row-intersect! target (row-position row index))
     (set target.on-click
          (fn [_target _event]
              (select-key! self row.key)))
@@ -113,30 +172,18 @@
              (select-key! self row.key)
              (local manager (get-menu-manager self.ctx))
              (when manager
-                 (manager:open {:actions (self:node-actions row.node)
-                                :position (menu-position event)}))))
-    (table.insert self.row-handles target)
-    (when clickables
-        (local handle (clickables:register target))
-        (when handle
-            (table.insert self.row-handles handle))
-        (when clickables.register-right-click
-            (local right-handle (clickables:register-right-click target))
-            (when right-handle
-                (table.insert self.row-handles right-handle)))
-        (when clickables.register-double-click
-            (local double-handle (clickables:register-double-click target))
-            (when double-handle
-                (table.insert self.row-handles double-handle))))
+                  (manager:open {:actions (self:node-actions row.node)
+                                 :position (menu-position event)}))))
+    (register-row-clickables! self clickables target)
     target)
 
 (fn rebuild-rows! [self]
     (drop-row-handles! self)
     (set self.rows (GraphOutline.build-rows self.graph-map self.graph-map.outline_root_keys))
     (set self.row-by-key {})
-    (each [_ row (ipairs self.rows)]
+    (each [idx row (ipairs self.rows)]
         (set (. self.row-by-key row.key) row)
-        (attach-row-handles! self row))
+        (attach-row-handles! self row idx))
     self.rows)
 
 (fn connect! [self signal handler]
