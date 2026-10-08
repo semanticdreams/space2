@@ -3,6 +3,7 @@
 (local GraphMapManager (require :graph/map-manager))
 (local Edge (require :graph/edge))
 (local GraphOutline (require :graph/outline))
+(local GraphView (require :graph/view))
 
 (local tests [])
 
@@ -28,6 +29,26 @@
     (assert source (.. "missing test graph source: " source-key))
     (assert target (.. "missing test graph target: " target-key))
     (graph-map:add-edge (Edge.GraphEdge {:source source :target target})))
+
+(fn drop-noop [_self] nil)
+
+(fn make-drop-handle []
+    {:drop drop-noop})
+
+(fn add-render-stub [_self]
+    (make-drop-handle))
+
+(fn register-clickable-stub [_self _target]
+    (make-drop-handle))
+
+(fn create-focus-scope-stub [_self _opts]
+    (make-drop-handle))
+
+(fn make-render-ctx []
+    {:triangle-vector {:add add-render-stub}
+     :points {:add add-render-stub}
+     :clickables {:register register-clickable-stub}
+     :focus {:create-scope create-focus-scope-stub}})
 
 (fn row-keys [rows]
     (icollect [_ row (ipairs rows)] row.key))
@@ -140,12 +161,42 @@
     (manager:drop)
     (graph:drop))
 
+(fn outline-view-exposes-visible-row-selection []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (add-edge! graph-map "test:root" "test:child")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (local view (GraphView {:graph-map graph-map :ctx (make-render-ctx)}))
+    (assert (= (view:selected-node-count) 0) "outline view should start with no selected rows")
+    (view:reveal-node "test:child" {:select? true :focus? true})
+    (assert (= graph-map.focused_node_key "test:child") "outline reveal should focus visible rows")
+    (assert (= (table.concat graph-map.selected_node_keys ",") "test:child") "outline reveal should select visible rows")
+    (view:drop)
+    (graph-map:drop)
+    (graph:drop))
+
+(fn outline-view-rejects-unreachable-reveal []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (graph-map:load-by-key "test:root")
+    (graph-map:load-by-key "test:other")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (local view (GraphView {:graph-map graph-map :ctx (make-render-ctx)}))
+    (local (ok message) (pcall (fn [] (view:reveal-node "test:other" {:select? true}))))
+    (assert (not ok) "outline reveal should fail for hidden map nodes")
+    (assert (string.find (tostring message) "not visible") "outline reveal error should explain visibility")
+    (view:drop)
+    (graph-map:drop)
+    (graph:drop))
+
 (table.insert tests {:name "outline builds reachable outgoing depth-first rows" :fn outline-builds-reachable-outgoing-depth-first-rows})
 (table.insert tests {:name "outline skips incoming-only edges" :fn outline-skips-incoming-only-edges})
 (table.insert tests {:name "outline handles cycles and shared nodes by first occurrence" :fn outline-handles-cycles-and-shared-nodes-by-first-occurrence})
 (table.insert tests {:name "graph map persists outline mode and roots" :fn graph-map-persists-outline-mode-and-roots})
 (table.insert tests {:name "graph map prunes removed outline roots" :fn graph-map-prunes-removed-outline-roots})
 (table.insert tests {:name "map manager persists outline state per map" :fn map-manager-persists-outline-state-per-map})
+(table.insert tests {:name "outline view exposes visible row selection" :fn outline-view-exposes-visible-row-selection})
+(table.insert tests {:name "outline view rejects unreachable reveal" :fn outline-view-rejects-unreachable-reveal})
 
 (fn main []
     {:name "graph-outline-view" :tests tests})
