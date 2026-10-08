@@ -10,7 +10,7 @@ The graph is intended to provide one uniform interface to many kinds of things: 
 
 `GraphMap` is the named, persistent interaction context for a task or workflow. A graph map owns the visible references, display edges, arrangement, and interaction state that a user has explicitly materialized. It does not own the underlying objects.
 
-This keeps the existing graph-as-universal-model direction while avoiding multiple independent `Graph` instances that duplicate shared store subscriptions and registry-installed key-loader behavior.
+This keeps the existing graph-as-universal-interface direction while avoiding multiple independent `Graph` instances that duplicate shared store subscriptions and registry-installed key-loader behavior.
 
 ## Current Status
 
@@ -23,6 +23,8 @@ Implemented:
 - Related objects are added explicitly by preview/view/action/search controls that load selected keys into the active map; graph maps do not perform hidden relationship-hook expansion.
 - `GraphMapManager` owns map records, active map id, legacy migration, create/rename/delete/switch, hydration pruning, capture, and metadata cleanup.
 - `GraphView` attaches to the active `GraphMap`, scopes persistence by map id, and captures/drops/restores runtime view state around map switching.
+- `GraphMap` stores map-local outline view mode state: `view_mode` defaults to `"spatial"`, and `outline_root_keys` is an ordered list of outline roots for that map.
+- Outline view projects compact rows from the active `GraphMap` by traversing outgoing visible graph-map edges from the configured roots; unreachable graph-map nodes remain in the map but are hidden while the map is in outline mode.
 - Graph canvas context exposes `graph-map`; root actions and node menu actions mutate the active graph map instead of the shared graph.
 - Graph map sidebar is installed as the graph mode left dock and exposes map list, switching, new/rename/delete actions, active stats, and selected count.
 - Graph node panel persistence includes `graph-map-id`; restore only applies to the active map and hydration prunes stale panel records.
@@ -43,7 +45,7 @@ Remaining:
 
 - `Graph`: the shared graph-addressable object resolver/catalog. It exposes the low-level key-loader registration primitive used by graph extension descriptor installers and provides shared backing-store integration. During the migration, keep the existing module name and avoid a broad rename.
 - `GraphMap`: a persistent interaction context over shared graph-addressable objects. It owns included node keys, explicit map edges, map-local node adapter instances, layout, expanded cards, selection/focus, and graph-owned panels.
-- `GraphView`: runtime renderer/controller for the active graph map. It owns rendering handles, force-layout instance, focus/click/movable registrations, drag state, and batching.
+- `GraphView`: runtime renderer/controller for the active graph map. It owns rendering handles, spatial force-layout instance, outline row widgets, focus/click/movable registrations, drag state, and batching.
 - `Remove from Map`: non-destructive operation. Removes a node reference and its map-local UI state from the active graph map.
 - `Delete Underlying Object`: destructive operation. Deletes the backing object through an explicit node/object-specific capability.
 
@@ -94,7 +96,32 @@ Owned per graph map:
 - Card sizes.
 - Selected node keys.
 - Focused node key.
+- View mode (`view_mode`), defaulting to `"spatial"` for each map.
+- Ordered outline root keys (`outline_root_keys`) for each map.
 - Open graph node panels.
+
+### Outline Mode
+
+Outline mode is an alternate projection of the same active `GraphMap`, not a
+companion panel and not a separate `Graph`. The active map owns the interaction
+state that selects the projection:
+
+- `view_mode` is map-local and defaults to `"spatial"`.
+- `outline_root_keys` is a map-local ordered root list. Current UI commands set
+  or replace it from the focused node, or from exactly one selected node.
+- Projection starts from the ordered roots and follows outgoing visible
+  graph-map edges only. Hidden domain relationships are not expanded.
+- Graph-map nodes that are unreachable from the current roots are hidden while
+  in outline mode, but they remain included in the map and return when spatial
+  mode or different roots expose them.
+- Cycles and shared nodes use first occurrence wins: after a node key has been
+  emitted once, later traversal encounters of the same key are skipped.
+- Child order follows graph-map edge order, with deterministic label/key
+  fallback where edge order is insufficient.
+
+Outline rows are derived runtime presentation over graph-map topology. Graph
+core, graph node adapters, and owning domain stores do not persist outline rows
+or hidden/unreachable status.
 
 #### Presentation islands
 
@@ -303,9 +330,11 @@ Target shape:
          :maps [{:id "main"
                  :name "Main"
                  :nodes [...]
-                 :edges [...]
-                 :selected_node_keys [...]
-                 :focused_node_key nil}]}}
+                  :edges [...]
+                  :selected_node_keys [...]
+                  :focused_node_key nil
+                  :view_mode "spatial"
+                  :outline_root_keys []}]}}
 ```
 
 Keep high-churn layout/presentation data out of `world.json` initially. Store it per map under the world directory:
