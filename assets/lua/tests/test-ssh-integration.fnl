@@ -54,7 +54,7 @@
   (.. "'" (string.gsub (tostring value) "'" "'\\''") "'"))
 
 (fn python-tcp-round-trip [host port payload]
-  (local script "import socket,sys,time; last=None\nfor _ in range(50):\n    try:\n        s=socket.create_connection((sys.argv[1], int(sys.argv[2])), 0.2); break\n    except OSError as exc:\n        last=exc; time.sleep(0.05)\nelse:\n    raise last\ndata=sys.argv[3].encode('utf-8'); s.sendall(data); s.shutdown(socket.SHUT_WR); out=s.recv(1024); s.close(); sys.stdout.buffer.write(out)")
+  (local script "import socket,sys,time; last=None\nfor _ in range(50):\n    try:\n        s=socket.create_connection((sys.argv[1], int(sys.argv[2])), 0.2); break\n    except OSError as exc:\n        last=exc; time.sleep(0.05)\nelse:\n    raise last\ndata=sys.argv[3].encode('utf-8'); s.sendall(data); s.shutdown(socket.SHUT_WR); chunks=[]\nwhile True:\n    chunk=s.recv(4096)\n    if not chunk:\n        break\n    chunks.append(chunk)\ns.close(); sys.stdout.buffer.write(b''.join(chunks))")
   (local command (.. "python3 -c " (shell-quote script) " " (shell-quote host) " " (shell-quote port) " " (shell-quote payload)))
   (local pipe (assert (io.popen command :r) "open python tcp client"))
   (local output (pipe:read :*a))
@@ -335,8 +335,11 @@
         (local success (find-event events tunnel-op "operation-success"))
         (assert opened "local tunnel should emit tunnel-opened")
         (assert-success success "local tunnel should succeed")
-        (assert (= (python-tcp-round-trip "127.0.0.1" fixture.local-tunnel-port "tunnel-ok") "tunnel-ok")
-                "local tunnel should relay a TCP payload to fixture echo endpoint")
+        (local payload (string.rep "tunnel-ok-" 1024))
+        (local output (python-tcp-round-trip "127.0.0.1" fixture.local-tunnel-port payload))
+        (assert (= output payload)
+                (.. "local tunnel should relay a TCP payload to fixture echo endpoint; expected bytes="
+                    (length payload) " actual bytes=" (length output)))
         (local close-op (ssh.close-tunnel opened.tunnel-id))
         (local (close-terminal) (wait-for-terminal ssh close-op "local tunnel close should finish"))
         (assert-success close-terminal "local tunnel close should succeed"))))
