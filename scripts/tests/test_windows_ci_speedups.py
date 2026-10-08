@@ -111,3 +111,15 @@ def test_build_windows_script_resets_stale_cache_when_generator_changes() -> Non
 
     assert 'CMAKE_GENERATOR:INTERNAL=${CMAKE_GENERATOR}' in script
     assert 'Resetting ${BUILD_DIR} due to stale CMake cache.' in script
+
+
+def test_windows_wine_notes_document_validation_packaging_boundary_and_speedups() -> None:
+    text = read_repo_text("docs/dev/notes/windows-wine-build-and-test.md")
+
+    assert "PR/merge-queue validation path" in text
+    assert "does not build the Windows installer" in text
+    assert "does not create the release ZIP" in text
+    assert "Release/manual packaging path" in text
+    assert "existing `workflow_dispatch` behavior remains available" in text
+    assert "vcpkg binary caching" in text
+    assert "Ninja parallel builds" in text
