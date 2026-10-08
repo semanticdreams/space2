@@ -50,6 +50,7 @@ Architecture notes, design sketches, debugging logs, and explorations. These are
 - [Libtorrent](./libtorrent)
 - [Light Balls](./light-balls)
 - [Lighting](./lighting)
+- [LLM Systems](./llm-systems)
 - [Link Entities](./link-entities)
 - [List Entities](./list-entities)
 - [Loop](./loop)
