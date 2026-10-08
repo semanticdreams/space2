@@ -1356,7 +1356,7 @@
         (local (load-ok load-err) (pcall #(unit:load)))
         (when (not load-ok)
           (app.unit-manager:unregister unit.id)
-          (print (.. "Failed to load user-code unit \"" candidate.name "\": " (tostring load-err)))))))
+          (logging.warn (.. "Failed to load user-code unit \"" candidate.name "\": " (tostring load-err)))))))
   true)
 
 (local installable-reset-projection app.reset-projection)

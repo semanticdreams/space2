@@ -11,6 +11,8 @@
 (local GraphViewLabels (require :graph/view/labels))
 (local GraphViewSelection (require :graph/view/selection))
 (local GraphViewNodeViews (require :graph/view/node-views))
+(local GraphNodeActions (require :graph/view/node-actions))
+(local FocusedActions (require :graph/view/focused-actions))
 (local GraphViewPersistence (require :graph/view/persistence)) (local ActivityCameraState (require :activity-camera-state)) (local SelectedPreviewCommands (require :graph/view/selected-preview-commands)) (local GraphViewSelectionEditing (require :graph/view/selection-editing))
 (local NodeBase (require :graph/node-base))
 (local GraphNodePresentation (require :graph/view/presentation))
@@ -53,7 +55,7 @@
 
 (fn clear-stale-before-island-pin-on-collapse! [pinned pinned-before-expand node]
     (when (and pinned.__before_island (not (. pinned-before-expand node)))
-        (set (. pinned.__before_island node) nil))) (var install-focused-node-action-methods! nil) (var update-islands-after-member-drag-end! nil) (fn same-island-state-position? [a b] (local pa (and a a.state a.state.position)) (local pb (and b b.state b.state.position)) (and pa pb (do (local va (ensure-glm-vec3 pa)) (local vb (ensure-glm-vec3 pb)) (and (= va.x vb.x) (= va.y vb.y) (= va.z vb.z)))))
+        (set (. pinned.__before_island node) nil))) (var update-islands-after-member-drag-end! nil) (fn same-island-state-position? [a b] (local pa (and a a.state a.state.position)) (local pb (and b b.state b.state.position)) (and pa pb (do (local va (ensure-glm-vec3 pa)) (local vb (ensure-glm-vec3 pb)) (and (= va.x vb.x) (= va.y vb.y) (= va.z vb.z)))))
 
 (fn drop-preview-focus-branch! [focus child]
     (when child
@@ -245,50 +247,13 @@
         (or (and ctx ctx.menu-manager) app.menu-manager))
 
     (fn build-node-actions [node]
-        (local actions [])
-        (local configured-actions
-               (if (= (type (and node node.actions)) :function)
-                   ((. node :actions) node)
-                   (and node node.actions)))
-        (table.insert actions
-                       {:name "Open"
-                        :icon "open_in_new"
-                         :fn (fn [_button event]
-                                (when focus-manager
-                                    (focus-manager:arm-auto-focus {:event event}))
-                                (local (ok err) (pcall (fn [] (views:open node))))
-                                (when focus-manager
-                                    (focus-manager:clear-auto-focus))
-                                (when (not ok)
-                                    (error err)))})
-        (table.insert actions
-                       {:name "Copy key"
-                        :icon "content_copy"
-                         :fn (fn [_button _event]
-                                (local runtime-gl (require :gl))
-                                (runtime-gl.clipboard-set (tostring node.key)))})
-        (table.insert actions
-                       {:name (if (. expanded-nodes node) "Collapse" "Expand")
-                        :icon (if (. expanded-nodes node) "close_fullscreen" "open_in_full")
-                         :fn (fn [_button _event]
-                                (toggle-node-presentation node))})
-        (table.insert actions
-                       {:name "cube"
-                         :fn (fn [_button _event]
-                                (local scene app.scene)
-                                (when (and scene scene.add-graph-node-cube)
-                                    (scene:add-graph-node-cube {:node node})))})
-        (table.insert actions
-                       {:name "Remove from Map"
-                        :icon "close"
-                        :fn (fn [_button _event]
-                                (when (and graph-map graph-map.remove-nodes)
-                                    (graph-map:remove-nodes [node])))})
-        (table.insert actions {:type :separator})
-        (each [_ action (ipairs (or configured-actions []))]
-            (when (and action action.name action.fn)
-                (table.insert actions action)))
-        actions)
+        (GraphNodeActions.build {:graph-map graph-map
+                                 :views views
+                                 :focus-manager focus-manager
+                                 :expanded-nodes expanded-nodes
+                                 :toggle-node-presentation toggle-node-presentation
+                                 :include-preview-action? true}
+                                node))
 
     (fn resolve-menu-position [event]
         (local screen (and event event.screen))
@@ -1603,17 +1568,21 @@
     (set view.remove-selected-nodes (fn [_self]
                                             (assert-not-dropped "remove-selected-nodes")
                                             (graph-map:remove-nodes selected-nodes)))
-    (install-focused-node-action-methods!
+    (set view.node-actions
+         (fn [_self node]
+             (assert-not-dropped "node-actions")
+             (build-node-actions node)))
+    (FocusedActions.install!
         view
-        {:assert-not-dropped assert-not-dropped
-         :build-node-actions build-node-actions
-         :focused-node (fn [] focused-node)
-          :get-menu-manager get-menu-manager
-          :get-position get-position
-          :pointer-target (or options.pointer-target (and ctx ctx.pointer-target))
-          :selector selector
-          :toggle-node-presentation toggle-node-presentation
-          :graph-map graph-map})
+        (FocusedActions.spatial-deps
+            {:assert-not-dropped assert-not-dropped
+             :focused-node (fn [] focused-node)
+             :get-menu-manager get-menu-manager
+             :get-position get-position
+             :pointer-target (or options.pointer-target (and ctx ctx.pointer-target))
+             :selector selector
+             :toggle-node-presentation toggle-node-presentation
+             :graph-map graph-map}))
     (GraphViewSelectionEditing.install! view {:assert-not-dropped assert-not-dropped :focused-node (fn [] focused-node) :selected-node? (fn [node] (and node (rawget selected-set node))) :selected-nodes selected-nodes :points registry.points :selector selector :selection selection :focus-nodes focus-nodes})
     (SelectedPreviewCommands.install! view assert-not-dropped toggle-node-presentation expanded-nodes)
     (set view.reveal-node
@@ -1899,100 +1868,6 @@
                   (error capture-err))))
     view)
 
-(fn resolve-keyboard-node-menu-position [deps node]
-    (local graph-position ((. deps :get-position) nil node))
-    (local pointer-target (. deps :pointer-target))
-    (local selector (. deps :selector))
-    (local project (or (and pointer-target pointer-target.project) (and selector selector.project)))
-    (assert (= (type project) :function)
-            "GraphView focused node menu requires pointer target or selector project")
-    (assert (and app.hud app.hud.screen-pos-ray)
-            "GraphView focused node menu requires HUD screen-pos-ray")
-    (local screen (project graph-position {}))
-    (assert (and screen screen.x screen.y) "GraphView focused node menu project must return screen coordinates")
-    (local viewport-utils (require :viewport-utils))
-    (local input-pos (viewport-utils.viewport-pos->input-pos screen (viewport-utils.to-table app.viewport) app.engine))
-    (assert (and input-pos input-pos.x input-pos.y) "GraphView focused node menu must convert projected viewport coordinates to logical input")
-    (local ray (app.hud:screen-pos-ray {:x input-pos.x :y input-pos.y}))
-    (assert (and ray ray.origin ray.direction)
-            "GraphView focused node menu HUD screen-pos-ray must return a ray")
-    (local dz (or ray.direction.z 0))
-    (assert (not (= dz 0))
-            "GraphView focused node menu HUD ray must intersect the HUD plane")
-    (local t (/ (- 0 ray.origin.z) dz))
-    (+ ray.origin (* ray.direction t)))
-
-(set install-focused-node-action-methods!
-     (fn [view deps]
-         (set view.node-actions
-              (fn [_self node]
-                  ((. deps :assert-not-dropped) "node-actions")
-                  ((. deps :build-node-actions) node)))
-         (set view.focused-node-actions
-              (fn [self]
-                  ((. deps :assert-not-dropped) "focused-node-actions")
-                  (local node ((. deps :focused-node)))
-                  (if node (self:node-actions node) [])))
-         (set view.run-focused-node-action-slot
-              (fn [self index]
-                  ((. deps :assert-not-dropped) "run-focused-node-action-slot")
-                  (if (not (= (type index) :number))
-                      false
-                      (do
-                          (local action (. (self:focused-node-actions) index))
-                          (if (and action (= (type action.fn) :function))
-                              (do
-                                  (action.fn nil {})
-                                  true)
-                              false)))))
-         (set view.open-focused-node-menu
-              (fn [self]
-                  ((. deps :assert-not-dropped) "open-focused-node-menu")
-                  (local node ((. deps :focused-node)))
-                  (local manager ((. deps :get-menu-manager)))
-                  (if (and node manager)
-                      (do
-                          (manager:open {:actions (self:focused-node-actions)
-                                         :position (resolve-keyboard-node-menu-position deps node)})
-                          true)
-                      false)))
-         (set view.toggle-focused-node-preview
-              (fn [_self]
-                  ((. deps :assert-not-dropped) "toggle-focused-node-preview")
-                  (local node ((. deps :focused-node)))
-                  (if node
-                      (do
-                          ((. deps :toggle-node-presentation) node)
-                          true)
-                      false)))
-         (set view.copy-focused-node-key
-              (fn [_self]
-                  ((. deps :assert-not-dropped) "copy-focused-node-key")
-                  (local node ((. deps :focused-node)))
-                  (if node
-                      (do
-                          (local runtime-gl (require :gl))
-                          (runtime-gl.clipboard-set (tostring node.key))
-                          true)
-                      false)))
-         (set view.remove-focused-node-from-map
-              (fn [_self]
-                  ((. deps :assert-not-dropped) "remove-focused-node-from-map")
-                  (local node ((. deps :focused-node)))
-                  (if node
-                      (do
-                          (local graph-map deps.graph-map)
-                          (> (graph-map:remove-nodes [node]) 0))
-                      false)))
-         (set view.reveal-focused-node
-              (fn [self]
-                  ((. deps :assert-not-dropped) "reveal-focused-node")
-                  (local node ((. deps :focused-node)))
-                  (if node
-                      (do
-                          (self:reveal-node node {:select? true :focus? true :center? true})
-                          true)
-                      false)))))
 (set update-islands-after-member-drag-end!
      (fn [graph-map island-host get-position node] (when (and node node.key) (assert graph-map.update-island "GraphView island member alt-drag requires GraphMap.update-island") (local member-key node.key) (local position (get-position nil node)) (each [_ island (ipairs (graph-map:list-islands))] (when (accumulate [found false _ key (ipairs (or island.members []))] (or found (= key member-key))) (local next-state (island-host:state-after-member-drag-end island {:member-key member-key :position position})) (when next-state (graph-map:update-island island.id {:state next-state})))))))
 GraphView

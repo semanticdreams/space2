@@ -9,8 +9,7 @@
   (assert (fuzzy-match "AlP" "alpha") "Case insensitive match failed")
   (assert (fuzzy-match "" "alpha") "Empty needle match failed")
   (assert (not (fuzzy-match "beta" "alpha")) "Mismatch passed")
-  (assert (not (fuzzy-match "z" "alpha")) "Mismatch passed")
-  (print "test-fuzzy-match passed"))
+  (assert (not (fuzzy-match "z" "alpha")) "Mismatch passed"))
 
 (fn main []
     (test-fuzzy-match))
