@@ -48,11 +48,24 @@
       (set found binding)))
   found)
 
+(fn find-select-all-binding [bindings]
+  (var found nil)
+  (each [_ binding (ipairs bindings) &until found]
+    (when (and (= (. binding.keys 1) "g")
+               (= (. binding.keys 2) "s")
+               (= (. binding.keys 3) "e"))
+      (set found binding)))
+  found)
+
 (fn make-command-graph-view [count calls]
   {:selected-node-count (fn [_self] count)
+   :has-visible-nodes? (fn [_self] (> count 0))
+   :select-all-visible-nodes (fn [_self]
+                               (set calls.select-all (+ calls.select-all 1))
+                               true)
    :focus-selected-node (fn [_self]
-                          (set calls.focus (+ calls.focus 1))
-                          true)})
+                           (set calls.focus (+ calls.focus 1))
+                           true)})
 
 (fn run-command-case [count expected-available expected-calls message]
   (local calls {:focus 0})
@@ -74,12 +87,61 @@
   (run-command-case 0 false 0 "SPC g s f should no-op with zero selected nodes")
   (run-command-case 2 false 0 "SPC g s f should no-op with multiple selected nodes"))
 
+(fn command-provider-select-all-routes-only-when-visible []
+  (fn run-case [count expected-available expected-calls message]
+    (local calls {:focus 0 :select-all 0})
+    (local graph-view (make-command-graph-view count calls))
+    (set command-graph-view graph-view)
+    (local provider (GraphCommands.provider {:graph-view resolve-command-graph-view}))
+    (local binding (assert (find-select-all-binding provider.bindings) "SPC g s e binding missing"))
+    (assert (= binding.command "graph.selection.select-all") "SPC g s e should bind select-all command")
+    (assert (= binding.label "select-all") "SPC g s e binding should use select-all label")
+    (local command (assert (. provider.commands binding.command) "select-all command missing"))
+    (assert (= command.id "graph.selection.select-all") "select-all command id mismatch")
+    (assert (= command.label "select-all") "select-all command label mismatch")
+    (assert (= (command:available? {}) expected-available) message)
+    (assert (= (command:run {}) expected-available) message)
+    (assert (= calls.select-all expected-calls) message))
+  (run-case 2 true 1 "SPC g s e should select all when visible nodes exist")
+  (run-case 0 false 0 "SPC g s e should no-op without visible nodes"))
+
 (fn assert-selection [view graph-map nodes label]
   (assert (= (length view.selected-nodes) (length nodes)) (.. label " selected node count mismatch"))
   (assert (= (length graph-map.selected_node_keys) (length nodes)) (.. label " selected key count mismatch"))
   (each [i node (ipairs nodes)]
     (assert (= (. view.selected-nodes i) node) (.. label " selected node mismatch"))
     (assert (= (. graph-map.selected_node_keys i) node.key) (.. label " selected key mismatch"))))
+
+(fn array-contains? [items expected]
+  (var found? false)
+  (each [_ item (ipairs items)]
+    (when (= item expected)
+      (set found? true)))
+  found?)
+
+(fn assert-array-members [actual expected label]
+  (assert (= (length actual) (length expected)) (.. label " length mismatch"))
+  (each [_ item (ipairs expected)]
+    (assert (array-contains? actual item) (.. label " missing expected item"))))
+
+(fn graph-view-select-all-visible-nodes-syncs-selection-and-selector []
+  (local ctx (make-ctx))
+  (local selector (ObjectSelector {:project identity-project :ctx ctx :enabled? true}))
+  (local graph-map (make-graph-map))
+  (local view (GraphView {:graph-map graph-map :ctx ctx :selector selector :data-dir "/tmp/space/tests/graph-selection-select-all"}))
+  (assert (= (view:select-all-visible-nodes) false) "Empty graph view select-all should no-op")
+  (local a (Graph.GraphNode {:key "a"}))
+  (local b (Graph.GraphNode {:key "b"}))
+  (graph-map:add-node a {:position (glm.vec3 0 0 0)})
+  (graph-map:add-node b {:position (glm.vec3 10 0 0)})
+  (selector:set-selected [(. view.points a)])
+  (assert (= (view:select-all-visible-nodes) true) "Select-all should report success when visible nodes exist")
+  (assert-selection view graph-map [a b] "select all visible")
+  (assert-array-members selector.selected [(. view.points a) (. view.points b)] "select all selector points")
+  (assert (not (graph-map:lookup "lazy-only")) "Select-all should not materialize lazy-only nodes")
+  (view:drop)
+  (graph-map:drop)
+  (selector:drop))
 
 (fn graph-view-focus-selected-node-preserves-selection-and-requires-single-selection []
   (local ctx (make-ctx))
@@ -110,9 +172,13 @@
   (selector:drop))
 
 (table.insert tests {:name "Graph selection focus command routes only for single selection"
-                     :fn command-provider-focus-selected-routes-only-for-single-selection})
+                      :fn command-provider-focus-selected-routes-only-for-single-selection})
+(table.insert tests {:name "Graph selection select-all command routes only when nodes are visible"
+                      :fn command-provider-select-all-routes-only-when-visible})
 (table.insert tests {:name "GraphView focus selected node preserves selection and requires single selection"
-                     :fn graph-view-focus-selected-node-preserves-selection-and-requires-single-selection})
+                      :fn graph-view-focus-selected-node-preserves-selection-and-requires-single-selection})
+(table.insert tests {:name "GraphView select all visible nodes syncs selection and selector"
+                      :fn graph-view-select-all-visible-nodes-syncs-selection-and-selector})
 
 (fn main []
   (table.insert tests 1 {:name "Graph selection focus command suppresses selection info logs"
