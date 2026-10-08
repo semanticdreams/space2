@@ -84,6 +84,9 @@
     (clickables:on-mouse-button-down payload)
     (clickables:on-mouse-button-up payload))
 
+(fn click-child-row [clickables button timestamp]
+    (click-row clickables 40 -36 button timestamp))
+
 (fn row-keys [rows]
     (icollect [_ row (ipairs rows)] row.key))
 
@@ -231,7 +234,7 @@
     (local clickables (Clickables))
     (assert clickables "outline row click test requires clickables")
     (local view (GraphView {:graph-map graph-map :ctx (make-real-render-ctx clickables)}))
-    (click-row clickables 20 -24 1 100)
+    (click-child-row clickables 1 100)
     (assert (= graph-map.focused_node_key "test:child") "row click should focus hit-tested child row")
     (assert (= (table.concat graph-map.selected_node_keys ",") "test:child") "row click should select hit-tested child row")
     (view:drop)
@@ -256,11 +259,11 @@
     (set view.node-views.open
          (fn [_self node _opts]
              (set opened-node-key node.key)))
-    (click-row clickables 20 -24 3 200)
+    (click-child-row clickables 3 200)
     (assert opened-menu "row right-click should open action menu through clickables")
     (assert (= graph-map.focused_node_key "test:child") "row right-click should focus hit-tested child row")
-    (click-row clickables 20 -24 1 300)
-    (click-row clickables 20 -24 1 500)
+    (click-child-row clickables 1 300)
+    (click-child-row clickables 1 500)
     (assert (= opened-node-key "test:child") "row double-click should activate/open hit-tested child row")
     (view:drop)
     (graph-map:drop)

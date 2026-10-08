@@ -104,10 +104,13 @@
         event.position
         {:x 0 :y 0 :z 0}))
 
-(fn row-position [row index]
-    (glm.vec3 (+ row-left-padding (* row-depth-indent row.depth))
+(fn row-hit-position [index]
+    (glm.vec3 0
               (- (* (- index 1) row-height))
               0))
+
+(fn row-label-x [row]
+    (+ row-left-padding (* row-depth-indent row.depth)))
 
 (fn ray-plane-point [ray z]
     (local direction (assert (and ray ray.direction) "GraphOutlineView row intersect requires ray.direction"))
@@ -122,9 +125,9 @@
 
 (fn point-in-row? [point position]
     (and (>= point.x position.x)
-         (<= point.x (+ position.x row-width))
+         (< point.x (+ position.x row-width))
          (<= point.y position.y)
-         (>= point.y (- position.y row-height))))
+         (> point.y (- position.y row-height))))
 
 (fn attach-row-intersect! [target position]
     (set target.position position)
@@ -154,8 +157,9 @@
     (local target {:key row.key
                    :row row
                    :label (row-title row)
+                   :label-x (row-label-x row)
                    :depth row.depth})
-    (attach-row-intersect! target (row-position row index))
+    (attach-row-intersect! target (row-hit-position index))
     (set target.on-click
          (fn [_target _event]
              (select-key! self row.key)))
