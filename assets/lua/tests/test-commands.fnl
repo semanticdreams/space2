@@ -64,10 +64,11 @@
 (fn make-graph-selection-test-view [opts]
   (local options (assert opts "make-graph-selection-test-view requires opts"))
   (local calls {:select 0
-                :add 0
-                :remove 0
-                :toggle 0
-                :clear 0})
+                 :add 0
+                 :remove 0
+                 :toggle 0
+                 :clear 0
+                 :select-all 0})
   (local view {:calls calls
                :selected-node-count (fn [_self]
                                       (assert (not (= options.selected-count nil))
@@ -86,7 +87,11 @@
   (set view.toggle-focused-node-selection
        (fn [_self] (set calls.toggle (+ calls.toggle 1)) true))
   (set view.clear-selection
-       (fn [_self] (set calls.clear (+ calls.clear 1)) true))
+        (fn [_self] (set calls.clear (+ calls.clear 1)) true))
+  (set view.select-all-visible-nodes
+       (fn [_self] (set calls.select-all (+ calls.select-all 1)) true))
+  (set view.has-visible-nodes?
+       (fn [_self] (= options.visible? true)))
   view)
 
 (fn find-hint-entry [section key]
@@ -270,8 +275,9 @@
 
 (fn graph-provider-selection-prefix-hints-include-selection-commands []
   (local composed (graph-selection-composed (make-graph-selection-test-view {:selected-count 1
-                                                                             :focused? true
-                                                                             :focused-selected? true})))
+                                                                              :focused? true
+                                                                              :focused-selected? true
+                                                                              :visible? true})))
   (local graph-section (Commands.hint-section composed ["g"] {} {:id :mode :title "MODE"}))
   (assert graph-section "Graph provider graph hints should exist")
   (assert-hint graph-section "p" "preview")
@@ -282,7 +288,12 @@
   (assert-hint selection-section "a" "add")
   (assert-hint selection-section "r" "remove")
   (assert-hint selection-section "t" "toggle")
-  (assert-hint selection-section "c" "clear"))
+  (assert-hint selection-section "c" "clear")
+  (assert-hint selection-section "e" "select-all")
+  (local resolved (Keymap.resolve composed.tree ["g" "s" "e"]))
+  (assert (= resolved.kind :command) "g s e should resolve to a graph selection command")
+  (assert (= resolved.command-id "graph.selection.select-all")
+          "g s e should route to graph.selection.select-all"))
 
 (fn graph-provider-selection-availability-follows-focus-and-selection []
   (local no-focus (graph-selection-composed (make-graph-selection-test-view {:selected-count 0
@@ -292,13 +303,16 @@
   (assert (not (Commands.available? no-focus "graph.selection.add-focused" {})))
   (assert (not (Commands.available? no-focus "graph.selection.remove-focused" {})))
   (assert (not (Commands.available? no-focus "graph.selection.toggle-focused" {})))
+  (assert (not (Commands.available? no-focus "graph.selection.select-all" {})))
   (local focused-empty (graph-selection-composed (make-graph-selection-test-view {:selected-count 0
-                                                                                 :focused? true
-                                                                                 :focused-selected? false})))
+                                                                                  :focused? true
+                                                                                  :focused-selected? false
+                                                                                  :visible? true})))
   (assert (Commands.available? focused-empty "graph.selection.select-focused" {}))
   (assert (Commands.available? focused-empty "graph.selection.add-focused" {}))
   (assert (not (Commands.available? focused-empty "graph.selection.remove-focused" {})))
   (assert (Commands.available? focused-empty "graph.selection.toggle-focused" {}))
+  (assert (Commands.available? focused-empty "graph.selection.select-all" {}))
   (assert (not (Commands.available? focused-empty "graph.selection.clear" {})))
   (local focused-selected (graph-selection-composed (make-graph-selection-test-view {:selected-count 1
                                                                                     :focused? true
@@ -311,15 +325,17 @@
 
 (fn graph-provider-selection-commands-run-view-methods []
   (local view (make-graph-selection-test-view {:selected-count 1
-                                               :focused? true
-                                               :focused-selected? true}))
+                                                :focused? true
+                                                :focused-selected? true
+                                                :visible? true}))
   (local composed (graph-selection-composed view))
   (local ids ["graph.selection.select-focused"
-              "graph.selection.add-focused"
-              "graph.selection.remove-focused"
-              "graph.selection.toggle-focused"
-              "graph.selection.clear"])
-  (local fields [:select :add :remove :toggle :clear])
+               "graph.selection.add-focused"
+               "graph.selection.remove-focused"
+               "graph.selection.toggle-focused"
+               "graph.selection.clear"
+               "graph.selection.select-all"])
+  (local fields [:select :add :remove :toggle :clear :select-all])
   (each [index id (ipairs ids)]
     (local before {})
     (each [_ field (ipairs fields)]
