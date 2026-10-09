@@ -13,6 +13,8 @@
 (local row-left-padding 12)
 (local row-depth-indent 18)
 (local node-label-gap 12)
+(local point-label-gap 1.0)
+(local graph-label-default-scale 3.0)
 (local focus-border-width 3)
 (local selection-border-width 2)
 (local empty-state-message "No outline roots. Focus a node or select exactly one node, then run Set Outline Root (SPC g o r).")
@@ -43,6 +45,38 @@
     (set label.layout.depth-offset-index 1)
     (label.layout:layouter)
     label)
+
+(fn visible-point-size [point]
+    (assert point "GraphOutlineView visible point size requires point")
+    (var size (assert point.size "GraphOutlineView visible point size requires base size"))
+    (when point.layers
+        (each [_ layer (ipairs point.layers)]
+            (when (and layer layer.size (> layer.size size))
+                (set size layer.size))))
+    size)
+
+(fn point-relative-label-position [point label]
+    (assert point "GraphOutlineView point-relative label requires point")
+    (assert label "GraphOutlineView point-relative label requires label")
+    (local measure (or label.layout.measure (glm.vec3 0 0 0)))
+    (glm.vec3 (+ point.position.x (/ (visible-point-size point) 2.0) point-label-gap)
+              (- point.position.y (/ measure.y 2.0))
+              0.02))
+
+(fn place-point-relative-label! [point label]
+    (set label.layout.position (point-relative-label-position point label))
+    (label.layout:layouter)
+    label)
+
+(fn row-label-scale [self]
+    (if (= self.outline-text-scale nil)
+        graph-label-default-scale
+        self.outline-text-scale))
+
+(fn empty-state-label-scale [self]
+    (if (= self.outline-text-scale nil)
+        1.0
+        self.outline-text-scale))
 
 (fn drop-handle-list! [handles]
     (each [_ handle (ipairs handles)]
@@ -240,8 +274,12 @@
                                           (+ base-size selection-border-width focus-border-width)
                                           0))
         (record.point:set-layer-size 2 (if (row-selected? self row)
-                                          (+ base-size selection-border-width)
-                                          0)))
+                                           (+ base-size selection-border-width)
+                                           0)))
+    (when (and record.point record.visuals)
+        (local label (. record.visuals 2))
+        (when label
+            (place-point-relative-label! record.point label)))
     (when record.background
         (set record.background.color (visual-color self row))
         (record.background:update)))
@@ -272,11 +310,12 @@
                         {:size base-size
                          :color (node-color row)}]}))
     (local label
-           (create-text! self.ctx
-                         (row-title row)
-                         (glm.vec3 (row-label-x row) (+ position.y 4) 0.02)
-                         (glm.vec4 0.86 0.88 0.92 1)
-                         self.outline-text-scale))
+            (create-text! self.ctx
+                          (row-title row)
+                          (glm.vec3 0 0 0.02)
+                          (glm.vec4 0.86 0.88 0.92 1)
+                          (row-label-scale self)))
+    (place-point-relative-label! point label)
     [point label])
 
 (fn attach-row-handles! [self row index]
@@ -323,10 +362,10 @@
                              0))
     (local label
            (create-text! self.ctx
-                         empty-state-message
-                         (glm.vec3 row-left-padding (- 0 row-height -6) 0.02)
-                         (glm.vec4 0.86 0.88 0.92 1)
-                         self.outline-text-scale))
+                          empty-state-message
+                          (glm.vec3 row-left-padding (- 0 row-height -6) 0.02)
+                          (glm.vec4 0.86 0.88 0.92 1)
+                          (empty-state-label-scale self)))
     (set self.empty-state-handle {:message empty-state-message
                                    :visuals [background label]})
     self.empty-state-handle)
@@ -517,7 +556,7 @@
                                             :ctx ctx
                                             :view-target options.view-target
                                             :view-context (resolve-view-context options ctx)}))
-    (local outline-text-scale (if (= options.outline-text-scale nil) 1.0 options.outline-text-scale))
+    (local outline-text-scale options.outline-text-scale)
     (local self (make-outline-view-state graph-map ctx clickables node-views outline-text-scale))
     (var dropped? false)
     (set self.assert-not-dropped
