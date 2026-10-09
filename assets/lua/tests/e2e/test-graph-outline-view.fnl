@@ -88,6 +88,7 @@
     (options.populate state.graph-map nodes))
   (set state.view (GraphView {:graph-map state.graph-map
                               :ctx build-ctx
+                              :outline-text-scale 2.4
                               :data-dir options.data-root}))
   (state.view:update 0.016)
   (local layout (make-outline-layout options.name world-width world-height))
@@ -111,9 +112,9 @@
 
 (fn capture-outline [ctx opts]
   (local options (assert opts "capture-outline requires opts"))
-  (local world-units-per-pixel 0.2)
-  (local world-width (* ctx.width world-units-per-pixel))
-  (local world-height (* ctx.height world-units-per-pixel))
+  (local world-width 192)
+  (local world-height 72)
+  (local world-units-per-pixel (/ world-height ctx.height))
   (local focus-manager (FocusManager {:root-name (.. "e2e-" options.name)}))
   (local data-root (fs.join-path "/tmp/space/tests" options.name))
   (when (fs.exists data-root)
@@ -128,9 +129,9 @@
   (local screen-target
     (Harness.make-screen-target
       {:focus-manager focus-manager
-       :width ctx.width
-       :height ctx.height
-       :world-units-per-pixel world-units-per-pixel
+        :width ctx.width
+        :height ctx.height
+        :world-units-per-pixel world-units-per-pixel
        :projection (glm.ortho 0 world-width (- world-height) 0 -100.0 100.0)
        :builder outline-screen-builder}))
   (set current-outline-build nil)
