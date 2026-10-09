@@ -11,6 +11,9 @@ env:
   SPACE_RELEASE_HEADLESS_SMOKE_MODULE: tests.test-headless-engine-run:main
   SPACE_RELEASE_CEF_SMOKE_MODULE: tests.test-cef-browser-smoke:main
 
+permissions:
+  contents: read
+
 jobs:
   build-linux:
     runs-on: ubuntu-22.04
@@ -173,13 +176,12 @@ jobs:
             test -f "${artifact}"
           done < "${manifest}"
 
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
-        if: github.ref_type == 'tag'
+      - name: Upload Linux release artifacts
+        uses: actions/upload-artifact@v5
         with:
-          files: ${{ steps.linux-release-artifacts.outputs.files }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: space-linux-release-${{ matrix.profile }}
+          path: ${{ steps.linux-release-artifacts.outputs.files }}
+          if-no-files-found: error
 
   build-windows:
     runs-on: ubuntu-22.04
@@ -329,12 +331,41 @@ jobs:
           }
           & (Join-Path $installDir "space-cli.exe") --help *> $null
 
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
-        if: github.ref_type == 'tag'
+      - name: Upload Windows release artifacts
+        uses: actions/upload-artifact@v5
         with:
-          files: |
+          name: space-windows-release
+          path: |
             build/dist/space-windows-x86_64.zip
             build/dist/space-windows-x86_64-setup.exe
+          if-no-files-found: error
+
+  publish-release:
+    runs-on: ubuntu-22.04
+    needs:
+      - build-linux
+      - build-windows-installer
+    if: github.ref_type == 'tag'
+    permissions:
+      contents: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: space-*-release*
+          path: build/release-artifacts
+          merge-multiple: true
+
+      - name: Verify downloaded release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          find build/release-artifacts -type f -print | sort
+          test -n "$(find build/release-artifacts -type f -print -quit)"
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/release-artifacts/**
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
