@@ -79,7 +79,9 @@
 (fn focus-node-activate [focus-node opts]
     (local presentation (assert focus-node.presentation
                                 "CompactNodeProjection focus activation requires presentation"))
-    (presentation:activate opts))
+    (if presentation.activate
+        (presentation:activate opts)
+        true))
 
 (fn refresh! [record opts]
     (assert record "CompactNodeProjection refresh! requires record")

@@ -680,6 +680,14 @@
             "focus activation should expand compact presentation")
     (assert child-record.point._card-size
             "focus activation should replace point with expanded card presentation")
+    (assert (= (ctx.focus.manager:activate-focused {}) true)
+            "focus activation on expanded outline card should be idempotent")
+    (assert (= opened-node-key nil)
+            "second focus activation should not open full node view")
+    (assert child-record.expanded?
+            "second focus activation should leave outline compact point expanded")
+    (assert child-record.point._card-size
+            "second focus activation should keep expanded card presentation")
     (view:drop)
     (graph-map:drop)
     (graph:drop))
