@@ -62,12 +62,27 @@ def require_windows_routing(errors):
         fail(errors, "windows.yml: missing workflow_dispatch trigger")
 
     on_block = top_level_block(windows, "on")
-    has_main_push = re.search(
-        r"(?m)^  push:\n(?:    .+\n|\n)*?    branches:\n(?:      .+\n|\n)*?      - main$",
+    trigger_names = set(re.findall(r"(?m)^  ([A-Za-z0-9_-]+):", on_block))
+    expected_triggers = {"push", "workflow_dispatch"}
+    if trigger_names != expected_triggers:
+        found = ", ".join(sorted(trigger_names)) or "none"
+        expected = ", ".join(sorted(expected_triggers))
+        fail(errors, f"windows.yml: triggers must be exactly {expected}; found {found}")
+
+    push_match = re.search(
+        r"(?ms)^  push:\n(?P<body>(?:    .+\n|\n)*?)(?=^  \S|\Z)",
         on_block,
     )
-    if not has_main_push:
-        fail(errors, "windows.yml: missing push trigger for main")
+    push_body = push_match.group("body") if push_match else ""
+    branches_match = re.search(
+        r"(?ms)^    branches:\n(?P<body>(?:      .+\n|\n)*?)(?=^    \S|^  \S|\Z)",
+        push_body,
+    )
+    branch_body = branches_match.group("body") if branches_match else ""
+    branches = re.findall(r"(?m)^      - (.+)$", branch_body)
+    if branches != ["main"]:
+        found = ", ".join(branches) or "none"
+        fail(errors, f"windows.yml: push branches must be exactly main; found {found}")
 
 
 def main():
