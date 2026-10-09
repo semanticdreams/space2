@@ -138,7 +138,9 @@
                   :register-double-click register-clickable-stub
                   :unregister-double-click unregister-clickable-stub}
      :focus {:create-scope create-focus-scope-stub}
-     :theme {:font (make-test-font)
+     :theme {:graph {:selection-border-color (glm.vec4 1 0.6 0.2 1)}
+             :input {:focus-outline (glm.vec4 0.2 0.6 1 1)}
+             :font (make-test-font)
              :text {:foreground (glm.vec4 0.8 0.8 0.8 1) :scale 1.0}}
      :render-events render-events
      :get-text-ssbo-batcher (fn [_self] text-batcher)
