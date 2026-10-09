@@ -10,6 +10,9 @@
 
 (local tests [])
 
+(fn approx [actual expected]
+    (< (math.abs (- actual expected)) 0.0001))
+
 (fn register-test-loader [graph]
     (graph:register-key-loader "test"
         (fn [key]
@@ -451,6 +454,28 @@
     (graph-map:drop)
     (graph:drop))
 
+(fn outline-labels-align-right-of-node-points []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (add-edge! graph-map "test:root" "test:child")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (local ctx (make-render-ctx))
+    (local view (GraphView {:graph-map graph-map :ctx ctx}))
+    (local root-point (outline-layer-point ctx 1 3))
+    (local root-label (assert (. (. view.row-handles 1) :visuals 2)
+                              "root row should keep its label visual"))
+    (assert (= root-label.style.scale 3.0)
+            "outline node labels should use graph-view label default scale")
+    (assert (approx root-label.layout.position.x (+ root-point.position.x (/ root-point.size 2.0) 1.0))
+            (.. "outline label x should sit just right of the node point, got "
+                (tostring root-label.layout.position.x)))
+    (assert (approx root-label.layout.position.y (- root-point.position.y (/ root-label.layout.measure.y 2.0)))
+            (.. "outline label y should vertically center measured text on the node point, got "
+                (tostring root-label.layout.position.y)))
+    (view:drop)
+    (graph-map:drop)
+    (graph:drop))
+
 (fn outline-view-creates-empty-state-guidance-when-no-roots []
     (local {:graph graph :graph-map graph-map} (make-map))
     (graph-map:load-by-key "test:orphan")
@@ -538,6 +563,7 @@
 (table.insert tests {:name "outline row right-click and activation use real hit testing" :fn outline-row-right-click-and-activation-use-real-hit-testing})
 (table.insert tests {:name "outline row registrations drop on rebuild and drop" :fn outline-row-registrations-drop-on-rebuild-and-drop})
 (table.insert tests {:name "outline view creates tree node visual artifacts for projected rows" :fn outline-view-creates-tree-node-visual-artifacts-for-projected-rows})
+(table.insert tests {:name "outline labels align right of node points" :fn outline-labels-align-right-of-node-points})
 (table.insert tests {:name "outline view creates empty state guidance when no roots" :fn outline-view-creates-empty-state-guidance-when-no-roots})
 (table.insert tests {:name "command toggle outline flips view mode" :fn command-toggle-outline-flips-view-mode})
 (table.insert tests {:name "command set outline root prefers focused node" :fn command-set-outline-root-prefers-focused-node})

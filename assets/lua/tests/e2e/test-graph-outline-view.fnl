@@ -88,7 +88,6 @@
     (options.populate state.graph-map nodes))
   (set state.view (GraphView {:graph-map state.graph-map
                               :ctx build-ctx
-                              :outline-text-scale 2.4
                               :data-dir options.data-root}))
   (state.view:update 0.016)
   (local layout (make-outline-layout options.name world-width world-height))
