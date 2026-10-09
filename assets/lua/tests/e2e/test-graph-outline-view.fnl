@@ -285,23 +285,24 @@
                          "outline click repro requires graph-map selected_node_keys")
                 ","))
 
-(fn outline-click-selects-and-focuses-visible-row [ctx]
-  (local env (make-outline-e2e-env ctx {:name "graph-outline-repro-click-selection"
-                                        :populate populate-child-root!}))
+(fn outline-click-focuses-visible-row-without-changing-selection [ctx]
+  (local env (make-outline-e2e-env ctx {:name "graph-outline-repro-click-focus"
+                                         :populate populate-child-root!}))
   (local (ok err)
     (pcall
       (fn []
         (local view (assert env.state.view "outline click repro missing view"))
         (local graph-map (assert env.state.graph-map "outline click repro missing graph map"))
         (local child-record (row-record view "child"))
+        (graph-map:set-selected-node-keys ["root"])
         (local click-point (project-to-screen (glm.vec3 40 -36 0) env.target))
         (click-at click-point)
         (view:update 0.016)
         (assert (= graph-map.focused_node_key "child")
                 (.. "outline row click should focus child graph node, got "
                     (tostring graph-map.focused_node_key)))
-        (assert (= (selected-keys-text graph-map) "child")
-                (.. "outline row click should select child graph node, got "
+        (assert (= (selected-keys-text graph-map) "root")
+                (.. "outline row click should preserve selected graph node, got "
                     (selected-keys-text graph-map)))
         (assert child-record.selectable
                 "outline row click repro requires row selectable proxy")
@@ -381,11 +382,11 @@
 (fn run-reproduction-tests [ctx]
   (local repro-case (os.getenv "SPACE_OUTLINE_REPRO_CASE"))
   (if (= repro-case "click")
-      (outline-click-selects-and-focuses-visible-row ctx)
+      (outline-click-focuses-visible-row-without-changing-selection ctx)
       (= repro-case "visual")
       (outline-selection-focus-visuals-match-graph-view ctx)
       (do
-        (outline-click-selects-and-focuses-visible-row ctx)
+        (outline-click-focuses-visible-row-without-changing-selection ctx)
         (outline-selection-focus-visuals-match-graph-view ctx))))
 
 (fn run [ctx]

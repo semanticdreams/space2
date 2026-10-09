@@ -357,11 +357,11 @@
         (record.focus-node:request-focus opts)
         (set self.graph-map.focused_node_key key)))
 
-(fn select-and-focus-key! [self key]
-    (local node (resolve-visible-node self key "select"))
-    (set-outline-selection! self [node.key])
-    (focus-key! self node.key {:reason :pointer})
+(fn focus-visible-key! [self key reason]
+    (local node (resolve-visible-node self key "focus"))
+    (focus-key! self node.key {:reason reason})
     (set self.graph-map.focused_node_key node.key)
+    (refresh-row-visuals! self)
     true)
 
 (fn attach-row-visuals! [self row index target]
@@ -403,21 +403,21 @@
     (attach-row-intersect! target (row-hit-position index))
     (set target.on-click
           (fn [_target _event]
-               (select-and-focus-key! self row.key)))
+               (focus-visible-key! self row.key :pointer)))
     (set target.activate
           (fn [_target opts]
-              (select-and-focus-key! self row.key)
+              (focus-visible-key! self row.key :activate)
               (open-key! self row.key opts)
               true))
     (set target.on-double-click
          (fn [_target event]
              (target:activate {:event event})))
     (set target.on-right-click
-          (fn [_target event]
-               (select-and-focus-key! self row.key)
-               (local manager (get-menu-manager self.ctx))
-              (when manager
-                   (manager:open {:actions (self:node-actions row.node)
+           (fn [_target event]
+                (focus-visible-key! self row.key :pointer-menu)
+                (local manager (get-menu-manager self.ctx))
+               (when manager
+                    (manager:open {:actions (self:node-actions row.node)
                                  :position (menu-position event)}))))
     (local record (register-row-clickables! self clickables target))
     (set record.row row)
