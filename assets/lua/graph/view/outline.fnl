@@ -3,14 +3,18 @@
 (local GraphViewNodeViews (require :graph/view/node-views))
 (local GraphNodeActions (require :graph/view/node-actions))
 (local FocusedActions (require :graph/view/focused-actions))
+(local GraphNodePresentation (require :graph/view/presentation))
 (local RawRectangle (require :raw-rectangle))
 (local Text (require :text))
 (local TextStyle (require :text-style))
 
 (local row-width 640)
 (local row-height 24)
-(local row-left-padding 8)
+(local row-left-padding 12)
 (local row-depth-indent 18)
+(local node-label-gap 12)
+(local focus-border-width 3)
+(local selection-border-width 2)
 (local empty-state-message "No outline roots. Focus a node or select exactly one node, then run Set Outline Root (SPC g o r).")
 
 (fn outline-text-style [ctx color scale]
@@ -99,6 +103,22 @@
         (glm.vec4 0.18 0.32 0.24 0.70)
         (glm.vec4 0.08 0.08 0.10 0.58)))
 
+(fn row-selected? [self row]
+    (not (= (. (selected-key-set self.graph-map) row.key) nil)))
+
+(fn row-focused? [self row]
+    (= self.graph-map.focused_node_key row.key))
+
+(fn node-color [row]
+    (assert (and row row.node row.node.color)
+            "GraphOutlineView node visual requires node color"))
+
+(fn node-size [row]
+    (local size (assert (and row row.node row.node.size)
+                        "GraphOutlineView node visual requires node size"))
+    (assert (> size 0) "GraphOutlineView node visual requires positive node size")
+    size)
+
 (fn graph-map-selected-keys [graph-map]
     (assert graph-map.selected_node_keys
             "GraphOutlineView requires graph-map selected_node_keys"))
@@ -165,7 +185,12 @@
               0))
 
 (fn row-label-x [row]
-    (+ row-left-padding (* row-depth-indent row.depth)))
+    (+ row-left-padding (* row-depth-indent row.depth) node-label-gap))
+
+(fn row-node-position [row index]
+    (glm.vec3 (+ row-left-padding (* row-depth-indent row.depth))
+              (- (+ (* (- index 1) row-height) (/ row-height 2)))
+              0))
 
 (fn ray-plane-point [ray z]
     (local direction (assert (and ray ray.direction) "GraphOutlineView row intersect requires ray.direction"))
@@ -209,6 +234,14 @@
 
 (fn refresh-row-visual! [self record]
     (local row (assert record.row "GraphOutlineView row visual requires row"))
+    (when record.point
+        (local base-size (node-size row))
+        (record.point:set-layer-size 1 (if (row-focused? self row)
+                                          (+ base-size selection-border-width focus-border-width)
+                                          0))
+        (record.point:set-layer-size 2 (if (row-selected? self row)
+                                          (+ base-size selection-border-width)
+                                          0)))
     (when record.background
         (set record.background.color (visual-color self row))
         (record.background:update)))
@@ -218,20 +251,33 @@
         (refresh-row-visual! self record)))
 
 (fn attach-row-visuals! [self row index target]
-    (local position target.position)
-    (local background
-          (create-rectangle! self.ctx
-                             (visual-color self row)
-                             (glm.vec3 position.x (- position.y row-height) -0.04)
-                             (glm.vec2 row-width row-height)
-                             0))
+    (local position (row-node-position row index))
+    (local base-size (node-size row))
+    (local point
+          (GraphNodePresentation.compact-point
+              {:points (assert self.ctx.points "GraphOutlineView node visuals require ctx.points")
+               :position position
+               :pointer-target (and self.ctx self.ctx.pointer-target)
+               :depth-offset-step 1
+               :base-depth-offset-index 2
+               :base-layer-index 3
+               :layers [{:size (if (row-focused? self row)
+                                  (+ base-size selection-border-width focus-border-width)
+                                  0)
+                         :color (glm.vec4 0.42 0.58 0.92 0.92)}
+                        {:size (if (row-selected? self row)
+                                  (+ base-size selection-border-width)
+                                  0)
+                         :color (glm.vec4 0.28 0.78 0.42 0.88)}
+                        {:size base-size
+                         :color (node-color row)}]}))
     (local label
            (create-text! self.ctx
                          (row-title row)
-                         (glm.vec3 (row-label-x row) (- position.y row-height -6) 0.02)
+                         (glm.vec3 (row-label-x row) (+ position.y 4) 0.02)
                          (glm.vec4 0.86 0.88 0.92 1)
                          self.outline-text-scale))
-    [background label])
+    [point label])
 
 (fn attach-row-handles! [self row index]
     (local clickables (assert self.clickables "GraphOutlineView row handles require clickables"))
@@ -265,7 +311,7 @@
     (local record (register-row-clickables! self clickables target))
     (set record.row row)
     (set record.visuals (attach-row-visuals! self row index target))
-    (set record.background (. record.visuals 1))
+    (set record.point (. record.visuals 1))
     target)
 
 (fn attach-empty-state! [self]
@@ -325,7 +371,8 @@
              (local keys (icollect [_ row (ipairs view.rows)] row.key))
              (if (> (length keys) 0)
                  (do
-                      (set-graph-map-selected-keys! view.graph-map keys)
+                     (set-graph-map-selected-keys! view.graph-map keys)
+                     (refresh-row-visuals! view)
                      true)
                  false)))
     (set self.clear-selection
@@ -333,7 +380,8 @@
              (view:assert-not-dropped "clear-selection")
              (if (> (length view.graph-map.selected_node_keys) 0)
                  (do
-                      (set-graph-map-selected-keys! view.graph-map [])
+                     (set-graph-map-selected-keys! view.graph-map [])
+                     (refresh-row-visuals! view)
                      true)
                  false)))
     (set self.focused-node-selected?
@@ -347,7 +395,8 @@
              (local node (view:focused-node))
              (if node
                  (do
-                      (set-graph-map-selected-keys! view.graph-map [node.key])
+                     (set-graph-map-selected-keys! view.graph-map [node.key])
+                     (refresh-row-visuals! view)
                      true)
                  false)))
     (set self.add-focused-node-to-selection
@@ -363,7 +412,8 @@
                              (table.insert keys key)))
                      (when (not (. seen node.key))
                          (table.insert keys node.key))
-                      (set-graph-map-selected-keys! view.graph-map keys)
+                     (set-graph-map-selected-keys! view.graph-map keys)
+                     (refresh-row-visuals! view)
                      true)
                  false)))
     (set self.remove-focused-node-from-selection
@@ -375,7 +425,8 @@
                      (each [_ key (ipairs (graph-map-selected-keys view.graph-map))]
                          (when (and (not= key node.key) (visible-key? view key))
                              (table.insert keys key)))
-                      (set-graph-map-selected-keys! view.graph-map keys)
+                     (set-graph-map-selected-keys! view.graph-map keys)
+                     (refresh-row-visuals! view)
                      true)
                  false)))
     (set self.toggle-focused-node-selection
@@ -393,6 +444,7 @@
              (if (= (length visible-selected) 1)
                  (do
                      (set view.graph-map.focused_node_key (. visible-selected 1))
+                     (refresh-row-visuals! view)
                      true)
                  false)))
     (set self.has-visible-nodes?
@@ -484,9 +536,10 @@
              (local reveal-options (options-table opts))
              (local node (resolve-visible-node view node-or-key "reveal-node"))
              (when (not (= reveal-options.select? false))
-                  (set-graph-map-selected-keys! graph-map [node.key]))
+                 (set-graph-map-selected-keys! graph-map [node.key]))
              (when (not (= reveal-options.focus? false))
-                 (set graph-map.focused_node_key node.key))
+                  (set graph-map.focused_node_key node.key))
+             (refresh-row-visuals! view)
              node))
     (set self.open-node
          (fn [view node-or-key opts]
@@ -545,6 +598,7 @@
              (view:assert-not-dropped "restore-graph-state")
              (when (and graph-map graph-map.restore-state state)
                  (graph-map:restore-state state))
+             (refresh-row-visuals! view)
              true))
     (set self.restore-state
          (fn [view state]
@@ -553,7 +607,8 @@
              (when payload.views
                  (view:restore-views-state payload.views))
              (when payload.selected_node_keys
-                  (set-graph-map-selected-keys! graph-map payload.selected_node_keys))
+                 (set-graph-map-selected-keys! graph-map payload.selected_node_keys))
+             (refresh-row-visuals! view)
              true))
     (set self.drop
          (fn [view]
