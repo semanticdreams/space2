@@ -27,6 +27,10 @@
         (.. "<table:" name ">")
         "<table>"))
 
+(fn metatable-backed-table? [value]
+    (local (mt-ok mt) (pcall (fn [] (debug.getmetatable value))))
+    (and mt-ok mt))
+
 (fn trim-text [_self text limit]
     (local str (safe-tostring text))
     (local resolved (math.max 3 (or limit 3)))
@@ -62,7 +66,9 @@
             key
             (if (= key-type :userdata)
                 (.. "[" key-type "] " (userdata-label key))
-                (.. "[" key-type "] " (safe-tostring key)))))
+                (if (and (= key-type :table) (metatable-backed-table? key))
+                    (.. "[" key-type "] " (metatable-table-label key))
+                    (.. "[" key-type "] " (safe-tostring key))))))
     (self:trim-text base self.key-limit))
 
 (fn describe-table-value [self value]
@@ -137,11 +143,15 @@
     (if options.key
         (tostring options.key)
         (.. "table:" (sanitize-label label) ":"
-            (select 1 (string.gsub (safe-tostring tbl) "%s+" "")))))
+            (if (metatable-backed-table? tbl)
+                (sanitize-label (metatable-table-label tbl))
+                (select 1 (string.gsub (safe-tostring tbl) "%s+" ""))))))
 
 (fn table-label [options tbl]
     (or options.label
-        (select 1 (string.gsub (safe-tostring tbl) "%s+" " "))))
+        (if (metatable-backed-table? tbl)
+            (metatable-table-label tbl)
+            (select 1 (string.gsub (safe-tostring tbl) "%s+" " ")))))
 
 (set TableNode (fn [opts]
     (local options (or opts {}))

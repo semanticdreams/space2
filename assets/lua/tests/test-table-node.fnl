@@ -51,11 +51,47 @@
           (.. "TableNode should prefer table labels, got "
               (tostring entry.value-text))))
 
+(fn table-node-describes-metatable-table-keys-without-tostring []
+  (set table-tostring-calls 0)
+  (local key (setmetatable {}
+                            {:__name "KeyTable"
+                             :__tostring fail-table-tostring}))
+  (local target {})
+  (set (. target key) "value")
+  (local node (TableNode {:table target
+                          :label "root"
+                          :key "table:root"}))
+  (local items (node:build-items))
+  (assert (= table-tostring-calls 0)
+          "TableNode must not call tostring on metatable table keys")
+  (local entry (. (. items 1) 1))
+  (assert (= entry.key-text "[table] <table:KeyTable>")
+          (.. "TableNode should use table key metadata label, got "
+              (tostring entry.key-text))))
+
+(fn table-node-default-labels-metatable-root-without-tostring []
+  (set table-tostring-calls 0)
+  (local target (setmetatable {}
+                              {:__name "RootTable"
+                               :__tostring fail-table-tostring}))
+  (local node (TableNode {:table target}))
+  (assert (= table-tostring-calls 0)
+          "TableNode must not call tostring for default root label/key")
+  (assert (= node.label "<table:RootTable>")
+          (.. "TableNode should use table root metadata label, got "
+              (tostring node.label))))
+
 (table.insert tests {:name "Table node describes userdata without tostring"
                      :fn table-node-describes-userdata-without-tostring})
 
 (table.insert tests {:name "Table node describes metatable tables without tostring"
                      :fn table-node-describes-metatable-tables-without-tostring})
+
+(table.insert tests {:name "Table node describes metatable table keys without tostring"
+                     :fn table-node-describes-metatable-table-keys-without-tostring})
+
+(table.insert tests {:name "Table node defaults metatable root labels without tostring"
+                     :fn table-node-default-labels-metatable-root-without-tostring})
 
 (local main
   (fn []
