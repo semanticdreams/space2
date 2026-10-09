@@ -445,6 +445,13 @@
       :connections []
       :row-handles []})
 
+(fn should-restore-focus-on-rebuild? [self]
+    (local focus-manager (and self.focus self.focus.manager))
+    (local current-focus (and focus-manager (focus-manager:get-focused-node)))
+    (if current-focus
+        (not (= (. self.row-by-focus current-focus) nil))
+        true))
+
 (fn rebuild-rows! [self]
     (set self.rebuilding? true)
     (drop-row-handles! self)
@@ -457,7 +464,9 @@
         (attach-empty-state! self))
     (set self.rebuilding? false)
     (sync-map-selection-to-selector! self)
-    (when (and self.graph-map.focused_node_key (visible-key? self self.graph-map.focused_node_key))
+    (when (and self.graph-map.focused_node_key
+               (visible-key? self self.graph-map.focused_node_key)
+               (should-restore-focus-on-rebuild? self))
         (focus-key! self self.graph-map.focused_node_key {:reason :rebuild}))
     self.rows)
 
@@ -469,9 +478,15 @@
 (fn sync-focus-manager-to-map! [self payload]
     (local focus-node (and payload payload.current))
     (local row (and focus-node (. self.row-by-focus focus-node)))
-    (when row
-        (set self.graph-map.focused_node_key row.key)
-        (refresh-row-visuals! self)))
+    (if row
+        (do
+            (set self.graph-map.focused_node_key row.key)
+            (refresh-row-visuals! self))
+        (do
+            (local previous-row (and payload payload.previous (. self.row-by-focus payload.previous)))
+            (when (and previous-row (= self.graph-map.focused_node_key previous-row.key))
+                (set self.graph-map.focused_node_key nil)
+                (refresh-row-visuals! self)))))
 
 (fn install-sync-connections! [self selector focus-manager]
     (when (and selector selector.changed)
@@ -479,7 +494,9 @@
     (when self.graph-map.selection-changed
         (connect! self self.graph-map.selection-changed (fn [_payload] (sync-map-selection-to-selector! self))))
     (when (and focus-manager focus-manager.focus-focus)
-        (connect! self focus-manager.focus-focus (fn [payload] (sync-focus-manager-to-map! self payload)))))
+        (connect! self focus-manager.focus-focus (fn [payload] (sync-focus-manager-to-map! self payload))))
+    (when (and focus-manager focus-manager.focus-blur)
+        (connect! self focus-manager.focus-blur (fn [payload] (sync-focus-manager-to-map! self payload)))))
 
 (fn install-rebuild-connections! [self graph-map]
     (connect! self graph-map.node-added (fn [_payload] (rebuild-rows! self)))

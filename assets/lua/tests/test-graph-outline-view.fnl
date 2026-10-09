@@ -445,6 +445,36 @@
 (fn outline-row-click-syncs-selector-and-focus-manager []
     (with-screen-ray outline-row-click-syncs-selector-and-focus-manager-body))
 
+(fn outline-focus-clears-when-external-control-focused-body []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (add-edge! graph-map "test:root" "test:child")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (local clickables (Clickables))
+    (local ctx (make-render-ctx-with-focus))
+    (set ctx.clickables clickables)
+    (local view (GraphView {:graph-map graph-map :ctx ctx}))
+    (local child-focus-ring (outline-layer-point ctx 2 1))
+    (local external-focus-node (ctx.focus:create-node {:name "external-control"}))
+    (click-child-row clickables 1 100)
+    (assert (= graph-map.focused_node_key "test:child") "row click should set outline graph focus")
+    (assert (> child-focus-ring.size 0) "focused outline row should show focus ring")
+    (external-focus-node:request-focus {:reason :test})
+    (assert (= graph-map.focused_node_key nil) "external focus should clear stale outline graph focus")
+    (assert (= child-focus-ring.size 0) "external focus should hide stale outline focus ring")
+    (graph-map:set-outline-root-keys! ["test:child"])
+    (assert (= (ctx.focus.manager:get-focused-node) external-focus-node)
+            "outline rebuild should not steal focus back from external controls")
+    (assert (= graph-map.focused_node_key nil)
+            "outline rebuild should keep graph focus clear while external control is focused")
+    (view:drop)
+    (external-focus-node:drop)
+    (graph-map:drop)
+    (graph:drop))
+
+(fn outline-focus-clears-when-external-control-focused []
+    (with-screen-ray outline-focus-clears-when-external-control-focused-body))
+
 (fn outline-row-action-body []
     (local original-menu-manager app.menu-manager)
     (local {:graph graph :graph-map graph-map} (make-map))
@@ -641,6 +671,7 @@
 (table.insert tests {:name "outline view rejects unreachable reveal" :fn outline-view-rejects-unreachable-reveal})
 (table.insert tests {:name "outline row clicks use real hit testing" :fn outline-row-clicks-use-real-hit-testing})
 (table.insert tests {:name "outline row click syncs selector and focus manager" :fn outline-row-click-syncs-selector-and-focus-manager})
+(table.insert tests {:name "outline focus clears when external control focused" :fn outline-focus-clears-when-external-control-focused})
 (table.insert tests {:name "outline row right-click and activation use real hit testing" :fn outline-row-right-click-and-activation-use-real-hit-testing})
 (table.insert tests {:name "outline row registrations drop on rebuild and drop" :fn outline-row-registrations-drop-on-rebuild-and-drop})
 (table.insert tests {:name "outline view creates tree node visual artifacts for projected rows" :fn outline-view-creates-tree-node-visual-artifacts-for-projected-rows})
