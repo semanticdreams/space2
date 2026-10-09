@@ -28,6 +28,11 @@ def workflow_job_block(text, job_name):
     return match.group("body") if match else ""
 
 
+def top_level_block(text, block_name):
+    match = re.search(rf"^{re.escape(block_name)}:\n(?P<body>(?:  .+\n|\n)+)", text, re.MULTILINE)
+    return match.group("body") if match else ""
+
+
 def require_exact_env(text, workflow_name, env_name, value, errors):
     if f"  {env_name}: {value}" not in text:
         fail(errors, f"{workflow_name}: {env_name} must be pinned to {value}")
@@ -70,6 +75,16 @@ def main():
     bundle_publish = workflow_job_block(bundle, "publish-release")
     if bundle.count("uses: softprops/action-gh-release@v2") != 1 or "softprops/action-gh-release@v2" not in bundle_publish:
         fail(errors, "bundle.yml: release publishing must be centralized in publish-release")
+
+    docs_pages = read(".github/workflows/docs-pages.yml")
+    docs_permissions = top_level_block(docs_pages, "permissions")
+    if "contents: read" not in docs_permissions:
+        fail(errors, "docs-pages.yml: workflow permissions must default to contents: read")
+    if "pages: write" in docs_permissions or "id-token: write" in docs_permissions:
+        fail(errors, "docs-pages.yml: Pages deploy permissions must be scoped to deploy job")
+    docs_deploy = workflow_job_block(docs_pages, "deploy")
+    if "permissions:\n      pages: write\n      id-token: write" not in docs_deploy:
+        fail(errors, "docs-pages.yml: deploy job must request pages: write and id-token: write")
 
     if errors:
         for error in errors:
