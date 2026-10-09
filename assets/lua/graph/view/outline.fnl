@@ -3,7 +3,7 @@
 (local GraphViewNodeViews (require :graph/view/node-views))
 (local GraphNodeActions (require :graph/view/node-actions))
 (local FocusedActions (require :graph/view/focused-actions))
-(local GraphNodePresentation (require :graph/view/presentation))
+(local CompactNodeProjection (require :graph/view/compact-node-projection))
 (local GraphViewUtils (require :graph/view/utils))
 (local RawRectangle (require :raw-rectangle))
 (local Text (require :text))
@@ -54,20 +54,11 @@
     (label.layout:layouter)
     label)
 
-(fn visible-point-size [point]
-    (assert point "GraphOutlineView visible point size requires point")
-    (var size (assert point.size "GraphOutlineView visible point size requires base size"))
-    (when point.layers
-        (each [_ layer (ipairs point.layers)]
-            (when (and layer layer.size (> layer.size size))
-                (set size layer.size))))
-    size)
-
 (fn point-relative-label-position [point label]
     (assert point "GraphOutlineView point-relative label requires point")
     (assert label "GraphOutlineView point-relative label requires label")
     (local measure (or label.layout.measure (glm.vec3 0 0 0)))
-    (glm.vec3 (+ point.position.x (/ (visible-point-size point) 2.0) point-label-gap)
+    (glm.vec3 (+ point.position.x (/ (CompactNodeProjection.visible-size point) 2.0) point-label-gap)
               (- point.position.y (/ measure.y 2.0))
               0.02))
 
@@ -109,26 +100,18 @@
 
 (fn drop-row-handles! [self]
     (local row-handles (assert self.row-handles "GraphOutlineView requires row handles"))
-    (local clickables (assert self.clickables "GraphOutlineView requires clickables for row teardown"))
     (when self.empty-state-handle
         (drop-handle-list! self.empty-state-handle.visuals)
         (set self.empty-state-handle nil))
     (each [_ record (ipairs row-handles)]
         (when record.visuals
             (drop-handle-list! record.visuals))
-        (local target (assert record.target "GraphOutlineView row handle requires target"))
-        (when (and record.double? clickables.unregister-double-click)
-            (clickables:unregister-double-click target))
-        (when (and record.right? clickables.unregister-right-click)
-            (clickables:unregister-right-click target))
-        (when record.left?
-            (assert clickables.unregister "GraphOutlineView requires clickables.unregister")
-            (clickables:unregister target))
-        (when (and self.selector record.selectable)
-            (self.selector:remove-selectables [record.selectable]))
         (when record.focus-node
-            (set (. self.row-by-focus record.focus-node) nil)
-            (record.focus-node:drop)))
+            (set (. self.row-by-focus record.focus-node) nil))
+        (when (and record.projection record.projection.drop!)
+            (record.projection:drop!))
+        (when record.focus-node
+            (set record.focus-node nil)))
     (for [idx (length row-handles) 1 -1]
         (table.remove row-handles idx)))
 
@@ -237,11 +220,6 @@
         event.position
         {:x 0 :y 0 :z 0}))
 
-(fn row-hit-position [index]
-    (glm.vec3 0
-              (- (* (- index 1) row-height))
-              0))
-
 (fn row-label-x [row]
     (+ row-left-padding (* row-depth-indent row.depth) node-label-gap))
 
@@ -250,54 +228,12 @@
               (- (+ (* (- index 1) row-height) (/ row-height 2)))
               0))
 
-(fn ray-plane-point [ray z]
-    (local direction (assert (and ray ray.direction) "GraphOutlineView row intersect requires ray.direction"))
-    (local origin (assert ray.origin "GraphOutlineView row intersect requires ray.origin"))
-    (if (= direction.z 0)
-        nil
-        (do
-            (local distance (/ (- z origin.z) direction.z))
-            (if (< distance 0)
-                nil
-                (values (+ origin (* direction distance)) distance)))))
-
-(fn point-in-row? [point position]
-    (and (>= point.x position.x)
-         (< point.x (+ position.x row-width))
-         (<= point.y position.y)
-         (> point.y (- position.y row-height))))
-
-(fn attach-row-intersect! [target position]
-    (set target.position position)
-    (set target.size (glm.vec3 row-width row-height 0))
-    (set target.intersect
-         (fn [self ray]
-             (local (point distance) (ray-plane-point ray self.position.z))
-             (if (and point (point-in-row? point self.position))
-                 (values true point distance)
-                 (values false nil nil)))))
-
-(fn register-row-clickables! [self clickables target]
-    (assert clickables.unregister "GraphOutlineView requires clickables.unregister")
-    (clickables:register target)
-    (local record {:target target :left? true})
-    (when clickables.register-right-click
-        (clickables:register-right-click target)
-        (set record.right? true))
-    (when clickables.register-double-click
-        (clickables:register-double-click target)
-        (set record.double? true))
-    (table.insert self.row-handles record)
-    record)
-
 (fn refresh-row-visual! [self record]
     (local row (assert record.row "GraphOutlineView row visual requires row"))
-    (when record.point
-        (local base-size (node-size row))
-        (record.point:set-layer-size focus-layer-index (row-focus-layer-size self row base-size))
-        (record.point:set-layer-size selection-layer-index (if (row-selected? self row)
-                                                               (+ base-size selection-border-width)
-                                                               0)))
+    (when record.projection
+        (CompactNodeProjection.refresh! record.projection
+                                        {:selected? (row-selected? self row)
+                                         :focused? (row-focused? self row)}))
     (when (and record.point record.visuals)
         (local label (. record.visuals 2))
         (when label
@@ -364,25 +300,62 @@
     (refresh-row-visuals! self)
     true)
 
-(fn attach-row-visuals! [self row index target]
-    (local position (row-node-position row index))
-    (local base-size (node-size row))
-    (local point
-          (GraphNodePresentation.compact-point
-              {:points (assert self.ctx.points "GraphOutlineView node visuals require ctx.points")
-               :position position
-               :pointer-target self.pointer-target
-               :depth-offset-step point-depth-offset-step
-               :base-depth-offset-index point-base-depth-offset
-               :base-layer-index base-layer-index
-               :layers [{:size (row-focus-layer-size self row base-size)
-                         :color self.focus-outline-color}
-                        {:size (if (row-selected? self row)
-                                  (+ base-size selection-border-width)
-                                  0)
-                         :color self.selection-border-color}
-                        {:size base-size
-                         :color (node-color row)}]}))
+(fn projection-focus [node opts]
+    (local view (assert (and opts opts.owner)
+                        "GraphOutlineView compact focus requires owner"))
+    (set view.graph-map.focused_node_key node.key)
+    (refresh-row-visuals! view)
+    true)
+
+(fn projection-right-click [node event opts]
+    (local view (assert (and opts opts.owner)
+                        "GraphOutlineView compact right-click requires owner"))
+    (local manager (get-menu-manager view.ctx))
+    (when manager
+        (manager:open {:actions (view:node-actions node)
+                       :position (menu-position event)})))
+
+(fn projection-activate [node opts]
+    (local view (assert (and opts opts.owner)
+                        "GraphOutlineView compact activate requires owner"))
+    (focus-visible-key! view node.key :activate)
+    (open-key! view node.key opts)
+    true)
+
+(fn projection-layers [self row base-size]
+    [{:size (row-focus-layer-size self row base-size)
+      :color self.focus-outline-color}
+     {:size (if (row-selected? self row)
+              (+ base-size selection-border-width)
+              0)
+      :color self.selection-border-color}
+     {:size base-size
+      :color (node-color row)}])
+
+(fn projection-options [self row index base-size clickables]
+    {:points (assert self.ctx.points "GraphOutlineView node visuals require ctx.points")
+     :node row.node
+     :position (row-node-position row index)
+     :pointer-target self.pointer-target
+     :depth-offset-step point-depth-offset-step
+     :base-depth-offset-index point-base-depth-offset
+     :base-layer-index base-layer-index
+     :focus-layer-index focus-layer-index
+     :selection-layer-index selection-layer-index
+     :focus-border-width focus-border-width
+     :selection-border-width selection-border-width
+     :clickables clickables
+     :selector self.selector
+     :focus self.focus
+     :layers (projection-layers self row base-size)
+     :selected? (row-selected? self row)
+     :focused? (row-focused? self row)
+     :owner self
+     :on-focus projection-focus
+     :on-right-click projection-right-click
+     :on-activate projection-activate})
+
+(fn attach-row-label! [self row point]
     (local label
             (create-text! self.ctx
                           (row-title row)
@@ -390,51 +363,28 @@
                           (glm.vec4 0.86 0.88 0.92 1)
                           (row-label-scale self)))
     (place-point-relative-label! point label)
-    [point label])
+    label)
 
 (fn attach-row-handles! [self row index]
     (local clickables (assert self.clickables "GraphOutlineView row handles require clickables"))
-    (local target {:key row.key
-                    :row row
-                    :label (row-title row)
-                    :label-x (row-label-x row)
-                    :depth row.depth
-                    :pointer-target self.pointer-target})
-    (attach-row-intersect! target (row-hit-position index))
-    (set target.on-click
-          (fn [_target _event]
-               (focus-visible-key! self row.key :pointer)))
-    (set target.activate
-          (fn [_target opts]
-              (focus-visible-key! self row.key :activate)
-              (open-key! self row.key opts)
-              true))
-    (set target.on-double-click
-         (fn [_target event]
-             (target:activate {:event event})))
-    (set target.on-right-click
-           (fn [_target event]
-                (focus-visible-key! self row.key :pointer-menu)
-                (local manager (get-menu-manager self.ctx))
-               (when manager
-                    (manager:open {:actions (self:node-actions row.node)
-                                 :position (menu-position event)}))))
-    (local record (register-row-clickables! self clickables target))
+    (local base-size (node-size row))
+    (local record {:row row
+                   :label (row-title row)
+                   :label-x (row-label-x row)
+                   :depth row.depth})
+    (local projection
+          (CompactNodeProjection.attach! (projection-options self row index base-size clickables)))
+    (table.insert self.row-handles record)
     (set record.row row)
-    (set record.selectable target)
-    (when self.selector
-        (self.selector:add-selectables [target]))
-    (when (and self.focus self.focus.create-node)
-        (local focus-node (self.focus:create-node {:name (.. "graph-outline-node-" row.key)}))
-        (when self.focus.attach-bounds
-            (self.focus:attach-bounds focus-node {:position target.position
-                                                  :size target.size}))
-        (set focus-node.activate target.activate)
-        (set record.focus-node focus-node)
-        (set (. self.row-by-focus focus-node) row))
-    (set record.visuals (attach-row-visuals! self row index target))
-    (set record.point (. record.visuals 1))
-    target)
+    (set record.projection projection)
+    (set record.point projection.point)
+    (set record.selectable projection.selectable)
+    (set record.focus-node projection.focus-node)
+    (when record.focus-node
+        (set (. self.row-by-focus record.focus-node) row))
+    (local label (attach-row-label! self row record.point))
+    (set record.visuals [false label])
+    record.point)
 
 (fn attach-empty-state! [self]
     (local background

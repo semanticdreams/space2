@@ -295,21 +295,35 @@
         (local graph-map (assert env.state.graph-map "outline click repro missing graph map"))
         (local child-record (row-record view "child"))
         (graph-map:set-selected-node-keys ["root"])
-        (local click-point (project-to-screen (glm.vec3 40 -36 0) env.target))
+        (local click-point (project-to-screen child-record.point.position env.target))
         (click-at click-point)
         (view:update 0.016)
         (assert (= graph-map.focused_node_key "child")
-                (.. "outline row click should focus child graph node, got "
+                (.. "outline compact point click should focus child graph node, got "
                     (tostring graph-map.focused_node_key)))
         (assert (= (selected-keys-text graph-map) "root")
-                (.. "outline row click should preserve selected graph node, got "
+                (.. "outline compact point click should preserve selected graph node, got "
                     (selected-keys-text graph-map)))
         (assert child-record.selectable
-                "outline row click repro requires row selectable proxy")
+                "outline compact point click repro requires selectable compact point")
         (assert child-record.focus-node
-                "outline row click repro requires row focus node")
+                "outline compact point click repro requires focus node")
         (assert (= (env.focus-manager:get-focused-node) child-record.focus-node)
-                "outline row click should focus the row focus-manager node"))))
+                "outline compact point click should focus the compact point focus-manager node")
+        (set graph-map.focused_node_key nil)
+        (graph-map:set-selected-node-keys ["root"])
+        (local miss-position (glm.vec3 (+ child-record.point.position.x 80)
+                                       child-record.point.position.y
+                                       child-record.point.position.z))
+        (local miss-point (project-to-screen miss-position env.target))
+        (click-at miss-point)
+        (view:update 0.016)
+        (assert (= graph-map.focused_node_key nil)
+                (.. "outline whitespace click should not focus a graph node, got "
+                    (tostring graph-map.focused_node_key)))
+        (assert (= (selected-keys-text graph-map) "root")
+                (.. "outline whitespace click should preserve selected graph node, got "
+                    (selected-keys-text graph-map))))))
   (cleanup-outline-e2e-env env)
   (when (not ok)
     (error err)))

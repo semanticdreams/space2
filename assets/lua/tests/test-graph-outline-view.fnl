@@ -84,8 +84,22 @@
 (fn point-set-depth-offset-index [self depth-offset-index]
     (set self.depth-offset-index depth-offset-index))
 
-(fn point-intersect [_self _ray]
-    (values false nil nil))
+(fn point-intersect [self ray]
+    (local direction (assert (and ray ray.direction) "point intersect requires ray.direction"))
+    (local origin (assert ray.origin "point intersect requires ray.origin"))
+    (if (= direction.z 0)
+        (values false nil nil)
+        (do
+            (local distance (/ (- self.position.z origin.z) direction.z))
+            (if (< distance 0)
+                (values false nil nil)
+                (do
+                    (local point (+ origin (* direction distance)))
+                    (local half (/ (or self.size 0) 2.0))
+                    (if (and (<= (math.abs (- point.x self.position.x)) half)
+                             (<= (math.abs (- point.y self.position.y)) half))
+                        (values true point distance)
+                        (values false nil nil)))))))
 
 (fn point-drop [self]
     (set self.dropped? true))
@@ -161,10 +175,11 @@
                                               opts.parent
                                               self.scope))
                      node)
-     :attach-bounds (fn [_self node opts]
-                      (set node.position (and opts opts.position))
-                      (set node.size (and opts opts.size))
-                      node)})
+      :attach-bounds (fn [_self node opts]
+                       (set node.position (and opts opts.position))
+                       (set node.size (and opts opts.size))
+                       (set node.get-bounds (and opts opts.get-bounds))
+                       node)})
 
 (fn make-render-ctx-with-focus []
     (local ctx (make-render-ctx))
@@ -211,8 +226,22 @@
     (clickables:on-mouse-button-down payload)
     (clickables:on-mouse-button-up payload))
 
-(fn click-child-row [clickables button timestamp]
-    (click-row clickables 40 -36 button timestamp))
+(fn view-record-for-key [view key]
+    (var found nil)
+    (each [_ record (ipairs (or view.row-handles [])) &until found]
+        (when (and record record.row (= record.row.key key))
+            (set found record)))
+    (assert found (.. "missing outline record for " key)))
+
+(fn click-position [clickables position button timestamp]
+    (click-row clickables position.x position.y button timestamp))
+
+(fn click-record-point [clickables record button timestamp]
+    (local point (assert record.point "outline record requires compact point"))
+    (click-position clickables point.position button timestamp))
+
+(fn offset-position [position dx dy]
+    (glm.vec3 (+ position.x dx) (+ position.y dy) position.z))
 
 (fn row-keys [rows]
     (icollect [_ row (ipairs rows)] row.key))
@@ -382,26 +411,70 @@
     (graph-map:drop)
     (graph:drop))
 
-(fn outline-row-clicks-body []
+(fn outline-compact-point-clicks-body []
     (local {:graph graph :graph-map graph-map} (make-map))
     (add-edge! graph-map "test:root" "test:child")
     (graph-map:set-view-mode! "outline")
     (graph-map:set-outline-root-keys! ["test:root"])
     (graph-map:set-selected-node-keys ["test:root"])
     (local clickables (Clickables))
-    (assert clickables "outline row click test requires clickables")
     (local view (GraphView {:graph-map graph-map :ctx (make-real-render-ctx clickables)}))
-    (click-child-row clickables 1 100)
-    (assert (= graph-map.focused_node_key "test:child") "row click should focus hit-tested child row")
-    (assert (= (table.concat graph-map.selected_node_keys ",") "test:root") "row click should preserve existing selection")
+    (local child-record (view-record-for-key view "test:child"))
+    (assert (= (. clickables.left-click-objects 2) child-record.point)
+            "outline should register compact point as left-click target")
+    (assert (= (. clickables.right-click-objects 2) child-record.point)
+            "outline should register compact point as right-click target")
+    (assert (= (. clickables.double-click-objects 2) child-record.point)
+            "outline should register compact point as double-click target")
+    (click-record-point clickables child-record 1 100)
+    (assert (= graph-map.focused_node_key "test:child")
+            "compact point click should focus hit-tested child node")
+    (assert (= (table.concat graph-map.selected_node_keys ",") "test:root")
+            "compact point click should preserve existing selection")
     (view:drop)
     (graph-map:drop)
     (graph:drop))
 
-(fn outline-row-clicks-use-real-hit-testing []
-    (with-screen-ray outline-row-clicks-body))
+(fn outline-compact-point-clicks-use-real-hit-testing []
+    (with-screen-ray outline-compact-point-clicks-body))
 
-(fn outline-row-click-syncs-selector-and-focus-manager-body []
+(fn outline-row-whitespace-and-label-misses-body []
+    (local original-menu-manager app.menu-manager)
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (add-edge! graph-map "test:root" "test:child")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (graph-map:set-selected-node-keys ["test:root"])
+    (local clickables (Clickables))
+    (var opened-menu nil)
+    (var opened-node-key nil)
+    (set app.menu-manager {:open (fn [_self opts] (set opened-menu opts))})
+    (local view (GraphView {:graph-map graph-map :ctx (make-real-render-ctx clickables)}))
+    (set view.node-views.open
+         (fn [_self node _opts]
+             (set opened-node-key node.key)))
+    (local child-record (view-record-for-key view "test:child"))
+    (click-position clickables (offset-position child-record.point.position 80 0) 1 100)
+    (click-position clickables (offset-position child-record.point.position 20 0) 3 200)
+    (click-position clickables (offset-position child-record.point.position 80 0) 1 300)
+    (click-position clickables (offset-position child-record.point.position 80 0) 1 500)
+    (assert (= graph-map.focused_node_key nil)
+            "row whitespace or label area outside compact point should not focus")
+    (assert (= (table.concat graph-map.selected_node_keys ",") "test:root")
+            "row whitespace or label area outside compact point should preserve selection")
+    (assert (= opened-menu nil)
+            "right-clicking row whitespace should not open menu")
+    (assert (= opened-node-key nil)
+            "double-clicking row whitespace should not activate/open node")
+    (view:drop)
+    (graph-map:drop)
+    (graph:drop)
+    (set app.menu-manager original-menu-manager))
+
+(fn outline-row-whitespace-and-label-misses-use-real-hit-testing []
+    (with-screen-ray outline-row-whitespace-and-label-misses-body))
+
+(fn outline-compact-point-click-syncs-selector-and-focus-manager-body []
     (local {:graph graph :graph-map graph-map} (make-map))
     (add-edge! graph-map "test:root" "test:child")
     (graph-map:set-view-mode! "outline")
@@ -412,22 +485,31 @@
     (set ctx.clickables clickables)
     (local selector (ObjectSelector {:project identity-project :ctx ctx :enabled? true}))
     (local view (GraphView {:graph-map graph-map :ctx ctx :selector selector}))
-    (local root-record (. view.row-handles 1))
-    (click-child-row clickables 1 100)
-    (local child-record (. view.row-handles 2))
-    (assert child-record.selectable "visible outline rows should expose selector proxies")
-    (assert child-record.focus-node "visible outline rows should expose focus nodes")
-    (assert (= graph-map.focused_node_key "test:child") "row click should keep graph-map focused key")
-    (assert (= (table.concat graph-map.selected_node_keys ",") "test:root") "row click should preserve graph-map selected key")
-    (assert (= (. selector.selected 1) root-record.selectable) "row click should preserve the selected outline proxy in ObjectSelector")
-    (assert (= (ctx.focus.manager:get-focused-node) child-record.focus-node) "row click should focus the outline proxy focus node")
-    (assert (= (view:select-all-visible-nodes) true) "select-all should work for outline rows")
-    (assert (= (length selector.selected) 2) "select-all should sync all visible outline proxies to ObjectSelector")
-    (assert (= (view:clear-selection) true) "clear-selection should work for outline rows")
-    (assert (= (length selector.selected) 0) "clear-selection should clear ObjectSelector outline proxies")
+    (local root-record (view-record-for-key view "test:root"))
+    (local child-record (view-record-for-key view "test:child"))
+    (click-record-point clickables child-record 1 100)
+    (assert child-record.selectable "visible outline compact points should expose selector entries")
+    (assert child-record.focus-node "visible outline compact points should expose focus nodes")
+    (assert (= child-record.selectable child-record.point)
+            "outline selector entry should be the compact point presentation")
+    (local bounds (and child-record.focus-node.get-bounds
+                      (child-record.focus-node:get-bounds)))
+    (assert bounds "outline focus node should expose dynamic compact point bounds")
+    (assert (approx bounds.size.x child-record.point.size)
+            "outline focus bounds width should match compact point size")
+    (assert (approx bounds.size.y child-record.point.size)
+            "outline focus bounds height should match compact point size")
+    (assert (= graph-map.focused_node_key "test:child") "compact point click should keep graph-map focused key")
+    (assert (= (table.concat graph-map.selected_node_keys ",") "test:root") "compact point click should preserve graph-map selected key")
+    (assert (= (. selector.selected 1) root-record.selectable) "compact point click should preserve the selected outline point in ObjectSelector")
+    (assert (= (ctx.focus.manager:get-focused-node) child-record.focus-node) "compact point click should focus the outline focus node")
+    (assert (= (view:select-all-visible-nodes) true) "select-all should work for outline compact points")
+    (assert (= (length selector.selected) 2) "select-all should sync all visible outline compact points to ObjectSelector")
+    (assert (= (view:clear-selection) true) "clear-selection should work for outline compact points")
+    (assert (= (length selector.selected) 0) "clear-selection should clear ObjectSelector outline compact points")
     (graph-map:set-selected-node-keys ["test:child"])
     (assert (= (. selector.selected 1) child-record.selectable) "graph-map selection changes should sync to ObjectSelector")
-    (assert (= (view:focus-selected-node) true) "focus-selected-node should focus one selected outline row")
+    (assert (= (view:focus-selected-node) true) "focus-selected-node should focus one selected outline compact point")
     (assert (= (ctx.focus.manager:get-focused-node) child-record.focus-node) "focus-selected-node should request focus on the outline focus node")
     (root-record.focus-node:request-focus {:reason :test})
     (assert (= graph-map.focused_node_key "test:root") "focus-manager focus changes should sync to graph-map focused key")
@@ -435,19 +517,19 @@
     (local old-child-selectable child-record.selectable)
     (graph-map:set-outline-root-keys! ["test:child"])
     (local rebuilt-child-record (. view.row-handles 1))
-    (assert (= (length selector.selectables) 1) "rebuild should remove stale outline selector proxies")
-    (assert (not (= (. selector.selectables 1) old-child-selectable)) "rebuild should replace stale outline selectable proxies")
-    (assert (= (. selector.selected 1) rebuilt-child-record.selectable) "rebuild should keep selection synchronized to the new outline proxy")
+    (assert (= (length selector.selectables) 1) "rebuild should remove stale outline compact point selectables")
+    (assert (not (= (. selector.selectables 1) old-child-selectable)) "rebuild should replace stale outline compact point selectables")
+    (assert (= (. selector.selected 1) rebuilt-child-record.selectable) "rebuild should keep selection synchronized to the new outline compact point")
     (assert (= (ctx.focus.manager:get-focused-node) rebuilt-child-record.focus-node) "rebuild should keep focus synchronized to the new outline focus node")
     (view:drop)
-    (assert (= (length selector.selectables) 0) "drop should remove outline selector proxies")
+    (assert (= (length selector.selectables) 0) "drop should remove outline compact point selectables")
     (assert (= (ctx.focus.manager:get-focused-node) nil) "drop should clear focused outline focus node")
     (graph-map:drop)
     (graph:drop)
     (selector:drop))
 
-(fn outline-row-click-syncs-selector-and-focus-manager []
-    (with-screen-ray outline-row-click-syncs-selector-and-focus-manager-body))
+(fn outline-compact-point-click-syncs-selector-and-focus-manager []
+    (with-screen-ray outline-compact-point-click-syncs-selector-and-focus-manager-body))
 
 (fn outline-focus-clears-when-external-control-focused-body []
     (local {:graph graph :graph-map graph-map} (make-map))
@@ -460,9 +542,10 @@
     (local view (GraphView {:graph-map graph-map :ctx ctx}))
     (local child-focus-ring (outline-layer-point ctx 2 1))
     (local external-focus-node (ctx.focus:create-node {:name "external-control"}))
-    (click-child-row clickables 1 100)
-    (assert (= graph-map.focused_node_key "test:child") "row click should set outline graph focus")
-    (assert (> child-focus-ring.size 0) "focused outline row should show focus ring")
+    (local child-record (view-record-for-key view "test:child"))
+    (click-record-point clickables child-record 1 100)
+    (assert (= graph-map.focused_node_key "test:child") "compact point click should set outline graph focus")
+    (assert (> child-focus-ring.size 0) "focused outline compact point should show focus ring")
     (external-focus-node:request-focus {:reason :test})
     (assert (= graph-map.focused_node_key nil) "external focus should clear stale outline graph focus")
     (assert (= child-focus-ring.size 0) "external focus should hide stale outline focus ring")
@@ -479,7 +562,7 @@
 (fn outline-focus-clears-when-external-control-focused []
     (with-screen-ray outline-focus-clears-when-external-control-focused-body))
 
-(fn outline-row-action-body []
+(fn outline-compact-point-action-body []
     (local original-menu-manager app.menu-manager)
     (local {:graph graph :graph-map graph-map} (make-map))
     (add-edge! graph-map "test:root" "test:child")
@@ -493,25 +576,26 @@
     (set app.menu-manager {:open (fn [_self opts] (set opened-menu opts))})
     (local view (GraphView {:graph-map graph-map :ctx (make-real-render-ctx clickables)}))
     (set view.node-views.open
-         (fn [_self node _opts]
-             (set opened-node-key node.key)))
-    (click-child-row clickables 3 200)
-    (assert opened-menu "row right-click should open action menu through clickables")
-    (assert (= graph-map.focused_node_key "test:child") "row right-click should focus hit-tested child row")
-    (assert (= (table.concat graph-map.selected_node_keys ",") "test:root") "row right-click should preserve selection")
-    (click-child-row clickables 1 300)
-    (click-child-row clickables 1 500)
-    (assert (= opened-node-key "test:child") "row double-click should activate/open hit-tested child row")
-    (assert (= (table.concat graph-map.selected_node_keys ",") "test:root") "row double-click activation should preserve selection")
+          (fn [_self node _opts]
+              (set opened-node-key node.key)))
+    (local child-record (view-record-for-key view "test:child"))
+    (click-record-point clickables child-record 3 200)
+    (assert opened-menu "compact point right-click should open action menu through clickables")
+    (assert (= graph-map.focused_node_key "test:child") "compact point right-click should focus hit-tested child node")
+    (assert (= (table.concat graph-map.selected_node_keys ",") "test:root") "compact point right-click should preserve selection")
+    (click-record-point clickables child-record 1 300)
+    (click-record-point clickables child-record 1 500)
+    (assert (= opened-node-key "test:child") "compact point double-click should activate/open hit-tested child node")
+    (assert (= (table.concat graph-map.selected_node_keys ",") "test:root") "compact point double-click activation should preserve selection")
     (view:drop)
     (graph-map:drop)
     (graph:drop)
     (set app.menu-manager original-menu-manager))
 
-(fn outline-row-right-click-and-activation-use-real-hit-testing []
-    (with-screen-ray outline-row-action-body))
+(fn outline-compact-point-right-click-and-activation-use-real-hit-testing []
+    (with-screen-ray outline-compact-point-action-body))
 
-(fn outline-row-registrations-body []
+(fn outline-compact-point-registrations-body []
     (local {:graph graph :graph-map graph-map} (make-map))
     (add-edge! graph-map "test:root" "test:child")
     (graph-map:set-view-mode! "outline")
@@ -519,22 +603,30 @@
     (local clickables (Clickables))
     (assert clickables "outline row registration test requires clickables")
     (local view (GraphView {:graph-map graph-map :ctx (make-real-render-ctx clickables)}))
+    (local root-record (view-record-for-key view "test:root"))
+    (local child-record (view-record-for-key view "test:child"))
     (assert (= (length clickables.left-click-objects) 2) "outline should register one left-click target per visible row")
     (assert (= (length clickables.right-click-objects) 2) "outline should register one right-click target per visible row")
     (assert (= (length clickables.double-click-objects) 2) "outline should register one double-click target per visible row")
+    (assert (= (. clickables.left-click-objects 1) root-record.point) "outline root left-click target should be compact point")
+    (assert (= (. clickables.left-click-objects 2) child-record.point) "outline child left-click target should be compact point")
+    (local stale-root-point root-record.point)
+    (local stale-child-point child-record.point)
     (graph-map:set-outline-root-keys! ["test:child"])
     (assert (= (length clickables.left-click-objects) 1) "rebuild should unregister stale left-click row targets")
     (assert (= (length clickables.right-click-objects) 1) "rebuild should unregister stale right-click row targets")
     (assert (= (length clickables.double-click-objects) 1) "rebuild should unregister stale double-click row targets")
+    (assert (not (= (. clickables.left-click-objects 1) stale-root-point)) "rebuild should remove stale root compact point clickable")
+    (assert (not (= (. clickables.left-click-objects 1) stale-child-point)) "rebuild should replace stale child compact point clickable")
     (view:drop)
-    (assert (= (length clickables.left-click-objects) 0) "drop should unregister row left-click targets")
-    (assert (= (length clickables.right-click-objects) 0) "drop should unregister row right-click targets")
-    (assert (= (length clickables.double-click-objects) 0) "drop should unregister row double-click targets")
+    (assert (= (length clickables.left-click-objects) 0) "drop should unregister compact point left-click targets")
+    (assert (= (length clickables.right-click-objects) 0) "drop should unregister compact point right-click targets")
+    (assert (= (length clickables.double-click-objects) 0) "drop should unregister compact point double-click targets")
     (graph-map:drop)
     (graph:drop))
 
-(fn outline-row-registrations-drop-on-rebuild-and-drop []
-    (with-screen-ray outline-row-registrations-body))
+(fn outline-compact-point-registrations-drop-on-rebuild-and-drop []
+    (with-screen-ray outline-compact-point-registrations-body))
 
 (fn outline-view-creates-tree-node-visual-artifacts-for-projected-rows []
     (local {:graph graph :graph-map graph-map} (make-map))
@@ -676,11 +768,12 @@
 (table.insert tests {:name "outline view exposes visible row selection" :fn outline-view-exposes-visible-row-selection})
 (table.insert tests {:name "outline reveal refreshes node selection rings" :fn outline-reveal-refreshes-node-selection-rings})
 (table.insert tests {:name "outline view rejects unreachable reveal" :fn outline-view-rejects-unreachable-reveal})
-(table.insert tests {:name "outline row clicks use real hit testing" :fn outline-row-clicks-use-real-hit-testing})
-(table.insert tests {:name "outline row click syncs selector and focus manager" :fn outline-row-click-syncs-selector-and-focus-manager})
+(table.insert tests {:name "outline compact point clicks use real hit testing" :fn outline-compact-point-clicks-use-real-hit-testing})
+(table.insert tests {:name "outline row whitespace and label misses use real hit testing" :fn outline-row-whitespace-and-label-misses-use-real-hit-testing})
+(table.insert tests {:name "outline compact point click syncs selector and focus manager" :fn outline-compact-point-click-syncs-selector-and-focus-manager})
 (table.insert tests {:name "outline focus clears when external control focused" :fn outline-focus-clears-when-external-control-focused})
-(table.insert tests {:name "outline row right-click and activation use real hit testing" :fn outline-row-right-click-and-activation-use-real-hit-testing})
-(table.insert tests {:name "outline row registrations drop on rebuild and drop" :fn outline-row-registrations-drop-on-rebuild-and-drop})
+(table.insert tests {:name "outline compact point right-click and activation use real hit testing" :fn outline-compact-point-right-click-and-activation-use-real-hit-testing})
+(table.insert tests {:name "outline compact point registrations drop on rebuild and drop" :fn outline-compact-point-registrations-drop-on-rebuild-and-drop})
 (table.insert tests {:name "outline view creates tree node visual artifacts for projected rows" :fn outline-view-creates-tree-node-visual-artifacts-for-projected-rows})
 (table.insert tests {:name "outline labels align right of node points" :fn outline-labels-align-right-of-node-points})
 (table.insert tests {:name "outline view creates empty state guidance when no roots" :fn outline-view-creates-empty-state-guidance-when-no-roots})
