@@ -13,9 +13,10 @@
 (local row-depth-indent 18)
 (local empty-state-message "No outline roots. Focus a node or select exactly one node, then run Set Outline Root (SPC g o r).")
 
-(fn outline-text-style [ctx color]
+(fn outline-text-style [ctx color scale]
+    (assert scale "GraphOutlineView text style requires scale")
     (TextStyle {:color color
-                :scale 1.0
+                :scale scale
                 :theme ctx.theme}))
 
 (fn create-rectangle! [ctx color position size depth-offset]
@@ -28,9 +29,10 @@
     (rectangle:update)
     rectangle)
 
-(fn create-text! [ctx text position color]
+(fn create-text! [ctx text position color scale]
+    (assert scale "GraphOutlineView text visual requires scale")
     (local label ((Text {:text text
-                         :style (outline-text-style ctx color)}) ctx))
+                         :style (outline-text-style ctx color scale)}) ctx))
     (label.layout:measurer)
     (set label.layout.position position)
     (set label.layout.rotation (glm.quat 1 0 0 0))
@@ -224,10 +226,11 @@
                              (glm.vec2 row-width row-height)
                              0))
     (local label
-          (create-text! self.ctx
-                        (row-title row)
-                        (glm.vec3 (row-label-x row) (- position.y row-height -6) 0.02)
-                        (glm.vec4 0.86 0.88 0.92 1)))
+           (create-text! self.ctx
+                         (row-title row)
+                         (glm.vec3 (row-label-x row) (- position.y row-height -6) 0.02)
+                         (glm.vec4 0.86 0.88 0.92 1)
+                         self.outline-text-scale))
     [background label])
 
 (fn attach-row-handles! [self row index]
@@ -273,13 +276,25 @@
                              (glm.vec2 row-width row-height)
                              0))
     (local label
-          (create-text! self.ctx
-                        empty-state-message
-                        (glm.vec3 row-left-padding (- 0 row-height -6) 0.02)
-                        (glm.vec4 0.86 0.88 0.92 1)))
+           (create-text! self.ctx
+                         empty-state-message
+                         (glm.vec3 row-left-padding (- 0 row-height -6) 0.02)
+                         (glm.vec4 0.86 0.88 0.92 1)
+                         self.outline-text-scale))
     (set self.empty-state-handle {:message empty-state-message
-                                  :visuals [background label]})
+                                   :visuals [background label]})
     self.empty-state-handle)
+
+(fn make-outline-view-state [graph-map ctx clickables node-views outline-text-scale]
+    {:graph-map graph-map
+     :ctx ctx
+     :clickables clickables
+     :rows []
+     :row-by-key {}
+     :node-views node-views
+     :outline-text-scale outline-text-scale
+     :connections []
+     :row-handles []})
 
 (fn rebuild-rows! [self]
     (drop-row-handles! self)
@@ -447,17 +462,11 @@
     (local ctx (assert options.ctx "GraphOutlineView requires :ctx"))
     (local clickables (assert ctx.clickables "GraphOutlineView requires ctx.clickables"))
     (local node-views (GraphViewNodeViews {:graph-map graph-map
-                                           :ctx ctx
-                                           :view-target options.view-target
-                                           :view-context (resolve-view-context options ctx)}))
-    (local self {:graph-map graph-map
-                 :ctx ctx
-                 :clickables clickables
-                 :rows []
-                 :row-by-key {}
-                 :node-views node-views
-                 :connections []
-                 :row-handles []})
+                                            :ctx ctx
+                                            :view-target options.view-target
+                                            :view-context (resolve-view-context options ctx)}))
+    (local outline-text-scale (if (= options.outline-text-scale nil) 1.0 options.outline-text-scale))
+    (local self (make-outline-view-state graph-map ctx clickables node-views outline-text-scale))
     (var dropped? false)
     (set self.assert-not-dropped
          (fn [_view context]
