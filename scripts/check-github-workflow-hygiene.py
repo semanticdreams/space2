@@ -38,6 +38,53 @@ def require_exact_env(text, workflow_name, env_name, value, errors):
         fail(errors, f"{workflow_name}: {env_name} must be pinned to {value}")
 
 
+def require_windows_routing(errors):
+    test = read(".github/workflows/test.yml")
+    for job_name in ("build-windows", "test-windows"):
+        if f"{job_name}:" in test:
+            fail(errors, f"test.yml: {job_name} must live in windows.yml, not test.yml")
+
+    windows_path = WORKFLOWS / "windows.yml"
+    if not windows_path.exists():
+        fail(errors, "windows.yml: missing dedicated Windows workflow")
+        return
+
+    windows = windows_path.read_text(encoding="utf-8")
+    for job_name in ("build-windows", "test-windows"):
+        if f"{job_name}:" not in windows:
+            fail(errors, f"windows.yml: missing {job_name} job")
+
+    for trigger in ("pull_request:", "merge_group:", "schedule:", "cron:"):
+        if trigger in windows:
+            fail(errors, f"windows.yml: forbidden trigger or schedule entry {trigger}")
+
+    if "workflow_dispatch:" not in windows:
+        fail(errors, "windows.yml: missing workflow_dispatch trigger")
+
+    on_block = top_level_block(windows, "on")
+    trigger_names = set(re.findall(r"(?m)^  ([A-Za-z0-9_-]+):", on_block))
+    expected_triggers = {"push", "workflow_dispatch"}
+    if trigger_names != expected_triggers:
+        found = ", ".join(sorted(trigger_names)) or "none"
+        expected = ", ".join(sorted(expected_triggers))
+        fail(errors, f"windows.yml: triggers must be exactly {expected}; found {found}")
+
+    push_match = re.search(
+        r"(?ms)^  push:\n(?P<body>(?:    .+\n|\n)*?)(?=^  \S|\Z)",
+        on_block,
+    )
+    push_body = push_match.group("body") if push_match else ""
+    branches_match = re.search(
+        r"(?ms)^    branches:\n(?P<body>(?:      .+\n|\n)*?)(?=^    \S|^  \S|\Z)",
+        push_body,
+    )
+    branch_body = branches_match.group("body") if branches_match else ""
+    branches = re.findall(r"(?m)^      - (.+)$", branch_body)
+    if branches != ["main"]:
+        found = ", ".join(branches) or "none"
+        fail(errors, f"windows.yml: push branches must be exactly main; found {found}")
+
+
 def main():
     errors = []
 
@@ -85,6 +132,8 @@ def main():
     docs_deploy = workflow_job_block(docs_pages, "deploy")
     if "permissions:\n      pages: write\n      id-token: write" not in docs_deploy:
         fail(errors, "docs-pages.yml: deploy job must request pages: write and id-token: write")
+
+    require_windows_routing(errors)
 
     if errors:
         for error in errors:
