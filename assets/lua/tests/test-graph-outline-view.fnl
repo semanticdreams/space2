@@ -7,6 +7,8 @@
 (local GraphView (require :graph/view))
 (local CommandHelpers (require :tests/graph-command-helpers))
 (local Clickables (require :clickables))
+(local ObjectSelector (require :object-selector))
+(local {:FocusManager FocusManager} (require :focus))
 
 (local tests [])
 
@@ -141,6 +143,31 @@
      :render-events render-events
      :get-text-ssbo-batcher (fn [_self] text-batcher)
      :get-rectangle-quad-batcher (fn [_self] quad-batcher)})
+
+(fn identity-project [position _opts]
+    position)
+
+(fn make-focus-ctx []
+    (local manager (FocusManager {:root-name "outline-selection-focus-test"}))
+    (local scope (manager:create-scope {:name "outline"}))
+    (manager:attach scope (manager:get-root-scope))
+    {:manager manager
+     :scope scope
+     :create-node (fn [self opts]
+                     (local node (manager:create-node opts))
+                     (manager:attach node (if (and opts opts.parent)
+                                              opts.parent
+                                              self.scope))
+                     node)
+     :attach-bounds (fn [_self node opts]
+                      (set node.position (and opts opts.position))
+                      (set node.size (and opts opts.size))
+                      node)})
+
+(fn make-render-ctx-with-focus []
+    (local ctx (make-render-ctx))
+    (set ctx.focus (make-focus-ctx))
+    ctx)
 
 (fn count-render-events [ctx kind]
     (accumulate [count 0 _ event (ipairs ctx.render-events)]
@@ -371,6 +398,83 @@
 (fn outline-row-clicks-use-real-hit-testing []
     (with-screen-ray outline-row-clicks-body))
 
+(fn outline-row-click-syncs-selector-and-focus-manager-body []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (add-edge! graph-map "test:root" "test:child")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (local clickables (Clickables))
+    (local ctx (make-render-ctx-with-focus))
+    (set ctx.clickables clickables)
+    (local selector (ObjectSelector {:project identity-project :ctx ctx :enabled? true}))
+    (local view (GraphView {:graph-map graph-map :ctx ctx :selector selector}))
+    (click-child-row clickables 1 100)
+    (local child-record (. view.row-handles 2))
+    (assert child-record.selectable "visible outline rows should expose selector proxies")
+    (assert child-record.focus-node "visible outline rows should expose focus nodes")
+    (assert (= graph-map.focused_node_key "test:child") "row click should keep graph-map focused key")
+    (assert (= (table.concat graph-map.selected_node_keys ",") "test:child") "row click should keep graph-map selected key")
+    (assert (= (. selector.selected 1) child-record.selectable) "row click should select the outline proxy in ObjectSelector")
+    (assert (= (ctx.focus.manager:get-focused-node) child-record.focus-node) "row click should focus the outline proxy focus node")
+    (assert (= (view:select-all-visible-nodes) true) "select-all should work for outline rows")
+    (assert (= (length selector.selected) 2) "select-all should sync all visible outline proxies to ObjectSelector")
+    (assert (= (view:clear-selection) true) "clear-selection should work for outline rows")
+    (assert (= (length selector.selected) 0) "clear-selection should clear ObjectSelector outline proxies")
+    (graph-map:set-selected-node-keys ["test:child"])
+    (assert (= (. selector.selected 1) child-record.selectable) "graph-map selection changes should sync to ObjectSelector")
+    (assert (= (view:focus-selected-node) true) "focus-selected-node should focus one selected outline row")
+    (assert (= (ctx.focus.manager:get-focused-node) child-record.focus-node) "focus-selected-node should request focus on the outline focus node")
+    (local root-record (. view.row-handles 1))
+    (root-record.focus-node:request-focus {:reason :test})
+    (assert (= graph-map.focused_node_key "test:root") "focus-manager focus changes should sync to graph-map focused key")
+    (view:reveal-node "test:child" {:select? true :focus? true})
+    (local old-child-selectable child-record.selectable)
+    (graph-map:set-outline-root-keys! ["test:child"])
+    (local rebuilt-child-record (. view.row-handles 1))
+    (assert (= (length selector.selectables) 1) "rebuild should remove stale outline selector proxies")
+    (assert (not (= (. selector.selectables 1) old-child-selectable)) "rebuild should replace stale outline selectable proxies")
+    (assert (= (. selector.selected 1) rebuilt-child-record.selectable) "rebuild should keep selection synchronized to the new outline proxy")
+    (assert (= (ctx.focus.manager:get-focused-node) rebuilt-child-record.focus-node) "rebuild should keep focus synchronized to the new outline focus node")
+    (view:drop)
+    (assert (= (length selector.selectables) 0) "drop should remove outline selector proxies")
+    (assert (= (ctx.focus.manager:get-focused-node) nil) "drop should clear focused outline focus node")
+    (graph-map:drop)
+    (graph:drop)
+    (selector:drop))
+
+(fn outline-row-click-syncs-selector-and-focus-manager []
+    (with-screen-ray outline-row-click-syncs-selector-and-focus-manager-body))
+
+(fn outline-focus-clears-when-external-control-focused-body []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (add-edge! graph-map "test:root" "test:child")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (local clickables (Clickables))
+    (local ctx (make-render-ctx-with-focus))
+    (set ctx.clickables clickables)
+    (local view (GraphView {:graph-map graph-map :ctx ctx}))
+    (local child-focus-ring (outline-layer-point ctx 2 1))
+    (local external-focus-node (ctx.focus:create-node {:name "external-control"}))
+    (click-child-row clickables 1 100)
+    (assert (= graph-map.focused_node_key "test:child") "row click should set outline graph focus")
+    (assert (> child-focus-ring.size 0) "focused outline row should show focus ring")
+    (external-focus-node:request-focus {:reason :test})
+    (assert (= graph-map.focused_node_key nil) "external focus should clear stale outline graph focus")
+    (assert (= child-focus-ring.size 0) "external focus should hide stale outline focus ring")
+    (graph-map:set-outline-root-keys! ["test:child"])
+    (assert (= (ctx.focus.manager:get-focused-node) external-focus-node)
+            "outline rebuild should not steal focus back from external controls")
+    (assert (= graph-map.focused_node_key nil)
+            "outline rebuild should keep graph focus clear while external control is focused")
+    (view:drop)
+    (external-focus-node:drop)
+    (graph-map:drop)
+    (graph:drop))
+
+(fn outline-focus-clears-when-external-control-focused []
+    (with-screen-ray outline-focus-clears-when-external-control-focused-body))
+
 (fn outline-row-action-body []
     (local original-menu-manager app.menu-manager)
     (local {:graph graph :graph-map graph-map} (make-map))
@@ -566,6 +670,8 @@
 (table.insert tests {:name "outline reveal refreshes node selection rings" :fn outline-reveal-refreshes-node-selection-rings})
 (table.insert tests {:name "outline view rejects unreachable reveal" :fn outline-view-rejects-unreachable-reveal})
 (table.insert tests {:name "outline row clicks use real hit testing" :fn outline-row-clicks-use-real-hit-testing})
+(table.insert tests {:name "outline row click syncs selector and focus manager" :fn outline-row-click-syncs-selector-and-focus-manager})
+(table.insert tests {:name "outline focus clears when external control focused" :fn outline-focus-clears-when-external-control-focused})
 (table.insert tests {:name "outline row right-click and activation use real hit testing" :fn outline-row-right-click-and-activation-use-real-hit-testing})
 (table.insert tests {:name "outline row registrations drop on rebuild and drop" :fn outline-row-registrations-drop-on-rebuild-and-drop})
 (table.insert tests {:name "outline view creates tree node visual artifacts for projected rows" :fn outline-view-creates-tree-node-visual-artifacts-for-projected-rows})
@@ -576,6 +682,7 @@
 (table.insert tests {:name "command set outline root uses single selection" :fn command-set-outline-root-uses-single-selection})
 
 (fn main []
+    ((. (require :logging) :set-level) "warn")
     ((. (require :tests/runner) :run-tests) {:name "graph-outline-view" :tests tests}))
 
 {:name "graph-outline-view" :tests tests :main main}
