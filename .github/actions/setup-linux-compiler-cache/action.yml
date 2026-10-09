@@ -1,0 +1,60 @@
+name: Setup Linux compiler cache
+description: Restore ccache, restore sccache, and install pinned sccache for Linux jobs.
+inputs:
+  cache-scope:
+    required: true
+    description: Cache scope suffix such as linux.
+  ccache-path:
+    required: true
+    description: Path restored by the ccache cache action.
+  sccache-path:
+    required: true
+    description: Path restored by the sccache cache action.
+  ccache-key-files:
+    required: true
+    description: Hash file patterns for the ccache key.
+  sccache-key-files:
+    required: true
+    description: Hash file patterns for the sccache key.
+  sccache-version:
+    required: false
+    default: 0.16.0
+    description: Exact sccache version installed when missing.
+runs:
+  using: composite
+  steps:
+    - name: Restore ccache
+      uses: actions/cache@v5
+      with:
+        path: ${{ inputs.ccache-path }}
+        key: ccache-${{ runner.os }}-${{ inputs.cache-scope }}-${{ github.ref }}-${{ hashFiles(inputs.ccache-key-files) }}
+        restore-keys: |
+          ccache-${{ runner.os }}-${{ inputs.cache-scope }}-${{ github.ref }}-
+          ccache-${{ runner.os }}-${{ inputs.cache-scope }}-
+          ccache-${{ runner.os }}-
+
+    - name: Restore sccache
+      uses: actions/cache@v5
+      with:
+        path: ${{ inputs.sccache-path }}
+        key: sccache-${{ runner.os }}-${{ inputs.cache-scope }}-${{ github.ref }}-${{ hashFiles(inputs.sccache-key-files) }}
+        restore-keys: |
+          sccache-${{ runner.os }}-${{ inputs.cache-scope }}-${{ github.ref }}-
+          sccache-${{ runner.os }}-${{ inputs.cache-scope }}-
+          sccache-${{ runner.os }}-
+
+    - name: Restore sccache binary
+      uses: actions/cache@v5
+      with:
+        path: ~/.cargo/bin/sccache
+        key: sccache-bin-${{ runner.os }}-${{ inputs.sccache-version }}
+
+    - name: Install sccache
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v sccache >/dev/null 2>&1; then
+          sccache --version
+        else
+          cargo install sccache --version "${{ inputs.sccache-version }}" --locked
+        fi

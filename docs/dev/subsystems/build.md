@@ -27,6 +27,7 @@ CMake-based C++ build with cross-platform packaging (DEB/RPM/AppImage/tarball), 
 - [C Builder](/dev/notes/c-builder) — C compilation via GCC JIT
 - [C Ir](/dev/notes/c-ir) — C intermediate representation
 - [Gccjit](/dev/notes/gccjit) — libgccjit binding details
+- [GitHub Actions Hygiene](/dev/notes/github-actions-hygiene) — CI workflow permissions, release publishing, and workflow hygiene checks
 - [Native Build](/dev/notes/native-build) — native C build integration
 
 ## See also

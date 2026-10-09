@@ -1,0 +1,71 @@
+name: Setup Windows cross-build cache
+description: Restore ccache, restore sccache, install pinned sccache, and optionally export the vcpkg cache runtime for Windows cross-build jobs.
+inputs:
+  cache-scope:
+    required: true
+    description: Cache scope suffix such as windows-cross.
+  ccache-path:
+    required: true
+    description: Path restored by the ccache cache action.
+  sccache-path:
+    required: true
+    description: Path restored by the sccache cache action.
+  ccache-key-files:
+    required: true
+    description: Hash file patterns for the ccache key.
+  sccache-key-files:
+    required: true
+    description: Hash file patterns for the sccache key.
+  sccache-version:
+    required: false
+    default: 0.16.0
+    description: Exact sccache version installed when missing.
+  export-vcpkg-cache-runtime:
+    required: false
+    default: 'false'
+    description: Export GitHub Actions cache runtime environment variables for vcpkg when true.
+runs:
+  using: composite
+  steps:
+    - name: Restore ccache
+      uses: actions/cache@v5
+      with:
+        path: ${{ inputs.ccache-path }}
+        key: ccache-${{ runner.os }}-${{ inputs.cache-scope }}-${{ github.ref }}-${{ hashFiles(inputs.ccache-key-files) }}
+        restore-keys: |
+          ccache-${{ runner.os }}-${{ inputs.cache-scope }}-${{ github.ref }}-
+          ccache-${{ runner.os }}-${{ inputs.cache-scope }}-
+
+    - name: Restore sccache
+      uses: actions/cache@v5
+      with:
+        path: ${{ inputs.sccache-path }}
+        key: sccache-${{ runner.os }}-${{ inputs.cache-scope }}-${{ github.ref }}-${{ hashFiles(inputs.sccache-key-files) }}
+        restore-keys: |
+          sccache-${{ runner.os }}-${{ inputs.cache-scope }}-${{ github.ref }}-
+          sccache-${{ runner.os }}-${{ inputs.cache-scope }}-
+
+    - name: Restore sccache binary
+      uses: actions/cache@v5
+      with:
+        path: ~/.cargo/bin/sccache
+        key: sccache-bin-${{ runner.os }}-${{ inputs.sccache-version }}
+
+    - name: Install sccache
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v sccache >/dev/null 2>&1; then
+          sccache --version
+        else
+          cargo install sccache --version "${{ inputs.sccache-version }}" --locked
+        fi
+
+    - name: Export GitHub Actions cache runtime for vcpkg
+      if: inputs.export-vcpkg-cache-runtime == 'true'
+      uses: actions/github-script@v8
+      with:
+        script: |
+          core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+          core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+          core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');

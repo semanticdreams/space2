@@ -43,7 +43,11 @@ on:
         default: ""
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  INNOSETUP_CHOCO_VERSION: 6.4.3
+  PILLOW_VERSION: 11.3.0
 
 jobs:
   bundle-linux:
@@ -158,13 +162,12 @@ jobs:
             echo 'EOF'
           } >> "${GITHUB_OUTPUT}"
 
-      - name: Upload Linux app artifacts to GitHub Release
-        uses: softprops/action-gh-release@v2
-        if: github.ref_type == 'tag'
+      - name: Upload Linux app release artifacts
+        uses: actions/upload-artifact@v5
         with:
-          files: ${{ steps.linux-release-artifacts.outputs.files }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: space-app-linux-release
+          path: ${{ steps.linux-release-artifacts.outputs.files }}
+          if-no-files-found: error
 
   bundle-windows:
     name: Bundle Windows app artifacts
@@ -233,11 +236,11 @@ jobs:
 
       - name: Install Inno Setup
         shell: pwsh
-        run: choco install innosetup --no-progress -y
+        run: choco install innosetup --version $env:INNOSETUP_CHOCO_VERSION --no-progress -y
 
       - name: Install Pillow for icon conversion
         shell: pwsh
-        run: python -m pip install Pillow
+        run: python -m pip install "Pillow==$env:PILLOW_VERSION"
 
       - name: Build Windows app packages
         shell: bash
@@ -273,10 +276,40 @@ jobs:
             echo 'EOF'
           } >> "${GITHUB_OUTPUT}"
 
-      - name: Upload Windows app artifacts to GitHub Release
-        uses: softprops/action-gh-release@v2
-        if: github.ref_type == 'tag'
+      - name: Upload Windows app release artifacts
+        uses: actions/upload-artifact@v5
         with:
-          files: ${{ steps.windows-release-artifacts.outputs.files }}
+          name: space-app-windows-release
+          path: ${{ steps.windows-release-artifacts.outputs.files }}
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish app release artifacts
+    runs-on: ubuntu-22.04
+    needs:
+      - bundle-linux
+      - bundle-windows
+    if: github.ref_type == 'tag'
+    permissions:
+      contents: write
+    steps:
+      - name: Download app release artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: space-app-*-release
+          path: build/app-release-artifacts
+          merge-multiple: true
+
+      - name: Verify app release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          find build/app-release-artifacts -type f -print | sort
+          test -n "$(find build/app-release-artifacts -type f -print -quit)"
+
+      - name: Upload app artifacts to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/app-release-artifacts/**
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
