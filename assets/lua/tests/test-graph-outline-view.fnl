@@ -326,6 +326,12 @@
             "reveal-node should refresh child focus ring immediately")
     (assert (> child-selection-ring.size 0)
             "reveal-node should refresh child selection ring immediately")
+    (local child-record (. view.row-handles 2))
+    (local child-label (assert (. child-record :visuals 2)
+                               "child row should keep its label visual"))
+    (assert (approx child-label.layout.position.x (+ child-focus-ring.position.x (/ child-focus-ring.size 2.0) 1.0))
+            (.. "reveal-node should keep child label past expanded focus ring, got "
+                (tostring child-label.layout.position.x)))
     (view:clear-selection)
     (assert (= child-selection-ring.size 0)
             "clear-selection should refresh child selection ring immediately")

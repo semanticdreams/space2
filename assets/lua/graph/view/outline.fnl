@@ -46,11 +46,20 @@
     (label.layout:layouter)
     label)
 
+(fn visible-point-size [point]
+    (assert point "GraphOutlineView visible point size requires point")
+    (var size (assert point.size "GraphOutlineView visible point size requires base size"))
+    (when point.layers
+        (each [_ layer (ipairs point.layers)]
+            (when (and layer layer.size (> layer.size size))
+                (set size layer.size))))
+    size)
+
 (fn point-relative-label-position [point label]
     (assert point "GraphOutlineView point-relative label requires point")
     (assert label "GraphOutlineView point-relative label requires label")
     (local measure (or label.layout.measure (glm.vec3 0 0 0)))
-    (glm.vec3 (+ point.position.x (/ point.size 2.0) point-label-gap)
+    (glm.vec3 (+ point.position.x (/ (visible-point-size point) 2.0) point-label-gap)
               (- point.position.y (/ measure.y 2.0))
               0.02))
 
@@ -265,8 +274,12 @@
                                           (+ base-size selection-border-width focus-border-width)
                                           0))
         (record.point:set-layer-size 2 (if (row-selected? self row)
-                                          (+ base-size selection-border-width)
-                                          0)))
+                                           (+ base-size selection-border-width)
+                                           0)))
+    (when (and record.point record.visuals)
+        (local label (. record.visuals 2))
+        (when label
+            (place-point-relative-label! record.point label)))
     (when record.background
         (set record.background.color (visual-color self row))
         (record.background:update)))
