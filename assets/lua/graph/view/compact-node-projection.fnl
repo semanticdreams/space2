@@ -104,8 +104,14 @@
     (point:set-layer-size record.selection-layer-index selection-size)
     record)
 
-(fn drop! [record]
+(fn option-enabled? [options key default]
+    (if (= (. options key) nil)
+        default
+        (. options key)))
+
+(fn drop! [record opts]
     (when (and record (not record.dropped?))
+        (local options (or opts {}))
         (set record.dropped? true)
         (local point record.point)
         (local clickables (assert record.clickables
@@ -122,11 +128,16 @@
             (set point.on-double-click nil)
             (set point.activate nil)
             (set point._compact_projection_record nil))
-        (when (and record.selector record.selectable)
+        (when (and (option-enabled? options :remove-selectable? true)
+                   record.selector
+                   record.selectable)
             (record.selector:remove-selectables [record.selectable]))
-        (when record.focus-node
+        (when (and (option-enabled? options :drop-focus-node? record.drop-focus-node?)
+                   record.focus-node)
             (record.focus-node:drop))
-        (when (and point point.drop)
+        (when (and (option-enabled? options :drop-point? true)
+                   point
+                   point.drop)
             (point:drop)))
     nil)
 
@@ -166,7 +177,10 @@
                    :owner options.owner
                    :on-focus options.on-focus
                    :on-right-click options.on-right-click
-                   :on-activate options.on-activate})
+                    :on-activate options.on-activate
+                    :drop-focus-node? (if (= options.drop-focus-node? nil)
+                                          (not options.focus-node)
+                                          options.drop-focus-node?)})
     (set point._compact_projection_record record)
     (set point.on-click point-click)
     (set point.on-right-click point-right-click)
@@ -180,17 +194,23 @@
     (when clickables.register-double-click
         (clickables:register-double-click point)
         (set record.double? true))
-    (when options.selector
+    (when (and options.selector (not (= options.register-selectable? false)))
         (options.selector:add-selectables [point]))
-    (when (and options.focus options.focus.create-node)
+    (if options.focus-node
+        (do
+            (set options.focus-node.presentation point)
+            (set options.focus-node.activate focus-node-activate)
+            (set record.focus-node options.focus-node))
+        (and options.focus options.focus.create-node)
+        (do
         (local focus-node (options.focus:create-node {:name (.. "graph-node-" (tostring key))
-                                                      :parent options.focus-parent}))
+                                                       :parent options.focus-parent}))
         (when options.focus.attach-bounds
             (options.focus:attach-bounds focus-node
-                                         {:get-bounds focus-node-bounds}))
+                                          {:get-bounds focus-node-bounds}))
         (set focus-node.presentation point)
         (set focus-node.activate focus-node-activate)
-        (set record.focus-node focus-node))
+        (set record.focus-node focus-node)))
     (set record.refresh! (fn [self refresh-opts] (refresh! self refresh-opts)))
     (set record.drop! (fn [self] (drop! self)))
     (refresh! record {:selected? options.selected? :focused? options.focused?})

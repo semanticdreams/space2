@@ -14,6 +14,7 @@
 (local GraphNodeActions (require :graph/view/node-actions))
 (local FocusedActions (require :graph/view/focused-actions))
 (local GraphViewPersistence (require :graph/view/persistence)) (local ActivityCameraState (require :activity-camera-state)) (local SelectedPreviewCommands (require :graph/view/selected-preview-commands)) (local GraphViewSelectionEditing (require :graph/view/selection-editing))
+(local CompactNodeProjection (require :graph/view/compact-node-projection))
 (local NodeBase (require :graph/node-base))
 (local GraphNodePresentation (require :graph/view/presentation))
 (local IslandHost (require :graph/view/island-host))
@@ -118,6 +119,47 @@
                     (graph-map:update-island island-id {:state next-state}))
                         (set (. runtime.positions island-id) nil))))) (fn selected-node-keys [nodes] (assert (= (type nodes) :table) "GraphView selected-node-keys requires nodes table") (icollect [_ node (ipairs nodes)] (and node node.key))) (fn sync-map-selected-node-keys! [graph-map keys] (assert graph-map "GraphView selected-node-key sync requires graph-map") (if graph-map.set-selected-node-keys (graph-map:set-selected-node-keys keys) (do (set graph-map.selected_node_keys keys) graph-map.selected_node_keys)))
 
+(fn attach-spatial-compact-node! [deps node position opts]
+    (local options (or opts {}))
+    (local record
+          (CompactNodeProjection.attach!
+              {:points deps.points
+               :node node
+               :position position
+               :pointer-target deps.pointer-target
+               :depth-offset-step deps.point-depth-offset-step
+               :base-depth-offset-index deps.point-base-depth-offset
+               :base-layer-index 3
+               :focus-layer-index deps.focus-layer-index
+               :selection-layer-index deps.selection-layer-index
+               :focus-border-width deps.focus-border-width
+               :selection-border-width deps.selection-border-width
+               :clickables deps.clickables
+               :selector deps.selector
+               :register-selectable? options.register-selectable?
+               :focus deps.focus
+               :focus-parent deps.points-focus-scope
+               :focus-node options.focus-node
+               :drop-focus-node? false
+               :layers [{:size 0 :color deps.focus-outline-color}
+                        {:size 0 :color deps.selection-border-color}
+                        {:size node.size :color node.color}]
+               :selected? (and deps.selected? (deps.selected? node))
+               :focused? (= (deps.focused-node) node)
+               :owner (and deps.view deps.view)
+               :on-right-click (fn [right-click-node event _opts]
+                                  (local manager (deps.get-menu-manager))
+                                  (when manager
+                                      (manager:open {:actions (deps.node-actions right-click-node)
+                                                     :position (deps.resolve-menu-position event)})))
+               :on-activate (fn [activate-node activate-opts]
+                                (local mod (and activate-opts activate-opts.event activate-opts.event.mod))
+                                (if (Modifiers.alt-held? mod)
+                                    (deps.expand-linked-frontier deps.graph-map [(tostring activate-node.key)])
+                                    (deps.toggle-node-presentation activate-node)))}))
+    (set (. deps.compact-records node) record)
+    record)
+
 (fn GraphView [options]
 
     (local graph-map options.graph-map)
@@ -139,8 +181,8 @@
     (var points-focus-scope
          (and focus (focus:create-scope {:name "graph-node-points"
                                          :directional-traversal-boundary? true})))
-    (local focus-nodes {})
-    (local node-by-focus {})
+     (local focus-nodes {})
+     (local node-by-focus {})
     (var selected-set {})
     (var focused-node nil)
     (var selection-handler nil)
@@ -274,19 +316,25 @@
     (fn update-point-state [node]
         (local point (. registry.points node))
         (when point
-            (local base-size (or point.size 0))
             (local selected? (rawget selected-set node))
             (local focused? (= focused-node node))
-            (local selection-size (if selected?
-                                      (+ base-size selection-border-width)
-                                      0))
-            (local focus-size (if focused?
-                                  (+ base-size
-                                     (if selected? selection-border-width 0)
-                                     focus-border-width)
-                                  0))
-            (point:set-layer-size focus-layer-index focus-size)
-            (point:set-layer-size selection-layer-index selection-size)))
+            (local compact-record (. options._compact-records node))
+            (if compact-record
+                (CompactNodeProjection.refresh! compact-record
+                                                {:selected? selected?
+                                                 :focused? focused?})
+                (do
+                    (local base-size (or point.size 0))
+                    (local selection-size (if selected?
+                                              (+ base-size selection-border-width)
+                                              0))
+                    (local focus-size (if focused?
+                                          (+ base-size
+                                             (if selected? selection-border-width 0)
+                                             focus-border-width)
+                                          0))
+                    (point:set-layer-size focus-layer-index focus-size)
+                    (point:set-layer-size selection-layer-index selection-size)))))
 
     (fn bounds-for-presentation [presentation]
         (when presentation
@@ -475,10 +523,11 @@
                         (table.insert filtered node)))
                  (labels:refresh-positions registry.points filtered))))
 
-     (set options._island-layout-runtime {:positions {}})
-     (set options._preview-scopes {})
+      (set options._island-layout-runtime {:positions {}})
+      (set options._preview-scopes {})
+      (set options._compact-records {})
 
-     (local graph-layout
+      (local graph-layout
            (GraphViewLayout {:layout layout
                         :nodes-by-index nodes-by-index
                         :indices indices
@@ -674,22 +723,6 @@
                   presentation.position.y
                   presentation.position.z))
 
-    (fn build-compact-presentation [node position]
-        (GraphNodePresentation.compact-point
-            {:points points
-             :position position
-             :pointer-target (or options.pointer-target
-                                 (and ctx ctx.pointer-target))
-             :depth-offset-step point-depth-offset-step
-             :base-depth-offset-index point-base-depth-offset
-             :base-layer-index 3
-             :layers [{:size 0
-                       :color resolved-focus-outline-color}
-                      {:size 0
-                       :color resolved-selection-border-color}
-                      {:size node.size
-                       :color node.color}]}))
-
     (fn build-expanded-presentation [node position]
         (local preview-scope (. options._preview-scopes node))
         (assert preview-scope "GraphView expanded presentation requires node preview scope")
@@ -759,6 +792,9 @@
                                          :position (resolve-menu-position event)}))))))
 
     (fn detach-presentation [node presentation]
+        (when (. options._compact-records node)
+            (CompactNodeProjection.drop! (. options._compact-records node))
+            (set (. options._compact-records node) nil))
         (when clickables
             (clickables:unregister presentation)
             (when clickables.unregister-right-click
@@ -773,6 +809,17 @@
           (app.resizables:unregister presentation._resize-target))
         (when presentation.drop
             (presentation:drop)))
+
+    (fn detach-compact-for-replacement! [node point]
+        (local record (. options._compact-records node))
+        (when record
+            (CompactNodeProjection.drop! record {:remove-selectable? false
+                                                 :drop-focus-node? false
+                                                 :drop-point? false})
+            (set (. options._compact-records node) nil))
+        (when movables-handler
+            (movables-handler:unregister node))
+        (set (. node-by-point point) nil))
 
     (fn install-presentation [node previous presentation]
         (attach-presentation-events node presentation)
@@ -803,9 +850,9 @@
              :on-resize-end (fn [entry]
                              (when (and entry entry.target persistence)
                                (persistence:set-size (. presentation :node) entry.target.size)))
-             :pointer-target (or presentation._pointer-target
-                                  options.pointer-target
-                                  (and ctx ctx.pointer-target))})))
+              :pointer-target (or presentation._pointer-target
+                                   options.pointer-target
+                                   (and ctx ctx.pointer-target))})))
 
     (fn detach-node-signals [node]
         (local record (. node-changed-handlers node))
@@ -916,23 +963,15 @@
                 (assert-valid-position position "GraphView.add-node position" node)
                 (local idx (graph-layout:add-node node position (and node-opts node-opts.pinned)))
                 (assert (not (= idx nil)) "GraphView.add-node failed to allocate layout index")
-                (local point (GraphNodePresentation.compact-point {:points points
-                                            :position position
-                                            :pointer-target (or options.pointer-target
-                                                                (and ctx ctx.pointer-target))
-                                            :depth-offset-step point-depth-offset-step
-                                            :base-depth-offset-index point-base-depth-offset
-                                             :base-layer-index 3
-                                            :layers [{:size 0
-                                                      :color resolved-focus-outline-color}
-                                                     {:size 0
-                                                      :color resolved-selection-border-color}
-                                                     {:size node.size
-                                                      :color node.color}]}))
+                (local compact-record (attach-spatial-compact-node!
+                                         {:points points :pointer-target (or options.pointer-target (and ctx ctx.pointer-target)) :point-depth-offset-step point-depth-offset-step :point-base-depth-offset point-base-depth-offset :focus-layer-index focus-layer-index :selection-layer-index selection-layer-index :focus-border-width focus-border-width :selection-border-width selection-border-width :clickables clickables :selector selector :focus focus :points-focus-scope points-focus-scope :focus-outline-color resolved-focus-outline-color :selection-border-color resolved-selection-border-color :selected? (fn [selected-node] (rawget selected-set selected-node)) :focused-node (fn [] focused-node) :view view :get-menu-manager get-menu-manager :node-actions (fn [action-node] (view:node-actions action-node)) :resolve-menu-position resolve-menu-position :expand-linked-frontier expand-linked-frontier :graph-map graph-map :toggle-node-presentation (fn [toggle-node] (toggle-node-presentation toggle-node)) :compact-records options._compact-records}
+                                         node
+                                         position))
+                (local point compact-record.point)
                 (assert point (string.format "GraphView.add-node failed to create point for %s"
-                                             (node-id node)))
-                (local focus-node (focus:create-node {:name (.. "graph-node-" (node-id node))
-                                                       :parent points-focus-scope}))
+                                              (node-id node)))
+                (local focus-node compact-record.focus-node)
+                (assert focus-node "GraphView.add-node failed to create focus node")
                 (local preview-scope (focus:create-scope {:name (.. "graph-node-preview-" (node-id node))}))
                 (focus-node:set-entry-scope preview-scope)
                 (preview-scope:set-exit-node focus-node)
@@ -951,33 +990,11 @@
                         (focus-node:request-focus)
                         (when node
                             (set node.auto-focus? false))))
-                (set point.on-click
-                     (fn [_self _event]
-                         (focus-node:request-focus)))
-                (set point.on-double-click
-                     (fn [_self event]
-                         (if (Modifiers.alt-held? (and event event.mod))
-                             (expand-linked-frontier graph-map [(tostring node.key)])
-                             (toggle-node-presentation node))))
-                (set point.on-right-click
-                     (fn [_self event]
-                         (when focus-node
-                             (focus-node:request-focus))
-                         (local manager (get-menu-manager))
-                         (when manager
-                              (manager:open {:actions (view:node-actions node)
-                                             :position (resolve-menu-position event)}))))
-                (clickables:register point)
-                (when clickables.register-right-click
-                    (clickables:register-right-click point))
-                (clickables:register-double-click point)
                 (registry:add-node node point idx (and node-opts node-opts.pinned))
                 (when consume-initial-center!
                     (consume-initial-center! node))
                 (attach-focus-bounds node)
                 (register-movable node point)
-                (when selector
-                    (selector:add-selectables [point]))
                 (queue-graph-layout-refresh! run-force?)
                 (update-point-state node)
                 (queue-label-refresh! node)
@@ -998,10 +1015,22 @@
         (local pos (presentation-position current-point))
         (if expanded?
             (do
-              (local new-point (build-compact-presentation node pos))
               (clear-preview-focus-descendants! options._preview-scopes focus node)
               (detach-presentation node current-point)
-              (install-presentation node current-point new-point)
+              (local compact-record (attach-spatial-compact-node!
+                                       {:points points :pointer-target (or options.pointer-target (and ctx ctx.pointer-target)) :point-depth-offset-step point-depth-offset-step :point-base-depth-offset point-base-depth-offset :focus-layer-index focus-layer-index :selection-layer-index selection-layer-index :focus-border-width focus-border-width :selection-border-width selection-border-width :clickables clickables :selector selector :focus focus :points-focus-scope points-focus-scope :focus-outline-color resolved-focus-outline-color :selection-border-color resolved-selection-border-color :selected? (fn [selected-node] (rawget selected-set selected-node)) :focused-node (fn [] focused-node) :view view :get-menu-manager get-menu-manager :node-actions (fn [action-node] (view:node-actions action-node)) :resolve-menu-position resolve-menu-position :expand-linked-frontier expand-linked-frontier :graph-map graph-map :toggle-node-presentation (fn [toggle-node] (toggle-node-presentation toggle-node)) :compact-records options._compact-records}
+                                       node
+                                       pos
+                                                                    {:focus-node (. focus-nodes node)
+                                                                     :register-selectable? false}))
+              (local point compact-record.point)
+              (set (. registry.points node) point)
+              (set (. node-by-point point) node)
+              (when selector
+                  (selector:replace-selectable current-point point))
+              (register-movable node point)
+              (attach-focus-bounds node)
+              (update-point-state node)
               (clear-stale-before-island-pin-on-collapse! pinned pinned-before-expand node)
               (set (. pinned node) (or (. pinned-before-expand node) false))
               (set (. pinned-before-expand node) nil)
@@ -1011,8 +1040,10 @@
               (reconcile-graph-islands!))
             (do
               (local new-card (build-expanded-presentation node pos))
-              (detach-presentation node current-point)
+              (detach-compact-for-replacement! node current-point)
               (install-presentation node current-point new-card)
+              (when current-point.drop
+                  (current-point:drop))
               (labels:drop-node node)
               (set (. pinned-before-expand node) (. pinned node))
               (set (. pinned node) true)
@@ -1034,12 +1065,20 @@
             (when was-expanded?
                 (set (. expanded-nodes node) true)
                 (set (. expanded-nodes existing) nil))
+            (local compact-record (. options._compact-records existing))
+            (when compact-record
+                (set (. options._compact-records existing) nil)
+                (set (. options._compact-records node) compact-record)
+                (set compact-record.node node)
+                (set compact-record.key node.key)
+                (when compact-record.point
+                    (set compact-record.point.node node)
+                    (set compact-record.point.key node.key)))
             (when had-saved-pin-before?
                 (set (. pinned-before-expand node) saved-pin-before)
                 (set (. pinned-before-expand existing) nil))
             (when (and replacement (not was-expanded?))
                 (when replacement.point
-                    (attach-presentation-events node replacement.point)
                     (set (. node-by-point replacement.point) node)
                     (register-movable node replacement.point)))
             (labels:move-label existing node)
@@ -1088,9 +1127,21 @@
                         (persistence:set-presentation node :expanded)
                         (graph-layout:rebuild))
                     (do
-                        (local compact (build-compact-presentation node position))
                         (detach-presentation node old-presentation)
-                        (install-presentation node old-presentation compact)
+                        (local compact-record (attach-spatial-compact-node!
+                                                {:points points :pointer-target (or options.pointer-target (and ctx ctx.pointer-target)) :point-depth-offset-step point-depth-offset-step :point-base-depth-offset point-base-depth-offset :focus-layer-index focus-layer-index :selection-layer-index selection-layer-index :focus-border-width focus-border-width :selection-border-width selection-border-width :clickables clickables :selector selector :focus focus :points-focus-scope points-focus-scope :focus-outline-color resolved-focus-outline-color :selection-border-color resolved-selection-border-color :selected? (fn [selected-node] (rawget selected-set selected-node)) :focused-node (fn [] focused-node) :view view :get-menu-manager get-menu-manager :node-actions (fn [action-node] (view:node-actions action-node)) :resolve-menu-position resolve-menu-position :expand-linked-frontier expand-linked-frontier :graph-map graph-map :toggle-node-presentation (fn [toggle-node] (toggle-node-presentation toggle-node)) :compact-records options._compact-records}
+                                                                              node
+                                                                              position
+                                                                              {:focus-node (. focus-nodes node)
+                                                                               :register-selectable? false}))
+                        (local point compact-record.point)
+                        (set (. registry.points node) point)
+                        (set (. node-by-point point) node)
+                        (when selector
+                            (selector:replace-selectable old-presentation point))
+                        (register-movable node point)
+                        (attach-focus-bounds node)
+                        (update-point-state node)
                         (set (. pinned node) (or (. pinned-before-expand node) false))
                         (set (. pinned-before-expand node) nil)
                         (set (. expanded-nodes node) nil)
@@ -1108,18 +1159,26 @@
             (local (removed-count removal-set)
                   (registry:remove-nodes nodes-to-remove
                        {:before-remove (fn [node point]
-                                            (drop-node-artifacts node)
-                                            (when (and clickables point)
-                                                (clickables:unregister point)
-                                                (when clickables.unregister-right-click
-                                                    (clickables:unregister-right-click point))
-                                                (clickables:unregister-double-click point)
-                                                (set point.on-double-click nil)
-                                                (set point.on-right-click nil))
-                                            (when selector
-                                                (selector:remove-selectables [point]))
-                                            (when movables-handler
-                                                (movables-handler:unregister node))
+                                             (drop-node-artifacts node)
+                                             (local compact-record (. options._compact-records node))
+                                             (if compact-record
+                                                 (do
+                                                     (CompactNodeProjection.drop! compact-record
+                                                                                  {:drop-focus-node? false
+                                                                                   :drop-point? false})
+                                                     (set (. options._compact-records node) nil))
+                                                 (do
+                                                     (when (and clickables point)
+                                                         (clickables:unregister point)
+                                                         (when clickables.unregister-right-click
+                                                             (clickables:unregister-right-click point))
+                                                         (clickables:unregister-double-click point)
+                                                         (set point.on-double-click nil)
+                                                         (set point.on-right-click nil))
+                                                     (when selector
+                                                         (selector:remove-selectables [point]))))
+                                             (when movables-handler
+                                                 (movables-handler:unregister node))
                                             (when (and point._card-size app.resizables point._resize-target)
                                                 (app.resizables:unregister point._resize-target)))
                        :on-drop-point (fn [point]
@@ -1289,7 +1348,7 @@
         (when focus-node
             (focus-node:request-focus)))
 
-    (set view {:graph-map graph-map
+     (set view {:graph-map graph-map
                :ctx ctx
                :camera options.camera
                :layout layout
@@ -1313,8 +1372,8 @@
                :selection selection
                :graph-layout graph-layout
                :island-host island-host
-               :extra-panels []
-               :extra-panel-runtimes []})
+                :extra-panels []
+                :extra-panel-runtimes []})
 
     (fn extra-panel-persistence-matches? [persistence entry]
         (and (= (type persistence) :table)
@@ -1818,21 +1877,27 @@
              (labels:drop-all)
             (when movables-handler
                 (movables-handler:drop-all))
-            (each [_ point (pairs registry.points)]
-                (when clickables
-                    (clickables:unregister point)
-                    (when clickables.unregister-right-click
-                        (clickables:unregister-right-click point))
-                    (clickables:unregister-double-click point)
-                    (set point.on-double-click nil)
-                    (set point.on-right-click nil))
-                (when selector
-                    (selector:remove-selectables [point]))
-                (set (. node-by-point point) nil)
-                (when (and point._card-size app.resizables point._resize-target)
-                    (app.resizables:unregister point._resize-target))
-                (when point.drop
-                    (point:drop)))
+            (each [node point (pairs registry.points)]
+                (local compact-record (. options._compact-records node))
+                (if compact-record
+                    (do
+                        (CompactNodeProjection.drop! compact-record {:drop-focus-node? false})
+                        (set (. options._compact-records node) nil))
+                    (do
+                        (when clickables
+                            (clickables:unregister point)
+                            (when clickables.unregister-right-click
+                                (clickables:unregister-right-click point))
+                            (clickables:unregister-double-click point)
+                            (set point.on-double-click nil)
+                            (set point.on-right-click nil))
+                        (when selector
+                            (selector:remove-selectables [point]))
+                        (when (and point._card-size app.resizables point._resize-target)
+                            (app.resizables:unregister point._resize-target))
+                        (when point.drop
+                            (point:drop))))
+                (set (. node-by-point point) nil))
             (each [node preview-scope (pairs options._preview-scopes)]
                 (when preview-scope
                     (clear-preview-focus-descendants! options._preview-scopes focus node)
