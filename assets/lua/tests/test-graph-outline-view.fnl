@@ -150,6 +150,11 @@
             (table.insert matches event)))
     matches)
 
+(fn outline-layer-point [ctx row-index layer-index]
+    (local point-index (+ (* (- row-index 1) 3) layer-index))
+    (assert (. ctx.points.created point-index)
+            (.. "missing outline point layer " point-index)))
+
 (fn with-screen-ray [body]
     (local original app.screen-pos-ray)
     (set app.screen-pos-ray
@@ -298,6 +303,29 @@
     (view:reveal-node "test:child" {:select? true :focus? true})
     (assert (= graph-map.focused_node_key "test:child") "outline reveal should focus visible rows")
     (assert (= (table.concat graph-map.selected_node_keys ",") "test:child") "outline reveal should select visible rows")
+    (view:drop)
+    (graph-map:drop)
+    (graph:drop))
+
+(fn outline-reveal-refreshes-node-selection-rings []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (add-edge! graph-map "test:root" "test:child")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (local ctx (make-render-ctx))
+    (local view (GraphView {:graph-map graph-map :ctx ctx}))
+    (local child-focus-ring (outline-layer-point ctx 2 1))
+    (local child-selection-ring (outline-layer-point ctx 2 2))
+    (assert (= child-focus-ring.size 0) "child focus ring should start hidden")
+    (assert (= child-selection-ring.size 0) "child selection ring should start hidden")
+    (view:reveal-node "test:child" {:select? true :focus? true})
+    (assert (> child-focus-ring.size 0)
+            "reveal-node should refresh child focus ring immediately")
+    (assert (> child-selection-ring.size 0)
+            "reveal-node should refresh child selection ring immediately")
+    (view:clear-selection)
+    (assert (= child-selection-ring.size 0)
+            "clear-selection should refresh child selection ring immediately")
     (view:drop)
     (graph-map:drop)
     (graph:drop))
@@ -504,6 +532,7 @@
 (table.insert tests {:name "graph map prunes removed outline roots" :fn graph-map-prunes-removed-outline-roots})
 (table.insert tests {:name "map manager persists outline state per map" :fn map-manager-persists-outline-state-per-map})
 (table.insert tests {:name "outline view exposes visible row selection" :fn outline-view-exposes-visible-row-selection})
+(table.insert tests {:name "outline reveal refreshes node selection rings" :fn outline-reveal-refreshes-node-selection-rings})
 (table.insert tests {:name "outline view rejects unreachable reveal" :fn outline-view-rejects-unreachable-reveal})
 (table.insert tests {:name "outline row clicks use real hit testing" :fn outline-row-clicks-use-real-hit-testing})
 (table.insert tests {:name "outline row right-click and activation use real hit testing" :fn outline-row-right-click-and-activation-use-real-hit-testing})

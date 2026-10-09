@@ -371,7 +371,8 @@
              (local keys (icollect [_ row (ipairs view.rows)] row.key))
              (if (> (length keys) 0)
                  (do
-                      (set-graph-map-selected-keys! view.graph-map keys)
+                     (set-graph-map-selected-keys! view.graph-map keys)
+                     (refresh-row-visuals! view)
                      true)
                  false)))
     (set self.clear-selection
@@ -379,7 +380,8 @@
              (view:assert-not-dropped "clear-selection")
              (if (> (length view.graph-map.selected_node_keys) 0)
                  (do
-                      (set-graph-map-selected-keys! view.graph-map [])
+                     (set-graph-map-selected-keys! view.graph-map [])
+                     (refresh-row-visuals! view)
                      true)
                  false)))
     (set self.focused-node-selected?
@@ -393,7 +395,8 @@
              (local node (view:focused-node))
              (if node
                  (do
-                      (set-graph-map-selected-keys! view.graph-map [node.key])
+                     (set-graph-map-selected-keys! view.graph-map [node.key])
+                     (refresh-row-visuals! view)
                      true)
                  false)))
     (set self.add-focused-node-to-selection
@@ -409,7 +412,8 @@
                              (table.insert keys key)))
                      (when (not (. seen node.key))
                          (table.insert keys node.key))
-                      (set-graph-map-selected-keys! view.graph-map keys)
+                     (set-graph-map-selected-keys! view.graph-map keys)
+                     (refresh-row-visuals! view)
                      true)
                  false)))
     (set self.remove-focused-node-from-selection
@@ -421,7 +425,8 @@
                      (each [_ key (ipairs (graph-map-selected-keys view.graph-map))]
                          (when (and (not= key node.key) (visible-key? view key))
                              (table.insert keys key)))
-                      (set-graph-map-selected-keys! view.graph-map keys)
+                     (set-graph-map-selected-keys! view.graph-map keys)
+                     (refresh-row-visuals! view)
                      true)
                  false)))
     (set self.toggle-focused-node-selection
@@ -439,6 +444,7 @@
              (if (= (length visible-selected) 1)
                  (do
                      (set view.graph-map.focused_node_key (. visible-selected 1))
+                     (refresh-row-visuals! view)
                      true)
                  false)))
     (set self.has-visible-nodes?
@@ -530,9 +536,10 @@
              (local reveal-options (options-table opts))
              (local node (resolve-visible-node view node-or-key "reveal-node"))
              (when (not (= reveal-options.select? false))
-                  (set-graph-map-selected-keys! graph-map [node.key]))
+                 (set-graph-map-selected-keys! graph-map [node.key]))
              (when (not (= reveal-options.focus? false))
-                 (set graph-map.focused_node_key node.key))
+                  (set graph-map.focused_node_key node.key))
+             (refresh-row-visuals! view)
              node))
     (set self.open-node
          (fn [view node-or-key opts]
@@ -591,6 +598,7 @@
              (view:assert-not-dropped "restore-graph-state")
              (when (and graph-map graph-map.restore-state state)
                  (graph-map:restore-state state))
+             (refresh-row-visuals! view)
              true))
     (set self.restore-state
          (fn [view state]
@@ -599,7 +607,8 @@
              (when payload.views
                  (view:restore-views-state payload.views))
              (when payload.selected_node_keys
-                  (set-graph-map-selected-keys! graph-map payload.selected_node_keys))
+                 (set-graph-map-selected-keys! graph-map payload.selected_node_keys))
+             (refresh-row-visuals! view)
              true))
     (set self.drop
          (fn [view]
