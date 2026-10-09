@@ -64,6 +64,50 @@
      :remove-quad (fn [_self _key]
                     (table.insert events {:kind :quad-remove}))})
 
+(fn point-set-position [self position]
+    (set self.position position))
+
+(fn point-set-position-values [self x y z]
+    (set self.position (glm.vec3 x y z)))
+
+(fn point-set-color [self color]
+    (set self.color color))
+
+(fn point-set-size [self size]
+    (set self.size size))
+
+(fn point-set-depth-offset-index [self depth-offset-index]
+    (set self.depth-offset-index depth-offset-index))
+
+(fn point-intersect [_self _ray]
+    (values false nil nil))
+
+(fn point-drop [self]
+    (set self.dropped? true))
+
+(fn make-points-stub [events]
+    (local created [])
+    {:created created
+     :create-point (fn [_self opts]
+                     (local point {:position opts.position
+                                   :color opts.color
+                                   :size opts.size
+                                   :depth-offset-index opts.depth-offset-index
+                                   :set-position point-set-position
+                                   :set-position-values point-set-position-values
+                                   :set-color point-set-color
+                                   :set-size point-set-size
+                                   :set-depth-offset-index point-set-depth-offset-index
+                                   :intersect point-intersect
+                                   :drop point-drop})
+                     (table.insert created point)
+                     (table.insert events {:kind :point-create
+                                           :position opts.position
+                                           :color opts.color
+                                           :size opts.size
+                                           :depth-offset-index opts.depth-offset-index})
+                     point)})
+
 (fn add-render-stub [_self]
     (make-drop-handle))
 
@@ -81,7 +125,7 @@
     (local text-batcher (make-text-batcher-stub render-events))
     (local quad-batcher (make-quad-batcher-stub render-events))
     {:triangle-vector {:add add-render-stub}
-     :points {:add add-render-stub}
+     :points (make-points-stub render-events)
      :clickables {:register register-clickable-stub
                   :unregister unregister-clickable-stub
                   :register-right-click register-clickable-stub
@@ -98,6 +142,13 @@
 (fn count-render-events [ctx kind]
     (accumulate [count 0 _ event (ipairs ctx.render-events)]
         (if (= event.kind kind) (+ count 1) count)))
+
+(fn render-events-of-kind [ctx kind]
+    (local matches [])
+    (each [_ event (ipairs ctx.render-events)]
+        (when (= event.kind kind)
+            (table.insert matches event)))
+    matches)
 
 (fn with-screen-ray [body]
     (local original app.screen-pos-ray)
@@ -337,7 +388,7 @@
 (fn outline-row-registrations-drop-on-rebuild-and-drop []
     (with-screen-ray outline-row-registrations-body))
 
-(fn outline-view-creates-visual-artifacts-for-projected-rows []
+(fn outline-view-creates-tree-node-visual-artifacts-for-projected-rows []
     (local {:graph graph :graph-map graph-map} (make-map))
     (add-edge! graph-map "test:root" "test:child")
     (graph-map:set-view-mode! "outline")
@@ -345,14 +396,30 @@
     (local ctx (make-render-ctx))
     (local view (GraphView {:graph-map graph-map :ctx ctx}))
     (assert (>= (count-render-events ctx :text-upsert) 2)
-            "outline rows should create visible text artifacts")
-    (assert (>= (count-render-events ctx :quad-upsert) 2)
-            "outline rows should create visible row background/focus artifacts")
+            "outline rows should create visible node labels")
+    (assert (>= (count-render-events ctx :point-create) 6)
+            "outline rows should create layered graph node circle artifacts, not plain text-only rows")
+    (local base-points [])
+    (each [_ event (ipairs (render-events-of-kind ctx :point-create))]
+        (when (> event.size 0)
+            (table.insert base-points event)))
+    (assert (= (length base-points) 2)
+            "outline should create one visible base node circle per projected row")
+    (assert (= (. base-points 1 :position :x) 12)
+            "root node circle should start at deterministic tree x position")
+    (assert (= (. base-points 2 :position :x) 30)
+            "child node circle should indent by depth in tree layout")
+    (assert (= (. base-points 1 :position :y) -12)
+            "root node circle should use deterministic first-row y position")
+    (assert (= (. base-points 2 :position :y) -36)
+            "child node circle should use deterministic traversal-row y position")
+    (assert (= (count-render-events ctx :quad-upsert) 0)
+            "non-empty outline rows should not render list-row rectangles")
     (view:drop)
     (assert (>= (count-render-events ctx :text-remove) 2)
-            "dropping outline rows should remove text artifacts")
-    (assert (>= (count-render-events ctx :quad-remove) 2)
-            "dropping outline rows should remove row background/focus artifacts")
+            "dropping outline rows should remove node label artifacts")
+    (each [_ point (ipairs ctx.points.created)]
+        (assert point.dropped? "dropping outline rows should remove node circle artifacts"))
     (graph-map:drop)
     (graph:drop))
 
@@ -441,7 +508,7 @@
 (table.insert tests {:name "outline row clicks use real hit testing" :fn outline-row-clicks-use-real-hit-testing})
 (table.insert tests {:name "outline row right-click and activation use real hit testing" :fn outline-row-right-click-and-activation-use-real-hit-testing})
 (table.insert tests {:name "outline row registrations drop on rebuild and drop" :fn outline-row-registrations-drop-on-rebuild-and-drop})
-(table.insert tests {:name "outline view creates visual artifacts for projected rows" :fn outline-view-creates-visual-artifacts-for-projected-rows})
+(table.insert tests {:name "outline view creates tree node visual artifacts for projected rows" :fn outline-view-creates-tree-node-visual-artifacts-for-projected-rows})
 (table.insert tests {:name "outline view creates empty state guidance when no roots" :fn outline-view-creates-empty-state-guidance-when-no-roots})
 (table.insert tests {:name "command toggle outline flips view mode" :fn command-toggle-outline-flips-view-mode})
 (table.insert tests {:name "command set outline root prefers focused node" :fn command-set-outline-root-prefers-focused-node})
