@@ -32,6 +32,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          deps=$(awk '/CI_DEPS_START/{flag=1;next}/CI_DEPS_END/{flag=0}flag' docs/dev/building.md | sed -n 's/^sudo apt install //p')
+          # sccache not available via apt on Ubuntu 22.04 — install via cargo below
+          deps=$(echo "$deps" | sed 's/\bsccache\b//g')
+          sudo apt-get install -y ${deps} ccache
+
       - name: Setup compiler cache
         uses: ./.github/actions/setup-linux-compiler-cache
         with:
@@ -50,14 +58,6 @@ jobs:
             external/wallet-core/rust/Cargo.lock
             external/wallet-core/rust/Cargo.toml
             CMakeLists.txt
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          deps=$(awk '/CI_DEPS_START/{flag=1;next}/CI_DEPS_END/{flag=0}flag' docs/dev/building.md | sed -n 's/^sudo apt install //p')
-          # sccache not available via apt on Ubuntu 22.04 — install via cargo below
-          deps=$(echo "$deps" | sed 's/\bsccache\b//g')
-          sudo apt-get install -y ${deps} ccache
 
       - name: Configure git for test directories
         run: |
