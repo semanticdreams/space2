@@ -13,6 +13,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 
+permissions:
+  contents: read
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -32,26 +35,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Restore ccache
-        uses: actions/cache@v5
-        with:
-          path: .ccache
-          key: ccache-${{ runner.os }}-linux-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'scripts/build-linux.sh', 'scripts/build-appimage.sh', 'Makefile') }}
-          restore-keys: |
-            ccache-${{ runner.os }}-linux-${{ github.ref }}-
-            ccache-${{ runner.os }}-linux-
-            ccache-${{ runner.os }}-
-
-      - name: Restore sccache
-        uses: actions/cache@v5
-        with:
-          path: .sccache
-          key: sccache-${{ runner.os }}-linux-${{ github.ref }}-${{ hashFiles('ffi/matrix/Cargo.lock', 'ffi/matrix/Cargo.toml', 'external/wallet-core/rust/Cargo.lock', 'external/wallet-core/rust/Cargo.toml', 'CMakeLists.txt') }}
-          restore-keys: |
-            sccache-${{ runner.os }}-linux-${{ github.ref }}-
-            sccache-${{ runner.os }}-linux-
-            sccache-${{ runner.os }}-
-
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -60,35 +43,39 @@ jobs:
           deps=$(echo "$deps" | sed 's/\bsccache\b//g')
           sudo apt-get install -y ${deps} ccache
 
-      - name: Restore sccache binary
-        uses: actions/cache@v5
+      - name: Setup compiler cache
+        uses: ./.github/actions/setup-linux-compiler-cache
         with:
-          path: ~/.cargo/bin/sccache
-          key: sccache-bin-${{ runner.os }}-0.16.0
-
-      - name: Install sccache
-        run: |
-          if command -v sccache >/dev/null 2>&1; then
-            sccache --version
-          else
-            cargo install sccache --version 0.16.0 --locked
-          fi
+          cache-scope: linux
+          ccache-path: .ccache
+          sccache-path: .sccache
+          ccache-key-files: |
+            **/CMakeLists.txt
+            **/*.cmake
+            scripts/build-linux.sh
+            scripts/build-appimage.sh
+            Makefile
+          sccache-key-files: |
+            ffi/matrix/Cargo.lock
+            ffi/matrix/Cargo.toml
+            external/wallet-core/rust/Cargo.lock
+            external/wallet-core/rust/Cargo.toml
+            CMakeLists.txt
 
       - name: Configure git for test directories
         run: |
-          git config --global user.name "CI Test"
-          git config --global user.email "ci@test.local"
-          git config --global --add safe.directory /tmp/space/tests
-          git config --global --add safe.directory '*'
-          git config --global protocol.file.allow always
-          echo "=== git config safe.directory ==="
-          git config --global --get-all safe.directory || echo "(none)"
-          echo "=== git config protocol.file.allow ==="
-          git config --global protocol.file.allow || echo "(none)"
-          echo "=== GIT_CONFIG env vars ==="
-          echo "GIT_CONFIG_NOSYSTEM=${GIT_CONFIG_NOSYSTEM:-unset}"
-          echo "GIT_CONFIG_GLOBAL=${GIT_CONFIG_GLOBAL:-unset}"
-          echo "HOME=$HOME"
+          set -euo pipefail
+          git_config="${RUNNER_TEMP}/gitconfig"
+          git config --file "${git_config}" user.name "CI Test"
+          git config --file "${git_config}" user.email "ci@test.local"
+          git config --file "${git_config}" --add safe.directory "${GITHUB_WORKSPACE}"
+          git config --file "${git_config}" --add safe.directory /tmp/space/tests
+          git config --file "${git_config}" protocol.file.allow always
+          echo "GIT_CONFIG_GLOBAL=${git_config}" >> "${GITHUB_ENV}"
+          echo "=== CI git config safe.directory ==="
+          git config --file "${git_config}" --get-all safe.directory
+          echo "=== CI git config protocol.file.allow ==="
+          git config --file "${git_config}" protocol.file.allow
 
       - name: Check OpenCode capability wiring
         run: make opencode-check
@@ -138,45 +125,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Restore ccache
-        uses: actions/cache@v5
+      - name: Setup Windows cross-build cache
+        uses: ./.github/actions/setup-windows-cross-cache
         with:
-          path: .ccache-windows
-          key: ccache-${{ runner.os }}-windows-cross-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'apps/space/windows_app.rc.in', 'scripts/build-windows.sh', 'scripts/build-windows-from-linux.sh', 'scripts/setup-windows-build-host.sh', 'scripts/prepare-windows-runtime.sh', 'scripts/prepare-windows-wine-runtime.sh', 'scripts/generate_windows_icon.py') }}
-          restore-keys: |
-            ccache-${{ runner.os }}-windows-cross-${{ github.ref }}-
-            ccache-${{ runner.os }}-windows-cross-
-
-      - name: Restore sccache
-        uses: actions/cache@v5
-        with:
-          path: .sccache-windows
-          key: sccache-${{ runner.os }}-windows-cross-${{ github.ref }}-${{ hashFiles('ffi/matrix/Cargo.lock', 'ffi/matrix/Cargo.toml', 'external/wallet-core/rust/Cargo.lock', 'external/wallet-core/rust/Cargo.toml', 'CMakeLists.txt', 'scripts/build-windows.sh', 'scripts/build-windows-from-linux.sh', 'scripts/setup-windows-build-host.sh') }}
-          restore-keys: |
-            sccache-${{ runner.os }}-windows-cross-${{ github.ref }}-
-            sccache-${{ runner.os }}-windows-cross-
-
-      - name: Restore sccache binary
-        uses: actions/cache@v5
-        with:
-          path: ~/.cargo/bin/sccache
-          key: sccache-bin-${{ runner.os }}-0.16.0
-
-      - name: Install sccache
-        run: |
-          if command -v sccache >/dev/null 2>&1; then
-            sccache --version
-          else
-            cargo install sccache --version 0.16.0 --locked
-          fi
-
-      - name: Export GitHub Actions cache runtime for vcpkg
-        uses: actions/github-script@v8
-        with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+          cache-scope: windows-cross
+          ccache-path: .ccache-windows
+          sccache-path: .sccache-windows
+          export-vcpkg-cache-runtime: true
+          ccache-key-files: |
+            **/CMakeLists.txt
+            **/*.cmake
+            apps/space/windows_app.rc.in
+            scripts/build-windows.sh
+            scripts/build-windows-from-linux.sh
+            scripts/setup-windows-build-host.sh
+            scripts/prepare-windows-runtime.sh
+            scripts/prepare-windows-wine-runtime.sh
+            scripts/generate_windows_icon.py
+          sccache-key-files: |
+            ffi/matrix/Cargo.lock
+            ffi/matrix/Cargo.toml
+            external/wallet-core/rust/Cargo.lock
+            external/wallet-core/rust/Cargo.toml
+            CMakeLists.txt
+            scripts/build-windows.sh
+            scripts/build-windows-from-linux.sh
+            scripts/setup-windows-build-host.sh
 
       - name: Setup Windows cross-build host
         run: scripts/setup-windows-build-host.sh
