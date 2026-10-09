@@ -13,6 +13,20 @@
     (local (ok result) (pcall (fn [] (tostring value))))
     (if ok result "<error>"))
 
+(fn userdata-label [value]
+    (local (mt-ok mt) (pcall (fn [] (debug.getmetatable value))))
+    (local name (and mt-ok (= (type mt) :table) (= (type mt.__name) :string) mt.__name))
+    (if name
+        (.. "<userdata:" name ">")
+        "<userdata>"))
+
+(fn metatable-table-label [value]
+    (local (mt-ok mt) (pcall (fn [] (debug.getmetatable value))))
+    (local name (and mt-ok (= (type mt) :table) (= (type mt.__name) :string) mt.__name))
+    (if name
+        (.. "<table:" name ">")
+        "<table>"))
+
 (fn trim-text [_self text limit]
     (local str (safe-tostring text))
     (local resolved (math.max 3 (or limit 3)))
@@ -46,13 +60,17 @@
     (local base
         (if (= key-type :string)
             key
-            (.. "[" key-type "] " (safe-tostring key))))
+            (if (= key-type :userdata)
+                (.. "[" key-type "] " (userdata-label key))
+                (.. "[" key-type "] " (safe-tostring key)))))
     (self:trim-text base self.key-limit))
 
 (fn describe-table-value [self value]
     (local (mt-ok mt) (pcall (fn [] (debug.getmetatable value))))
     (if (and mt-ok mt)
-        (self:trim-text (safe-tostring value) self.value-limit)
+        (do
+            (local resolved (self:resolve-table-label value))
+            (self:trim-text (if resolved resolved (metatable-table-label value)) self.value-limit))
         (do
             (local resolved (self:resolve-table-label value))
             (or resolved (self:trim-text (safe-tostring value) self.value-limit)))))
@@ -60,7 +78,9 @@
 (fn describe-non-table [self value value-type]
     (if (= value-type :nil)
         "nil"
-        (self:trim-text (safe-tostring value) self.value-limit)))
+        (if (= value-type :userdata)
+            (self:trim-text (userdata-label value) self.value-limit)
+            (self:trim-text (safe-tostring value) self.value-limit))))
 
 (fn describe-value [self value]
     (local value-type (type value))
