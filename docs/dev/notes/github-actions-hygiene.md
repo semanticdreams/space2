@@ -32,6 +32,14 @@ Devlog publication is serialized with a dedicated concurrency group and
 `cancel-in-progress: false` so state restoration, notification delivery, and
 state upload cannot overlap.
 
+## PR and Windows validation routing
+
+The `test` workflow is the PR and merge-queue gate and runs Linux validation.
+Windows validation lives in the `windows` workflow and runs on pushes to
+`main` plus manual dispatch. This keeps PR feedback fast while detecting
+Windows regressions immediately after merge with a small culprit range. Windows
+is intentionally not scheduled by default.
+
 ## CI Git configuration
 
 CI must not use wildcard `safe.directory` or broad global Git mutation. Tests

@@ -38,6 +38,38 @@ def require_exact_env(text, workflow_name, env_name, value, errors):
         fail(errors, f"{workflow_name}: {env_name} must be pinned to {value}")
 
 
+def require_windows_routing(errors):
+    test = read(".github/workflows/test.yml")
+    for job_name in ("build-windows", "test-windows"):
+        if f"{job_name}:" in test:
+            fail(errors, f"test.yml: {job_name} must live in windows.yml, not test.yml")
+
+    windows_path = WORKFLOWS / "windows.yml"
+    if not windows_path.exists():
+        fail(errors, "windows.yml: missing dedicated Windows workflow")
+        return
+
+    windows = windows_path.read_text(encoding="utf-8")
+    for job_name in ("build-windows", "test-windows"):
+        if f"{job_name}:" not in windows:
+            fail(errors, f"windows.yml: missing {job_name} job")
+
+    for trigger in ("pull_request:", "merge_group:", "schedule:", "cron:"):
+        if trigger in windows:
+            fail(errors, f"windows.yml: forbidden trigger or schedule entry {trigger}")
+
+    if "workflow_dispatch:" not in windows:
+        fail(errors, "windows.yml: missing workflow_dispatch trigger")
+
+    on_block = top_level_block(windows, "on")
+    has_main_push = re.search(
+        r"(?m)^  push:\n(?:    .+\n|\n)*?    branches:\n(?:      .+\n|\n)*?      - main$",
+        on_block,
+    )
+    if not has_main_push:
+        fail(errors, "windows.yml: missing push trigger for main")
+
+
 def main():
     errors = []
 
@@ -85,6 +117,8 @@ def main():
     docs_deploy = workflow_job_block(docs_pages, "deploy")
     if "permissions:\n      pages: write\n      id-token: write" not in docs_deploy:
         fail(errors, "docs-pages.yml: deploy job must request pages: write and id-token: write")
+
+    require_windows_routing(errors)
 
     if errors:
         for error in errors:
