@@ -4,6 +4,8 @@
 (local GraphNodeActions (require :graph/view/node-actions))
 (local FocusedActions (require :graph/view/focused-actions))
 (local CompactNodeProjection (require :graph/view/compact-node-projection))
+(local GraphNodePresentation (require :graph/view/presentation))
+(local PanelBounds (require :graph/view/panel-bounds))
 (local GraphViewUtils (require :graph/view/utils))
 (local RawRectangle (require :raw-rectangle))
 (local Text (require :text))
@@ -26,6 +28,8 @@
 (local selection-layer-index 2)
 (local base-layer-index 3)
 (local empty-state-message "No outline roots. Focus a node or select exactly one node, then run Set Outline Root (SPC g o r).")
+
+(var rebuild-rows! nil)
 
 (fn outline-text-style [ctx color scale]
     (assert scale "GraphOutlineView text style requires scale")
@@ -98,6 +102,19 @@
     (for [idx (length connections) 1 -1]
         (table.remove connections idx)))
 
+(fn drop-expanded-record! [self record]
+    (when (and record record.expanded-card)
+        (local card record.expanded-card)
+        (local clickables (assert self.clickables
+                                  "GraphOutlineView expanded card drop requires clickables"))
+        (when clickables.unregister
+            (clickables:unregister card))
+        (when (and self.selector record.selectable)
+            (self.selector:remove-selectables [record.selectable]))
+        (when card.drop
+            (card:drop))
+        (set record.expanded-card nil)))
+
 (fn drop-row-handles! [self]
     (local row-handles (assert self.row-handles "GraphOutlineView requires row handles"))
     (when self.empty-state-handle
@@ -106,6 +123,7 @@
     (each [_ record (ipairs row-handles)]
         (when record.visuals
             (drop-handle-list! record.visuals))
+        (drop-expanded-record! self record)
         (when record.focus-node
             (set (. self.row-by-focus record.focus-node) nil))
         (when (and record.projection record.projection.drop!)
@@ -230,7 +248,14 @@
 
 (fn refresh-row-visual! [self record]
     (local row (assert record.row "GraphOutlineView row visual requires row"))
-    (when record.projection
+    (if record.expanded?
+        (when (and record.point record.point.set-layer-size)
+            (local base-size (or record.point.size (node-size row)))
+            (record.point:set-layer-size focus-layer-index (row-focus-layer-size self row base-size))
+            (record.point:set-layer-size selection-layer-index (if (row-selected? self row)
+                                                                  (+ base-size selection-border-width)
+                                                                  0)))
+        record.projection
         (CompactNodeProjection.refresh! record.projection
                                         {:selected? (row-selected? self row)
                                          :focused? (row-focused? self row)}))
@@ -315,12 +340,116 @@
         (manager:open {:actions (view:node-actions node)
                        :position (menu-position event)})))
 
+(fn register-expanded-card! [self record card]
+    (local clickables (assert self.clickables
+                              "GraphOutlineView expanded card requires clickables"))
+    (assert clickables.register "GraphOutlineView expanded card requires clickables.register")
+    (set card.on-click
+         (fn [_card _event]
+             (when record.focus-node
+                 (record.focus-node:request-focus {:reason :pointer}))))
+    (clickables:register card)
+    (when self.selector
+        (self.selector:add-selectables [card]))
+    (set record.expanded-card card)
+    (set record.point card)
+    (set record.selectable card)
+    (when record.focus-node
+        (set record.focus-node.presentation card)))
+
+(fn expanded-card-collapse [self]
+    (rebuild-rows! self)
+    true)
+
+(fn expanded-card-collapse-callback [self]
+    (fn collapse-callback []
+        (expanded-card-collapse self))
+
+    collapse-callback)
+
+(fn expanded-card-open [self node _event]
+    (self.node-views:open node)
+    true)
+
+(fn expanded-card-open-callback [self node]
+    (fn open-callback [event]
+        (expanded-card-open self node event))
+
+    open-callback)
+
+(fn expanded-card-menu [self node event]
+    (local manager (get-menu-manager self.ctx))
+    (when manager
+        (manager:open {:actions (self:node-actions node)
+                       :position (menu-position event)})))
+
+(fn expanded-card-menu-callback [self node]
+    (fn menu-callback [event]
+        (expanded-card-menu self node event))
+
+    menu-callback)
+
+(fn expanded-card-options [self record node]
+    (local bounds (PanelBounds.inline-card-bounds))
+    {:node node
+     :position record.point.position
+     :default-size bounds.default-size
+     :min-size bounds.min-size
+     :max-size bounds.max-size
+     :resize-max-size bounds.resize-max-size
+     :depth-offset-index point-base-depth-offset
+     :selection-color self.selection-border-color
+     :focus-color self.focus-outline-color
+     :pointer-target self.pointer-target
+     :on-collapse (expanded-card-collapse-callback self)
+     :on-open (expanded-card-open-callback self node)
+     :on-menu (expanded-card-menu-callback self node)})
+
+(fn build-expanded-card! [self record node]
+    (local card-builder
+          (GraphNodePresentation.card-builder (expanded-card-options self record node)))
+    (card-builder self.ctx))
+
+(fn unregister-compact-projection-handles! [record]
+    (local projection (assert record.projection
+                              "GraphOutlineView compact expansion requires projection"))
+    (local point (assert projection.point
+                         "GraphOutlineView compact expansion requires point"))
+    (local clickables (assert projection.clickables
+                              "GraphOutlineView compact expansion requires clickables"))
+    (when (and projection.left? clickables.unregister)
+        (clickables:unregister point))
+    (when (and projection.right? clickables.unregister-right-click)
+        (clickables:unregister-right-click point))
+    (when (and projection.double? clickables.unregister-double-click)
+        (clickables:unregister-double-click point))
+    (when (and projection.selector projection.selectable)
+        (projection.selector:remove-selectables [projection.selectable]))
+    (when point.drop
+        (point:drop))
+    (set projection.left? nil)
+    (set projection.right? nil)
+    (set projection.double? nil))
+
+(fn expand-record! [self record node]
+    (if record.expanded?
+        true
+        (do
+            (unregister-compact-projection-handles! record)
+            (local card (build-expanded-card! self record node))
+            (register-expanded-card! self record card)
+            (set record.expanded? true)
+            (set (. self.expanded-row-keys node.key) true)
+            (refresh-row-visual! self record)
+            true)))
+
 (fn projection-activate [node opts]
     (local view (assert (and opts opts.owner)
                         "GraphOutlineView compact activate requires owner"))
+    (local record (assert (row-record-for-key view node.key)
+                          "GraphOutlineView compact activate requires visible record"))
     (focus-visible-key! view node.key :activate)
-    (open-key! view node.key opts)
-    true)
+    (expand-record! view record node))
 
 (fn projection-layers [self row base-size]
     [{:size (row-focus-layer-size self row base-size)
@@ -415,6 +544,7 @@
       :rows []
       :row-by-key {}
       :row-by-focus {}
+      :expanded-row-keys {}
       :node-views node-views
       :outline-text-scale outline-text-scale
       :connections []
@@ -427,11 +557,12 @@
         (not (= (. self.row-by-focus current-focus) nil))
         true))
 
-(fn rebuild-rows! [self]
+(set rebuild-rows! (fn [self]
     (set self.rebuilding? true)
     (drop-row-handles! self)
     (set self.rows (GraphOutline.build-rows self.graph-map self.graph-map.outline_root_keys))
     (set self.row-by-key {})
+    (set self.expanded-row-keys {})
     (each [idx row (ipairs self.rows)]
         (set (. self.row-by-key row.key) row)
         (attach-row-handles! self row idx))
@@ -443,7 +574,7 @@
                (visible-key? self self.graph-map.focused_node_key)
                (should-restore-focus-on-rebuild? self))
         (focus-key! self self.graph-map.focused_node_key {:reason :rebuild}))
-    self.rows)
+    self.rows))
 
 (fn connect! [self signal handler]
     (when signal

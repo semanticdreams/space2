@@ -67,12 +67,19 @@
     (local record (assert point._compact_projection_record
                           "CompactNodeProjection activate requires record"))
     (when record.on-activate
-        (record.on-activate record.node activate-opts))
+        (local opts (event-options record :activate (and activate-opts activate-opts.event)))
+        (set opts.activation-options activate-opts)
+        (record.on-activate record.node opts))
     true)
 
 (fn focus-node-bounds [focus-node]
     (bounds-for-presentation (assert focus-node.presentation
                                      "CompactNodeProjection focus bounds require presentation")))
+
+(fn focus-node-activate [focus-node opts]
+    (local presentation (assert focus-node.presentation
+                                "CompactNodeProjection focus activation requires presentation"))
+    (presentation:activate opts))
 
 (fn refresh! [record opts]
     (assert record "CompactNodeProjection refresh! requires record")
@@ -180,7 +187,7 @@
             (options.focus:attach-bounds focus-node
                                          {:get-bounds focus-node-bounds}))
         (set focus-node.presentation point)
-        (set focus-node.activate point.activate)
+        (set focus-node.activate focus-node-activate)
         (set record.focus-node focus-node))
     (set record.refresh! (fn [self refresh-opts] (refresh! self refresh-opts)))
     (set record.drop! (fn [self] (drop! self)))

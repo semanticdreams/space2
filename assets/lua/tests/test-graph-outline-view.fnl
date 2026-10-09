@@ -9,17 +9,48 @@
 (local Clickables (require :clickables))
 (local ObjectSelector (require :object-selector))
 (local {:FocusManager FocusManager} (require :focus))
+(local {:Layout Layout :LayoutRoot LayoutRoot} (require :layout))
 
 (local tests [])
 
 (fn approx [actual expected]
     (< (math.abs (- actual expected)) 0.0001))
 
+(fn preview-measurer [self]
+    (set self.measure (glm.vec3 24 12 0)))
+
+(fn preview-constrained-measurer [self _constraints]
+    (set self.measure (glm.vec3 24 12 0)))
+
+(fn preview-layouter [_self]
+    nil)
+
+(fn preview-drop [widget]
+    (set widget.state.dropped? true)
+    (widget.layout:drop))
+
+(fn build-preview-widget [state node]
+    (set state.built-node node)
+    (local layout (Layout {:name "outline-compact-preview"
+                           :measurer preview-measurer
+                           :constrained-measurer preview-constrained-measurer
+                           :layouter preview-layouter}))
+    {:layout layout
+     :state state
+     :drop preview-drop})
+
+(fn tracked-preview [state]
+    (fn preview-for-node [node _opts]
+        (fn preview-builder [_ctx]
+            (build-preview-widget state node)))
+    preview-for-node)
+
 (fn register-test-loader [graph]
     (graph:register-key-loader "test"
         (fn [key]
             (Graph.GraphNode {:key key
-                              :label key})))
+                              :label key
+                              :preview (tracked-preview {})})))
     graph)
 
 (fn make-map []
@@ -54,6 +85,32 @@
         (set (. font.glyph-map codepoint) glyph))
     (set (. font.glyph-map 65533) glyph)
     font)
+
+(fn make-icons-stub []
+    (local glyph {:advance 1})
+    (local font {:metadata {:metrics {:ascender 1 :descender -1}
+                            :atlas {:width 1 :height 1}}
+                 :glyph-map {65533 glyph
+                             4242 glyph}})
+    (local stub {:font font
+                 :codepoints {:close_fullscreen 4242
+                              :open_in_new 4242
+                              :more_vert 4242}})
+    (set stub.get
+         (fn [self name]
+             (local value (. self.codepoints name))
+             (assert value (.. "Missing icon " name))
+             value))
+    (set stub.resolve
+         (fn [self name]
+             {:type :font
+              :codepoint (self:get name)
+              :font self.font}))
+    stub)
+
+(fn make-hoverables-stub []
+    {:register (fn [_self _obj] nil)
+     :unregister (fn [_self _obj] nil)})
 
 (fn make-text-batcher-stub [events]
     {:upsert-text (fn [_self _key payload]
@@ -151,8 +208,11 @@
                   :unregister-right-click unregister-clickable-stub
                   :register-double-click register-clickable-stub
                   :unregister-double-click unregister-clickable-stub}
-     :focus {:create-scope create-focus-scope-stub}
-     :theme {:graph {:selection-border-color (glm.vec4 1 0.6 0.2 1)}
+      :focus {:create-scope create-focus-scope-stub}
+      :layout-root (LayoutRoot {:log-dirt? false})
+      :icons (make-icons-stub)
+      :hoverables (make-hoverables-stub)
+      :theme {:graph {:selection-border-color (glm.vec4 1 0.6 0.2 1)}
              :input {:focus-outline (glm.vec4 0.2 0.6 1 1)}
              :font (make-test-font)
              :text {:foreground (glm.vec4 0.8 0.8 0.8 1) :scale 1.0}}
@@ -585,12 +645,47 @@
     (assert (= (table.concat graph-map.selected_node_keys ",") "test:root") "compact point right-click should preserve selection")
     (click-record-point clickables child-record 1 300)
     (click-record-point clickables child-record 1 500)
-    (assert (= opened-node-key "test:child") "compact point double-click should activate/open hit-tested child node")
+    (assert (= opened-node-key nil)
+            "compact point double-click should not open full node view")
+    (assert child-record.expanded?
+            "compact point double-click should expand compact presentation")
+    (assert child-record.point._card-size
+            "compact point double-click should replace point with expanded card presentation")
     (assert (= (table.concat graph-map.selected_node_keys ",") "test:root") "compact point double-click activation should preserve selection")
     (view:drop)
     (graph-map:drop)
     (graph:drop)
     (set app.menu-manager original-menu-manager))
+
+(fn outline-focused-compact-point-activation-body []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (add-edge! graph-map "test:root" "test:child")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (local clickables (Clickables))
+    (local ctx (make-render-ctx-with-focus))
+    (set ctx.clickables clickables)
+    (local view (GraphView {:graph-map graph-map :ctx ctx}))
+    (var opened-node-key nil)
+    (set view.node-views.open
+         (fn [_self node _opts]
+             (set opened-node-key node.key)))
+    (local child-record (view-record-for-key view "test:child"))
+    (child-record.focus-node:request-focus {:reason :test})
+    (assert (= (ctx.focus.manager:activate-focused {}) true)
+            "focus activation should activate focused outline compact point")
+    (assert (= opened-node-key nil)
+            "focus activation should not open full node view")
+    (assert child-record.expanded?
+            "focus activation should expand compact presentation")
+    (assert child-record.point._card-size
+            "focus activation should replace point with expanded card presentation")
+    (view:drop)
+    (graph-map:drop)
+    (graph:drop))
+
+(fn outline-focused-compact-point-activation-uses-graph-expansion []
+    (with-screen-ray outline-focused-compact-point-activation-body))
 
 (fn outline-compact-point-right-click-and-activation-use-real-hit-testing []
     (with-screen-ray outline-compact-point-action-body))
@@ -773,6 +868,7 @@
 (table.insert tests {:name "outline compact point click syncs selector and focus manager" :fn outline-compact-point-click-syncs-selector-and-focus-manager})
 (table.insert tests {:name "outline focus clears when external control focused" :fn outline-focus-clears-when-external-control-focused})
 (table.insert tests {:name "outline compact point right-click and activation use real hit testing" :fn outline-compact-point-right-click-and-activation-use-real-hit-testing})
+(table.insert tests {:name "outline focused compact point activation uses graph expansion" :fn outline-focused-compact-point-activation-uses-graph-expansion})
 (table.insert tests {:name "outline compact point registrations drop on rebuild and drop" :fn outline-compact-point-registrations-drop-on-rebuild-and-drop})
 (table.insert tests {:name "outline view creates tree node visual artifacts for projected rows" :fn outline-view-creates-tree-node-visual-artifacts-for-projected-rows})
 (table.insert tests {:name "outline labels align right of node points" :fn outline-labels-align-right-of-node-points})
