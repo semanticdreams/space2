@@ -4,9 +4,12 @@
 (local GraphNodeActions (require :graph/view/node-actions))
 (local FocusedActions (require :graph/view/focused-actions))
 (local GraphNodePresentation (require :graph/view/presentation))
+(local GraphViewUtils (require :graph/view/utils))
 (local RawRectangle (require :raw-rectangle))
 (local Text (require :text))
 (local TextStyle (require :text-style))
+
+(local ensure-glm-vec4 GraphViewUtils.ensure-glm-vec4)
 
 (local row-width 640)
 (local row-height 24)
@@ -15,8 +18,13 @@
 (local node-label-gap 12)
 (local point-label-gap 1.0)
 (local graph-label-default-scale 3.0)
-(local focus-border-width 3)
-(local selection-border-width 2)
+(local focus-border-width 1.5)
+(local selection-border-width 2.0)
+(local point-depth-offset-step 1)
+(local point-base-depth-offset 2)
+(local focus-layer-index 1)
+(local selection-layer-index 2)
+(local base-layer-index 3)
 (local empty-state-message "No outline roots. Focus a node or select exactly one node, then run Set Outline Root (SPC g o r).")
 
 (fn outline-text-style [ctx color scale]
@@ -148,6 +156,23 @@
 (fn row-focused? [self row]
     (= self.graph-map.focused_node_key row.key))
 
+(fn row-focus-layer-size [self row base-size]
+    (if (row-focused? self row)
+        (+ base-size
+           (if (row-selected? self row) selection-border-width 0)
+           focus-border-width)
+        0))
+
+(fn outline-selection-border-color [ctx]
+    (local color (and ctx ctx.theme ctx.theme.graph ctx.theme.graph.selection-border-color))
+    (assert color "GraphOutlineView requires theme graph.selection-border-color")
+    (ensure-glm-vec4 color))
+
+(fn outline-focus-outline-color [ctx]
+    (local color (and ctx ctx.theme ctx.theme.input ctx.theme.input.focus-outline))
+    (assert color "GraphOutlineView requires theme input focus-outline")
+    (ensure-glm-vec4 color))
+
 (fn node-color [row]
     (assert (and row row.node row.node.color)
             "GraphOutlineView node visual requires node color"))
@@ -269,12 +294,10 @@
     (local row (assert record.row "GraphOutlineView row visual requires row"))
     (when record.point
         (local base-size (node-size row))
-        (record.point:set-layer-size 1 (if (row-focused? self row)
-                                          (+ base-size selection-border-width focus-border-width)
-                                          0))
-        (record.point:set-layer-size 2 (if (row-selected? self row)
-                                           (+ base-size selection-border-width)
-                                           0)))
+        (record.point:set-layer-size focus-layer-index (row-focus-layer-size self row base-size))
+        (record.point:set-layer-size selection-layer-index (if (row-selected? self row)
+                                                               (+ base-size selection-border-width)
+                                                               0)))
     (when (and record.point record.visuals)
         (local label (. record.visuals 2))
         (when label
@@ -348,18 +371,16 @@
           (GraphNodePresentation.compact-point
               {:points (assert self.ctx.points "GraphOutlineView node visuals require ctx.points")
                :position position
-               :pointer-target (and self.ctx self.ctx.pointer-target)
-               :depth-offset-step 1
-               :base-depth-offset-index 2
-               :base-layer-index 3
-               :layers [{:size (if (row-focused? self row)
-                                  (+ base-size selection-border-width focus-border-width)
-                                  0)
-                         :color (glm.vec4 0.42 0.58 0.92 0.92)}
+               :pointer-target self.pointer-target
+               :depth-offset-step point-depth-offset-step
+               :base-depth-offset-index point-base-depth-offset
+               :base-layer-index base-layer-index
+               :layers [{:size (row-focus-layer-size self row base-size)
+                         :color self.focus-outline-color}
                         {:size (if (row-selected? self row)
                                   (+ base-size selection-border-width)
                                   0)
-                         :color (glm.vec4 0.28 0.78 0.42 0.88)}
+                         :color self.selection-border-color}
                         {:size base-size
                          :color (node-color row)}]}))
     (local label
@@ -374,10 +395,11 @@
 (fn attach-row-handles! [self row index]
     (local clickables (assert self.clickables "GraphOutlineView row handles require clickables"))
     (local target {:key row.key
-                   :row row
-                   :label (row-title row)
-                   :label-x (row-label-x row)
-                   :depth row.depth})
+                    :row row
+                    :label (row-title row)
+                    :label-x (row-label-x row)
+                    :depth row.depth
+                    :pointer-target self.pointer-target})
     (attach-row-intersect! target (row-hit-position index))
     (set target.on-click
           (fn [_target _event]
@@ -431,12 +453,15 @@
                                    :visuals [background label]})
     self.empty-state-handle)
 
-(fn make-outline-view-state [graph-map ctx clickables node-views outline-text-scale selector focus]
+(fn make-outline-view-state [graph-map ctx clickables node-views outline-text-scale selector focus pointer-target]
     {:graph-map graph-map
       :ctx ctx
       :clickables clickables
       :selector selector
       :focus focus
+      :pointer-target pointer-target
+      :selection-border-color (outline-selection-border-color ctx)
+      :focus-outline-color (outline-focus-outline-color ctx)
       :rows []
       :row-by-key {}
       :row-by-focus {}
@@ -659,12 +684,14 @@
     (local selector options.selector)
     (local focus (and ctx ctx.focus))
     (local focus-manager (and focus focus.manager))
+    (local pointer-target (or options.pointer-target
+                              (and ctx ctx.pointer-target)))
     (local node-views (GraphViewNodeViews {:graph-map graph-map
                                             :ctx ctx
                                             :view-target options.view-target
                                             :view-context (resolve-view-context options ctx)}))
     (local outline-text-scale options.outline-text-scale)
-    (local self (make-outline-view-state graph-map ctx clickables node-views outline-text-scale selector focus))
+    (local self (make-outline-view-state graph-map ctx clickables node-views outline-text-scale selector focus pointer-target))
     (var dropped? false)
     (set self.assert-not-dropped
          (fn [_view context]
