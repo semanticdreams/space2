@@ -1,5 +1,6 @@
 (local glm (require :glm))
 (local GraphNodePresentation (require :graph/view/presentation))
+(local Modifiers (require :input-modifiers))
 
 (fn visible-size [point]
     (assert point "CompactNodeProjection visible-size requires point")
@@ -216,7 +217,53 @@
     (refresh! record {:selected? options.selected? :focused? options.focused?})
     record)
 
+(fn spatial-options [deps node position options]
+    {:points deps.points
+     :node node
+     :position position
+     :pointer-target deps.pointer-target
+     :depth-offset-step deps.point-depth-offset-step
+     :base-depth-offset-index deps.point-base-depth-offset
+     :base-layer-index 3
+     :focus-layer-index deps.focus-layer-index
+     :selection-layer-index deps.selection-layer-index
+     :focus-border-width deps.focus-border-width
+     :selection-border-width deps.selection-border-width
+     :clickables (assert deps.clickables "CompactNodeProjection spatial attach requires clickables")
+     :selector deps.selector
+     :register-selectable? options.register-selectable?
+     :focus deps.focus
+     :focus-parent deps.points-focus-scope
+     :focus-node options.focus-node
+     :drop-focus-node? false
+     :layers [{:size 0 :color deps.focus-outline-color}
+              {:size 0 :color deps.selection-border-color}
+              {:size node.size :color node.color}]
+     :selected? (deps.selected? node)
+     :focused? (= (deps.focused-node) node)
+     :owner deps.view
+     :on-right-click (fn [right-click-node event _opts]
+                        (local manager (deps.get-menu-manager))
+                        (when manager
+                            (manager:open {:actions (deps.node-actions right-click-node)
+                                           :position (deps.resolve-menu-position event)})))
+     :on-activate (fn [activate-node activate-opts]
+                    (local event (and activate-opts activate-opts.event))
+                    (local mod (and event event.mod))
+                    (if (Modifiers.alt-held? mod)
+                        (deps.expand-linked-frontier deps.graph-map [(tostring activate-node.key)])
+                        (deps.toggle-node-presentation activate-node)))})
+
+(fn attach-spatial! [deps node position opts]
+    (local options (assert opts "CompactNodeProjection spatial attach requires options"))
+    (local record (attach! (spatial-options deps node position options)))
+    (when (and deps.bind-focus-node-activate record.focus-node)
+        (deps.bind-focus-node-activate node record.focus-node))
+    (set (. deps.compact-records node) record)
+    record)
+
 {:attach! attach!
+ :attach-spatial! attach-spatial!
  :refresh! refresh!
  :drop! drop!
  :bounds-for-presentation bounds-for-presentation
