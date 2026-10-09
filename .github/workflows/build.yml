@@ -31,25 +31,24 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Restore ccache
-        uses: actions/cache@v5
+      - name: Setup compiler cache
+        uses: ./.github/actions/setup-linux-compiler-cache
         with:
-          path: .ccache
-          key: ccache-${{ runner.os }}-linux-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'scripts/build-linux.sh', 'scripts/build-appimage.sh', 'Makefile') }}
-          restore-keys: |
-            ccache-${{ runner.os }}-linux-${{ github.ref }}-
-            ccache-${{ runner.os }}-linux-
-            ccache-${{ runner.os }}-
-
-      - name: Restore sccache
-        uses: actions/cache@v5
-        with:
-          path: .sccache
-          key: sccache-${{ runner.os }}-linux-${{ github.ref }}-${{ hashFiles('ffi/matrix/Cargo.lock', 'ffi/matrix/Cargo.toml', 'external/wallet-core/rust/Cargo.lock', 'external/wallet-core/rust/Cargo.toml', 'CMakeLists.txt') }}
-          restore-keys: |
-            sccache-${{ runner.os }}-linux-${{ github.ref }}-
-            sccache-${{ runner.os }}-linux-
-            sccache-${{ runner.os }}-
+          cache-scope: linux
+          ccache-path: .ccache
+          sccache-path: .sccache
+          ccache-key-files: |
+            **/CMakeLists.txt
+            **/*.cmake
+            scripts/build-linux.sh
+            scripts/build-appimage.sh
+            Makefile
+          sccache-key-files: |
+            ffi/matrix/Cargo.lock
+            ffi/matrix/Cargo.toml
+            external/wallet-core/rust/Cargo.lock
+            external/wallet-core/rust/Cargo.toml
+            CMakeLists.txt
 
       - name: Install dependencies
         run: |
@@ -58,9 +57,6 @@ jobs:
           # sccache not available via apt on Ubuntu 22.04 — install via cargo below
           deps=$(echo "$deps" | sed 's/\bsccache\b//g')
           sudo apt-get install -y ${deps} ccache rpm
-
-      - name: Install sccache
-        run: cargo install sccache --version 0.16.0 --locked
 
       - name: Configure and Build
         env:
@@ -203,45 +199,34 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Restore ccache
-        uses: actions/cache@v5
+      - name: Setup Windows cross-build cache
+        uses: ./.github/actions/setup-windows-cross-cache
         with:
-          path: .ccache-windows
-          key: ccache-${{ runner.os }}-windows-cross-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'apps/space/windows_app.rc.in', 'scripts/build-windows.sh', 'scripts/build-windows-from-linux.sh', 'scripts/setup-windows-build-host.sh', 'scripts/prepare-windows-runtime.sh', 'scripts/prepare-windows-wine-runtime.sh', 'scripts/generate_windows_icon.py', 'scripts/build-windows-installer.py', 'scripts/windows-installer.iss') }}
-          restore-keys: |
-            ccache-${{ runner.os }}-windows-cross-${{ github.ref }}-
-            ccache-${{ runner.os }}-windows-cross-
-
-      - name: Restore sccache
-        uses: actions/cache@v5
-        with:
-          path: .sccache-windows
-          key: sccache-${{ runner.os }}-windows-cross-${{ github.ref }}-${{ hashFiles('ffi/matrix/Cargo.lock', 'ffi/matrix/Cargo.toml', 'external/wallet-core/rust/Cargo.lock', 'external/wallet-core/rust/Cargo.toml', 'CMakeLists.txt', 'scripts/build-windows.sh', 'scripts/build-windows-from-linux.sh', 'scripts/setup-windows-build-host.sh') }}
-          restore-keys: |
-            sccache-${{ runner.os }}-windows-cross-${{ github.ref }}-
-            sccache-${{ runner.os }}-windows-cross-
-
-      - name: Restore sccache binary
-        uses: actions/cache@v5
-        with:
-          path: ~/.cargo/bin/sccache
-          key: sccache-bin-${{ runner.os }}-0.16.0
-
-      - name: Install sccache
-        run: |
-          if command -v sccache >/dev/null 2>&1; then
-            sccache --version
-          else
-            cargo install sccache --version 0.16.0 --locked
-          fi
-
-      - name: Export GitHub Actions cache runtime for vcpkg
-        uses: actions/github-script@v8
-        with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+          cache-scope: windows-cross
+          ccache-path: .ccache-windows
+          sccache-path: .sccache-windows
+          export-vcpkg-cache-runtime: true
+          ccache-key-files: |
+            **/CMakeLists.txt
+            **/*.cmake
+            apps/space/windows_app.rc.in
+            scripts/build-windows.sh
+            scripts/build-windows-from-linux.sh
+            scripts/setup-windows-build-host.sh
+            scripts/prepare-windows-runtime.sh
+            scripts/prepare-windows-wine-runtime.sh
+            scripts/generate_windows_icon.py
+            scripts/build-windows-installer.py
+            scripts/windows-installer.iss
+          sccache-key-files: |
+            ffi/matrix/Cargo.lock
+            ffi/matrix/Cargo.toml
+            external/wallet-core/rust/Cargo.lock
+            external/wallet-core/rust/Cargo.toml
+            CMakeLists.txt
+            scripts/build-windows.sh
+            scripts/build-windows-from-linux.sh
+            scripts/setup-windows-build-host.sh
 
       - name: Setup Windows cross-build host
         run: scripts/setup-windows-build-host.sh
