@@ -285,14 +285,14 @@
                          "outline click repro requires graph-map selected_node_keys")
                 ","))
 
-(fn outline-click-focuses-visible-row-without-changing-selection [ctx]
-  (local env (make-outline-e2e-env ctx {:name "graph-outline-repro-click-focus"
-                                         :populate populate-child-root!}))
+(fn outline-compact-point-click-focuses-node-without-changing-selection [ctx]
+  (local env (make-outline-e2e-env ctx {:name "graph-outline-repro-compact-point-click-focus"
+                                          :populate populate-child-root!}))
   (local (ok err)
     (pcall
       (fn []
-        (local view (assert env.state.view "outline click repro missing view"))
-        (local graph-map (assert env.state.graph-map "outline click repro missing graph map"))
+        (local view (assert env.state.view "outline compact point click repro missing view"))
+        (local graph-map (assert env.state.graph-map "outline compact point click repro missing graph map"))
         (local child-record (row-record view "child"))
         (graph-map:set-selected-node-keys ["root"])
         (local click-point (project-to-screen child-record.point.position env.target))
@@ -319,10 +319,10 @@
         (click-at miss-point)
         (view:update 0.016)
         (assert (= graph-map.focused_node_key nil)
-                (.. "outline whitespace click should not focus a graph node, got "
+                (.. "outline whitespace miss should not focus a graph node, got "
                     (tostring graph-map.focused_node_key)))
         (assert (= (selected-keys-text graph-map) "root")
-                (.. "outline whitespace click should preserve selected graph node, got "
+                (.. "outline whitespace miss should preserve selected graph node, got "
                     (selected-keys-text graph-map))))))
   (cleanup-outline-e2e-env env)
   (when (not ok)
@@ -361,7 +361,7 @@
 (fn draw-style-target [ctx screen-target]
   (Harness.draw-targets ctx.width ctx.height [{:target screen-target}]))
 
-(fn assert-outline-row-style [ctx state-name opts]
+(fn assert-outline-compact-point-style [ctx state-name opts]
   (local options (or opts {}))
   (local data-root (fs.join-path "/tmp/space/tests" (.. "graph-outline-style-source-" state-name)))
   (when (fs.exists data-root)
@@ -389,18 +389,18 @@
     (error err)))
 
 (fn outline-selection-focus-visuals-match-graph-view [ctx]
-  (assert-outline-row-style ctx "selected-only" {:selected? true :focused? false})
-  (assert-outline-row-style ctx "focused-only" {:selected? false :focused? true})
-  (assert-outline-row-style ctx "selected-focused" {:selected? true :focused? true}))
+  (assert-outline-compact-point-style ctx "selected-only" {:selected? true :focused? false})
+  (assert-outline-compact-point-style ctx "focused-only" {:selected? false :focused? true})
+  (assert-outline-compact-point-style ctx "selected-focused" {:selected? true :focused? true}))
 
 (fn run-reproduction-tests [ctx]
   (local repro-case (os.getenv "SPACE_OUTLINE_REPRO_CASE"))
   (if (= repro-case "click")
-      (outline-click-focuses-visible-row-without-changing-selection ctx)
+      (outline-compact-point-click-focuses-node-without-changing-selection ctx)
       (= repro-case "visual")
       (outline-selection-focus-visuals-match-graph-view ctx)
       (do
-        (outline-click-focuses-visible-row-without-changing-selection ctx)
+        (outline-compact-point-click-focuses-node-without-changing-selection ctx)
         (outline-selection-focus-visuals-match-graph-view ctx))))
 
 (fn run [ctx]
@@ -418,7 +418,7 @@
 (fn main []
   (Harness.with-app {:width 640 :height 360 :units-per-pixel 1}
                      run-context)
-  (print "E2E graph outline view reproduction tests and snapshots complete"))
+  (print "E2E graph outline compact point click/focus, whitespace miss, visuals, and snapshots complete"))
 
 {:run run
  :run-reproduction-tests run-reproduction-tests

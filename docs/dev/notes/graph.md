@@ -32,7 +32,7 @@ Related objects become graph-visible only through explicit preview, view, search
 - `graph/extension-registry.fnl`: the only node-type installation mechanism for built-ins and user/runtime extensions. Descriptors install owner-safe key-loader and morph handles into live and future world runtimes, then refresh map-local adapters by scheme during reload. See [Reloadable Graph Extension Units](/dev/features/reloadable-graph-extension-units).
 - `graph/extensions/builtins/`: family-scoped built-in graph extension descriptors register through the app registry. Their installer functions call the low-level `graph:register-key-loader` primitive to adapt owning stores/systems into graph nodes on demand via `load-by-key`; they do not own or persist domain records. Entity descriptors adapt entity stores; LLM descriptors adapt the LLM store; workflow descriptors adapt workflow stores; world activity and surface descriptors adapt `world-manager` and `WorldData`.
 - `graph/map.fnl`: graph maps hold the visible topology a user has materialized in that interaction context. Preview/search/action code loads keys through the active `GraphMap` and inserts explicit display edges when the user asks to reveal related records.
-- `graph/outline.fnl`: outline rows are a `GraphMap` projection over graph-visible topology. The projection follows outgoing visible graph-map edges from the active map's ordered `outline_root_keys`; it does not materialize hidden relationships or persist row state.
+- `graph/outline.fnl`: outline rows are deterministic visual/layout records in a `GraphMap` projection over graph-visible topology. The projection follows outgoing visible graph-map edges from the active map's ordered `outline_root_keys`; it does not materialize hidden relationships or persist row state. Outline rows and labels are visual-only; compact node presentations own interaction.
 - Graph presentation islands are map-local presentation state over graph-exposed objects. `GraphMap` persists island records, while `GraphView` hosts presenters by kind. Presenter kinds such as `ordered-list` must not make domain stores subordinate to graph view; domain stores remain the source of truth for domain data.
 - `graph/world-data.fnl`: activity-owned scene/HUD/canvas state is resolved from `world.state.activity.sessions.<activity-id>` through `WorldData` helpers. Activity-owned graph keys include both `world-id` and `activity-id` (for example `activity-scene:<world-id>:<activity-id>`, `activity-background:<world-id>:<activity-id>`, and `activity-terrain:<world-id>:<activity-id>:<terrain-id>`). Updates mutate the owning activity surface state, then sync to the active surface and persist world. Graph nodes are projections, not the source of truth.
 - Activity hierarchy keys expose `world:<world-id>` → `world-activities:<world-id>` → `world-activity:<world-id>:<activity-id>` → `activity-surfaces:<world-id>:<activity-id>` before reaching concrete surface nodes such as scene, HUD, or canvas.
@@ -48,8 +48,14 @@ topology; it is not persisted by graph core and is not tracked by graph node
 adapters.
 
 `GraphView` chooses the spatial renderer or outline renderer at runtime and owns
-the resulting UI handles, hit targets, focus behavior, and row widgets. Graph
-core persists only graph topology: node keys and edge source/target keys.
+the resulting UI handles. In outline mode, rows and labels are deterministic
+visual/layout records only; they do not own click, selection, focus, menu, or
+activation behavior. The compact node presentation for each visible outline node
+owns the same interaction lifecycle as spatial compact nodes: clickables,
+selector entries, focus bounds, menu routing, activation, visual focus/selection
+rings, and teardown. Clicking row whitespace or label area outside the compact
+point is not a graph-node interaction. Graph core persists only graph topology:
+node keys and edge source/target keys.
 `GraphMap:capture-state` separately persists map-local interaction state such
 as `view_mode` and `outline_root_keys`.
 
