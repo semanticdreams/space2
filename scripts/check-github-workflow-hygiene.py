@@ -28,6 +28,11 @@ def workflow_job_block(text, job_name):
     return match.group("body") if match else ""
 
 
+def require_exact_env(text, workflow_name, env_name, value, errors):
+    if f"  {env_name}: {value}" not in text:
+        fail(errors, f"{workflow_name}: {env_name} must be pinned to {value}")
+
+
 def main():
     errors = []
 
@@ -48,6 +53,7 @@ def main():
         fail(errors, "devlog-publish.yml: missing serial devlog-publish concurrency")
 
     build = read(".github/workflows/build.yml")
+    require_exact_env(build, "build.yml", "INNOSETUP_CHOCO_VERSION", "6.4.3", errors)
     if "choco install innosetup --version $env:INNOSETUP_CHOCO_VERSION" not in build:
         fail(errors, "build.yml: Inno Setup Chocolatey install must be pinned")
     build_publish = workflow_job_block(build, "publish-release")
@@ -55,6 +61,8 @@ def main():
         fail(errors, "build.yml: release publishing must be centralized in publish-release")
 
     bundle = read(".github/workflows/bundle.yml")
+    require_exact_env(bundle, "bundle.yml", "INNOSETUP_CHOCO_VERSION", "6.4.3", errors)
+    require_exact_env(bundle, "bundle.yml", "PILLOW_VERSION", "11.3.0", errors)
     if "choco install innosetup --version $env:INNOSETUP_CHOCO_VERSION" not in bundle:
         fail(errors, "bundle.yml: Inno Setup Chocolatey install must be pinned")
     if "Pillow==$env:PILLOW_VERSION" not in bundle:
