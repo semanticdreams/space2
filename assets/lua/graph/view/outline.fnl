@@ -340,17 +340,21 @@
         (manager:open {:actions (view:node-actions node)
                        :position (menu-position event)})))
 
-(fn register-expanded-card! [self record card]
+(fn register-expanded-card! [self record card previous-selectable]
     (local clickables (assert self.clickables
                               "GraphOutlineView expanded card requires clickables"))
     (assert clickables.register "GraphOutlineView expanded card requires clickables.register")
     (set card.on-click
          (fn [_card _event]
              (when record.focus-node
-                 (record.focus-node:request-focus {:reason :pointer}))))
+                  (record.focus-node:request-focus {:reason :pointer}))))
+    (set card.key record.row.key)
+    (set card.node record.row.node)
     (clickables:register card)
     (when self.selector
-        (self.selector:add-selectables [card]))
+        (if previous-selectable
+            (self.selector:replace-selectable previous-selectable card)
+            (self.selector:add-selectables [card])))
     (set record.expanded-card card)
     (set record.point card)
     (set record.selectable card)
@@ -423,8 +427,6 @@
         (clickables:unregister-right-click point))
     (when (and projection.double? clickables.unregister-double-click)
         (clickables:unregister-double-click point))
-    (when (and projection.selector projection.selectable)
-        (projection.selector:remove-selectables [projection.selectable]))
     (when point.drop
         (point:drop))
     (set projection.left? nil)
@@ -435,9 +437,10 @@
     (if record.expanded?
         true
         (do
+            (local previous-selectable record.selectable)
             (unregister-compact-projection-handles! record)
             (local card (build-expanded-card! self record node))
-            (register-expanded-card! self record card)
+            (register-expanded-card! self record card previous-selectable)
             (set record.expanded? true)
             (set (. self.expanded-row-keys node.key) true)
             (refresh-row-visual! self record)

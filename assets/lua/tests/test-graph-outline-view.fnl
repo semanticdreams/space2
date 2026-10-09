@@ -692,6 +692,38 @@
     (graph-map:drop)
     (graph:drop))
 
+(fn outline-selected-compact-point-expansion-preserves-selection-body []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (add-edge! graph-map "test:root" "test:child")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (graph-map:set-selected-node-keys ["test:child"])
+    (local clickables (Clickables))
+    (local ctx (make-render-ctx-with-focus))
+    (set ctx.clickables clickables)
+    (local selector (ObjectSelector {:project identity-project :ctx ctx :enabled? true}))
+    (local view (GraphView {:graph-map graph-map :ctx ctx :selector selector}))
+    (local child-record (view-record-for-key view "test:child"))
+    (assert (= (. selector.selected 1) child-record.selectable)
+            "selected outline compact point should be selected before expansion")
+    (click-record-point clickables child-record 1 100)
+    (click-record-point clickables child-record 1 300)
+    (assert child-record.expanded?
+            "double-clicking selected compact point should expand it")
+    (assert child-record.point._card-size
+            "selected compact point expansion should replace it with card presentation")
+    (assert (= (table.concat graph-map.selected_node_keys ",") "test:child")
+            "expanding selected compact point should preserve graph-map selected key")
+    (assert (= (. selector.selected 1) child-record.selectable)
+            "expanding selected compact point should replace ObjectSelector selection with card selectable")
+    (view:drop)
+    (graph-map:drop)
+    (graph:drop)
+    (selector:drop))
+
+(fn outline-selected-compact-point-expansion-preserves-selection []
+    (with-screen-ray outline-selected-compact-point-expansion-preserves-selection-body))
+
 (fn outline-focused-compact-point-activation-uses-graph-expansion []
     (with-screen-ray outline-focused-compact-point-activation-body))
 
@@ -877,6 +909,7 @@
 (table.insert tests {:name "outline focus clears when external control focused" :fn outline-focus-clears-when-external-control-focused})
 (table.insert tests {:name "outline compact point right-click and activation use real hit testing" :fn outline-compact-point-right-click-and-activation-use-real-hit-testing})
 (table.insert tests {:name "outline focused compact point activation uses graph expansion" :fn outline-focused-compact-point-activation-uses-graph-expansion})
+(table.insert tests {:name "outline selected compact point expansion preserves selection" :fn outline-selected-compact-point-expansion-preserves-selection})
 (table.insert tests {:name "outline compact point registrations drop on rebuild and drop" :fn outline-compact-point-registrations-drop-on-rebuild-and-drop})
 (table.insert tests {:name "outline view creates tree node visual artifacts for projected rows" :fn outline-view-creates-tree-node-visual-artifacts-for-projected-rows})
 (table.insert tests {:name "outline labels align right of node points" :fn outline-labels-align-right-of-node-points})
