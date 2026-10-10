@@ -45,7 +45,7 @@ Remaining:
 
 - `Graph`: the shared graph-addressable object resolver/catalog. It exposes the low-level key-loader registration primitive used by graph extension descriptor installers and provides shared backing-store integration. During the migration, keep the existing module name and avoid a broad rename.
 - `GraphMap`: a persistent interaction context over shared graph-addressable objects. It owns included node keys, explicit map edges, map-local node adapter instances, layout, expanded cards, selection/focus, and graph-owned panels.
-- `GraphView`: runtime renderer/controller for the active graph map. It owns rendering handles, spatial force-layout instance, outline row widgets, focus/click/movable registrations, drag state, and batching.
+- `GraphView`: runtime renderer/controller for the active graph map. It owns rendering handles, spatial force-layout instance, outline visual rows/labels, compact node presentation focus/click/selection registrations, movable registrations, drag state, and batching.
 - `Remove from Map`: non-destructive operation. Removes a node reference and its map-local UI state from the active graph map.
 - `Delete Underlying Object`: destructive operation. Deletes the backing object through an explicit node/object-specific capability.
 
@@ -119,9 +119,14 @@ state that selects the projection:
 - Child order follows graph-map edge order, with deterministic label/key
   fallback where edge order is insufficient.
 
-Outline rows are derived runtime presentation over graph-map topology. Graph
-core, graph node adapters, and owning domain stores do not persist outline rows
-or hidden/unreachable status.
+Outline rows are derived runtime presentation over graph-map topology. They are
+deterministic visual/layout records only: rows and labels do not own graph-node
+clicking, selection, focus, menus, activation, or teardown. The compact node
+presentation rendered inside each visible outline row owns those interaction
+handles, including clickables, selector entries, focus bounds, right-click menu
+routing, activation, and focus/selection rings. Clicking row whitespace or label
+area outside the compact point is a miss. Graph core, graph node adapters, and
+owning domain stores do not persist outline rows or hidden/unreachable status.
 
 #### Presentation islands
 
