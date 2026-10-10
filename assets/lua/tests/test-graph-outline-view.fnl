@@ -712,6 +712,8 @@
     (click-record-point clickables child-record 1 300)
     (assert child-record.expanded?
             "double-clicking selected compact point should expand it")
+    (assert (= (ctx.focus.manager:get-focused-node) child-record.focus-node)
+            "expanded outline card should preserve the compact row focus node")
     (assert child-record.point._card-size
             "selected compact point expansion should replace it with card presentation")
     (assert (= (table.concat graph-map.selected_node_keys ",") "test:child")
@@ -761,7 +763,11 @@
             "collapsing expanded outline card should preserve graph-map selection")
     (assert (= (. selector.selected 1) rebuilt-record.selectable)
             "collapsing expanded outline card should select rebuilt compact point")
+    (assert (= (ctx.focus.manager:get-focused-node) rebuilt-record.focus-node)
+            "collapsing expanded outline card should focus the rebuilt compact row")
     (view:drop)
+    (assert (= (ctx.focus.manager:get-focused-node) nil)
+            "dropping collapsed outline view should clear rebuilt compact row focus")
     (graph-map:drop)
     (graph:drop)
     (selector:drop))

@@ -125,13 +125,23 @@
             (drop-handle-list! record.visuals))
         (drop-expanded-record! self record)
         (when record.focus-node
-            (set (. self.row-by-focus record.focus-node) nil))
+            (set (. self.row-by-focus record.focus-node) nil)
+            (if (and self.rebuilding? record.expanded?)
+                (set (. self.pending-focus-nodes record.row.key) record.focus-node)
+                (when record.expanded?
+                    (record.focus-node:drop))))
         (when (and record.projection record.projection.drop!)
             (record.projection:drop!))
         (when record.focus-node
             (set record.focus-node nil)))
     (for [idx (length row-handles) 1 -1]
         (table.remove row-handles idx)))
+
+(fn drop-pending-focus-nodes! [self]
+    (each [key focus-node (pairs self.pending-focus-nodes)]
+        (when focus-node
+            (focus-node:drop))
+        (set (. self.pending-focus-nodes key) nil)))
 
 (fn visible-key? [self key]
     (not (= (. self.row-by-key (tostring key)) nil)))
@@ -451,7 +461,7 @@
      {:size base-size
       :color (node-color row)}])
 
-(fn projection-options [self row index base-size clickables]
+(fn projection-options [self row index base-size clickables focus-node]
     {:points (assert self.ctx.points "GraphOutlineView node visuals require ctx.points")
      :node row.node
      :position (row-node-position row index)
@@ -464,9 +474,11 @@
      :focus-border-width focus-border-width
      :selection-border-width selection-border-width
      :clickables clickables
-     :selector self.selector
-     :focus self.focus
-     :layers (projection-layers self row base-size)
+      :selector self.selector
+      :focus self.focus
+      :focus-node focus-node
+      :drop-focus-node? true
+      :layers (projection-layers self row base-size)
      :selected? (row-selected? self row)
      :focused? (row-focused? self row)
      :owner self
@@ -491,8 +503,10 @@
                    :label (row-title row)
                    :label-x (row-label-x row)
                    :depth row.depth})
+    (local focus-node (. self.pending-focus-nodes row.key))
+    (set (. self.pending-focus-nodes row.key) nil)
     (local projection
-          (CompactNodeProjection.attach! (projection-options self row index base-size clickables)))
+          (CompactNodeProjection.attach! (projection-options self row index base-size clickables focus-node)))
     (table.insert self.row-handles record)
     (set record.row row)
     (set record.projection projection)
@@ -534,6 +548,7 @@
       :rows []
       :row-by-key {}
       :row-by-focus {}
+      :pending-focus-nodes {}
       :expanded-row-keys {}
       :node-views node-views
       :outline-text-scale outline-text-scale
@@ -556,6 +571,7 @@
     (each [idx row (ipairs self.rows)]
         (set (. self.row-by-key row.key) row)
         (attach-row-handles! self row idx))
+    (drop-pending-focus-nodes! self)
     (when (= (length self.rows) 0)
         (attach-empty-state! self))
     (set self.rebuilding? false)
