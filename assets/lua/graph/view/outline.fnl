@@ -416,22 +416,9 @@
 
 (fn unregister-compact-projection-handles! [record]
     (local projection (assert record.projection
-                              "GraphOutlineView compact expansion requires projection"))
-    (local point (assert projection.point
-                         "GraphOutlineView compact expansion requires point"))
-    (local clickables (assert projection.clickables
-                              "GraphOutlineView compact expansion requires clickables"))
-    (when (and projection.left? clickables.unregister)
-        (clickables:unregister point))
-    (when (and projection.right? clickables.unregister-right-click)
-        (clickables:unregister-right-click point))
-    (when (and projection.double? clickables.unregister-double-click)
-        (clickables:unregister-double-click point))
-    (when point.drop
-        (point:drop))
-    (set projection.left? nil)
-    (set projection.right? nil)
-    (set projection.double? nil))
+                               "GraphOutlineView compact expansion requires projection"))
+    (CompactNodeProjection.drop! projection {:remove-selectable? false
+                                             :drop-focus-node? false}))
 
 (fn expand-record! [self record node]
     (if record.expanded?

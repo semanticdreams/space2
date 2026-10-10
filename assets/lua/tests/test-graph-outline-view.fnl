@@ -159,6 +159,8 @@
                         (values false nil nil)))))))
 
 (fn point-drop [self]
+    (when (and self.fail-on-double-drop? self.dropped?)
+        (error "test point dropped twice"))
     (set self.dropped? true))
 
 (fn make-points-stub [events]
@@ -724,6 +726,49 @@
 (fn outline-selected-compact-point-expansion-preserves-selection []
     (with-screen-ray outline-selected-compact-point-expansion-preserves-selection-body))
 
+(fn outline-expanded-card-collapse-rebuilds-compact-row-body []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (add-edge! graph-map "test:root" "test:child")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (graph-map:set-selected-node-keys ["test:child"])
+    (local clickables (Clickables))
+    (local ctx (make-render-ctx-with-focus))
+    (set ctx.clickables clickables)
+    (local selector (ObjectSelector {:project identity-project :ctx ctx :enabled? true}))
+    (local view (GraphView {:graph-map graph-map :ctx ctx :selector selector}))
+    (local child-record (view-record-for-key view "test:child"))
+    (each [_ point (ipairs ctx.points.created)]
+        (set point.fail-on-double-drop? true))
+    (click-record-point clickables child-record 1 100)
+    (click-record-point clickables child-record 1 300)
+    (assert child-record.expanded?
+            "double-clicking selected compact point should expand it")
+    (local expanded-card (assert child-record.point
+                                 "expanded record should expose card point"))
+    (var collapse-button nil)
+    (each [_ child (ipairs expanded-card.header-bar.children) &until collapse-button]
+        (when (= (. child :element :icon) "close_fullscreen")
+            (set collapse-button child.element)))
+    (assert collapse-button "expanded card should expose header collapse button")
+    (collapse-button.clicked:emit {:button 1})
+    (local rebuilt-record (view-record-for-key view "test:child"))
+    (assert (not rebuilt-record.expanded?)
+            "collapsing expanded outline card should rebuild compact row")
+    (assert (not rebuilt-record.point._card-size)
+            "collapsed outline row should use compact point presentation")
+    (assert (= (table.concat graph-map.selected_node_keys ",") "test:child")
+            "collapsing expanded outline card should preserve graph-map selection")
+    (assert (= (. selector.selected 1) rebuilt-record.selectable)
+            "collapsing expanded outline card should select rebuilt compact point")
+    (view:drop)
+    (graph-map:drop)
+    (graph:drop)
+    (selector:drop))
+
+(fn outline-expanded-card-collapse-rebuilds-compact-row []
+    (with-screen-ray outline-expanded-card-collapse-rebuilds-compact-row-body))
+
 (fn outline-focused-compact-point-activation-uses-graph-expansion []
     (with-screen-ray outline-focused-compact-point-activation-body))
 
@@ -910,6 +955,7 @@
 (table.insert tests {:name "outline compact point right-click and activation use real hit testing" :fn outline-compact-point-right-click-and-activation-use-real-hit-testing})
 (table.insert tests {:name "outline focused compact point activation uses graph expansion" :fn outline-focused-compact-point-activation-uses-graph-expansion})
 (table.insert tests {:name "outline selected compact point expansion preserves selection" :fn outline-selected-compact-point-expansion-preserves-selection})
+(table.insert tests {:name "outline expanded card collapse rebuilds compact row" :fn outline-expanded-card-collapse-rebuilds-compact-row})
 (table.insert tests {:name "outline compact point registrations drop on rebuild and drop" :fn outline-compact-point-registrations-drop-on-rebuild-and-drop})
 (table.insert tests {:name "outline view creates tree node visual artifacts for projected rows" :fn outline-view-creates-tree-node-visual-artifacts-for-projected-rows})
 (table.insert tests {:name "outline labels align right of node points" :fn outline-labels-align-right-of-node-points})
