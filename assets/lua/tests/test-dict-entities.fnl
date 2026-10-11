@@ -130,8 +130,107 @@
       (assert (string.find (tostring err) "forced remove failure" 1 true) "delete error should surface remove failure")
       (assert (= observed-deleted-count 0) "failed delete should not emit deleted signal")
       (assert (store:get-entity entity.id) "failed delete should keep cached entity")
-      (assert (fs.exists (fs.join-path root "entities" "dict" "delete-failure.json"))
-              "failed delete should leave persisted json for retry"))))
+       (assert (fs.exists (fs.join-path root "entities" "dict" "delete-failure.json"))
+               "failed delete should leave persisted json for retry"))))
+
+(fn dict-entity-node-creates-with-correct-properties []
+  (with-temp-store
+    (fn [store _root]
+      (local entity (store:create-entity {:name "Profile"}))
+      (local {:DictEntityNode DictEntityNode} (require :graph/nodes/dict-entity))
+      (local node (DictEntityNode {:entity-id entity.id :store store}))
+      (assert (= node.key (.. "dict-entity:" entity.id)) "key should be prefixed entity id")
+      (assert (= node.label "Profile") "named dict should label by name")
+      (assert (= node.compact-label "Profile") "named dict should use compact label")
+      (assert node.items-changed "should have items-changed signal")
+      (assert node.changed "should have changed signal")
+      (assert node.entity-deleted "should have entity-deleted signal")
+      (assert node.get-entity "should expose get-entity")
+      (assert node.update-name "should expose update-name")
+      (assert node.get-item "should expose get-item")
+      (assert node.set-item "should expose set-item")
+      (assert node.remove-item "should expose remove-item")
+      (assert node.rename-item "should expose rename-item")
+      (assert node.delete-entity "should expose delete-entity")
+      (node:drop))))
+
+(fn dict-entity-node-adds-edges-for-resolved-values []
+  (with-temp-store
+    (fn [store _root]
+      (local Graph (require :graph/init))
+      (local graph (Graph {:with-start false}))
+      (local a (Graph.GraphNode {:key "node-a"}))
+      (local b (Graph.GraphNode {:key "node-b"}))
+      (graph:add-node a {})
+      (graph:add-node b {})
+      (local entity (store:create-entity {:items {"first" "node-a"
+                                                  "second" "node-b"
+                                                  "missing" "node-missing"}}))
+      (local {:DictEntityNode DictEntityNode} (require :graph/nodes/dict-entity))
+      (local node (DictEntityNode {:entity-id entity.id :store store}))
+      (graph:add-node node {})
+      (assert (= (graph:edge-count) 2) "dict entity node should edge only resolved values")
+      (assert (= (. (store:get-entity entity.id) :items "missing") "node-missing")
+              "unresolved reference should remain stored")
+      (graph:drop))))
+
+(fn dict-entity-node-set-item-wraps-non-identity-key []
+  (with-temp-store
+    (fn [store root]
+      (local Graph (require :graph/init))
+      (local IdentityStore (require :entities/identity))
+      (local identity-store (IdentityStore.IdentityStore {:base-dir (fs.join-path root "identity")}))
+      (local entity (store:create-entity {:name "x"}))
+      (local {:DictEntityNode DictEntityNode} (require :graph/nodes/dict-entity))
+      (local graph (Graph {:with-start false :identity-store identity-store}))
+      (local node (DictEntityNode {:entity-id entity.id
+                                   :store store
+                                   :identity-store identity-store}))
+      (graph:add-node node {})
+      (node:set-item "manager" "node-a")
+      (local stored-key (. (store:get-entity entity.id) :items "manager"))
+      (assert (= (string.sub stored-key 1 9) "identity:")
+              "dict graph node should wrap non-identity values")
+      (local identity-id (string.sub stored-key 10))
+      (local identity-entity (identity-store:get-entity identity-id))
+      (assert identity-entity "identity should be persisted")
+      (assert (= identity-entity.target-key "node-a") "identity target should match source key")
+      (graph:drop))))
+
+(fn dict-entity-list-node-collects-items-with-counts []
+  (with-temp-store
+    (fn [store _root]
+      (store:create-entity {:name "old" :updated-at 10 :items {"a" "node-a"}})
+      (store:create-entity {:name "new" :updated-at 20 :items {"a" "node-a" "b" "node-b"}})
+      (local DictEntityListNode (require :graph/nodes/dict-entity-list))
+      (local node (DictEntityListNode {:store store}))
+      (local items (node:collect-items))
+      (assert (= (length items) 2) "should collect two dicts")
+      (assert (string.find (. items 1 2) "2 items" 1 true) "newer label should include item count")
+      (node:drop))))
+
+(fn entities-node-includes-dict-type []
+  (local EntitiesNode (require :graph/nodes/entities))
+  (local node (EntitiesNode {}))
+  (local types (node:collect-types))
+  (var found false)
+  (each [_ t (ipairs types)]
+    (when (= (. t 1) :dict)
+      (set found true)))
+  (assert found "entities node should include dict type"))
+
+(fn built-in-loaders-resolve-dict-entity-keys []
+  (with-temp-store
+    (fn [dict-store root]
+      (local Graph (require :graph/init))
+      (local graph (Graph {:with-start false}))
+      (local IdentityStore (require :entities/identity))
+      (local identity-store (IdentityStore.IdentityStore {:base-dir (fs.join-path root "identity")}))
+      (local entity (dict-store:create-entity {:name "x"}))
+      (local DictNodeModule (require :graph/nodes/dict-entity))
+      (DictNodeModule.register-loader graph {:store dict-store :identity-store identity-store})
+      (assert (graph:load-by-key (.. "dict-entity:" entity.id)) "dict entity key should load")
+      (graph:drop))))
 
 (table.insert tests {:name "dict entity store creates entities"
                      :fn dict-entity-store-creates-entities})
@@ -144,7 +243,19 @@
 (table.insert tests {:name "dict entity store skips unchanged item signals"
                      :fn dict-entity-store-skips-unchanged-item-signals})
 (table.insert tests {:name "dict entity store surfaces delete remove failure"
-                     :fn dict-entity-store-surfaces-delete-remove-failure})
+                      :fn dict-entity-store-surfaces-delete-remove-failure})
+(table.insert tests {:name "dict entity node creates with correct properties"
+                     :fn dict-entity-node-creates-with-correct-properties})
+(table.insert tests {:name "dict entity node adds edges for resolved values"
+                     :fn dict-entity-node-adds-edges-for-resolved-values})
+(table.insert tests {:name "dict entity node set item wraps non identity key"
+                     :fn dict-entity-node-set-item-wraps-non-identity-key})
+(table.insert tests {:name "dict entity list node collects items with counts"
+                     :fn dict-entity-list-node-collects-items-with-counts})
+(table.insert tests {:name "entities node includes dict type"
+                     :fn entities-node-includes-dict-type})
+(table.insert tests {:name "built in loaders resolve dict entity keys"
+                     :fn built-in-loaders-resolve-dict-entity-keys})
 
 (local main
   (fn []

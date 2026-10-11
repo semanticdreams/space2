@@ -16,8 +16,8 @@
    "fnl-module" "fs" "fs-file-viewer" "hackernews-root" "hackernews-story"
    "hackernews-story-list" "hackernews-user" "hud-panel" "hud-panels" "identity"
    "hosted-app-launcher"
-   "kernel" "kernel-instance" "kernels" "link-entity" "link-entity-list" "list-entity"
-   "list-entity-list" "llm" "llm-conversation" "llm-conversations" "llm-message"
+    "kernel" "kernel-instance" "kernels" "link-entity" "link-entity-list" "list-entity" "dict-entity"
+    "list-entity-list" "dict-entity-list" "llm" "llm-conversation" "llm-conversations" "llm-message"
    "llm-model" "llm-provider" "llm-tool" "llm-tool-call" "llm-tool-result"
    "llm-tools" "notebook" "notebooks" "quit" "start" "string-entity"
     "string-entity-list" "string-entity-search" "table" "text-module" "workflow-definition" "workflow-run"
@@ -132,15 +132,17 @@
   (local StringEntityStore (require :entities/string))
   (local CodeEntityStore (require :entities/code))
   (local ListEntityStore (require :entities/list))
+  (local DictEntityStore (require :entities/dict))
   (local LinkEntityStore (require :entities/link))
   (local IdentityStore (require :entities/identity))
   (local NotebookStore (require :notebooks/store))
   (local LlmStore (require :llm/conversations/store))
   (local WorkflowStore (require :workflows/store))
   {:string-store (StringEntityStore.StringEntityStore {:base-dir base-dir})
-   :code-store (CodeEntityStore.CodeEntityStore {:base-dir base-dir})
-   :list-store (ListEntityStore.ListEntityStore {:base-dir base-dir})
-   :link-store (LinkEntityStore.LinkEntityStore {:base-dir base-dir})
+    :code-store (CodeEntityStore.CodeEntityStore {:base-dir base-dir})
+    :list-store (ListEntityStore.ListEntityStore {:base-dir base-dir})
+    :dict-store (DictEntityStore.DictEntityStore {:base-dir base-dir})
+    :link-store (LinkEntityStore.LinkEntityStore {:base-dir base-dir})
    :identity-store (IdentityStore.IdentityStore {:base-dir base-dir})
    :notebook-store (NotebookStore.NotebookStore {:base-dir base-dir})
    :llm-store (LlmStore.Store {:base-dir base-dir})
@@ -178,6 +180,7 @@
   (assert-loads graph "start")
   (assert-loads graph "string-entity-list")
   (assert-loads graph "string-entity-search")
+  (assert-loads graph "dict-entity-list")
   (assert-loads graph (.. "fs:" temp-dir.path))
   (assert-loads graph "llm")
   (assert-loads graph "hosted-app-launcher:workspace")
