@@ -78,31 +78,49 @@
     (set view.saved-camera-state
          (fn [_self]
              (assert-runtime-live state "saved-camera-state")
-             (and state.persistence
-                  state.persistence.saved-mode-camera-state
-                  (state.persistence:saved-mode-camera-state state.mode))))
+             (if (and (. state.mode-states state.mode)
+                      (. state.mode-states state.mode :camera))
+                 (. state.mode-states state.mode :camera)
+                 (and state.persistence
+                      state.persistence.saved-mode-camera-state
+                      (state.persistence:saved-mode-camera-state state.mode)))))
     (set view.capture-camera-state!
          (fn [_self]
              (assert-runtime-live state "capture-camera-state!")
-             (when (and state.persistence
-                        state.persistence.set-mode-camera-state)
-                 (local camera-state (ActivityCameraState.capture-camera state.camera))
-                 (state.persistence:set-mode-camera-state state.mode camera-state)
-                 camera-state)))
+              (when (and state.persistence
+                         state.persistence.set-mode-camera-state)
+                  (local camera-state (ActivityCameraState.capture-camera state.camera))
+                  (when (= (. state.mode-states state.mode) nil)
+                      (set (. state.mode-states state.mode) {}))
+                  (set (. state.mode-states state.mode :camera) camera-state)
+                  (state.persistence:set-mode-camera-state state.mode camera-state)
+                  camera-state)))
     (set view.apply-initial-camera-policy!
          (fn [self]
              (assert-runtime-live state "apply-initial-camera-policy!")
              (adapter.apply-initial-camera-policy! self state)))
-    (set view.capture-state
-         (fn [self]
-             (assert-runtime-live state "capture-state")
-             (local mode-states (clone-mode-states state.mode-states))
-             (set (. mode-states state.mode) (adapter.capture-projection-state! self state))
-             (set state.mode-states mode-states)
-             {:mode_states mode-states
-              :views (and state.node-views state.node-views.capture-state (state.node-views:capture-state))
-              :selected_node_keys state.graph-map.selected_node_keys
-              :focused_node_key state.graph-map.focused_node_key}))
+     (set view.capture-state
+          (fn [self]
+              (assert-runtime-live state "capture-state")
+              (local selected-node-keys state.graph-map.selected_node_keys)
+              (local focused-node-key state.graph-map.focused_node_key)
+              (local mode-states (clone-mode-states state.mode-states))
+              (local retained-camera (and (. state.mode-states state.mode)
+                                          (. state.mode-states state.mode :camera)))
+              (local mode-state (clone-table (adapter.capture-projection-state! self state)))
+              (when retained-camera
+                  (set mode-state.camera (clone-camera-state retained-camera)))
+              (set (. mode-states state.mode) mode-state)
+              (local restored-selected-node-keys (if selected-node-keys selected-node-keys []))
+              (if state.graph-map.set-selected-node-keys
+                  (state.graph-map:set-selected-node-keys restored-selected-node-keys)
+                  (set state.graph-map.selected_node_keys selected-node-keys))
+              (set state.graph-map.focused_node_key focused-node-key)
+              (set state.mode-states mode-states)
+              {:mode_states mode-states
+               :views (and state.node-views state.node-views.capture-state (state.node-views:capture-state))
+               :selected_node_keys selected-node-keys
+               :focused_node_key focused-node-key}))
     (set view.restore-views-state
          (fn [_self views-state]
              (assert-runtime-live state "restore-views-state")

@@ -539,6 +539,7 @@
     (graph-map:drop)
     (graph:drop))
 
+(fn outline-runtime-capture-retains-other-mode-states [] (local {:graph graph :graph-map graph-map} (make-map)) (graph-map:load-by-key "test:root") (graph-map:set-view-mode! "outline") (graph-map:set-outline-root-keys! ["test:root"]) (local view (GraphView {:graph-map graph-map :ctx (make-render-ctx)})) (view:restore-state {:mode_states {:spatial {:extra_panels [{:node-key "test:root"}]} :outline {:stale? true}} :selected_node_keys ["test:root"] :focused_node_key "test:root"}) (local captured (view:capture-state)) (assert (= (. captured.mode_states :spatial :extra_panels 1 :node-key) "test:root") "outline capture should retain non-current spatial mode state") (assert (= (. captured.mode_states :outline :stale?) nil) "outline capture should replace only the current outline mode state") (assert (= (table.concat captured.selected_node_keys ",") "test:root") "outline capture should preserve GraphMap-owned selected keys") (assert (= captured.focused_node_key "test:root") "outline capture should preserve GraphMap-owned focused key") (view:drop) (graph-map:drop) (graph:drop))
 (fn outline-focused-node-menu-opens-at-focused-presentation []
     (local original-menu-manager app.menu-manager)
     (local {:graph graph :graph-map graph-map} (make-map))
@@ -1166,6 +1167,7 @@
 (table.insert tests {:name "outline-view-exposes-shared-runtime-camera-contract" :fn outline-view-exposes-shared-runtime-camera-contract})
 (table.insert tests {:name "outline runtime persists outline camera state" :fn outline-runtime-persists-outline-camera-state})
 (table.insert tests {:name "outline restore keeps graph-map selection owner" :fn outline-restore-keeps-graph-map-selection-owner})
+(table.insert tests {:name "outline runtime capture retains other mode states" :fn outline-runtime-capture-retains-other-mode-states})
 (table.insert tests {:name "outline focused-node menu opens at focused presentation" :fn outline-focused-node-menu-opens-at-focused-presentation})
 (table.insert tests {:name "outline view exposes shared runtime method contract" :fn outline-view-exposes-shared-runtime-method-contract})
 (table.insert tests {:name "outline selection methods fail fast after drop" :fn outline-selection-methods-fail-fast-after-drop})
