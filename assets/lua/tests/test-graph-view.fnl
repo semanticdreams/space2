@@ -4285,6 +4285,20 @@
                             :ctx ctx
                             :camera camera
                             :data-dir "/tmp/space/tests/graph-view-reveal"}))
+    (local shared-methods ["update" "drop" "capture-state" "restore-state"
+                           "restore-graph-state" "restore-views-state"
+                           "remove-nodes" "remove-selected-nodes" "node-actions"
+                           "reveal-node" "open-node" "open-focused-node"
+                           "selected-node-count" "select-all-visible-nodes"
+                           "clear-selection" "focused-node-selected?"
+                           "select-focused-node-only" "add-focused-node-to-selection"
+                           "remove-focused-node-from-selection"
+                           "toggle-focused-node-selection" "focus-selected-node"
+                           "saved-camera-state" "capture-camera-state!"
+                           "apply-initial-camera-policy!"])
+    (each [_ method-name (ipairs shared-methods)]
+        (assert (= (type (. view method-name)) :function)
+                (.. "GraphView should expose shared graph-view method " method-name)))
     (local point (. view.points node))
     (assert point "GraphView should create a presentation for the node")
     (point:set-position (glm.vec3 42 24 0))
@@ -4951,8 +4965,7 @@
     (assert view.layout.active "GraphView start-layout should start the graph layout path")
     (view:drop)
     (graph-map:drop)
-    (graph:drop))})
-
+    (graph:drop))}) ((. (require :tests.graph-view-runtime-tests) :append-tests) tests)
 (local main
   (fn []
     (local runner (require :tests/runner))

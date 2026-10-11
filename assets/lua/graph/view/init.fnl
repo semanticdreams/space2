@@ -1630,17 +1630,25 @@
              (when (and graph-map graph-map.restore-state state)
                  (self:with-batched-updates
                    (fn []
-                       (graph-map:restore-state state))))
-             true))
-    (set view.capture-camera-state!
+                  (graph-map:restore-state state))))
+              true))
+    (set view.saved-camera-state
          (fn [_self]
-             (when (and options.camera
-                        persistence
-                        persistence.set-camera-state
-                        (should-capture-camera-state?))
-                 (local state (capture-current-camera-state))
-                 (persistence:set-camera-state state)
-                 state)))
+             (assert-not-dropped "saved-camera-state")
+             (if (and persistence persistence.saved-mode-camera-state)
+                 (persistence:saved-mode-camera-state "spatial")
+                 (and persistence persistence.saved-camera-state (persistence:saved-camera-state)))))
+    (set view.capture-camera-state!
+          (fn [_self]
+              (when (and options.camera
+                         persistence
+                         (should-capture-camera-state?))
+                  (local state (capture-current-camera-state))
+                  (if persistence.set-mode-camera-state
+                      (persistence:set-mode-camera-state "spatial" state)
+                      (and persistence.set-camera-state
+                           (persistence:set-camera-state state)))
+                  state)))
     (set view.restore-views-state
          (fn [_self state]
              (assert-not-dropped "restore-views-state")

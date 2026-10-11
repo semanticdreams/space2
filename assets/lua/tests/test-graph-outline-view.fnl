@@ -13,6 +13,37 @@
 
 (local tests [])
 
+(local shared-view-methods
+       ["update"
+        "drop"
+        "capture-state"
+        "restore-state"
+        "restore-graph-state"
+        "restore-views-state"
+        "remove-nodes"
+        "remove-selected-nodes"
+        "node-actions"
+        "reveal-node"
+        "open-node"
+        "open-focused-node"
+        "selected-node-count"
+        "select-all-visible-nodes"
+        "clear-selection"
+        "focused-node-selected?"
+        "select-focused-node-only"
+        "add-focused-node-to-selection"
+        "remove-focused-node-from-selection"
+        "toggle-focused-node-selection"
+        "focus-selected-node"
+        "saved-camera-state"
+        "capture-camera-state!"
+        "apply-initial-camera-policy!"])
+
+(fn assert-shared-view-method-contract [view label]
+    (each [_ method-name (ipairs shared-view-methods)]
+        (assert (= (type (. view method-name)) :function)
+                (.. label " should expose shared graph-view method " method-name))))
+
 (fn approx [actual expected]
     (< (math.abs (- actual expected)) 0.0001))
 
@@ -454,6 +485,35 @@
     (assert (= (type view.apply-initial-camera-policy!) :function)
             "outline view should expose apply-initial-camera-policy! function")
     (view:drop)
+    (graph-map:drop)
+    (graph:drop))
+
+(fn outline-view-exposes-shared-runtime-method-contract []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (graph-map:load-by-key "test:root")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (local view (GraphView {:graph-map graph-map :ctx (make-render-ctx)}))
+    (assert-shared-view-method-contract view "GraphOutlineView")
+    (view:drop)
+    (graph-map:drop)
+    (graph:drop))
+
+(fn outline-selection-methods-fail-fast-after-drop []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (graph-map:load-by-key "test:root")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (local view (GraphView {:graph-map graph-map :ctx (make-render-ctx)}))
+    (view:drop)
+    (local (ok message) (pcall (fn [] (view:select-all-visible-nodes))))
+    (assert (not ok) "outline select-all-visible-nodes should fail after drop")
+    (local text (tostring message))
+    (assert (string.find text "called after drop" 1 true)
+            "outline dropped guard should explain use after drop")
+    (assert (or (string.find text "GraphOutlineView" 1 true)
+                (string.find text "GraphViewRuntime" 1 true))
+            "outline dropped guard should identify GraphOutlineView or GraphViewRuntime")
     (graph-map:drop)
     (graph:drop))
 
@@ -1028,6 +1088,8 @@
 (table.insert tests {:name "map manager persists outline state per map" :fn map-manager-persists-outline-state-per-map})
 (table.insert tests {:name "outline view exposes visible row selection" :fn outline-view-exposes-visible-row-selection})
 (table.insert tests {:name "outline-view-exposes-shared-runtime-camera-contract" :fn outline-view-exposes-shared-runtime-camera-contract})
+(table.insert tests {:name "outline view exposes shared runtime method contract" :fn outline-view-exposes-shared-runtime-method-contract})
+(table.insert tests {:name "outline selection methods fail fast after drop" :fn outline-selection-methods-fail-fast-after-drop})
 (table.insert tests {:name "outline reveal refreshes node selection rings" :fn outline-reveal-refreshes-node-selection-rings})
 (table.insert tests {:name "outline view rejects unreachable reveal" :fn outline-view-rejects-unreachable-reveal})
 (table.insert tests {:name "outline compact point clicks use real hit testing" :fn outline-compact-point-clicks-use-real-hit-testing})
