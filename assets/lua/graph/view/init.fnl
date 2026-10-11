@@ -1914,7 +1914,7 @@
 (set focus-spatial-key!
      (fn [graph-map points focus-nodes key]
          (local node (graph-map:lookup key))
-         (local focus-node (and node (. focus-nodes node) (. points node)))
+         (local focus-node (and node (. points node) (. focus-nodes node)))
          (if focus-node
              (do
                  (focus-node:request-focus)
@@ -1964,10 +1964,10 @@
      (fn [view deps]
          (ProjectionSelection.install!
              view
-             {:assert-not-dropped deps.assert-not-dropped
-              :visible-keys (fn []
-                              (icollect [_ node (ipairs deps.nodes-by-index)]
-                                  (and node node.key (. deps.points node))))
+              {:assert-not-dropped deps.assert-not-dropped
+               :visible-keys (fn []
+                               (icollect [_ node (ipairs deps.nodes-by-index)]
+                                   (if (and node node.key (. deps.points node)) node.key nil)))
               :selected-keys (fn [] (selected-node-keys deps.selected-nodes))
               :set-selected-keys! (fn [keys]
                                     (deps.selection:set-selection
