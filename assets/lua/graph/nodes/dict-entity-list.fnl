@@ -41,12 +41,14 @@
   (local options (options-table opts))
   (local store (if options.store options.store (DictEntityStore.get-default)))
   (local identity-store options.identity-store)
+  (local DictEntityListNodeView (require :graph/view/views/dict-entity-list))
   (local node
     (GraphNode {:key "dict-entity-list"
                 :label "dict entities"
                 :color TEAL
                 :sub-color TEAL_ACCENT
-                :size 8.0}))
+                :size 8.0
+                :view DictEntityListNodeView}))
 
   (set node.store store)
   (set node.identity-store identity-store)

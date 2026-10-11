@@ -256,13 +256,15 @@
 
 (fn DictEntityNode [opts]
   (local (_options entity-id identity-store store) (node-options opts))
+  (local DictEntityNodeView (require :graph/view/views/dict-entity))
   (local entity (store:get-entity entity-id))
   (local node
     (GraphNode {:key (.. KEY_PREFIX entity-id)
                 :label (make-label entity)
                 :color TEAL
                 :sub-color TEAL_ACCENT
-                :size 8.0}))
+                :size 8.0
+                :view DictEntityNodeView}))
 
   (set node.entity-id entity-id)
   (set node.compact-label (make-compact-label entity))

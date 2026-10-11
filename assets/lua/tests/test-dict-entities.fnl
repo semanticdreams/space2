@@ -152,6 +152,7 @@
       (assert node.remove-item "should expose remove-item")
       (assert node.rename-item "should expose rename-item")
       (assert node.delete-entity "should expose delete-entity")
+      (assert (= (type node.view) "function") "dict entity node should expose view")
       (node:drop))))
 
 (fn dict-entity-node-adds-edges-for-resolved-values []
@@ -207,6 +208,7 @@
       (local items (node:collect-items))
       (assert (= (length items) 2) "should collect two dicts")
       (assert (string.find (. items 1 2) "2 items" 1 true) "newer label should include item count")
+      (assert (= (type node.view) "function") "dict entity list node should expose view")
       (node:drop))))
 
 (fn entities-node-includes-dict-type []
@@ -232,6 +234,16 @@
       (assert (graph:load-by-key (.. "dict-entity:" entity.id)) "dict entity key should load")
       (graph:drop))))
 
+(fn dict-entity-node-view-loads []
+  (local DictEntityNodeView (require :graph/view/views/dict-entity))
+  (assert DictEntityNodeView "DictEntityNodeView should load")
+  (assert (= (type DictEntityNodeView) "function") "DictEntityNodeView should be a function"))
+
+(fn dict-entity-list-node-view-loads []
+  (local DictEntityListNodeView (require :graph/view/views/dict-entity-list))
+  (assert DictEntityListNodeView "DictEntityListNodeView should load")
+  (assert (= (type DictEntityListNodeView) "function") "DictEntityListNodeView should be a function"))
+
 (table.insert tests {:name "dict entity store creates entities"
                      :fn dict-entity-store-creates-entities})
 (table.insert tests {:name "dict entity store persists and reloads json"
@@ -255,7 +267,11 @@
 (table.insert tests {:name "entities node includes dict type"
                      :fn entities-node-includes-dict-type})
 (table.insert tests {:name "built in loaders resolve dict entity keys"
-                     :fn built-in-loaders-resolve-dict-entity-keys})
+                      :fn built-in-loaders-resolve-dict-entity-keys})
+(table.insert tests {:name "dict entity node view loads"
+                     :fn dict-entity-node-view-loads})
+(table.insert tests {:name "dict entity list node view loads"
+                     :fn dict-entity-list-node-view-loads})
 
 (local main
   (fn []
