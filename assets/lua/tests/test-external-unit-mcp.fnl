@@ -1505,24 +1505,20 @@
                        :data-dir data-dir}))
       (bridge:start)
       (local status (bridge:status))
-      ;; status fields
       (assert (= status.started? true) "bridge should report started")
       (assert (= status.host "127.0.0.1") "bridge should bind to loopback")
       (assert (> status.port 0) "bridge should have a valid port")
-      ;; opencode-env
       (local env (bridge:opencode-env))
       (assert env.XDG_CONFIG_HOME "should have XDG_CONFIG_HOME")
       (assert (= env.XDG_CONFIG_HOME status.config-root)
               "XDG_CONFIG_HOME should match config-root from status")
-      ;; config-path is under data-dir, not under global ~/.config/opencode
       (assert status.config-path "should have config-path")
+      (assert (= (bridge:config-path) status.config-path) "bridge should expose config path")
       (assert (= (string.sub status.config-path 1 (# data-dir)) data-dir)
               "config-path should be under the provided temp data-dir, not global ~/.config/opencode")
-      ;; Check written config content
       (local json (require :json))
       (local raw (fs.read-file status.config-path))
       (local config (json.loads raw))
-      ;; MCP config
       (assert config.mcp "config should have mcp")
       (assert config.mcp.space-unit-dev "config should have mcp.space-unit-dev")
       (assert (= config.mcp.space-unit-dev.type "remote")
@@ -1541,7 +1537,9 @@
       (assert (= perms.glob "deny") "glob should be denied")
       (assert (= perms.list "deny") "list should be denied")
       (assert (= perms.bash "deny") "bash should be denied")
-      ;; Clean up
+      (local refreshed (bridge:refresh-config!))
+      (assert (= refreshed.config-path status.config-path) "refresh should report generated config path")
+      (assert (= refreshed.url status.url) "refresh should keep active MCP url")
       (bridge:stop))))
 
 (table.insert tests {:name "external-unit-mcp: bridge starts loopback server and writes isolated opencode config"
