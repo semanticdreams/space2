@@ -151,6 +151,7 @@
     :tests.test-identity-entities
     :tests.test-link-entities
     :tests.test-list-entities
+    :tests.test-dict-entities
     :tests.test-notebooks
     :tests.test-link-entity-crash
     :tests.test-morphs
