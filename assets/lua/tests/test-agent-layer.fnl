@@ -1349,7 +1349,7 @@
   (each [_ name (ipairs ["read" "list" "glob" "grep" "external_directory"])] (assert-bounded-tool name))
   (assert (= (length status.allowed-roots) (length allowed-patterns)) "bridge status should report allowed roots")
   (each [i pattern (ipairs allowed-patterns)] (assert (= (slash-path (. status.allowed-roots i)) (slash-path pattern)) (.. "bridge status allowed root should match: expected " (slash-path pattern) " actual " (slash-path (. status.allowed-roots i)))))
-  (bridge:refresh-config!) (local refreshed (json.loads (fs.read-file status.config-path))) (assert (= refreshed.mcp.space.url status.url) "refresh-config should preserve current MCP URL") (bridge:stop) (clean-dir dir))
+  (local refresh-result (bridge:refresh-config!)) (assert (= refresh-result.config-path status.config-path) "refresh-config should return generated config path") (assert (= refresh-result.url status.url) "refresh-config should return current MCP URL") (local refreshed (json.loads (fs.read-file status.config-path))) (assert (= refreshed.mcp.space.url status.url) "refresh-config should preserve current MCP URL") (bridge:stop) (clean-dir dir))
 
 (fn test-opencode-mcp-bridge-refreshes-provider-table []
   (local BridgeMod (require :llm/agent/opencode-mcp-bridge))

@@ -126,6 +126,13 @@ Both servers reuse the same infrastructure:
 - `mcp/server-http.fnl` for HTTP/SSE transport
 - C++ `http_server` binding for loopback HTTP and main-thread dispatch
 
+OpenCode-facing bridge wrappers also delegate common bridge mechanics to
+`assets/lua/llm/opencode-mcp/bridge.fnl`. That shared module owns loopback MCP
+server lifecycle and generated OpenCode config writing, but it does not own tool
+registries or permission policy derivation. The internal Space Agent, external
+unit MCP, and Fennel validation MCP surfaces keep separate wrappers, registries,
+MCP config keys, and native OpenCode permission profiles.
+
 ## Tests
 
 - `assets/lua/tests/test-mcp.fnl`: protocol, tool registry, contract validation, and registry status

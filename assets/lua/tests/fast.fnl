@@ -185,6 +185,7 @@
     :tests.test-llm-tools
     :tests.test-agent-presets
     :tests.test-agent-presets-mcp
+    :tests.test-opencode-mcp-bridge
     :tests.test-agent-layer
     :tests.test-agent-panel
     :tests.test-agent-units
