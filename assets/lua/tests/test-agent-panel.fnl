@@ -849,6 +849,19 @@
   (widget:refresh)
   (widget:drop))
 
+(fn test-session-list-builds-with-workflow-timestamp []
+  (local controller
+    {:state {:sessions [{:id "workflow-session-1"
+                         :status :idle
+                         :title "Workflow Session"
+                         :updated-at "2026-08-15T07:08:09Z"}]
+             :active-session-id "workflow-session-1"}
+     :select-session (fn [_self _id] nil)})
+  (local widget ((AgentSessionList controller) (make-widget-ctx)))
+  (assert (= (type widget.refresh) :function)
+          "session list should build with canonical workflow timestamp strings")
+  (widget:drop))
+
 (fn test-panel-refresh-does-not-crash []
   (local registry (AgentRegistry {:deps {}}))
   (fn make-agent [_deps]
@@ -958,9 +971,11 @@
 (table.insert tests {:name "preset list builds expanded row"
                      :fn test-preset-list-builds-expanded-row})
 (table.insert tests {:name "session list builds has refresh"
-                     :fn test-session-list-builds-has-refresh})
+                      :fn test-session-list-builds-has-refresh})
+(table.insert tests {:name "session list builds with workflow timestamp"
+                     :fn test-session-list-builds-with-workflow-timestamp})
 (table.insert tests {:name "panel refresh does not crash"
-                     :fn test-panel-refresh-does-not-crash})
+                      :fn test-panel-refresh-does-not-crash})
 
 (fn main []
   (local runner (require :tests/runner))

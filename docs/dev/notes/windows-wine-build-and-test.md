@@ -54,14 +54,17 @@ The original attempt used a native Windows-host MinGW build in GitHub Actions. T
 
 Final CI shape:
 
-- `test.yml`
+- `test.yml` PR/merge-queue validation path
   - Linux job builds the Windows artifact with `scripts/setup-windows-build-host.sh` + `scripts/build-windows-from-linux.sh`
-  - Linux job prepares a runtime bundle with `scripts/package-windows-runtime.sh`
-  - Windows job downloads that runtime bundle and runs the native Windows fast suite
-- `build.yml`
+  - Linux job prepares and uploads only the runtime bundle needed by tests
+  - native Windows job downloads that runtime bundle and runs the native Windows fast suite
+  - this path does not build the Windows installer and does not create the release ZIP
+- `build.yml` Release/manual packaging path
   - Linux job builds the Windows artifact the same way
   - Linux job smoke-tests the Windows binary under Wine
-  - Linux job packages the Windows release payload
+  - Linux job creates the Windows release ZIP
+  - native Windows job builds and smoke-tests the installer
+  - existing `workflow_dispatch` behavior remains available
 
 Why this architecture was chosen:
 
@@ -223,7 +226,7 @@ Additional cleanup:
 - `test-external-editor` remains skipped on Windows due shell-command assumptions (`sh`-driven behavior).
 - kernel subprocess integration test is skipped on Windows/Wine test environments lacking Python runtime.
 - Wine is validation support, not a complete substitute for native Windows verification.
-- current CI uses `ccache`, but the main remaining Windows build time bottleneck is likely outside cacheable compilation; `vcpkg` binary caching is the next meaningful optimization, not more `ccache` tuning alone.
+- Windows cross-build CI uses `ccache`, `sccache`, GitHub Actions `vcpkg binary caching`, and Ninja parallel builds. The remaining bottlenecks are dependency cache misses, hosted-runner variance, and native Windows runner startup/installer work in the release/manual packaging path.
 
 ## Validation Snapshot
 
@@ -272,9 +275,9 @@ Windows binary under Wine:
 
 4. Windows build performance
 
-- add `ccache -z` before CI builds so per-run cache stats are meaningful
-- add `vcpkg` binary caching for the Linux Windows cross-build path
-- keep `ccache`, but do not expect it alone to materially change total Windows build time
+- keep `ccache`, `sccache`, GitHub Actions `vcpkg binary caching`, and Ninja parallel builds enabled for Windows cross-build jobs
+- use `SPACE_TEST_TIMINGS=1` in follow-up investigations if the native Windows fast suite becomes the dominant bottleneck
+- keep release ZIP and installer generation out of PR/merge-queue validation unless a future test directly consumes those package artifacts
 
 ## Reproducible Workflow (Current)
 

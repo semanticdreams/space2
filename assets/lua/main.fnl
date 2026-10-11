@@ -1356,7 +1356,7 @@
         (local (load-ok load-err) (pcall #(unit:load)))
         (when (not load-ok)
           (app.unit-manager:unregister unit.id)
-          (print (.. "Failed to load user-code unit \"" candidate.name "\": " (tostring load-err)))))))
+          (logging.warn (.. "Failed to load user-code unit \"" candidate.name "\": " (tostring load-err)))))))
   true)
 
 (local installable-reset-projection app.reset-projection)
@@ -2260,9 +2260,9 @@
    :workflow-runner (or options.workflow-runner app.workflow-runner)
    :string-store (or options.string-store app.string-store
                      (StringEntityStore.get-default {:base-dir data-dir}))
-   :list-store (or options.list-store app.list-store
-                   (ListEntityStore.get-default {:base-dir data-dir}))
-   :link-store (or options.link-store app.link-store
+    :list-store (or options.list-store app.list-store (ListEntityStore.get-default {:base-dir data-dir}))
+    :dict-store (or options.dict-store app.dict-store ((. (require :entities/dict) :get-default) {:base-dir data-dir}))
+    :link-store (or options.link-store app.link-store
                    (LinkEntityStore.get-default {:base-dir data-dir}))
    :identity-store (or options.identity-store app.identity-store
                        (IdentityStore.get-default {:base-dir data-dir}))

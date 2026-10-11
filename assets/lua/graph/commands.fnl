@@ -69,11 +69,29 @@
   (local graph-map (resolve-active-map opts))
   (and graph-map graph-map.clearable? (graph-map:clearable?)))
 
+(fn graph-map-view-mode-toggleable? [opts]
+  (local graph-map (resolve-active-map opts))
+  (and graph-map graph-map.set-view-mode!))
+
+(fn graph-map-outline-root-settable? [opts]
+  (local graph-map (resolve-active-map opts))
+  (and graph-map graph-map.set-outline-root-keys!))
+
 (fn graph-view-focused-node-key [graph-view]
   (if (and graph-view graph-view.focused-node)
       (do
         (local node (graph-view:focused-node))
         (and node node.key))
+      nil))
+
+(fn current-focused-node-key [opts]
+  (local graph-view (resolve-graph-view opts))
+  (graph-view-focused-node-key graph-view))
+
+(fn single-selected-node-key [graph-map]
+  (local keys (and graph-map graph-map.selected_node_keys))
+  (if (and keys (= (length keys) 1))
+      (. keys 1)
       nil))
 
 (fn graph-view-method-available? [opts method-name]
@@ -191,8 +209,15 @@
   (local graph-map (resolve-active-map opts))
   (and (resolve-graph-view opts)
        graph-map
-       graph-map.clear!
-       (graph-map-clearable? opts)))
+        graph-map.clear!
+        (graph-map-clearable? opts)))
+
+(fn outline-set-root-from-current-available? [opts]
+  (local graph-map (resolve-active-map opts))
+  (and (graph-map-outline-root-settable? opts)
+       (if (current-focused-node-key opts)
+           true
+           (not (= (single-selected-node-key graph-map) nil)))))
 
 (fn run-add-start [opts]
   (require-graph-view opts)
@@ -236,6 +261,24 @@
   (local graph-map (require-active-map opts))
   (assert graph-map.clear! "GraphCommands requires active graph map clear!")
   (graph-map:clear!))
+
+(fn run-toggle-outline [opts]
+  (local graph-map (require-active-map opts))
+  (assert graph-map.set-view-mode! "GraphCommands requires active graph map set-view-mode!")
+  (graph-map:set-view-mode! (if (= graph-map.view_mode "outline") "spatial" "outline"))
+  true)
+
+(fn run-set-outline-root-from-current [opts]
+  (local graph-map (require-active-map opts))
+  (assert graph-map.set-outline-root-keys! "GraphCommands requires active graph map set-outline-root-keys!")
+  (local focused-key (current-focused-node-key opts))
+  (local selected-key (single-selected-node-key graph-map))
+  (local root-key (or focused-key selected-key))
+  (if root-key
+      (do
+        (graph-map:set-outline-root-keys! [root-key])
+        true)
+      false))
 
 (fn add-focused-action-commands [commands options]
   (for [index 1 9]
@@ -284,10 +327,14 @@
      (make-graph-view-command options "graph.node.remove-focused-from-map" "remove" :remove-focused-node-from-map #(graph-view-focused-method-available? $1 :remove-focused-node-from-map))
      "graph.view.center-focused"
      (make-graph-view-command options "graph.view.center-focused" "center" :reveal-focused-node #(graph-view-focused-method-available? $1 :reveal-focused-node))
-     "graph.view.start-layout"
-     (make-graph-view-command options "graph.view.start-layout" "layout" :start-layout #(graph-view-method-available? $1 :start-layout))
-     "graph.view.focus-start"
-     (make-map-command options "graph.view.focus-start" "start" focus-start-available? run-focus-start)
+      "graph.view.start-layout"
+      (make-graph-view-command options "graph.view.start-layout" "layout" :start-layout #(graph-view-method-available? $1 :start-layout))
+      "graph.view.toggle-outline"
+      (make-map-command options "graph.view.toggle-outline" "outline" graph-map-view-mode-toggleable? run-toggle-outline)
+      "graph.outline.set-root-from-current"
+      (make-map-command options "graph.outline.set-root-from-current" "root" outline-set-root-from-current-available? run-set-outline-root-from-current)
+      "graph.view.focus-start"
+      (make-map-command options "graph.view.focus-start" "start" focus-start-available? run-focus-start)
      "graph.map.add-start"
      (make-map-command options "graph.map.add-start" "add-start" map-add-start-available? run-add-start)
      "graph.map.new-empty"
@@ -312,9 +359,11 @@
                    {:keys ["g" "n" "t"] :command "graph.node.toggle-focused-preview" :label "toggle-preview" :priority 30}
                    {:keys ["g" "n" "y"] :command "graph.node.copy-focused-key" :label "copy-key" :priority 40}
                    {:keys ["g" "n" "r"] :command "graph.node.remove-focused-from-map" :label "remove" :priority 50}
-                   {:keys ["g" "v" "c"] :command "graph.view.center-focused" :label "center" :priority 10}
-                   {:keys ["g" "v" "l"] :command "graph.view.start-layout" :label "layout" :priority 20}
-                   {:keys ["g" "v" "s"] :command "graph.view.focus-start" :label "start" :priority 30}
+                    {:keys ["g" "v" "c"] :command "graph.view.center-focused" :label "center" :priority 10}
+                    {:keys ["g" "v" "l"] :command "graph.view.start-layout" :label "layout" :priority 20}
+                    {:keys ["g" "v" "o"] :command "graph.view.toggle-outline" :label "outline" :priority 30}
+                    {:keys ["g" "v" "s"] :command "graph.view.focus-start" :label "start" :priority 40}
+                    {:keys ["g" "o" "r"] :command "graph.outline.set-root-from-current" :label "root" :priority 10}
                    {:keys ["g" "m" "a"] :command "graph.map.add-start" :label "add-start" :priority 10}
                    {:keys ["g" "m" "n"] :command "graph.map.new-empty" :label "new" :priority 20}
                    {:keys ["g" "m" "s"] :command "graph.map.from-selection" :label "selection" :priority 30}
@@ -324,9 +373,10 @@
    :prefixes [{:keys ["g"] :label "graph" :priority 10}
                {:keys ["g" "p"] :label "preview" :priority 10}
                {:keys ["g" "s"] :label "selection" :priority 20}
-               {:keys ["g" "n"] :label "node" :priority 30}
-               {:keys ["g" "v"] :label "view" :priority 40}
-               {:keys ["g" "m"] :label "map" :priority 50}]
+                {:keys ["g" "n"] :label "node" :priority 30}
+                {:keys ["g" "v"] :label "view" :priority 40}
+                {:keys ["g" "o"] :label "outline" :priority 50}
+                {:keys ["g" "m"] :label "map" :priority 60}]
    :bindings bindings})
 
 {:provider M.provider}

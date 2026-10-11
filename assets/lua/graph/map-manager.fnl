@@ -74,6 +74,16 @@
     (table.sort keys (fn [a b] (< (tostring a) (tostring b))))
     keys)
 
+(fn default-view-mode [mode]
+    (if (= mode nil)
+        "spatial"
+        mode))
+
+(fn default-outline-root-keys [keys]
+    (if (= keys nil)
+        []
+        keys))
+
 (fn migrate-keyed-metadata-table! [tbl]
     (var migrated? false)
     (each [_ key (ipairs (sorted-keys tbl))]
@@ -139,10 +149,18 @@
     (local (focused-key focused-migrated?) (canonicalize-legacy-activity-key entry.focused_node_key))
     (when focused-migrated?
         (set migrated? true))
+    (local migrated-outline-roots [])
+    (each [_ key (ipairs (default-outline-root-keys entry.outline_root_keys))]
+        (local (canonical-key key-migrated?) (canonicalize-legacy-activity-key key))
+        (when key-migrated?
+            (set migrated? true))
+        (table.insert migrated-outline-roots canonical-key))
     (tset entry :nodes migrated-nodes)
     (tset entry :edges migrated-edges)
     (tset entry :selected_node_keys migrated-selection)
     (tset entry :focused_node_key focused-key)
+    (tset entry :view_mode (default-view-mode entry.view_mode))
+    (tset entry :outline_root_keys migrated-outline-roots)
     (values entry migrated?))
 
 (fn GraphMapManager [opts]
@@ -314,10 +332,12 @@
             (local pruned-islands (entry.map:prune-islands-for-node-keys valid-keys))
             (when (if pruned-nodes? true (> (length pruned-islands) 0))
                 (local state (entry.map:capture-state))
-                (set entry.nodes kept-nodes)
-                (set entry.islands state.islands)
-                (set entry.next_island_id state.next_island_id)
-                (entry.map:clear-unresolved-restored-state)))
+                 (set entry.nodes kept-nodes)
+                 (set entry.islands state.islands)
+                 (set entry.next_island_id state.next_island_id)
+                 (set entry.view_mode (default-view-mode state.view_mode))
+                 (set entry.outline_root_keys (default-outline-root-keys state.outline_root_keys))
+                 (entry.map:clear-unresolved-restored-state)))
         (when (and entry entry.map entry.edges (> (length entry.edges) 0))
             (local valid-keys {})
             (each [key _ (pairs entry.map.nodes)]
@@ -334,7 +354,7 @@
                 (entry.map:clear-unresolved-restored-state)
                 true)))
 
-    (fn construct-map [id name node-keys edge-list selected-keys focused-key islands next-island-id]
+    (fn construct-map [id name node-keys edge-list selected-keys focused-key islands next-island-id view-mode outline-root-keys]
         (local map (GraphMap.GraphMap {:graph shared-graph :id id :name name}))
         (local (ok result)
             (pcall
@@ -342,15 +362,19 @@
                 (when (or (> (length (or node-keys [])) 0)
                           (> (length (or edge-list [])) 0)
                           (> (length (or islands [])) 0)
-                          (> (length (or selected-keys [])) 0)
-                          (not (= next-island-id nil))
-                          (not (= focused-key nil)))
-                    (map:restore-state {:nodes (or node-keys [])
-                                         :edges (or edge-list [])
-                                         :islands (or islands [])
-                                         :next_island_id next-island-id
-                                         :selected_node_keys (or selected-keys [])
-                                         :focused_node_key focused-key}))
+                           (> (length (or selected-keys [])) 0)
+                           (> (length (default-outline-root-keys outline-root-keys)) 0)
+                           (not (= next-island-id nil))
+                           (not (= view-mode nil))
+                           (not (= focused-key nil)))
+                     (map:restore-state {:nodes (or node-keys [])
+                                          :edges (or edge-list [])
+                                          :islands (or islands [])
+                                          :next_island_id next-island-id
+                                          :selected_node_keys (or selected-keys [])
+                                          :focused_node_key focused-key
+                                          :view_mode (default-view-mode view-mode)
+                                          :outline_root_keys (default-outline-root-keys outline-root-keys)}))
                 true)))
         (when (not ok)
             (map:drop)
@@ -364,9 +388,11 @@
             {:nodes (or state.nodes [])
              :edges (or state.edges [])
              :islands (or state.islands [])
-             :next_island_id state.next_island_id
-             :selected_node_keys (or state.selected_node_keys [])
-             :focused_node_key state.focused_node_key}))
+              :next_island_id state.next_island_id
+              :selected_node_keys (or state.selected_node_keys [])
+              :focused_node_key state.focused_node_key
+              :view_mode (default-view-mode state.view_mode)
+              :outline_root_keys (default-outline-root-keys state.outline_root_keys)}))
 
     (fn build-active-map [target-id]
         (local entry (. entries target-id))
@@ -380,9 +406,11 @@
                                                    (or entry.nodes [])
                                                    (or entry.edges [])
                                                    (or entry.selected_node_keys [])
-                                                   entry.focused_node_key
-                                                   (or entry.islands [])
-                                                   entry.next_island_id))
+                                                    entry.focused_node_key
+                                                    (or entry.islands [])
+                                                    entry.next_island_id
+                                                    (default-view-mode entry.view_mode)
+                                                    (default-outline-root-keys entry.outline_root_keys)))
                     (prune-hydrated-map! entry)
                     (when (and (or (not entry.restored-from-state?) entry.seed-start?)
                                (= (length (or entry.nodes [])) 0)
@@ -416,9 +444,11 @@
                                                (or entry.nodes [])
                                                (or entry.edges [])
                                                (or entry.selected_node_keys [])
-                                               entry.focused_node_key
-                                               (or entry.islands [])
-                                               entry.next_island_id)))
+                                                entry.focused_node_key
+                                                (or entry.islands [])
+                                                entry.next_island_id
+                                                (default-view-mode entry.view_mode)
+                                                (default-outline-root-keys entry.outline_root_keys))))
             (local (ok result)
                 (pcall
                   (fn []
@@ -428,9 +458,11 @@
                     (set entry.edges (or state.edges []))
                     (set entry.islands (or state.islands []))
                     (set entry.next_island_id state.next_island_id)
-                    (set entry.selected_node_keys (or state.selected_node_keys []))
-                    (set entry.focused_node_key state.focused_node_key)
-                    true)))
+                     (set entry.selected_node_keys (or state.selected_node_keys []))
+                     (set entry.focused_node_key state.focused_node_key)
+                     (set entry.view_mode (default-view-mode state.view_mode))
+                     (set entry.outline_root_keys (default-outline-root-keys state.outline_root_keys))
+                     true)))
             (when constructed-for-capture?
                 (local map-to-drop entry.map)
                 (set entry.map nil)
@@ -452,9 +484,11 @@
                 (set entry.edges (or state.edges []))
                 (set entry.islands (or state.islands []))
                 (set entry.next_island_id state.next_island_id)
-                (set entry.selected_node_keys (or state.selected_node_keys []))
-                (set entry.focused_node_key state.focused_node_key)
-                (entry.map:drop)
+                 (set entry.selected_node_keys (or state.selected_node_keys []))
+                 (set entry.focused_node_key state.focused_node_key)
+                 (set entry.view_mode (default-view-mode state.view_mode))
+                 (set entry.outline_root_keys (default-outline-root-keys state.outline_root_keys))
+                 (entry.map:drop)
                 (set entry.map nil))
             true))
 
@@ -481,10 +515,12 @@
                                            :name "Main"
                                            :nodes (or core.nodes [])
                                            :edges (explicit-legacy-edges core.edges)
-                                           :islands []
-                                           :next_island_id nil
-                                           :selected_node_keys (or core.selected_node_keys [])
-                                           :focused_node_key core.focused_node_key})
+                                          :islands []
+                                          :next_island_id nil
+                                          :selected_node_keys (or core.selected_node_keys [])
+                                          :focused_node_key core.focused_node_key
+                                          :view_mode (default-view-mode core.view_mode)
+                                          :outline_root_keys (default-outline-root-keys core.outline_root_keys)})
                 (when (not (= graph.active_map_id nil))
                     (set active-id-result (sanitize-id graph.active_map_id "legacy-graph.active_map_id")))
                 (when graph.next_map_id
@@ -498,10 +534,12 @@
                                                       :name (or legacy-map.name legacy-map.id)
                                                       :nodes (or legacy-map.nodes [])
                                                       :edges (explicit-legacy-edges legacy-map.edges)
-                                                      :islands []
-                                                      :next_island_id nil
-                                                      :selected_node_keys (or legacy-map.selected_node_keys [])
-                                                      :focused_node_key legacy-map.focused_node_key}))))
+                                                       :islands []
+                                                       :next_island_id nil
+                                                       :selected_node_keys (or legacy-map.selected_node_keys [])
+                                                       :focused_node_key legacy-map.focused_node_key
+                                                       :view_mode (default-view-mode legacy-map.view_mode)
+                                                       :outline_root_keys (default-outline-root-keys legacy-map.outline_root_keys)}))))
                 (values active-id-result next-map-id maps-list))
             (or (= (type payload.maps) :table)
                 (not (= payload.active_map_id nil)))
@@ -513,7 +551,7 @@
                                                     "active_map_id"))
                 (set next-map-id (ensure-int (or payload.next_map_id) 2))
                 (local raw-maps (or payload.maps
-                                    [{:id "main" :name "Main" :nodes [] :edges [] :selected_node_keys [] :focused_node_key nil}]))
+                                    [{:id "main" :name "Main" :nodes [] :edges [] :selected_node_keys [] :focused_node_key nil :view_mode "spatial" :outline_root_keys []}]))
                 (each [_ entry (ipairs raw-maps)]
                     (when (= (type entry) :table)
                         (local map-id (sanitize-id entry.id (.. "maps-entry.id=" (tostring entry.id))))
@@ -522,10 +560,12 @@
                                                       :name (or entry.name entry.id)
                                                       :nodes (or entry.nodes [])
                                                       :edges (or entry.edges [])
-                                                      :islands (or entry.islands [])
-                                                      :next_island_id entry.next_island_id
-                                                      :selected_node_keys (or entry.selected_node_keys [])
-                                                      :focused_node_key entry.focused_node_key}))))
+                                                       :islands (or entry.islands [])
+                                                       :next_island_id entry.next_island_id
+                                                       :selected_node_keys (or entry.selected_node_keys [])
+                                                       :focused_node_key entry.focused_node_key
+                                                       :view_mode (default-view-mode entry.view_mode)
+                                                       :outline_root_keys (default-outline-root-keys entry.outline_root_keys)}))))
                 (values active-id-result next-map-id maps-list))
             (= (type graph.nodes) :table)
             (do
@@ -534,10 +574,12 @@
                                            :name "Main"
                                            :nodes (or graph.nodes [])
                                            :edges (explicit-legacy-edges graph.edges)
-                                           :islands []
-                                           :next_island_id nil
-                                           :selected_node_keys (or graph.selected_node_keys [])
-                                           :focused_node_key graph.focused_node_key})
+                                          :islands []
+                                          :next_island_id nil
+                                          :selected_node_keys (or graph.selected_node_keys [])
+                                          :focused_node_key graph.focused_node_key
+                                          :view_mode (default-view-mode graph.view_mode)
+                                          :outline_root_keys (default-outline-root-keys graph.outline_root_keys)})
                 (when (not (= graph.active_map_id nil))
                     (set active-id-result (sanitize-id graph.active_map_id "legacy-graph.active_map_id")))
                 (when graph.next_map_id
@@ -551,10 +593,12 @@
                                                       :name (or legacy-map.name legacy-map.id)
                                                       :nodes (or legacy-map.nodes [])
                                                       :edges (explicit-legacy-edges legacy-map.edges)
-                                                      :islands []
-                                                      :next_island_id nil
-                                                      :selected_node_keys (or legacy-map.selected_node_keys [])
-                                                      :focused_node_key legacy-map.focused_node_key}))))
+                                                       :islands []
+                                                       :next_island_id nil
+                                                       :selected_node_keys (or legacy-map.selected_node_keys [])
+                                                       :focused_node_key legacy-map.focused_node_key
+                                                       :view_mode (default-view-mode legacy-map.view_mode)
+                                                       :outline_root_keys (default-outline-root-keys legacy-map.outline_root_keys)}))))
                 (values active-id-result next-map-id maps-list))
             (do
                 (set active-id-result (sanitize-id (if (not (= payload.active_map_id nil))
@@ -565,7 +609,7 @@
                                                     "active_map_id"))
                 (set next-map-id (ensure-int (or payload.next_map_id graph.next_map_id) 2))
                 (local raw-maps (or payload.maps graph.maps
-                                    [{:id "main" :name "Main" :nodes [] :edges [] :selected_node_keys [] :focused_node_key nil}]))
+                                    [{:id "main" :name "Main" :nodes [] :edges [] :selected_node_keys [] :focused_node_key nil :view_mode "spatial" :outline_root_keys []}]))
                 (each [_ entry (ipairs raw-maps)]
                     (when (= (type entry) :table)
                         (local map-id (sanitize-id entry.id (.. "maps-entry.id=" (tostring entry.id))))
@@ -574,10 +618,12 @@
                                                       :name (or entry.name entry.id)
                                                       :nodes (or entry.nodes [])
                                                       :edges (or entry.edges [])
-                                                      :islands (or entry.islands [])
-                                                      :next_island_id entry.next_island_id
-                                                      :selected_node_keys (or entry.selected_node_keys [])
-                                                      :focused_node_key entry.focused_node_key}))))
+                                                       :islands (or entry.islands [])
+                                                       :next_island_id entry.next_island_id
+                                                       :selected_node_keys (or entry.selected_node_keys [])
+                                                       :focused_node_key entry.focused_node_key
+                                                       :view_mode (default-view-mode entry.view_mode)
+                                                       :outline_root_keys (default-outline-root-keys entry.outline_root_keys)}))))
                 (values active-id-result next-map-id maps-list))))
 
     (local init-state (or options.state {}))
@@ -601,13 +647,15 @@
                                             :name migrated-entry.name
                                              :nodes migrated-entry.nodes
                                              :edges migrated-entry.edges
-                                             :islands (or migrated-entry.islands [])
-                                             :next_island_id migrated-entry.next_island_id
-                                             :selected_node_keys (or migrated-entry.selected_node_keys [])
-                                            :focused_node_key migrated-entry.focused_node_key
-                                            :restored-from-state? restored-from-state?
-                                            :seed-start? seed-start-for-legacy-empty?
-                                            :map nil}))
+                                              :islands (or migrated-entry.islands [])
+                                              :next_island_id migrated-entry.next_island_id
+                                              :selected_node_keys (or migrated-entry.selected_node_keys [])
+                                             :focused_node_key migrated-entry.focused_node_key
+                                             :view_mode (default-view-mode migrated-entry.view_mode)
+                                             :outline_root_keys (default-outline-root-keys migrated-entry.outline_root_keys)
+                                             :restored-from-state? restored-from-state?
+                                             :seed-start? seed-start-for-legacy-empty?
+                                             :map nil}))
 
     (when (not (. entries active-id))
         (error (.. "GraphMapManager active_map_id does not reference a map: "
@@ -620,11 +668,13 @@
                                    :nodes []
                                    :edges []
                                    :islands []
-                                   :next_island_id nil
-                                   :selected_node_keys []
-                                  :focused_node_key nil
-                                  :restored-from-state? false
-                                  :map nil})
+                                    :next_island_id nil
+                                    :selected_node_keys []
+                                   :focused_node_key nil
+                                   :view_mode "spatial"
+                                   :outline_root_keys []
+                                   :restored-from-state? false
+                                   :map nil})
         (set active-id "main"))
 
     ;; Ensure next-id is beyond any existing map-N numeric IDs
@@ -725,11 +775,13 @@
                                 :nodes []
                                 :edges []
                                 :islands []
-                                :next_island_id nil
-                                :selected_node_keys []
-                               :focused_node_key nil
-                               :restored-from-state? false
-                               :map nil})
+                                 :next_island_id nil
+                                 :selected_node_keys []
+                                :focused_node_key nil
+                                :view_mode "spatial"
+                                :outline_root_keys []
+                                :restored-from-state? false
+                                :map nil})
         (set next-id (+ next-id 1))
         (set self.next-map-id next-id)
         (maps-changed:emit {:created-id id :active-id active-id})
@@ -781,17 +833,21 @@
                     {:nodes (or entry.nodes [])
                      :edges (or entry.edges [])
                      :islands (or entry.islands [])
-                     :next_island_id entry.next_island_id
-                     :selected_node_keys (or entry.selected_node_keys [])
-                     :focused_node_key entry.focused_node_key}))
-            (table.insert maps-list {:id entry.id
-                                      :name entry.name
-                                      :nodes (or state.nodes [])
-                                      :edges (or state.edges [])
-                                      :islands (or state.islands [])
-                                      :next_island_id state.next_island_id
-                                      :selected_node_keys (or state.selected_node_keys [])
-                                     :focused_node_key state.focused_node_key}))
+                      :next_island_id entry.next_island_id
+                      :selected_node_keys (or entry.selected_node_keys [])
+                      :focused_node_key entry.focused_node_key
+                      :view_mode (default-view-mode entry.view_mode)
+                      :outline_root_keys (default-outline-root-keys entry.outline_root_keys)}))
+             (table.insert maps-list {:id entry.id
+                                       :name entry.name
+                                       :nodes (or state.nodes [])
+                                       :edges (or state.edges [])
+                                       :islands (or state.islands [])
+                                       :next_island_id state.next_island_id
+                                       :selected_node_keys (or state.selected_node_keys [])
+                                      :focused_node_key state.focused_node_key
+                                      :view_mode (default-view-mode state.view_mode)
+                                      :outline_root_keys (default-outline-root-keys state.outline_root_keys)}))
         (table.sort maps-list (fn [a b] (< a.id b.id)))
         {:active_map_id active-id
          :next_map_id next-id
@@ -828,10 +884,12 @@
                              :nodes (if (= state.nodes nil) [] state.nodes)
                              :edges (if (= state.edges nil) [] state.edges)
                              :islands (if (= state.islands nil) [] state.islands)
-                             :next_island_id state.next_island_id
-                             :selected_node_keys (if (= state.selected_node_keys nil) [] state.selected_node_keys)
-                             :focused_node_key state.focused_node_key
-                             :restored-from-state? true
+                              :next_island_id state.next_island_id
+                              :selected_node_keys (if (= state.selected_node_keys nil) [] state.selected_node_keys)
+                              :focused_node_key state.focused_node_key
+                              :view_mode (default-view-mode state.view_mode)
+                              :outline_root_keys (default-outline-root-keys state.outline_root_keys)
+                              :restored-from-state? true
                              :seed-start? false
                              :map nil})
         (set next-id (+ next-id 1))

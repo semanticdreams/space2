@@ -70,11 +70,11 @@ def test_workflows_use_new_release_artifact_names() -> None:
     for obsolete_name in obsolete_names:
         assert_absent(build_workflow, obsolete_name, ".github/workflows/build.yml")
 
-    for expected_name in [
+    for release_only_name in [
         "space-windows-x86_64.zip",
         "space-windows-x86_64-setup.exe",
     ]:
-        assert expected_name in test_workflow, f"{expected_name!r} missing from .github/workflows/test.yml"
+        assert_absent(test_workflow, release_only_name, ".github/workflows/test.yml")
 
     for obsolete_name in [
         "space-windows.zip",

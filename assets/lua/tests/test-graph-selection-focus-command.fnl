@@ -1,20 +1,16 @@
 (local glm (require :glm))
 (local Graph (require :graph/init))
 (local GraphMap (require :graph/map))
-(local GraphCommands (require :graph/commands))
+(local CommandHelpers (require :tests/graph-command-helpers))
 (local GraphView (require :graph/view))
 (local BuildContext (require :build-context))
 (local ObjectSelector (require :object-selector))
 (local {:FocusManager FocusManager} (require :focus))
 
 (local tests [])
-(var command-graph-view nil)
 
 (fn identity-project [position _opts]
   position)
-
-(fn resolve-command-graph-view []
-  command-graph-view)
 
 (fn make-ctx []
   (local focus-manager (FocusManager {:root-name "test-graph-selection-focus-command"}))
@@ -39,24 +35,6 @@
              (if key true false))))
   (GraphMap.GraphMap {:graph graph :id "test-graph-selection-focus-command"}))
 
-(fn find-binding [bindings]
-  (var found nil)
-  (each [_ binding (ipairs bindings) &until found]
-    (when (and (= (. binding.keys 1) "g")
-               (= (. binding.keys 2) "s")
-               (= (. binding.keys 3) "f"))
-      (set found binding)))
-  found)
-
-(fn find-select-all-binding [bindings]
-  (var found nil)
-  (each [_ binding (ipairs bindings) &until found]
-    (when (and (= (. binding.keys 1) "g")
-               (= (. binding.keys 2) "s")
-               (= (. binding.keys 3) "e"))
-      (set found binding)))
-  found)
-
 (fn make-command-graph-view [count calls]
   {:selected-node-count (fn [_self] count)
    :has-visible-nodes? (fn [_self] (> count 0))
@@ -70,9 +48,10 @@
 (fn run-command-case [count expected-available expected-calls message]
   (local calls {:focus 0})
   (local graph-view (make-command-graph-view count calls))
-  (set command-graph-view graph-view)
-  (local provider (GraphCommands.provider {:graph-view resolve-command-graph-view}))
-  (local binding (assert (find-binding provider.bindings) "SPC g s f binding missing"))
+  (CommandHelpers.reset!)
+  (CommandHelpers.set-graph-view! graph-view)
+  (local provider (CommandHelpers.provider))
+  (local binding (assert (CommandHelpers.find-binding-by-keys provider.bindings ["g" "s" "f"]) "SPC g s f binding missing"))
   (assert (= binding.command "graph.selection.focus-selected") "SPC g s f should bind focus-selected command")
   (assert (= binding.label "focus") "SPC g s f binding should use focus label")
   (local command (assert (. provider.commands binding.command) "focus-selected command missing"))
@@ -91,9 +70,10 @@
   (fn run-case [count expected-available expected-calls message]
     (local calls {:focus 0 :select-all 0})
     (local graph-view (make-command-graph-view count calls))
-    (set command-graph-view graph-view)
-    (local provider (GraphCommands.provider {:graph-view resolve-command-graph-view}))
-    (local binding (assert (find-select-all-binding provider.bindings) "SPC g s e binding missing"))
+    (CommandHelpers.reset!)
+    (CommandHelpers.set-graph-view! graph-view)
+    (local provider (CommandHelpers.provider))
+    (local binding (assert (CommandHelpers.find-binding-by-keys provider.bindings ["g" "s" "e"]) "SPC g s e binding missing"))
     (assert (= binding.command "graph.selection.select-all") "SPC g s e should bind select-all command")
     (assert (= binding.label "select-all") "SPC g s e binding should use select-all label")
     (local command (assert (. provider.commands binding.command) "select-all command missing"))

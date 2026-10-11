@@ -13,6 +13,9 @@
 
 (var maps-changed-handler nil)
 (var maps-will-change-handler nil)
+(var activate-graph-view! nil)
+(var capture-graph-view-state! nil)
+(var drop-graph-view! nil)
 
 (fn clone-table [value]
   (if (= (type value) :table)
@@ -114,13 +117,40 @@
     (set (. world-runtime.graph-view-states (or map-id "main"))
          (do (when graph-view.capture-camera-state! (graph-view:capture-camera-state!)) (graph-view:capture-state))))
   (and world-runtime
-       (. (or world-runtime.graph-view-states {}) (or map-id "main"))))
+        (. (or world-runtime.graph-view-states {}) (or map-id "main"))))
+
+(fn disconnect-graph-view-mode-handler! []
+  (local world-runtime app.active-world-runtime)
+  (local conn (and world-runtime world-runtime.graph-view-mode-conn))
+  (when conn
+    (when (and conn.signal conn.handler)
+      (conn.signal:disconnect conn.handler true))
+    (set world-runtime.graph-view-mode-conn nil))
+  true)
 
 (fn activate-focused-node []
   (local graph-view app.graph-view)
   (and graph-view
-       graph-view.expand-focused-node
-       (graph-view:expand-focused-node)))
+        graph-view.expand-focused-node
+        (graph-view:expand-focused-node)))
+
+(fn rebuild-graph-view-on-view-mode-change [_mode]
+  (when (= (Activities.active-activity-id) "graph")
+    (local world-runtime app.active-world-runtime)
+    (when world-runtime
+      (capture-graph-view-state!)
+      (drop-graph-view! true)
+      (activate-graph-view!))))
+
+(fn connect-graph-view-mode-handler! [graph-map]
+  (local world-runtime (assert app.active-world-runtime
+                               "Graph activity view mode handler requires app.active-world-runtime"))
+  (disconnect-graph-view-mode-handler!)
+  (when (and graph-map graph-map.view-mode-changed)
+    (local handler (graph-map.view-mode-changed:connect rebuild-graph-view-on-view-mode-change))
+    (set world-runtime.graph-view-mode-conn {:signal graph-map.view-mode-changed
+                                             :handler handler}))
+  true)
 
 (fn delete-selection []
   (local graph-view app.graph-view)
@@ -168,7 +198,8 @@
 (fn root-actions [context]
   ((. GraphActivityActions :graph-root-actions) context))
 
-(fn activate-graph-view! []
+(set activate-graph-view!
+     (fn []
   (local world-runtime (assert app.active-world-runtime
                                   "Graph activity requires app.active-world-runtime"))
   (local canvas (assert world-runtime.canvas
@@ -217,6 +248,7 @@
   (set world-runtime.graph-view-map-id map-id)
   (set app.graph-view graph-view)
   (set app.graph-map graph-map)
+  (connect-graph-view-mode-handler! graph-map)
   (local saved-camera-state
     (and graph-view.persistence
          graph-view.persistence.saved-camera-state
@@ -243,10 +275,11 @@
           (local saved-extra-panels (graph-view.persistence:saved-extra-panels))
           (when (and saved-extra-panels (> (length saved-extra-panels) 0))
             (graph-view:restore-state {:extra_panels saved-extra-panels})))))
-  graph-view)
+  graph-view))
 
 
-(fn capture-graph-view-state! []
+(set capture-graph-view-state!
+     (fn []
   (local world-runtime app.active-world-runtime)
   (local graph-view (and world-runtime world-runtime.graph-view))
   (when (and world-runtime graph-view graph-view.capture-state)
@@ -256,9 +289,10 @@
          (do (when graph-view.capture-camera-state! (graph-view:capture-camera-state!)) (graph-view:capture-state))))
   (and world-runtime
        (. (or world-runtime.graph-view-states {})
-          (or world-runtime.graph-view-map-id (view-state-key)))))
+           (or world-runtime.graph-view-map-id (view-state-key))))))
 
 (fn deactivate-graph-view! []
+  (disconnect-graph-view-mode-handler!)
   (capture-graph-view-state!)
   (local world-runtime app.active-world-runtime)
   (local canvas (and world-runtime world-runtime.canvas))
@@ -267,7 +301,9 @@
   (set app.graph-view nil)
   true)
 
-(fn drop-graph-view! [skip-capture?]
+(set drop-graph-view!
+     (fn [skip-capture?]
+  (disconnect-graph-view-mode-handler!)
   (when (not skip-capture?)
     (capture-graph-view-state!))
   (local world-runtime app.active-world-runtime)
@@ -286,7 +322,7 @@
     (set world-runtime.graph-view-map-id nil))
   (set app.graph-view nil)
   (set app.graph-map (and world-runtime (active-graph-map)))
-  true)
+  true))
 
 (fn disconnect-map-switch-handlers! []
   (local world-runtime app.active-world-runtime)
@@ -328,6 +364,7 @@
                                    :position (or (and panel-state panel-state.position))
                                    :rotation (or (and panel-state panel-state.rotation))
                                    :graph-map-id metadata.persistence.graph-map-id}}))))
+      (disconnect-graph-view-mode-handler!)
       (capture-graph-view-state-for-key! payload.previous-id)
       (drop-graph-view! true))))
 

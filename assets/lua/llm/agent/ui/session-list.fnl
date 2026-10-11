@@ -22,7 +22,13 @@
       "Session"))
 
 (fn format-timestamp [ts]
-  (if ts (os.date "%H:%M" ts) ""))
+  (if (= ts nil) ""
+      (= (type ts) :number) (os.date "%H:%M" ts)
+      (= (type ts) :string) (do
+                              (local display (ts:match "^%d%d%d%d%-%d%d%-%d%dT(%d%d:%d%d):%d%dZ$"))
+                              (if display display
+                                  (error (.. "AgentSessionList expected updated-at as canonical UTC timestamp string, got " ts))))
+      (error (.. "AgentSessionList expected updated-at as epoch seconds number or canonical UTC timestamp string, got " (type ts)))))
 
 (fn AgentSessionList [controller]
   (fn build [ctx]

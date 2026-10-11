@@ -18,6 +18,26 @@ SPACE_ENABLE_FFMPEG="${SPACE_ENABLE_FFMPEG:-ON}"
 WRAPPER_RESTORE_DIR=""
 WRAPPER_RESTORE_MAP_FILE=""
 
+resolve_build_jobs() {
+    local jobs="${BUILD_JOBS:-}"
+    if [ -z "${jobs}" ]; then
+        if command -v nproc >/dev/null 2>&1; then
+            jobs="$(nproc)"
+        else
+            jobs="2"
+        fi
+    fi
+
+    case "${jobs}" in
+        ''|*[!0-9]*|0)
+            echo "BUILD_JOBS must be a positive integer; got '${jobs}'." >&2
+            exit 1
+            ;;
+    esac
+
+    printf '%s\n' "${jobs}"
+}
+
 if [ ! -d "${VCPKG_ROOT}" ]; then
     echo "VCPKG_ROOT not found: ${VCPKG_ROOT}" >&2
     echo "Set VCPKG_ROOT or clone vcpkg into ${ROOT_DIR}/vcpkg." >&2
@@ -299,6 +319,11 @@ fi
 cache_file="${BUILD_DIR}/CMakeCache.txt"
 if [ -f "${cache_file}" ]; then
     needs_reset=0
+    if [ -n "${CMAKE_GENERATOR:-}" ] \
+        && grep -q '^CMAKE_GENERATOR:INTERNAL=' "${cache_file}" \
+        && ! grep -Fxq "CMAKE_GENERATOR:INTERNAL=${CMAKE_GENERATOR}" "${cache_file}"; then
+        needs_reset=1
+    fi
     if ! grep -Eq '^CMAKE_SYSTEM_NAME:.*=Windows$' "${cache_file}"; then
         needs_reset=1
     fi
@@ -312,4 +337,5 @@ if [ -f "${cache_file}" ]; then
 fi
 
 cmake "${cmake_args[@]}"
-cmake --build "${BUILD_DIR}" --config Release --target space space-cli
+BUILD_JOBS="$(resolve_build_jobs)"
+cmake --build "${BUILD_DIR}" --config Release --parallel "${BUILD_JOBS}" --target space space-cli

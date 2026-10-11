@@ -151,6 +151,7 @@
     :tests.test-identity-entities
     :tests.test-link-entities
     :tests.test-list-entities
+    :tests.test-dict-entities
     :tests.test-notebooks
     :tests.test-link-entity-crash
     :tests.test-morphs
@@ -240,8 +241,10 @@
     :tests.test-demo-car
     :tests.test-car-state
     :tests.test-heightfield-terrain
-     :tests.test-graph-view
-     :tests.test-graph-selection-focus-command
+      :tests.test-graph-view
+      :tests.test-graph-outline-view
+      :tests.test-graph-view-compact-projection
+      :tests.test-graph-selection-focus-command
      :tests.test-graph-view-camera-persistence
      :tests.test-graph-view-control-view
     :tests.test-hackernews-graph-view-node-views

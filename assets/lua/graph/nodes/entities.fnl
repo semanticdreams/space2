@@ -28,6 +28,7 @@
     (table.insert produced [:string "string"])
     (table.insert produced [:link "link"])
     (table.insert produced [:list "list"])
+    (table.insert produced [:dict "dict"])
     produced)
 
   (fn emit-types [self]
@@ -52,11 +53,17 @@
                  (local list-node (LinkEntityListNode {}))
                  (graph:add-edge (GraphEdge {:source self
                                              :target list-node})))
-               (= type-key :list)
-               (do
-                 (local list-node (ListEntityListNode {}))
-                 (graph:add-edge (GraphEdge {:source self
-                                             :target list-node})))))))
+                (= type-key :list)
+                (do
+                  (local list-node (ListEntityListNode {}))
+                  (graph:add-edge (GraphEdge {:source self
+                                              :target list-node})))
+                (= type-key :dict)
+                (do
+                  (local DictEntityListNode (require :graph/nodes/dict-entity-list))
+                  (local list-node (DictEntityListNode {}))
+                  (graph:add-edge (GraphEdge {:source self
+                                              :target list-node})))))))
 
   (set node.actions
        [{:name "String Entities"
@@ -67,10 +74,14 @@
          :icon "link"
          :fn (fn [_button _event]
                  (node:add-type-node :link))}
-        {:name "List Entities"
-         :icon "list"
-         :fn (fn [_button _event]
-                 (node:add-type-node :list))}])
+         {:name "List Entities"
+          :icon "list"
+          :fn (fn [_button _event]
+                  (node:add-type-node :list))}
+         {:name "Dict Entities"
+          :icon "data_object"
+          :fn (fn [_button _event]
+                  (node:add-type-node :dict))}])
 
   (set node.drop
        (fn [self]

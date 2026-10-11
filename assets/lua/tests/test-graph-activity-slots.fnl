@@ -1017,7 +1017,126 @@
   (if ok result (error result)))
 
 (table.insert tests {:name "Graph map cameras save and restore on switch"
-                     :fn graph-map-cameras-save-and-restore-on-switch})
+                      :fn graph-map-cameras-save-and-restore-on-switch})
+
+(fn graph-view-mode-change-rebuilds-active-renderer-and-cleans-connections []
+  (local app-snapshot (snapshot-app-fields board-graph-camera-app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  (set app.canvas-visible? false)
+  (set app.canvas-interactive? false)
+  (set app.canvas-surface-interactive? true)
+  (set app.active-interaction-surface :scene)
+  (set app.preferred-interaction-surface :scene)
+  (Main.install-app-shell!)
+  (set app.themes {:get-active-theme test-theme})
+  (set app.renderers (make-board-graph-camera-renderers))
+  (set app.lights (make-board-graph-camera-lights))
+  (set app.engine {:physics {:addRigidBody (fn [_phys _body])
+                             :removeRigidBody (fn [_phys _body])}})
+  (local data-dir "/tmp/space/tests/graph-view-mode-rebuild")
+  (when (fs.exists data-dir)
+    (fs.remove-all data-dir))
+  (fs.create-dirs data-dir)
+  (local camera (Camera {:position (glm.vec3 0 0 100)}))
+  (local focus-manager (FocusManager {:root-name "graph-view-mode-rebuild"}))
+  (local canvas (Canvas {:camera camera :focus-manager focus-manager}))
+  (local AppProjection (require :app-projection))
+  (when (not app.create-default-projection)
+    (set app.create-default-projection AppProjection.create-default-projection))
+  (local scene (Scene {:camera camera}))
+  (set app.viewport {:x 0 :y 0 :width 800 :height 600})
+  (canvas:on-viewport-changed app.viewport)
+  (scene:on-viewport-changed app.viewport)
+  (local graph (Graph {:with-start false}))
+  (local graph-map-manager (GraphMapManager.GraphMapManager {:graph graph :data-dir data-dir}))
+  (graph-map-manager:create-map! "beta" "Beta")
+  (local graph-map (graph-map-manager:get-active-map))
+  (local object-selector (ObjectSelector {:ctx-provider (fn []
+                                                          (if (and canvas.active-activity-slot
+                                                                   canvas.active-activity-slot.ctx)
+                                                              canvas.active-activity-slot.ctx
+                                                              canvas.build-context))
+                                            :enabled? true}))
+  (local runtime {:canvas canvas
+                  :scene scene
+                  :graph graph
+                  :graph-map graph-map
+                  :graph-map-manager graph-map-manager
+                  :object-selector object-selector
+                  :movables app.movables
+                  :activity-cameras {:canvas {} :scene {}}
+                  :activity-controls {:canvas {} :scene {}}
+                  :world-dir data-dir})
+  (set app.active-world-runtime runtime)
+  (set app.canvas canvas)
+  (set app.graph graph)
+  (set app.graph-map graph-map)
+  (set app.graph-map-manager graph-map-manager)
+  (local (ok result)
+    (pcall
+      (fn []
+        (GraphActivityUnit.load-graph-activity!)
+        (Activities.activate-activity "graph")
+        (local spatial-view app.graph-view)
+        (assert spatial-view "Graph activity should create an initial spatial graph view")
+        (assert spatial-view.points "Initial graph view should be spatial")
+        (assert runtime.graph-view-mode-conn "Graph activity should connect active map view-mode changes")
+
+        (graph-map:set-view-mode! "outline")
+        (local outline-view app.graph-view)
+        (assert (not (= outline-view spatial-view)) "View mode change should replace the active graph view")
+        (assert (= outline-view.graph-map graph-map) "Outline rebuild should keep the same active graph map")
+        (assert outline-view.rows "Outline rebuild should create an outline renderer")
+        (assert runtime.graph-view-mode-conn "Outline rebuild should reconnect view-mode changes")
+
+        (graph-map:set-view-mode! "spatial")
+        (local rebuilt-spatial-view app.graph-view)
+        (assert (not (= rebuilt-spatial-view outline-view)) "Returning to spatial should replace outline renderer")
+        (assert (= rebuilt-spatial-view.graph-map graph-map) "Spatial rebuild should keep the same active graph map")
+        (assert rebuilt-spatial-view.points "Spatial rebuild should create a spatial renderer")
+
+        (graph-map-manager:switch-map! "beta")
+        (local beta-map (graph-map-manager:get-active-map))
+        (local beta-view app.graph-view)
+        (assert (= app.graph-map beta-map) "Map switch should expose the beta graph map")
+        (assert (= beta-view.graph-map beta-map) "Map switch should rebuild for beta map")
+        (assert runtime.graph-view-mode-conn "Map switch should connect beta map view-mode changes")
+        (graph-map:set-view-mode! "outline")
+        (assert (= app.graph-map beta-map) "Old map view-mode changes must not switch the active map")
+        (assert (= app.graph-view beta-view) "Old map view-mode changes must not rebuild the beta renderer")
+
+        (Activities.deactivate-active-activity)
+        (assert (= runtime.graph-view-mode-conn nil) "Deactivation should disconnect view-mode changes")
+        (beta-map:set-view-mode! "outline")
+        (assert (= app.graph-view nil) "View-mode change after deactivation must not rebuild a graph view")
+
+        (Activities.activate-activity "graph")
+        (assert runtime.graph-view-mode-conn "Reactivation should reconnect view-mode changes")
+        (GraphActivityUnit.drop-graph-view! false)
+        (assert (= runtime.graph-view-mode-conn nil) "Dropping graph view should disconnect view-mode changes")
+        (beta-map:set-view-mode! "spatial")
+        (assert (= app.graph-view nil) "View-mode change after drop must not rebuild a graph view")
+        true)))
+  (pcall GraphActivityUnit.unload-graph-activity!)
+  (when runtime.graph-view
+    (runtime.graph-view:drop)
+    (set runtime.graph-view nil))
+  (object-selector:drop)
+  (graph-map-manager:drop)
+  (graph:drop)
+  (scene:drop)
+  (canvas:drop)
+  (focus-manager:drop)
+  (camera:drop)
+  (when (fs.exists data-dir)
+    (fs.remove-all data-dir))
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(table.insert tests {:name "Graph view-mode change rebuilds active renderer and cleans connections"
+                     :fn graph-view-mode-change-rebuilds-active-renderer-and-cleans-connections})
 
 (fn theme-switch-color-approx [a b]
   (local MathUtils (require :math-utils))

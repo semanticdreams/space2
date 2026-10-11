@@ -33,6 +33,7 @@ Architecture notes, design sketches, debugging logs, and explorations. These are
 - [Focus Change Ordering](./focus-change-ordering)
 - [Force Layout Barnes Hut](./force-layout-barnes-hut)
 - [Gccjit](./gccjit)
+- [GitHub Actions Hygiene](./github-actions-hygiene)
 - [Gltf Async Embedded Texture Decode](./gltf-async-embedded-texture-decode)
 - [Graph](./graph)
 - [Graph Identity](./graph-identity)

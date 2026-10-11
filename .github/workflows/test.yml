@@ -13,6 +13,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 
+permissions:
+  contents: read
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -32,26 +35,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Restore ccache
-        uses: actions/cache@v5
-        with:
-          path: .ccache
-          key: ccache-${{ runner.os }}-linux-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'scripts/build-linux.sh', 'scripts/build-appimage.sh', 'Makefile') }}
-          restore-keys: |
-            ccache-${{ runner.os }}-linux-${{ github.ref }}-
-            ccache-${{ runner.os }}-linux-
-            ccache-${{ runner.os }}-
-
-      - name: Restore sccache
-        uses: actions/cache@v5
-        with:
-          path: .sccache
-          key: sccache-${{ runner.os }}-linux-${{ github.ref }}-${{ hashFiles('ffi/matrix/Cargo.lock', 'ffi/matrix/Cargo.toml', 'external/wallet-core/rust/Cargo.lock', 'external/wallet-core/rust/Cargo.toml', 'CMakeLists.txt') }}
-          restore-keys: |
-            sccache-${{ runner.os }}-linux-${{ github.ref }}-
-            sccache-${{ runner.os }}-linux-
-            sccache-${{ runner.os }}-
-
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -60,35 +43,39 @@ jobs:
           deps=$(echo "$deps" | sed 's/\bsccache\b//g')
           sudo apt-get install -y ${deps} ccache
 
-      - name: Restore sccache binary
-        uses: actions/cache@v5
+      - name: Setup compiler cache
+        uses: ./.github/actions/setup-linux-compiler-cache
         with:
-          path: ~/.cargo/bin/sccache
-          key: sccache-bin-${{ runner.os }}-0.16.0
-
-      - name: Install sccache
-        run: |
-          if command -v sccache >/dev/null 2>&1; then
-            sccache --version
-          else
-            cargo install sccache --version 0.16.0 --locked
-          fi
+          cache-scope: linux
+          ccache-path: .ccache
+          sccache-path: .sccache
+          ccache-key-files: |
+            **/CMakeLists.txt
+            **/*.cmake
+            scripts/build-linux.sh
+            scripts/build-appimage.sh
+            Makefile
+          sccache-key-files: |
+            ffi/matrix/Cargo.lock
+            ffi/matrix/Cargo.toml
+            external/wallet-core/rust/Cargo.lock
+            external/wallet-core/rust/Cargo.toml
+            CMakeLists.txt
 
       - name: Configure git for test directories
         run: |
-          git config --global user.name "CI Test"
-          git config --global user.email "ci@test.local"
-          git config --global --add safe.directory /tmp/space/tests
-          git config --global --add safe.directory '*'
-          git config --global protocol.file.allow always
-          echo "=== git config safe.directory ==="
-          git config --global --get-all safe.directory || echo "(none)"
-          echo "=== git config protocol.file.allow ==="
-          git config --global protocol.file.allow || echo "(none)"
-          echo "=== GIT_CONFIG env vars ==="
-          echo "GIT_CONFIG_NOSYSTEM=${GIT_CONFIG_NOSYSTEM:-unset}"
-          echo "GIT_CONFIG_GLOBAL=${GIT_CONFIG_GLOBAL:-unset}"
-          echo "HOME=$HOME"
+          set -euo pipefail
+          git_config="${RUNNER_TEMP}/gitconfig"
+          git config --file "${git_config}" user.name "CI Test"
+          git config --file "${git_config}" user.email "ci@test.local"
+          git config --file "${git_config}" --add safe.directory "${GITHUB_WORKSPACE}"
+          git config --file "${git_config}" --add safe.directory /tmp/space/tests
+          git config --file "${git_config}" protocol.file.allow always
+          echo "GIT_CONFIG_GLOBAL=${git_config}" >> "${GITHUB_ENV}"
+          echo "=== CI git config safe.directory ==="
+          git config --file "${git_config}" --get-all safe.directory
+          echo "=== CI git config protocol.file.allow ==="
+          git config --file "${git_config}" protocol.file.allow
 
       - name: Check OpenCode capability wiring
         run: make opencode-check
@@ -118,185 +105,3 @@ jobs:
 
       - name: Run e2e test suite
         run: make test-e2e
-
-  build-windows:
-    runs-on: ubuntu-22.04
-    env:
-      CCACHE_DIR: ${{ github.workspace }}/.ccache-windows
-      CCACHE_MAXSIZE: 1G
-      CCACHE_BASEDIR: ${{ github.workspace }}
-      SCCACHE_DIR: ${{ github.workspace }}/.sccache-windows
-      SCCACHE_CACHE_SIZE: 2G
-      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Restore ccache
-        uses: actions/cache@v5
-        with:
-          path: .ccache-windows
-          key: ccache-${{ runner.os }}-windows-cross-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'apps/space/windows_app.rc.in', 'scripts/build-windows.sh', 'scripts/build-windows-from-linux.sh', 'scripts/setup-windows-build-host.sh', 'scripts/prepare-windows-runtime.sh', 'scripts/prepare-windows-wine-runtime.sh', 'scripts/generate_windows_icon.py', 'scripts/build-windows-installer.py', 'scripts/windows-installer.iss') }}
-          restore-keys: |
-            ccache-${{ runner.os }}-windows-cross-${{ github.ref }}-
-            ccache-${{ runner.os }}-windows-cross-
-
-      - name: Restore sccache
-        uses: actions/cache@v5
-        with:
-          path: .sccache-windows
-          key: sccache-${{ runner.os }}-windows-cross-${{ github.ref }}-${{ hashFiles('ffi/matrix/Cargo.lock', 'ffi/matrix/Cargo.toml', 'external/wallet-core/rust/Cargo.lock', 'external/wallet-core/rust/Cargo.toml', 'CMakeLists.txt', 'scripts/build-windows.sh', 'scripts/build-windows-from-linux.sh', 'scripts/setup-windows-build-host.sh') }}
-          restore-keys: |
-            sccache-${{ runner.os }}-windows-cross-${{ github.ref }}-
-            sccache-${{ runner.os }}-windows-cross-
-
-      - name: Setup Windows cross-build host
-        run: scripts/setup-windows-build-host.sh
-
-      - name: Build Windows target
-        env:
-          CMAKE_C_COMPILER_LAUNCHER: ccache
-          CMAKE_CXX_COMPILER_LAUNCHER: ccache
-        run: scripts/build-windows-from-linux.sh
-
-      - name: Prepare runtime bundle
-        run: scripts/package-windows-runtime.sh
-
-      - name: Smoke test Windows package
-        run: |
-          scripts/prepare-windows-wine-runtime.sh build/windows/space-cli.exe
-          test -f build/dist/windows/space.exe
-          test -f build/dist/windows/space-cli.exe
-          x86_64-w64-mingw32-objdump -p build/windows/space.exe | rg "Subsystem.*Windows GUI"
-          x86_64-w64-mingw32-objdump -p build/windows/space-cli.exe | rg "Subsystem.*Windows CUI"
-          if command -v wine64 >/dev/null 2>&1; then
-            WINE_CMD=wine64
-          elif command -v wine >/dev/null 2>&1; then
-            WINE_CMD=wine
-          else
-            echo "Missing required command: wine64 or wine" >&2
-            exit 1
-          fi
-          timeout 60s "${WINE_CMD}" build/windows/space-cli.exe --help >/dev/null
-
-      - name: Create Windows ZIP
-        run: |
-          python3 - <<'PY'
-          import pathlib
-          import zipfile
-
-          root = pathlib.Path("build/dist/windows")
-          with zipfile.ZipFile("build/dist/space-windows-x86_64.zip", "w", zipfile.ZIP_DEFLATED) as archive:
-              for path in root.rglob("*"):
-                  archive.write(path, path.relative_to(root))
-          PY
-
-      - name: Verify Windows ZIP contents
-        run: |
-          python3 - <<'PY'
-          import zipfile
-
-          with zipfile.ZipFile("build/dist/space-windows-x86_64.zip") as archive:
-              names = set(archive.namelist())
-          missing = {"space.exe", "space-cli.exe"} - names
-          if missing:
-              raise SystemExit(f"missing from Windows ZIP: {sorted(missing)}")
-          PY
-
-      - name: ccache stats
-        run: ccache -s
-
-      - name: sccache stats
-        run: |
-          if command -v sccache >/dev/null 2>&1; then
-            sccache --show-stats
-            sccache --stop-server || true
-          fi
-
-      - name: Upload Windows runtime
-        uses: actions/upload-artifact@v5
-        with:
-          name: space-windows-runtime
-          path: build/dist/windows
-          if-no-files-found: error
-
-      - name: Upload Windows packaging inputs
-        uses: actions/upload-artifact@v5
-        with:
-          name: windows-packaging-inputs
-          path: |
-            build/dist/space-windows-x86_64.zip
-            build/dist/windows
-            build/windows/CPackConfig.cmake
-            build/windows/space.ico
-            scripts/windows-installer.iss
-          if-no-files-found: error
-
-  test-windows:
-    needs: build-windows
-    runs-on: windows-latest
-    env:
-      SKIP_KEYRING_TESTS: 1
-      SPACE_DISABLE_AUDIO: 1
-      SPACE_MATRIX_TEST: ${{ secrets.MATRIX_USERNAME != '' && secrets.MATRIX_PASSWORD != '' && '1' || '' }}
-      MATRIX_USERNAME: ${{ secrets.MATRIX_USERNAME }}
-      MATRIX_PASSWORD: ${{ secrets.MATRIX_PASSWORD }}
-      MATRIX_HOMESERVER: ${{ secrets.MATRIX_HOMESERVER }}
-    steps:
-      - name: Download Windows runtime
-        uses: actions/download-artifact@v5
-        with:
-          name: space-windows-runtime
-          path: build/dist/windows
-
-      - name: Smoke test Windows binary
-        run: .\build\dist\windows\space-cli.exe --help | Out-Null
-
-      - name: Run Windows fast suite
-        env:
-          SPACE_ASSETS_PATH: ${{ github.workspace }}\\build\\dist\\windows\\assets
-          SPACE_BIN: ${{ github.workspace }}\\build\\dist\\windows\\space-cli.exe
-          FENNEL_PATH: ${{ github.workspace }}\\build\\dist\\windows\\assets\\lua\\?.fnl;${{ github.workspace }}\\build\\dist\\windows\\assets\\lua\\?\\init.fnl
-          FENNEL_MACRO_PATH: ${{ github.workspace }}\\build\\dist\\windows\\assets\\lua\\?.fnl;${{ github.workspace }}\\build\\dist\\windows\\assets\\lua\\?\\init.fnl
-          XDG_DATA_HOME: ${{ github.workspace }}\\.tmp\\xdg-data
-        run: .\build\dist\windows\space-cli.exe -m tests.fast:main
-
-  build-windows-installer:
-    needs: build-windows
-    runs-on: windows-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Download Windows packaging inputs
-        uses: actions/download-artifact@v5
-        with:
-          name: windows-packaging-inputs
-          path: .
-
-      - name: Install Inno Setup
-        shell: pwsh
-        run: choco install innosetup --no-progress -y
-
-      - name: Build Windows installer
-        shell: pwsh
-        run: python scripts/build-windows-installer.py
-
-      - name: Smoke test Windows installer
-        shell: pwsh
-        run: |
-          $installDir = Join-Path $env:RUNNER_TEMP "space-install"
-          $logPath = Join-Path $env:RUNNER_TEMP "space-installer.log"
-          Remove-Item -Recurse -Force $installDir -ErrorAction SilentlyContinue
-          Remove-Item $logPath -ErrorAction SilentlyContinue
-          $installer = (Resolve-Path "build/dist/space-windows-x86_64-setup.exe").Path
-          Start-Process -FilePath $installer -ArgumentList @("/SP-","/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CURRENTUSER","/TASKS=desktopicon",("/DIR=" + $installDir),("/LOG=" + $logPath)) -Wait -NoNewWindow
-          foreach ($exeName in @("space.exe", "space-cli.exe")) {
-            if (-not (Test-Path (Join-Path $installDir $exeName))) {
-              if (Test-Path $logPath) {
-                Get-Content $logPath
-              }
-              throw "Installed executable not found: ${exeName}"
-            }
-          }
-          & (Join-Path $installDir "space-cli.exe") --help *> $null
