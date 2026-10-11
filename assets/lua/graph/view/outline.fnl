@@ -783,7 +783,12 @@
                                     (do
                                         (view:reveal-node node (default-reveal-options opts))
                                         true)
-                                    false))}))
+                                     false))}))
+
+(fn install-camera-contract! [self]
+    (set self.saved-camera-state (fn [view] (view:assert-not-dropped "saved-camera-state") nil))
+    (set self.capture-camera-state! (fn [view] (view:assert-not-dropped "capture-camera-state!") true))
+    (set self.apply-initial-camera-policy! (fn [view] (view:assert-not-dropped "apply-initial-camera-policy!") true)))
 
 (fn GraphOutlineView [options]
     (local graph-map (assert options.graph-map "GraphOutlineView requires :graph-map"))
@@ -862,7 +867,7 @@
              (graph-map:remove-nodes nodes)))
     (set self.update (fn [view _delta] (view:assert-not-dropped "update") true))
     (set self.start-layout (fn [view] (view:assert-not-dropped "start-layout") false))
-    (set self.apply-initial-camera-policy! (fn [view] (view:assert-not-dropped "apply-initial-camera-policy!") true))
+    (install-camera-contract! self)
     (set self.capture-state
          (fn [view]
              (view:assert-not-dropped "capture-state")

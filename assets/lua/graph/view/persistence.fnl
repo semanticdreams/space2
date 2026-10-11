@@ -7,6 +7,41 @@
 (local ensure-glm-vec3 Utils.ensure-glm-vec3)
 (local position-magnitude-threshold 1e6)
 (var finite-number? nil) (var assert-valid-position nil) (var assert-valid-size nil)
+
+(fn assert-camera-number-array [map-id value count label]
+    (assert (= (type value) :table) (string.format "GraphViewPersistence %s for %s camera must be a table" label map-id))
+    (for [idx 1 count]
+        (assert (finite-number? (rawget value idx))
+                (string.format "GraphViewPersistence %s for %s camera has invalid value at %d" label map-id idx))))
+
+(fn assert-valid-camera-state [map-id value context]
+    (when (not (= value nil))
+        (assert (= (type value) :table) (string.format "GraphViewPersistence %s for %s camera must be a table" context map-id))
+        (assert-camera-number-array map-id value.position 3 (.. context " position"))
+        (when (not (= value.rotation nil))
+            (assert-camera-number-array map-id value.rotation 4 (.. context " rotation")))))
+
+(fn clone-camera-state [map-id value]
+    (when (not (= value nil))
+        (assert-valid-camera-state map-id value "camera")
+        (local cloned {:position [(rawget value.position 1) (rawget value.position 2) (rawget value.position 3)]})
+        (when (not (= value.rotation nil))
+            (set cloned.rotation [(rawget value.rotation 1) (rawget value.rotation 2) (rawget value.rotation 3) (rawget value.rotation 4)]))
+        cloned))
+
+(fn clone-view-modes [map-id view-modes]
+    (local cloned {})
+    (each [mode entry (pairs (or view-modes {}))]
+        (assert (= (type mode) :string)
+                (string.format "GraphViewPersistence view_modes for %s must be keyed by mode string" map-id))
+        (assert (= (type entry) :table)
+                (string.format "GraphViewPersistence view_modes.%s for %s must be a table" mode map-id))
+        (local mode-entry {})
+        (when (not (= entry.camera nil))
+            (set mode-entry.camera (clone-camera-state map-id entry.camera)))
+        (set (. cloned mode) mode-entry))
+    cloned)
+
 (fn GraphViewPersistence [opts]
     (local options (or opts {}))
     (local data-dir options.data-dir)
@@ -23,36 +58,19 @@
     (local metadata-path (fs.join-path graph-data-dir "metadata.json"))
     (var pending-save? false)
      (var persisted {:positions {}
-                     :presentations {}
-                     :sizes {}
-                     :panels []
-                     :extra_panels []
-                     :camera nil})
+                      :presentations {}
+                      :sizes {}
+                      :panels []
+                      :extra_panels []
+                      :camera nil
+                      :view_modes {}})
     (var persisted-positions persisted.positions)
     (var persisted-presentations persisted.presentations)
     (var persisted-sizes persisted.sizes)
      (var persisted-panels persisted.panels)
      (var persisted-extra-panels [])
-     (var persisted-camera nil)
-
-    (fn assert-number-array [value count label]
-        (assert (= (type value) :table) (string.format "GraphViewPersistence %s for %s camera must be a table" label map-id))
-        (for [idx 1 count]
-            (assert (finite-number? (rawget value idx))
-                    (string.format "GraphViewPersistence %s for %s camera has invalid value at %d" label map-id idx))))
-    (fn assert-valid-camera-state [value context]
-        (when (not (= value nil))
-            (assert (= (type value) :table) (string.format "GraphViewPersistence %s for %s camera must be a table" context map-id))
-            (assert-number-array value.position 3 (.. context " position"))
-            (when (not (= value.rotation nil))
-                (assert-number-array value.rotation 4 (.. context " rotation")))))
-    (fn clone-camera-state [value]
-        (when (not (= value nil))
-            (assert-valid-camera-state value "camera")
-            (local cloned {:position [(rawget value.position 1) (rawget value.position 2) (rawget value.position 3)]})
-            (when (not (= value.rotation nil))
-                (set cloned.rotation [(rawget value.rotation 1) (rawget value.rotation 2) (rawget value.rotation 3) (rawget value.rotation 4)]))
-            cloned))
+      (var persisted-camera nil)
+      (var persisted-view-modes {})
 
      (fn ensure-graph-data-dir []
         (local (ok result) (pcall fs.create-dirs graph-data-dir))
@@ -90,7 +108,8 @@
              (local sizes (or decoded.sizes {}))
               (local panels (or decoded.panels []))
               (local extra-panels (or decoded.extra_panels []))
-              (local camera (rawget decoded "camera"))
+               (local camera (rawget decoded "camera"))
+               (local view-modes (or (rawget decoded "view_modes") {}))
               (each [key value (pairs positions)]
                   (assert-valid-position key value "GraphViewPersistence load"))
              (each [key value (pairs presentations)]
@@ -102,7 +121,9 @@
                     "GraphViewPersistence load panels must be a table")
              (assert (= (type extra-panels) :table)
                      "GraphViewPersistence load extra_panels must be a table")
-             (assert-valid-camera-state camera "load")
+              (assert-valid-camera-state map-id camera "load")
+              (assert (= (type view-modes) :table)
+                      (string.format "GraphViewPersistence load view_modes for %s must be a table" map-id))
                (local kept-panels [])
               (local kept-extra-panels [])
               (var compacted? false)
@@ -124,18 +145,28 @@
                           (= panel.graph-map-id map-id))
                       (table.insert kept-extra-panels panel)
                       (set compacted? true)))
+               (local mode-states (clone-view-modes map-id view-modes))
+               (when (and camera
+                          (or (= (. mode-states :spatial) nil)
+                              (= (. mode-states :spatial :camera) nil)))
+                   (when (= (. mode-states :spatial) nil)
+                       (set (. mode-states :spatial) {}))
+                   (set (. mode-states :spatial :camera) (clone-camera-state map-id camera)))
                (set persisted {:positions positions
-                               :presentations presentations
-                               :sizes sizes
-                               :panels kept-panels
-                               :extra_panels kept-extra-panels
-                               :camera (clone-camera-state camera)})
+                                :presentations presentations
+                                :sizes sizes
+                                :panels kept-panels
+                                :extra_panels kept-extra-panels
+                                :camera (clone-camera-state map-id (and (. mode-states :spatial)
+                                                                        (. mode-states :spatial :camera)))
+                                :view_modes mode-states})
              (set persisted-positions positions)
              (set persisted-presentations presentations)
              (set persisted-sizes sizes)
                (set persisted-panels kept-panels)
                (set persisted-extra-panels kept-extra-panels)
-               (set persisted-camera persisted.camera)
+                (set persisted-camera persisted.camera)
+                (set persisted-view-modes mode-states)
                (when compacted?
                    (ensure-graph-data-dir)
                   (JsonUtils.write-json! metadata-path persisted))))
@@ -163,7 +194,12 @@
                 (glm.vec3 (rawget stored 1) (rawget stored 2) 0))))
 
     (fn saved-camera-state [_self]
-        (clone-camera-state persisted-camera))
+        (clone-camera-state map-id persisted-camera))
+
+    (fn saved-mode-camera-state [_self mode]
+        (assert (= (type mode) :string) "GraphViewPersistence saved-mode-camera-state requires a string mode")
+        (clone-camera-state map-id (and (. persisted-view-modes mode)
+                                        (. persisted-view-modes mode :camera))))
 
     (fn capture-positions [_self points]
         (local positions {})
@@ -200,8 +236,9 @@
               (set persisted.sizes persisted-sizes)
               (set persisted.panels persisted-panels)
               (set persisted.extra_panels persisted-extra-panels)
-             (set persisted.camera persisted-camera)
-             (local (write-ok err) (pcall (fn [] (JsonUtils.write-json! metadata-path persisted))))
+              (set persisted.camera persisted-camera)
+              (set persisted.view_modes persisted-view-modes)
+              (local (write-ok err) (pcall (fn [] (JsonUtils.write-json! metadata-path persisted))))
             (when (not write-ok)
                 (error (string.format "GraphView failed to write %s: %s"
                                       metadata-path
@@ -237,8 +274,25 @@
         (set pending-save? true))
 
     (fn set-camera-state [_self camera-state]
-        (set persisted-camera (clone-camera-state camera-state))
+        (when (= (. persisted-view-modes :spatial) nil)
+            (set (. persisted-view-modes :spatial) {}))
+        (set (. persisted-view-modes :spatial :camera) (clone-camera-state map-id camera-state))
+        (set persisted-camera (clone-camera-state map-id camera-state))
         (set persisted.camera persisted-camera)
+        (set persisted.view_modes persisted-view-modes)
+        (set pending-save? true)
+        true)
+
+    (fn set-mode-camera-state [_self mode camera-state]
+        (assert (= (type mode) :string) "GraphViewPersistence set-mode-camera-state requires a string mode")
+        (when (= (. persisted-view-modes mode) nil)
+            (set (. persisted-view-modes mode) {}))
+        (local cloned (clone-camera-state map-id camera-state))
+        (set (. persisted-view-modes mode :camera) cloned)
+        (when (= mode "spatial")
+            (set persisted-camera (clone-camera-state map-id camera-state))
+            (set persisted.camera persisted-camera))
+        (set persisted.view_modes persisted-view-modes)
         (set pending-save? true)
         true)
 
@@ -289,11 +343,13 @@
                  :saved-position saved-position
                  :saved-presentation saved-presentation
                   :saved-size saved-size
-                  :saved-camera-state saved-camera-state
+                   :saved-camera-state saved-camera-state
+                   :saved-mode-camera-state saved-mode-camera-state
                   :saved-panels saved-panels
                  :saved-extra-panels saved-extra-panels
                    :set-size set-size
-                   :set-camera-state set-camera-state
+                    :set-camera-state set-camera-state
+                    :set-mode-camera-state set-mode-camera-state
                    :set-presentation set-presentation
                   :prune-node-key prune-node-key
                   :set-panels set-panels

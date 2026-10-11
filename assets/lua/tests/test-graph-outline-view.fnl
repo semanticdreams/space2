@@ -441,6 +441,22 @@
     (graph-map:drop)
     (graph:drop))
 
+(fn outline-view-exposes-shared-runtime-camera-contract []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (graph-map:load-by-key "test:root")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (local view (GraphView {:graph-map graph-map :ctx (make-render-ctx)}))
+    (assert (= (type view.saved-camera-state) :function)
+            "outline view should expose saved-camera-state function")
+    (assert (= (type view.capture-camera-state!) :function)
+            "outline view should expose capture-camera-state! function")
+    (assert (= (type view.apply-initial-camera-policy!) :function)
+            "outline view should expose apply-initial-camera-policy! function")
+    (view:drop)
+    (graph-map:drop)
+    (graph:drop))
+
 (fn outline-reveal-refreshes-node-selection-rings []
     (local {:graph graph :graph-map graph-map} (make-map))
     (add-edge! graph-map "test:root" "test:child")
@@ -1011,6 +1027,7 @@
 (table.insert tests {:name "graph map prunes removed outline roots" :fn graph-map-prunes-removed-outline-roots})
 (table.insert tests {:name "map manager persists outline state per map" :fn map-manager-persists-outline-state-per-map})
 (table.insert tests {:name "outline view exposes visible row selection" :fn outline-view-exposes-visible-row-selection})
+(table.insert tests {:name "outline-view-exposes-shared-runtime-camera-contract" :fn outline-view-exposes-shared-runtime-camera-contract})
 (table.insert tests {:name "outline reveal refreshes node selection rings" :fn outline-reveal-refreshes-node-selection-rings})
 (table.insert tests {:name "outline view rejects unreachable reveal" :fn outline-view-rejects-unreachable-reveal})
 (table.insert tests {:name "outline compact point clicks use real hit testing" :fn outline-compact-point-clicks-use-real-hit-testing})
