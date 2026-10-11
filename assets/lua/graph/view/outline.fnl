@@ -156,10 +156,10 @@
 
 (fn visual-color [self row]
     (if (= self.graph-map.focused_node_key row.key)
-        (glm.vec4 0.20 0.28 0.42 0.78)
+        self.focused-row-background-color
         (. (selected-key-set self.graph-map) row.key)
-        (glm.vec4 0.18 0.32 0.24 0.70)
-        (glm.vec4 0.08 0.08 0.10 0.58)))
+        self.selected-row-background-color
+        self.default-row-background-color))
 
 (fn row-selected? [self row]
     (not (= (. (selected-key-set self.graph-map) row.key) nil)))
@@ -183,6 +183,23 @@
     (local color (and ctx ctx.theme ctx.theme.input ctx.theme.input.focus-outline))
     (assert color "GraphOutlineView requires theme input focus-outline")
     (ensure-glm-vec4 color))
+
+(fn vec4-with-alpha [color alpha]
+    (local resolved (ensure-glm-vec4 color))
+    (glm.vec4 resolved.x resolved.y resolved.z alpha))
+
+(fn outline-label-color [ctx]
+    (local theme-color (and ctx ctx.theme ctx.theme.graph ctx.theme.graph.label-color))
+    (ensure-glm-vec4 (if theme-color
+                         theme-color
+                         (glm.vec4 0.86 0.88 0.92 1))))
+
+(fn outline-background-color [ctx]
+    (local theme-color (and ctx ctx.theme ctx.theme.graph ctx.theme.graph.background))
+    (vec4-with-alpha (if theme-color
+                         theme-color
+                         (glm.vec4 0.08 0.08 0.10 1))
+                     0.58))
 
 (fn node-color [row]
     (assert (and row row.node row.node.color)
@@ -489,10 +506,10 @@
 (fn attach-row-label! [self row point]
     (local label
             (create-text! self.ctx
-                          (row-title row)
-                          (glm.vec3 0 0 0.02)
-                          (glm.vec4 0.86 0.88 0.92 1)
-                          (row-label-scale self)))
+                           (row-title row)
+                           (glm.vec3 0 0 0.02)
+                           self.label-color
+                           (row-label-scale self)))
     (place-point-relative-label! point label)
     label)
 
@@ -521,17 +538,17 @@
 
 (fn attach-empty-state! [self]
     (local background
-          (create-rectangle! self.ctx
-                             (glm.vec4 0.08 0.08 0.10 0.58)
-                             (glm.vec3 0 (- row-height) -0.04)
-                             (glm.vec2 row-width row-height)
-                             0))
+           (create-rectangle! self.ctx
+                              self.default-row-background-color
+                              (glm.vec3 0 (- row-height) -0.04)
+                              (glm.vec2 row-width row-height)
+                              0))
     (local label
            (create-text! self.ctx
-                          empty-state-message
-                          (glm.vec3 row-left-padding (- 0 row-height -6) 0.02)
-                          (glm.vec4 0.86 0.88 0.92 1)
-                          (empty-state-label-scale self)))
+                           empty-state-message
+                           (glm.vec3 row-left-padding (- 0 row-height -6) 0.02)
+                           self.label-color
+                           (empty-state-label-scale self)))
     (set self.empty-state-handle {:message empty-state-message
                                    :visuals [background label]})
     self.empty-state-handle)
@@ -545,6 +562,10 @@
       :pointer-target pointer-target
       :selection-border-color (outline-selection-border-color ctx)
       :focus-outline-color (outline-focus-outline-color ctx)
+      :label-color (outline-label-color ctx)
+      :default-row-background-color (outline-background-color ctx)
+      :selected-row-background-color (vec4-with-alpha (outline-selection-border-color ctx) 0.70)
+      :focused-row-background-color (vec4-with-alpha (outline-focus-outline-color ctx) 0.78)
       :rows []
       :row-by-key {}
       :row-by-focus {}
