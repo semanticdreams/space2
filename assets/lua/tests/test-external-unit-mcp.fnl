@@ -1537,6 +1537,7 @@
       (assert (= perms.glob "deny") "glob should be denied")
       (assert (= perms.list "deny") "list should be denied")
       (assert (= perms.bash "deny") "bash should be denied")
+      (assert (= perms.external_directory "deny") "external_directory should be denied")
       (local refreshed (bridge:refresh-config!))
       (assert (= refreshed.config-path status.config-path) "refresh should report generated config path")
       (assert (= refreshed.url status.url) "refresh should keep active MCP url")
