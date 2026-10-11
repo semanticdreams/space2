@@ -1,17 +1,12 @@
-;; OpenCode MCP bridge — owns the loopback MCP HTTP server and isolated OpenCode config.
+;; Agent OpenCode MCP bridge — preserves Space Agent permissions and delegates
+;; loopback server/config lifecycle to the shared OpenCode MCP bridge core.
 
 (local fs (require :fs))
-(local JsonUtils (require :json-utils))
+(local Core (require :llm/opencode-mcp/bridge))
 
 (fn ensure-dir! [path]
   (when (not (fs.exists path))
     (fs.create-dirs path)))
-
-(fn remote-url [host port]
-  (.. "http://" host ":" (tostring port) "/mcp"))
-
-(fn config-path [config-root]
-  (fs.join-path (fs.join-path config-root "opencode") "opencode.json"))
 
 (fn normalize-root [path]
   "Normalize an optional root value; nil/empty roots mean that scope is not configured."
@@ -92,29 +87,6 @@
    :skill "deny"
    :question "deny"})
 
-(fn write-opencode-config! [config-root url allowed-patterns]
-  (local opencode-dir (fs.join-path config-root "opencode"))
-  (ensure-dir! opencode-dir)
-  (JsonUtils.write-json!
-    (config-path config-root)
-    {:permission (native-tool-permissions allowed-patterns)
-      :mcp {:space {:type "remote"
-                    :url url
-                    :enabled true}}}))
-
-(fn start-server-and-write-config! [server host config-root allowed-roots]
-  (local port (server:start host 0))
-  (when (not (> port 0))
-    (error (.. "AgentOpencodeMcpBridge got invalid MCP port: "
-               (tostring port))))
-  (local url (remote-url host port))
-  (write-opencode-config! config-root url allowed-roots)
-  {:port port :url url})
-
-(fn cleanup-failed-start! [server]
-  (when server
-    (pcall (fn [] (server:stop)))))
-
 (fn refresh-opencode-provider! [providers bridge]
   "Refresh bridge config and replace the provider stored in a provider table."
   (assert providers "refresh-opencode-provider! requires providers")
@@ -133,90 +105,90 @@
   (tset providers :opencode provider)
   provider)
 
+(fn start-core! [bridge]
+  (bridge:start))
+
 (fn AgentOpencodeMcpBridge [opts]
   (local tools (or opts.tools (error "AgentOpencodeMcpBridge requires :tools")))
   (local data-dir (or opts.data-dir (error "AgentOpencodeMcpBridge requires :data-dir")))
   (local host (or opts.host "127.0.0.1"))
-  (local http-server-factory (or opts.http-server-factory
-                                 (fn []
-                                   (local http-server-mod (require :http_server))
-                                   (http-server-mod.HttpServer))))
-  (local mcp-server-factory (or opts.mcp-server-factory
-                                (fn [http-server]
-                                  (local MCPHTTPServer (require :mcp/server-http))
-                                  (MCPHTTPServer {:http-server http-server
-                                                  :tools tools
-                                                  :force-sse true}))))
+  (local http-server-factory opts.http-server-factory)
+  (local mcp-server-factory opts.mcp-server-factory)
 
-  (var server nil)
-  (var config-root nil)
-  (var port nil)
-  (var url nil)
+  (var core nil)
   (var started? false)
   (var allowed-roots [])
   (var artifact-root nil)
 
+  (fn permissions []
+    (native-tool-permissions allowed-roots))
+
+  (fn status-extra []
+    {:artifact-root artifact-root
+     :allowed-roots allowed-roots})
+
+  (fn build-core []
+    (Core.OpencodeMcpBridge
+      {:name "AgentOpencodeMcpBridge"
+       :tools tools
+       :data-dir data-dir
+       :config-dir-name "opencode-mcp-config"
+       :mcp-key "space"
+       :permissions permissions
+       :host host
+       :http-server-factory http-server-factory
+       :mcp-server-factory mcp-server-factory
+       :status-extra status-extra}))
+
   (fn start [self]
     (when started?
       (error "AgentOpencodeMcpBridge already started"))
-    (ensure-dir! data-dir)
     (local roots (space-owned-roots opts data-dir))
     (set allowed-roots roots.allowed-patterns)
     (set artifact-root roots.artifact-root)
     (when artifact-root
       (ensure-dir! artifact-root))
-    (set config-root (fs.join-path data-dir "opencode-mcp-config"))
-    (ensure-dir! config-root)
-    (set server (mcp-server-factory (http-server-factory)))
-    (local (ok result) (pcall start-server-and-write-config! server host config-root allowed-roots))
+    (set core (build-core))
+    (local (ok result) (pcall start-core! core))
     (when (not ok)
-      (cleanup-failed-start! server)
-      (set server nil)
-      (set port nil)
-      (set url nil)
-      (set config-root nil)
+      (set core nil)
+      (set started? false)
       (set allowed-roots [])
       (set artifact-root nil)
       (error result))
-    (set port result.port)
-    (set url result.url)
     (set started? true)
     self)
 
   (fn stop [self]
-    (when server
-      (server:stop))
-    (set server nil)
-    (set port nil)
-    (set url nil)
+    (when started?
+      (core:stop))
     (set started? false)
     self)
 
   (fn opencode-env [self]
     (when (not started?)
       (error "AgentOpencodeMcpBridge must be started before building OpenCode env"))
-    {:XDG_CONFIG_HOME config-root})
+    (core:opencode-env))
 
   (fn refresh-config! [self]
     (when (not started?)
       (error "AgentOpencodeMcpBridge must be started before refreshing OpenCode config"))
-    (write-opencode-config! config-root url allowed-roots)
-    {:config-path (config-path config-root)
-     :url url
-     :allowed-roots allowed-roots})
+    (core:refresh-config!))
 
   (fn current-config-path [self]
-    (and config-root (config-path config-root)))
+    (and core (core:config-path)))
 
   (fn status [self]
-    {:started? started?
-     :host host
-      :port port
-      :url url
-      :config-root config-root
-      :config-path (and config-root (config-path config-root))
-      :artifact-root artifact-root
-      :allowed-roots allowed-roots})
+    (if core
+        (core:status)
+        {:started? false
+         :host host
+         :port nil
+         :url nil
+         :config-root nil
+         :config-path nil
+         :artifact-root artifact-root
+         :allowed-roots allowed-roots}))
 
   {:start start
    :stop stop

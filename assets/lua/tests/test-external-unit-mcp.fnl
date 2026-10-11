@@ -1493,6 +1493,16 @@
 
 (local ExternalUnitMcpBridge (require :llm/external-unit-mcp/bridge))
 
+(local expected-external-opencode-permissions {:invalid "deny" :read "deny" :write "deny" :edit "deny" :grep "deny" :glob "deny" :list "deny" :bash "deny" :task "deny" :external_directory "deny" :todowrite "deny" :webfetch "deny" :websearch "deny" :lsp "deny" :skill "deny" :question "deny"})
+
+
+(fn assert-exact-opencode-permissions [actual expected]
+  (assert (= (type actual) "table") "config permission should be a table")
+  (var expected-count 0) (var actual-count 0)
+  (each [name expected-value (pairs expected)] (set expected-count (+ expected-count 1)) (assert (= (. actual name) expected-value) (.. "native OpenCode permission mismatch: " name)))
+  (each [name _value (pairs actual)] (set actual-count (+ actual-count 1)) (assert (not= (. expected name) nil) (.. "unexpected native OpenCode permission key: " name)))
+  (assert (= actual-count expected-count) (.. "native OpenCode permission map should have exactly " expected-count " entries, got " actual-count)))
+
 (fn test-bridge-starts-loopback-server-and-writes-isolated-opencode-config []
   (with-temp-dir
     (fn [dir]
@@ -1505,24 +1515,20 @@
                        :data-dir data-dir}))
       (bridge:start)
       (local status (bridge:status))
-      ;; status fields
       (assert (= status.started? true) "bridge should report started")
       (assert (= status.host "127.0.0.1") "bridge should bind to loopback")
       (assert (> status.port 0) "bridge should have a valid port")
-      ;; opencode-env
       (local env (bridge:opencode-env))
       (assert env.XDG_CONFIG_HOME "should have XDG_CONFIG_HOME")
       (assert (= env.XDG_CONFIG_HOME status.config-root)
               "XDG_CONFIG_HOME should match config-root from status")
-      ;; config-path is under data-dir, not under global ~/.config/opencode
       (assert status.config-path "should have config-path")
+      (assert (= (bridge:config-path) status.config-path) "bridge should expose config path")
       (assert (= (string.sub status.config-path 1 (# data-dir)) data-dir)
               "config-path should be under the provided temp data-dir, not global ~/.config/opencode")
-      ;; Check written config content
       (local json (require :json))
       (local raw (fs.read-file status.config-path))
       (local config (json.loads raw))
-      ;; MCP config
       (assert config.mcp "config should have mcp")
       (assert config.mcp.space-unit-dev "config should have mcp.space-unit-dev")
       (assert (= config.mcp.space-unit-dev.type "remote")
@@ -1531,17 +1537,10 @@
               "MCP should be enabled")
       (assert (= config.mcp.space-unit-dev.url status.url)
               "MCP url should match status.url")
-      ;; Deny native OpenCode tools
-      (local perms config.permission)
-      (assert perms "config should have permission")
-      (assert (= perms.read "deny") "read should be denied")
-      (assert (= perms.write "deny") "write should be denied")
-      (assert (= perms.edit "deny") "edit should be denied")
-      (assert (= perms.grep "deny") "grep should be denied")
-      (assert (= perms.glob "deny") "glob should be denied")
-      (assert (= perms.list "deny") "list should be denied")
-      (assert (= perms.bash "deny") "bash should be denied")
-      ;; Clean up
+      (assert-exact-opencode-permissions config.permission expected-external-opencode-permissions)
+      (local refreshed (bridge:refresh-config!))
+      (assert (= refreshed.config-path status.config-path) "refresh should report generated config path")
+      (assert (= refreshed.url status.url) "refresh should keep active MCP url")
       (bridge:stop))))
 
 (table.insert tests {:name "external-unit-mcp: bridge starts loopback server and writes isolated opencode config"

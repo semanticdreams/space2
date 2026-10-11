@@ -68,6 +68,10 @@ that wrap the same project-native validation service:
 These MCP tools are for inspection and validation only. They must not edit files
 or duplicate compiler/parser logic outside the project service.
 
+The Fennel validation MCP bridge uses the shared OpenCode bridge mechanism in
+`llm/opencode-mcp/bridge.fnl`, while remaining read-only and preserving this
+validation-only tool list.
+
 ## Repair Workflow
 
 When Fennel reports a delimiter or confusing parse error, start with the compile

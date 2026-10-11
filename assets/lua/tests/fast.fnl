@@ -151,6 +151,7 @@
     :tests.test-identity-entities
     :tests.test-link-entities
     :tests.test-list-entities
+    :tests.test-dict-entities
     :tests.test-notebooks
     :tests.test-link-entity-crash
     :tests.test-morphs
@@ -184,6 +185,7 @@
     :tests.test-llm-tools
     :tests.test-agent-presets
     :tests.test-agent-presets-mcp
+    :tests.test-opencode-mcp-bridge
     :tests.test-agent-layer
     :tests.test-agent-panel
     :tests.test-agent-units
