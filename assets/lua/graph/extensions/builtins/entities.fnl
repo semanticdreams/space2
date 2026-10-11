@@ -3,12 +3,14 @@
 (local StringEntityNodeModule (require :graph/nodes/string-entity))
 (local CodeEntityNodeModule (require :graph/nodes/code-entity))
 (local ListEntityNodeModule (require :graph/nodes/list-entity))
+(local DictEntityNodeModule (require :graph/nodes/dict-entity))
 (local LinkEntityNodeModule (require :graph/nodes/link-entity))
 (local IdentityNodeModule (require :graph/nodes/identity))
 (local NotebookNodeModule (require :graph/nodes/notebook))
 (local StringEntityListNode (require :graph/nodes/string-entity-list))
 (local StringEntitySearchNodeModule (require :graph/nodes/string-entity-search))
 (local ListEntityListNode (require :graph/nodes/list-entity-list))
+(local DictEntityListNode (require :graph/nodes/dict-entity-list))
 (local LinkEntityListNode (require :graph/nodes/link-entity-list))
 (local EntitiesNode (require :graph/nodes/entities))
 (local NotebooksNode (require :graph/nodes/notebooks))
@@ -17,8 +19,8 @@
 (local ClassNode (require :graph/nodes/class))
 
 (local entity-schemes
-  ["string-entity" "code-entity" "list-entity" "link-entity" "identity" "notebook"
-   "string-entity-list" "string-entity-search" "list-entity-list" "link-entity-list" "entities" "notebooks"])
+  ["string-entity" "code-entity" "list-entity" "dict-entity" "link-entity" "identity" "notebook"
+   "string-entity-list" "string-entity-search" "list-entity-list" "dict-entity-list" "link-entity-list" "entities" "notebooks"])
 (local static-schemes ["start" "quit" "class"])
 
 (fn loader-opts [ctx]
@@ -38,6 +40,7 @@
   (local string-store (assert options.string-store "builtin-graph-entities requires :string-store"))
   (local code-store (assert options.code-store "builtin-graph-entities requires :code-store"))
   (local list-store (assert options.list-store "builtin-graph-entities requires :list-store"))
+  (local dict-store (assert options.dict-store "builtin-graph-entities requires :dict-store"))
   (local link-store (assert options.link-store "builtin-graph-entities requires :link-store"))
   (local identity-store (assert options.identity-store "builtin-graph-entities requires :identity-store"))
   (local notebook-store (assert options.notebook-store "builtin-graph-entities requires :notebook-store"))
@@ -49,7 +52,11 @@
     (CodeEntityNodeModule.CodeEntityNode {:entity-id entity-id :store code-store}))
   (fn make-list-entity [entity-id]
     (ListEntityNodeModule.ListEntityNode {:entity-id entity-id
-                                          :store list-store
+                                           :store list-store
+                                           :identity-store identity-store}))
+  (fn make-dict-entity [entity-id]
+    (DictEntityNodeModule.DictEntityNode {:entity-id entity-id
+                                          :store dict-store
                                           :identity-store identity-store}))
   (fn make-link-entity [entity-id]
     (LinkEntityNodeModule.LinkEntityNode {:entity-id entity-id :store link-store}))
@@ -68,6 +75,8 @@
   (fn make-string-entity-search []
     (StringEntitySearchNodeModule.StringEntitySearchNode {:store string-store}))
   (fn make-list-entity-list [] (ListEntityListNode {:store list-store}))
+  (fn make-dict-entity-list [] (DictEntityListNode {:store dict-store
+                                                    :identity-store identity-store}))
   (fn make-link-entity-list [] (LinkEntityListNode {:store link-store}))
   (fn make-entities [] (EntitiesNode {}))
   (fn make-notebooks [] (NotebooksNode {:store notebook-store}))
@@ -76,7 +85,9 @@
   (add! (register-store-node-loader graph ctx "code-entity" code-store
       make-code-entity))
   (add! (register-store-node-loader graph ctx "list-entity" list-store
-      make-list-entity))
+       make-list-entity))
+  (add! (register-store-node-loader graph ctx "dict-entity" dict-store
+      make-dict-entity))
   (add! (register-store-node-loader graph ctx "link-entity" link-store
       make-link-entity))
   (add! (register-store-node-loader graph ctx "identity" identity-store
@@ -95,6 +106,10 @@
   (add! (graph:register-key-loader "list-entity-list"
       (Common.exact-key-loader "list-entity-list"
         make-list-entity-list)
+      (loader-opts ctx)))
+  (add! (graph:register-key-loader "dict-entity-list"
+      (Common.exact-key-loader "dict-entity-list"
+        make-dict-entity-list)
       (loader-opts ctx)))
   (add! (graph:register-key-loader "link-entity-list"
       (Common.exact-key-loader "link-entity-list"
