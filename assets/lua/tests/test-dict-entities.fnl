@@ -4,6 +4,7 @@
 (var temp-counter 0)
 (var observed-updated-count 0)
 (var observed-items-count 0)
+(var observed-deleted-count 0)
 (local temp-root (fs.join-path "/tmp/space/tests" "dict-entities"))
 
 (fn count-updated [_]
@@ -11,6 +12,12 @@
 
 (fn count-items [_]
   (set observed-items-count (+ observed-items-count 1)))
+
+(fn count-deleted [_]
+  (set observed-deleted-count (+ observed-deleted-count 1)))
+
+(fn fail-remove [_path]
+  (error "forced remove failure"))
 
 (fn make-temp-dir []
   (set temp-counter (+ temp-counter 1))
@@ -107,6 +114,25 @@
       (store.dict-entity-updated:clear)
       (store.dict-entity-items-changed:clear))))
 
+(fn dict-entity-store-surfaces-delete-remove-failure []
+  (with-temp-store
+    (fn [store root]
+      (local entity (store:create-entity {:id "delete-failure"
+                                          :name "Delete failure"}))
+      (local original-remove fs.remove)
+      (set observed-deleted-count 0)
+      (store.dict-entity-deleted:connect count-deleted)
+      (set fs.remove fail-remove)
+      (local (ok err) (pcall store.delete-entity store entity.id))
+      (set fs.remove original-remove)
+      (store.dict-entity-deleted:clear)
+      (assert (not ok) "delete should error when persistent removal fails")
+      (assert (string.find (tostring err) "forced remove failure" 1 true) "delete error should surface remove failure")
+      (assert (= observed-deleted-count 0) "failed delete should not emit deleted signal")
+      (assert (store:get-entity entity.id) "failed delete should keep cached entity")
+      (assert (fs.exists (fs.join-path root "entities" "dict" "delete-failure.json"))
+              "failed delete should leave persisted json for retry"))))
+
 (table.insert tests {:name "dict entity store creates entities"
                      :fn dict-entity-store-creates-entities})
 (table.insert tests {:name "dict entity store persists and reloads json"
@@ -117,6 +143,8 @@
                      :fn dict-entity-store-rejects-invalid-item-mutations})
 (table.insert tests {:name "dict entity store skips unchanged item signals"
                      :fn dict-entity-store-skips-unchanged-item-signals})
+(table.insert tests {:name "dict entity store surfaces delete remove failure"
+                     :fn dict-entity-store-surfaces-delete-remove-failure})
 
 (local main
   (fn []

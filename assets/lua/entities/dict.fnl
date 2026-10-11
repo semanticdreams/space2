@@ -101,6 +101,12 @@
       (JsonUtils.write-json! path (persisted-entity entity))))
   entity)
 
+(fn remove-entity-file! [path]
+  (when (and path fs fs.remove (fs.exists path))
+    (local (ok err) (pcall fs.remove path))
+    (when (not ok)
+      (error (.. "failed to delete dict entity file " path ": " (tostring err))))))
+
 (fn load-entity [store id]
   (when id
     (local key (tostring id))
@@ -165,8 +171,7 @@
   (local entity (load-entity self id))
   (when entity
     (local path (entity-path self id))
-    (when (and path fs fs.remove (fs.exists path))
-      (pcall fs.remove path))
+    (remove-entity-file! path)
     (set (. self.cache (tostring id)) nil)
     (self.dict-entity-deleted:emit entity))
   entity)
