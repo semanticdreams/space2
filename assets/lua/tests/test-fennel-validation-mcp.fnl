@@ -111,6 +111,42 @@
 
 (fn empty-tool-list [] [])
 
+(local expected-fennel-validation-opencode-permissions
+  {:invalid "deny"
+   :read "allow"
+   :write "deny"
+   :edit "deny"
+   :grep "allow"
+   :glob "allow"
+   :list "allow"
+   :bash "deny"
+   :task "deny"
+   :external_directory "deny"
+   :todowrite "deny"
+   :webfetch "deny"
+   :websearch "deny"
+   :lsp "deny"
+   :skill "deny"
+   :question "deny"})
+
+(fn assert-exact-opencode-permissions [actual expected]
+  (assert (= (type actual) "table") "config permission should be a table")
+  (var expected-count 0)
+  (each [name expected-value (pairs expected)]
+    (set expected-count (+ expected-count 1))
+    (local actual-value (. actual name))
+    (assert (= actual-value expected-value)
+            (.. "native OpenCode permission '" name "' expected '" expected-value
+                "', got '" (or actual-value "nil") "'")))
+  (var actual-count 0)
+  (each [name _value (pairs actual)]
+    (set actual-count (+ actual-count 1))
+    (assert (not= (. expected name) nil)
+            (.. "unexpected native OpenCode permission key: " name)))
+  (assert (= actual-count expected-count)
+          (.. "native OpenCode permission map should have exactly " expected-count
+              " entries, got " actual-count)))
+
 (fn bridge-writes-isolated-read-only-opencode-config-in-dir [dir]
   (set bridge-stopped? false)
   (local data-dir (fs.join-path dir "bridge-data"))
@@ -133,18 +169,7 @@
   (local config (json.loads (fs.read-file status.config-path)))
   (assert config.mcp.space-fennel-validation "config should register fennel validation MCP server")
   (assert (= config.mcp.space-fennel-validation.url status.url) "MCP URL should match status")
-  (local perms config.permission)
-  (assert (= perms.read "allow") "read should be allowed")
-  (assert (= perms.list "allow") "list should be allowed")
-  (assert (= perms.glob "allow") "glob should be allowed")
-  (assert (= perms.grep "allow") "grep should be allowed")
-  (assert (= perms.write "deny") "write should be denied")
-  (assert (= perms.edit "deny") "edit should be denied")
-  (assert (= perms.bash "deny") "bash should be denied")
-  (assert (= perms.task "deny") "task should be denied")
-  (assert (= perms.webfetch "deny") "webfetch should be denied")
-  (assert (= perms.websearch "deny") "websearch should be denied")
-  (assert (= perms.external_directory "deny") "external-directory style permission should be denied")
+  (assert-exact-opencode-permissions config.permission expected-fennel-validation-opencode-permissions)
   (local refreshed (bridge:refresh-config!))
   (assert (= refreshed.config-path status.config-path)
           "refresh should report the same generated config path")

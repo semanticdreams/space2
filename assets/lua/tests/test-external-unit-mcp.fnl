@@ -1493,6 +1493,16 @@
 
 (local ExternalUnitMcpBridge (require :llm/external-unit-mcp/bridge))
 
+(local expected-external-opencode-permissions {:invalid "deny" :read "deny" :write "deny" :edit "deny" :grep "deny" :glob "deny" :list "deny" :bash "deny" :task "deny" :external_directory "deny" :todowrite "deny" :webfetch "deny" :websearch "deny" :lsp "deny" :skill "deny" :question "deny"})
+
+
+(fn assert-exact-opencode-permissions [actual expected]
+  (assert (= (type actual) "table") "config permission should be a table")
+  (var expected-count 0) (var actual-count 0)
+  (each [name expected-value (pairs expected)] (set expected-count (+ expected-count 1)) (assert (= (. actual name) expected-value) (.. "native OpenCode permission mismatch: " name)))
+  (each [name _value (pairs actual)] (set actual-count (+ actual-count 1)) (assert (not= (. expected name) nil) (.. "unexpected native OpenCode permission key: " name)))
+  (assert (= actual-count expected-count) (.. "native OpenCode permission map should have exactly " expected-count " entries, got " actual-count)))
+
 (fn test-bridge-starts-loopback-server-and-writes-isolated-opencode-config []
   (with-temp-dir
     (fn [dir]
@@ -1527,17 +1537,7 @@
               "MCP should be enabled")
       (assert (= config.mcp.space-unit-dev.url status.url)
               "MCP url should match status.url")
-      ;; Deny native OpenCode tools
-      (local perms config.permission)
-      (assert perms "config should have permission")
-      (assert (= perms.read "deny") "read should be denied")
-      (assert (= perms.write "deny") "write should be denied")
-      (assert (= perms.edit "deny") "edit should be denied")
-      (assert (= perms.grep "deny") "grep should be denied")
-      (assert (= perms.glob "deny") "glob should be denied")
-      (assert (= perms.list "deny") "list should be denied")
-      (assert (= perms.bash "deny") "bash should be denied")
-      (assert (= perms.external_directory "deny") "external_directory should be denied")
+      (assert-exact-opencode-permissions config.permission expected-external-opencode-permissions)
       (local refreshed (bridge:refresh-config!))
       (assert (= refreshed.config-path status.config-path) "refresh should report generated config path")
       (assert (= refreshed.url status.url) "refresh should keep active MCP url")
