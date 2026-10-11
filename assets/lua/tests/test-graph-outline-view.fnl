@@ -16,6 +16,12 @@
 (fn approx [actual expected]
     (< (math.abs (- actual expected)) 0.0001))
 
+(fn color-approx [actual expected]
+    (and (approx actual.x expected.x)
+         (approx actual.y expected.y)
+         (approx actual.z expected.z)
+         (approx actual.w expected.w)))
+
 (fn preview-measurer [self]
     (set self.measure (glm.vec3 24 12 0)))
 
@@ -219,8 +225,13 @@
              :font (make-test-font)
              :text {:foreground (glm.vec4 0.8 0.8 0.8 1) :scale 1.0}}
      :render-events render-events
-     :get-text-ssbo-batcher (fn [_self] text-batcher)
-     :get-rectangle-quad-batcher (fn [_self] quad-batcher)})
+      :get-text-ssbo-batcher (fn [_self] text-batcher)
+      :get-rectangle-quad-batcher (fn [_self] quad-batcher)})
+
+(fn make-themed-render-ctx [theme]
+    (local ctx (make-render-ctx))
+    (set ctx.theme theme)
+    ctx)
 
 (fn identity-project [position _opts]
     position)
@@ -871,6 +882,54 @@
     (graph-map:drop)
     (graph:drop))
 
+(fn outline-rebuild-resolves-row-and-empty-colors-from-theme []
+    (local dark-theme {:graph {:label-color (glm.vec4 0.12 0.18 0.24 1)
+                               :background (glm.vec4 0.02 0.03 0.04 1)
+                               :selection-border-color (glm.vec4 1 0.6 0.2 1)}
+                       :input {:focus-outline (glm.vec4 0.2 0.6 1 1)}
+                       :font (make-test-font)
+                       :text {:foreground (glm.vec4 0.8 0.8 0.8 1) :scale 1.0}})
+    (local light-theme {:graph {:label-color (glm.vec4 0.92 0.76 0.20 1)
+                                :background (glm.vec4 0.82 0.86 0.91 1)
+                                :selection-border-color (glm.vec4 0.1 0.2 0.9 1)}
+                        :input {:focus-outline (glm.vec4 0.1 0.3 0.7 1)}
+                        :font (make-test-font)
+                        :text {:foreground (glm.vec4 0.1 0.1 0.1 1) :scale 1.0}})
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (graph-map:load-by-key "test:root")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (local dark-view (GraphView {:graph-map graph-map :ctx (make-themed-render-ctx dark-theme)}))
+    (local dark-label (assert (. (. dark-view.row-handles 1) :visuals 2)
+                              "dark outline row should keep label visual"))
+    (assert (color-approx dark-label.style.color dark-theme.graph.label-color)
+            "outline row label should use dark theme graph label color")
+    (dark-view:drop)
+    (local light-view (GraphView {:graph-map graph-map :ctx (make-themed-render-ctx light-theme)}))
+    (local light-label (assert (. (. light-view.row-handles 1) :visuals 2)
+                               "light outline row should keep label visual"))
+    (assert (color-approx light-label.style.color light-theme.graph.label-color)
+            "outline row label should use light theme graph label color after rebuild")
+    (assert (not (color-approx light-label.style.color dark-theme.graph.label-color))
+            "outline row label color should not stay stale after theme rebuild")
+    (light-view:drop)
+    (graph-map:set-outline-root-keys! [])
+    (local empty-view (GraphView {:graph-map graph-map :ctx (make-themed-render-ctx light-theme)}))
+    (local empty-background (assert (. empty-view.empty-state-handle :visuals 1)
+                                    "empty outline should keep background visual"))
+    (local empty-label (assert (. empty-view.empty-state-handle :visuals 2)
+                               "empty outline should keep label visual"))
+    (assert (color-approx empty-label.style.color light-theme.graph.label-color)
+            "outline empty label should use theme graph label color")
+    (assert (color-approx empty-background.color (glm.vec4 light-theme.graph.background.x
+                                                          light-theme.graph.background.y
+                                                          light-theme.graph.background.z
+                                                          0.58))
+            "outline empty background should use theme graph background RGB with outline alpha")
+    (empty-view:drop)
+    (graph-map:drop)
+    (graph:drop))
+
 (fn outline-view-creates-empty-state-guidance-when-no-roots []
     (local {:graph graph :graph-map graph-map} (make-map))
     (graph-map:load-by-key "test:orphan")
@@ -965,6 +1024,7 @@
 (table.insert tests {:name "outline compact point registrations drop on rebuild and drop" :fn outline-compact-point-registrations-drop-on-rebuild-and-drop})
 (table.insert tests {:name "outline view creates tree node visual artifacts for projected rows" :fn outline-view-creates-tree-node-visual-artifacts-for-projected-rows})
 (table.insert tests {:name "outline labels align right of node points" :fn outline-labels-align-right-of-node-points})
+(table.insert tests {:name "outline rebuild resolves row and empty colors from theme" :fn outline-rebuild-resolves-row-and-empty-colors-from-theme})
 (table.insert tests {:name "outline view creates empty state guidance when no roots" :fn outline-view-creates-empty-state-guidance-when-no-roots})
 (table.insert tests {:name "command toggle outline flips view mode" :fn command-toggle-outline-flips-view-mode})
 (table.insert tests {:name "command set outline root prefers focused node" :fn command-set-outline-root-prefers-focused-node})
