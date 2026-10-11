@@ -116,11 +116,12 @@
                   (state.graph-map:set-selected-node-keys restored-selected-node-keys)
                   (set state.graph-map.selected_node_keys selected-node-keys))
               (set state.graph-map.focused_node_key focused-node-key)
-              (set state.mode-states mode-states)
-              {:mode_states mode-states
-               :views (and state.node-views state.node-views.capture-state (state.node-views:capture-state))
-               :selected_node_keys selected-node-keys
-               :focused_node_key focused-node-key}))
+               (set state.mode-states mode-states)
+               {:mode_states mode-states
+                :views (and state.node-views state.node-views.capture-state (state.node-views:capture-state))
+                :selected_node_keys selected-node-keys
+                :focused_node_key_present? (not (= focused-node-key nil))
+                :focused_node_key focused-node-key}))
     (set view.restore-views-state
          (fn [_self views-state]
              (assert-runtime-live state "restore-views-state")
@@ -139,12 +140,14 @@
              (local payload (if incoming incoming {}))
              (when payload.mode_states
                  (set state.mode-states (clone-mode-states payload.mode_states)))
-             (when payload.selected_node_keys
-                 (if state.graph-map.set-selected-node-keys
-                     (state.graph-map:set-selected-node-keys payload.selected_node_keys)
-                     (set state.graph-map.selected_node_keys payload.selected_node_keys)))
-             (when (not (= payload.focused_node_key nil))
-                 (set state.graph-map.focused_node_key payload.focused_node_key))
+              (when payload.selected_node_keys
+                  (if state.graph-map.set-selected-node-keys
+                      (state.graph-map:set-selected-node-keys payload.selected_node_keys)
+                      (set state.graph-map.selected_node_keys payload.selected_node_keys)))
+              (if (= payload.focused_node_key_present? false)
+                  (set state.graph-map.focused_node_key nil)
+                  (when (not (= payload.focused_node_key nil))
+                      (set state.graph-map.focused_node_key payload.focused_node_key)))
              (when payload.views
                  (self:restore-views-state payload.views))
              (adapter.restore-projection-state! self state (. state.mode-states state.mode))

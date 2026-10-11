@@ -49,18 +49,21 @@
                  false)))
     (set view.focused-node-selected?
          (fn [_self]
+             (assert-not-dropped "focused-node-selected?")
              (local key (focused-key))
              (if key
                  (not (= (. (key-set (selected-keys)) key) nil))
                  false)))
     (set view.select-focused-node-only
          (fn [_self]
+             (assert-not-dropped "select-focused-node-only")
              (local key (focused-key))
              (if (and key (visible-key? key))
                  (apply-selection! [key])
                  false)))
     (set view.add-focused-node-to-selection
          (fn [_self]
+             (assert-not-dropped "add-focused-node-to-selection")
              (local key (focused-key))
              (if (and key (visible-key? key))
                  (do
@@ -76,6 +79,7 @@
                  false)))
     (set view.remove-focused-node-from-selection
          (fn [_self]
+             (assert-not-dropped "remove-focused-node-from-selection")
              (local key (focused-key))
              (if key
                  (do
@@ -87,6 +91,7 @@
                  false)))
     (set view.toggle-focused-node-selection
          (fn [self]
+             (assert-not-dropped "toggle-focused-node-selection")
              (if (self:focused-node-selected?)
                  (self:remove-focused-node-from-selection)
                  (self:add-focused-node-to-selection))))

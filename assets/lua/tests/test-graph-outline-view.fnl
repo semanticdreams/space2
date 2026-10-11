@@ -540,6 +540,7 @@
     (graph:drop))
 
 (fn outline-runtime-capture-retains-other-mode-states [] (local {:graph graph :graph-map graph-map} (make-map)) (graph-map:load-by-key "test:root") (graph-map:set-view-mode! "outline") (graph-map:set-outline-root-keys! ["test:root"]) (local view (GraphView {:graph-map graph-map :ctx (make-render-ctx)})) (view:restore-state {:mode_states {:spatial {:extra_panels [{:node-key "test:root"}]} :outline {:stale? true}} :selected_node_keys ["test:root"] :focused_node_key "test:root"}) (local captured (view:capture-state)) (assert (= (. captured.mode_states :spatial :extra_panels 1 :node-key) "test:root") "outline capture should retain non-current spatial mode state") (assert (= (. captured.mode_states :outline :stale?) nil) "outline capture should replace only the current outline mode state") (assert (= (table.concat captured.selected_node_keys ",") "test:root") "outline capture should preserve GraphMap-owned selected keys") (assert (= captured.focused_node_key "test:root") "outline capture should preserve GraphMap-owned focused key") (view:drop) (graph-map:drop) (graph:drop))
+(fn outline-runtime-restore-clears-captured-empty-focus [] (local {:graph graph :graph-map graph-map} (make-map)) (graph-map:load-by-key "test:root") (graph-map:load-by-key "test:stale") (graph-map:set-view-mode! "outline") (graph-map:set-outline-root-keys! ["test:root"]) (local view (GraphView {:graph-map graph-map :ctx (make-render-ctx)})) (set graph-map.focused_node_key nil) (local captured (view:capture-state)) (set graph-map.focused_node_key "test:stale") (view:restore-state captured) (assert (= graph-map.focused_node_key nil) "runtime restore should clear stale GraphMap focus when captured state had no focus") (view:drop) (graph-map:drop) (graph:drop))
 (fn outline-focused-node-menu-opens-at-focused-presentation []
     (local original-menu-manager app.menu-manager)
     (local {:graph graph :graph-map graph-map} (make-map))
@@ -594,6 +595,7 @@
     (graph-map:drop)
     (graph:drop))
 
+(fn outline-focused-selection-queries-fail-fast-after-drop-without-focus [] (local {:graph graph :graph-map graph-map} (make-map)) (graph-map:load-by-key "test:root") (graph-map:set-view-mode! "outline") (graph-map:set-outline-root-keys! ["test:root"]) (local view (GraphView {:graph-map graph-map :ctx (make-render-ctx)})) (set graph-map.focused_node_key nil) (view:drop) (local (ok message) (pcall (fn [] (view:focused-node-selected?)))) (assert (not ok) "outline focused-node-selected? should fail after drop even without focus") (assert (string.find (tostring message) "called after drop" 1 true) "outline focused selection guard should explain use after drop") (graph-map:drop) (graph:drop))
 (fn outline-reveal-refreshes-node-selection-rings []
     (local {:graph graph :graph-map graph-map} (make-map))
     (add-edge! graph-map "test:root" "test:child")
@@ -1167,10 +1169,10 @@
 (table.insert tests {:name "outline-view-exposes-shared-runtime-camera-contract" :fn outline-view-exposes-shared-runtime-camera-contract})
 (table.insert tests {:name "outline runtime persists outline camera state" :fn outline-runtime-persists-outline-camera-state})
 (table.insert tests {:name "outline restore keeps graph-map selection owner" :fn outline-restore-keeps-graph-map-selection-owner})
-(table.insert tests {:name "outline runtime capture retains other mode states" :fn outline-runtime-capture-retains-other-mode-states})
+(table.insert tests {:name "outline runtime capture retains other mode states" :fn outline-runtime-capture-retains-other-mode-states}) (table.insert tests {:name "outline runtime restore clears captured empty focus" :fn outline-runtime-restore-clears-captured-empty-focus})
 (table.insert tests {:name "outline focused-node menu opens at focused presentation" :fn outline-focused-node-menu-opens-at-focused-presentation})
 (table.insert tests {:name "outline view exposes shared runtime method contract" :fn outline-view-exposes-shared-runtime-method-contract})
-(table.insert tests {:name "outline selection methods fail fast after drop" :fn outline-selection-methods-fail-fast-after-drop})
+(table.insert tests {:name "outline selection methods fail fast after drop" :fn outline-selection-methods-fail-fast-after-drop}) (table.insert tests {:name "outline focused selection queries fail fast after drop without focus" :fn outline-focused-selection-queries-fail-fast-after-drop-without-focus})
 (table.insert tests {:name "outline reveal refreshes node selection rings" :fn outline-reveal-refreshes-node-selection-rings})
 (table.insert tests {:name "outline view rejects unreachable reveal" :fn outline-view-rejects-unreachable-reveal})
 (table.insert tests {:name "outline compact point clicks use real hit testing" :fn outline-compact-point-clicks-use-real-hit-testing})
