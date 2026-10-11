@@ -45,6 +45,10 @@ loader-neutral operations (`space_unit_resolve`, `space_unit_inspect`,
 `space_unit_snapshot`, `space_unit_list`) through
 `llm/external-unit-mcp/tools.fnl`.
 
+`ExternalUnitMcpBridge` delegates common OpenCode bridge mechanics to
+`llm/opencode-mcp/bridge.fnl`, but keeps its own `space-unit-dev` MCP key,
+all-deny native OpenCode permission policy, and external unit tool registry.
+
 Do not add Space-specific user-unit behavior to global `~/.config/opencode`.
 
 ## Starting the Server
