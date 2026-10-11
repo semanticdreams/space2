@@ -1,4 +1,6 @@
 (local fs (require :fs))
+(local BuildContext (require :build-context))
+(local Signal (require :signal))
 
 (local tests [])
 (var temp-counter 0)
@@ -6,6 +8,15 @@
 (var observed-items-count 0)
 (var observed-deleted-count 0)
 (local temp-root (fs.join-path "/tmp/space/tests" "dict-entities"))
+
+(fn make-icons-stub []
+  {:resolve (fn [_self _name]
+              nil)})
+
+(fn make-ctx []
+  (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+                 :hoverables (assert app.hoverables "test requires app.hoverables")
+                 :icons (make-icons-stub)}))
 
 (fn count-updated [_]
   (set observed-updated-count (+ observed-updated-count 1)))
@@ -244,6 +255,46 @@
   (assert DictEntityListNodeView "DictEntityListNodeView should load")
   (assert (= (type DictEntityListNodeView) "function") "DictEntityListNodeView should be a function"))
 
+(fn dict-entity-node-view-rejects-empty-save-value-before-rename []
+  (local DictEntityNodeView (require :graph/view/views/dict-entity))
+  (local state {:items {"old" "node-a"}})
+  (local target {:items-changed (Signal)
+                 :get-entity (fn [_self]
+                               state)
+                 :rename-item (fn [_self old-key new-key]
+                                (set (. state.items new-key) (. state.items old-key))
+                                (set (. state.items old-key) nil))
+                 :set-item (fn [_self _key value]
+                             (when (= value "")
+                               (error "item value is required")))})
+  (local view ((DictEntityNodeView target) (make-ctx)))
+  (local row (. view.list.item-widgets 1))
+  (local key-input (. (. row.children 1) :element))
+  (local value-input (. (. row.children 3) :element))
+  (local save-button (. (. row.children 4) :element))
+  (key-input:set-text "new")
+  (value-input:set-text "")
+  (local (ok err) (pcall save-button.on-click save-button {:button 1}))
+  (assert (not ok) "empty final value should reject the save")
+  (assert (string.find (tostring err) "item value" 1 true) "save error should mention item value")
+  (assert (= (. state.items "old") "node-a") "failed save should keep original item key")
+  (assert (= (. state.items "new") nil) "failed save should not persist rename")
+  (view:drop))
+
+(fn dict-entity-list-node-view-preserves-emitted-order []
+  (local DictEntityListNodeView (require :graph/view/views/dict-entity-list))
+  (local emitted [[{:key "newest"} "zzz"]
+                  [{:key "older"} "aaa"]])
+  (local target {:items-changed (Signal)
+                 :emit-items (fn [_self]
+                               emitted)})
+  (local view ((DictEntityListNodeView target) (make-ctx)))
+  (assert (= (. (. view.search.list-view.items 1) 2) "zzz")
+          "visible list should keep newest emitted item first")
+  (assert (= (. (. view.search.list-view.items 2) 2) "aaa")
+          "visible list should keep older emitted item second")
+  (view:drop))
+
 (table.insert tests {:name "dict entity store creates entities"
                      :fn dict-entity-store-creates-entities})
 (table.insert tests {:name "dict entity store persists and reloads json"
@@ -271,7 +322,11 @@
 (table.insert tests {:name "dict entity node view loads"
                      :fn dict-entity-node-view-loads})
 (table.insert tests {:name "dict entity list node view loads"
-                     :fn dict-entity-list-node-view-loads})
+                      :fn dict-entity-list-node-view-loads})
+(table.insert tests {:name "dict entity node view rejects empty save value before rename"
+                     :fn dict-entity-node-view-rejects-empty-save-value-before-rename})
+(table.insert tests {:name "dict entity list node view preserves emitted order"
+                     :fn dict-entity-list-node-view-preserves-emitted-order})
 
 (local main
   (fn []

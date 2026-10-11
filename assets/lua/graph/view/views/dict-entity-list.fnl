@@ -6,6 +6,17 @@
   (fn build-widget-child [_ctx]
     widget))
 
+(fn copy-items [items]
+  (local source (if items items []))
+  (local copied [])
+  (each [_ item (ipairs source)]
+    (table.insert copied item))
+  copied)
+
+(fn set-search-items-preserving-order [search new-items]
+  (set search.items (copy-items new-items))
+  (search:update-list-view))
+
 (fn create-entity-handler [target]
   (fn handle-create-entity [_button _event]
     (when (and target.create-entity target.add-entity-node)
@@ -52,8 +63,7 @@
     (if target.emit-items
         (target:emit-items)
         fallback-items))
-  (view:set-items refreshed)
-  (set view.search.items refreshed))
+  (view:set-items refreshed))
 
 (fn connect-items-signal [view target]
   (local signal target.items-changed)
@@ -85,7 +95,7 @@
     (set view.search search)
     (set view.create-button create-button)
     (set view.layout flex.layout)
-    (set view.set-items (fn [_self new-items] (search:set-items new-items)))
+    (set view.set-items (fn [_self new-items] (set-search-items-preserving-order search new-items)))
     (set view.refresh-items (fn [self] (refresh-items self target items)))
     (local connection (connect-items-signal view target))
     (set view.drop

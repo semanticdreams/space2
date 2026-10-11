@@ -68,10 +68,16 @@
   (fn handle-focus-value [_button _event]
     (maybe-focus-node node-key)))
 
+(fn assert-required-item-text [label value]
+  (local text (value-or-empty value))
+  (assert (> (string.len text) 0)
+          (.. "dict entity item " label " is required"))
+  text)
+
 (fn save-item-handler [target original-key key-input value-input]
   (fn handle-save-item [_button _event]
-    (local final-key (key-input:get-text))
-    (local final-value (value-input:get-text))
+    (local final-key (assert-required-item-text "key" (key-input:get-text)))
+    (local final-value (assert-required-item-text "value" (value-input:get-text)))
     (when (and target.rename-item (not (= final-key original-key)))
       (target:rename-item original-key final-key))
     (when target.set-item
