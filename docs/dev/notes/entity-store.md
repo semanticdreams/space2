@@ -8,7 +8,7 @@ tags:
 
 ## Overview
 
-The entity store provides JSON file-based persistence for the core data types used by the graph system. Five entity types exist, each backed by its own subdirectory under `{data-dir}/entities/` with CRUD operations, UUID-based keys, and signal emission for changes.
+The entity store provides JSON file-based persistence for the core data types used by the graph system. Six entity types exist, each backed by its own subdirectory under `{data-dir}/entities/` with CRUD operations, UUID-based keys, and signal emission for changes.
 
 ## Entity types
 
@@ -47,6 +47,15 @@ Ordered collections of entity references. Used for grouping related entities exp
 - **Fields**: `:items` (array of entity reference keys)
 - **Store**: `entities/list/`
 - **Signals**: `list-entity-created`, `list-entity-updated`, `list-entity-deleted`
+
+### Dict entity (`entities/dict.fnl`)
+
+Keyed collections of graph-addressable references. Used for profile-like or object-like structures composed from primitive entity references.
+
+- **Fields**: `:items` (string-keyed table of graph reference keys)
+- **Store**: `entities/dict/`
+- **Signals**: `dict-entity-created`, `dict-entity-updated`, `dict-entity-deleted`, `dict-entity-items-changed`
+- **API**: `get-item`, `set-item`, `remove-item`, `rename-item`
 
 ### Identity entity (`entities/identity.fnl`)
 
