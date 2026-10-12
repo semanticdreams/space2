@@ -30,6 +30,7 @@ jobs:
       CCACHE_BASEDIR: ${{ github.workspace }}
       SCCACHE_DIR: ${{ github.workspace }}/.sccache
       SCCACHE_CACHE_SIZE: 2G
+      CMAKE_GENERATOR: Ninja
     steps:
       - uses: actions/checkout@v5
         with:
@@ -41,7 +42,7 @@ jobs:
           deps=$(awk '/CI_DEPS_START/{flag=1;next}/CI_DEPS_END/{flag=0}flag' docs/dev/building.md | sed -n 's/^sudo apt install //p')
           # sccache not available via apt on Ubuntu 22.04 — install via cargo below
           deps=$(echo "$deps" | sed 's/\bsccache\b//g')
-          sudo apt-get install -y ${deps} ccache rpm
+          sudo apt-get install -y ${deps} ccache ninja-build rpm
 
       - name: Setup compiler cache
         uses: ./.github/actions/setup-linux-compiler-cache
@@ -61,6 +62,13 @@ jobs:
             external/wallet-core/rust/Cargo.lock
             external/wallet-core/rust/Cargo.toml
             CMakeLists.txt
+
+      - name: Reset compiler cache stats
+        run: |
+          ccache -z
+          if command -v sccache >/dev/null 2>&1; then
+            sccache --zero-stats
+          fi
 
       - name: Configure and Build
         env:
