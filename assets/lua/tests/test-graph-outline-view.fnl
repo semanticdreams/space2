@@ -5,6 +5,7 @@
 (local Edge (require :graph/edge))
 (local GraphOutline (require :graph/outline))
 (local GraphView (require :graph/view))
+(local OutlineRowWidget (require :graph/view/outline-row-widget))
 (local CommandHelpers (require :tests/graph-command-helpers))
 (local Clickables (require :clickables))
 (local ObjectSelector (require :object-selector))
@@ -111,39 +112,9 @@
 (fn make-drop-handle []
     {:drop drop-noop})
 
-(fn make-test-font []
-    (local glyph {:advance 8
-                  :planeBounds {:left 0 :bottom 0 :right 8 :top 10}
-                  :atlasBounds {:left 0 :bottom 0 :right 8 :top 10}})
-    (local font {:glyph-map {}
-                 :metadata {:metrics {:lineHeight 12 :ascender 10 :descender -2}
-                            :atlas {:distanceRange 4}}})
-    (for [codepoint 32 126]
-        (set (. font.glyph-map codepoint) glyph))
-    (set (. font.glyph-map 65533) glyph)
-    font)
+(fn make-test-font [] (local glyph {:advance 8 :planeBounds {:left 0 :bottom 0 :right 8 :top 10} :atlasBounds {:left 0 :bottom 0 :right 8 :top 10}}) (local font {:glyph-map {} :metadata {:metrics {:lineHeight 12 :ascender 10 :descender -2} :atlas {:distanceRange 4}}}) (for [codepoint 32 126] (set (. font.glyph-map codepoint) glyph)) (set (. font.glyph-map 65533) glyph) font)
 
-(fn make-icons-stub []
-    (local glyph {:advance 1})
-    (local font {:metadata {:metrics {:ascender 1 :descender -1}
-                            :atlas {:width 1 :height 1}}
-                 :glyph-map {65533 glyph
-                             4242 glyph}})
-    (local stub {:font font
-                 :codepoints {:close_fullscreen 4242
-                              :open_in_new 4242
-                              :more_vert 4242}})
-    (set stub.get
-         (fn [self name]
-             (local value (. self.codepoints name))
-             (assert value (.. "Missing icon " name))
-             value))
-    (set stub.resolve
-         (fn [self name]
-             {:type :font
-              :codepoint (self:get name)
-              :font self.font}))
-    stub)
+(fn make-icons-stub [] (local glyph {:advance 1}) (local font {:metadata {:metrics {:ascender 1 :descender -1} :atlas {:width 1 :height 1}} :glyph-map {65533 glyph 4242 glyph}}) (local stub {:font font :codepoints {:close_fullscreen 4242 :open_in_new 4242 :more_vert 4242}}) (set stub.get (fn [self name] (local value (. self.codepoints name)) (assert value (.. "Missing icon " name)) value)) (set stub.resolve (fn [self name] {:type :font :codepoint (self:get name) :font self.font})) stub)
 
 (fn make-hoverables-stub []
     {:register (fn [_self _obj] nil)
@@ -352,6 +323,33 @@
 
 (fn row-depths [rows]
     (icollect [_ row (ipairs rows)] row.depth))
+
+(fn outline-row-false? [_row] false)
+(fn make-outline-row-node [key] (Graph.GraphNode {:key key :label key :size 8 :color (glm.vec4 0.25 0.5 0.75 1) :preview (tracked-preview {})}))
+(fn failing-preview-builder [_ctx] (error "preview boom")) (fn failing-preview [_node _opts] failing-preview-builder)
+(fn make-outline-row-failing-node [key] (Graph.GraphNode {:key key :label key :size 8 :color (glm.vec4 0.25 0.5 0.75 1) :preview failing-preview}))
+(fn make-outline-row [key] {:key key :node (make-outline-row-node key) :depth 1 :index 1 :expanded? false :has-children? false})
+(fn make-outline-row-for-node [node] {:key node.key :node node :depth 1 :index 1 :expanded? false :has-children? false})
+(fn outline-row-add-selectables [events self selectables] (each [_ selectable (ipairs selectables)] (table.insert self.selectables selectable) (table.insert events {:kind :selector-add :selectable selectable})))
+(fn outline-row-remove-selectables [events self selectables] (each [_ selectable (ipairs selectables)] (table.insert events {:kind :selector-remove :selectable selectable}) (for [idx (length self.selectables) 1 -1] (when (= (. self.selectables idx) selectable) (table.remove self.selectables idx)))))
+(fn outline-row-replace-selectable [events self previous next] (table.insert events {:kind :selector-replace :previous previous :next next}) (for [idx 1 (length self.selectables)] (when (= (. self.selectables idx) previous) (set (. self.selectables idx) next))))
+(fn make-outline-row-selector-stub [events] {:selectables [] :selected [] :add-selectables (fn [self selectables] (outline-row-add-selectables events self selectables)) :remove-selectables (fn [self selectables] (outline-row-remove-selectables events self selectables)) :replace-selectable (fn [self previous next] (outline-row-replace-selectable events self previous next))})
+(fn outline-row-focus-request [events self request] (set self.last-request request) (table.insert events {:kind :focus-request :request request}))
+(fn outline-row-focus-drop [events self] (assert (not self.dropped?) "test focus node dropped twice") (set self.dropped? true) (table.insert events {:kind :focus-drop}))
+(fn outline-row-create-focus-node [events opts] (local focus-node {:name opts.name :dropped? false}) (set focus-node.request-focus (fn [self request] (outline-row-focus-request events self request))) (set focus-node.drop (fn [self] (outline-row-focus-drop events self))) focus-node)
+(fn make-outline-row-focus-stub [events] {:create-node (fn [_self opts] (outline-row-create-focus-node events opts)) :attach-bounds (fn [_self node opts] (set node.get-bounds opts.get-bounds))})
+(fn outline-row-value [table-value fallback] (if (= table-value nil) fallback table-value))
+(fn make-outline-row-widget [overrides] (local opts (outline-row-value overrides {})) (local ctx (outline-row-value opts.ctx (make-render-ctx))) (local events (outline-row-value opts.events [])) (local row (outline-row-value opts.row (make-outline-row "test:row"))) (local selector (outline-row-value opts.selector (make-outline-row-selector-stub events))) (local focus (outline-row-value opts.focus (make-outline-row-focus-stub events))) (local widget ((OutlineRowWidget {:ctx ctx :row row :clickables (outline-row-value opts.clickables ctx.clickables) :selector selector :focus focus :pointer-target (outline-row-value opts.pointer-target {}) :depth-indent 18 :left-padding 12 :label-gap 1 :vertical-padding 1 :expanded-gap 3 :selected? (outline-row-value opts.selected? outline-row-false?) :focused? (outline-row-value opts.focused? outline-row-false?) :on-focus opts.on-focus :on-right-click opts.on-right-click :on-activate opts.on-activate :on-collapse opts.on-collapse :on-open opts.on-open :on-menu opts.on-menu}) ctx)) {:widget widget :ctx ctx :events events :row row :selector selector :focus focus})
+(fn outline-row-widget-measures-compact-point-and-label [] (local {:widget widget :row row} (make-outline-row-widget {:row (make-outline-row "Measured Label")})) (widget.layout:measurer) (assert (>= widget.layout.measure.y row.node.size) "compact outline row height should include compact point visible size") (assert (< widget.layout.measure.y 24) (.. "compact outline row should measure below old fixed stride, got " (tostring widget.layout.measure.y))) (widget:drop))
+(fn outline-row-focus-event-recorder [focus-events] (fn [node opts] (table.insert focus-events {:node node :opts opts})))
+(fn outline-row-widget-keeps-compact-projection-interaction-owner [] (local focus-events []) (local {:widget widget :row row} (make-outline-row-widget {:on-focus (outline-row-focus-event-recorder focus-events)})) (assert widget.point "outline row widget should expose compact projection point") (assert (= widget.on-click nil) "outline row widget background should not own point click interaction") (widget.point:on-click {:button 1}) (assert (= (length focus-events) 1) "compact projection point click should invoke row focus callback once") (assert (= (. focus-events 1 :node) row.node) "compact projection should pass row node to focus callback") (assert (= (. focus-events 1 :opts :reason) :pointer) "compact projection should report pointer focus reason") (assert (= (. focus-events 1 :opts :owner) widget) "compact projection should report row widget as interaction owner") (widget:drop))
+(fn outline-row-widget-expands-to-measured-card-height [] (local {:widget widget} (make-outline-row-widget {:row (make-outline-row "Expanded Label")})) (widget.layout:measurer) (local compact-height widget.layout.measure.y) (assert (= (widget:expanded?) false) "outline row should start compact") (widget:expand!) (widget.layout:measurer) (assert (widget:expanded?) "outline row should report expanded state after expand!") (assert widget.expanded-card "expanded outline row should expose expanded card") (assert (> widget.layout.measure.y (+ compact-height widget.expanded-card.layout.measure.y)) "expanded outline row height should include compact summary, gap, and measured card height") (widget:drop))
+(fn outline-row-wrap-drop-counter [target field] (local original (. target field :drop)) (local count {:value 0}) (set (. target field :drop) (fn [self] (set count.value (+ count.value 1)) (original self))) count)
+(fn outline-row-count-events [events kind] (accumulate [count 0 _ event (ipairs events)] (if (= event.kind kind) (+ count 1) count)))
+(fn outline-row-widget-drops-owned-handles-once [] (local events []) (local ctx (make-render-ctx)) (local {:widget widget :selector selector} (make-outline-row-widget {:ctx ctx :events events})) (local point widget.point) (local label-count (outline-row-wrap-drop-counter widget :label)) (widget:expand!) (local card-count (outline-row-wrap-drop-counter widget :expanded-card)) (widget:drop) (widget:drop) (each [_ layer (ipairs point.layers)] (assert layer.point.dropped? "dropping outline row should drop compact projection point layers once")) (assert (= card-count.value 1) "dropping outline row should drop expanded card once") (assert (= label-count.value 1) "dropping outline row should drop label text once") (assert (= (outline-row-count-events events :focus-drop) 1) "dropping outline row should drop focus node once") (assert (= (outline-row-count-events events :selector-remove) 1) "dropping outline row should remove selector entry once") (assert (= (length selector.selectables) 0) "dropping outline row should leave no selector entries") (local (ok message) (pcall (fn [] (widget:refresh)))) (assert (not ok) "outline row public methods should fail after drop") (assert (string.find (tostring message) "called after drop" 1 true) "outline row dropped guard should explain use after drop"))
+(fn outline-row-widget-set-row-rejects-compact-node-change [] (local row-a (make-outline-row "test:a")) (local row-b (make-outline-row "test:b")) (local focus-events []) (local {:widget widget} (make-outline-row-widget {:row row-a :on-focus (outline-row-focus-event-recorder focus-events)})) (local (ok message) (pcall (fn [] (widget:set-row row-b)))) (assert (not ok) "set-row should reject compact node/key changes") (assert (string.find (tostring message) "node/key change" 1 true) "set-row rejection should explain node/key change") (widget.point:on-click {:button 1}) (assert (= (. focus-events 1 :node) row-a.node) "rejected compact set-row should keep compact projection bound to original node") (widget:drop))
+(fn outline-row-widget-set-row-rejects-expanded-node-change [] (local row-a (make-outline-row "test:a")) (local row-b (make-outline-row "test:b")) (local {:widget widget} (make-outline-row-widget {:row row-a})) (widget:expand!) (local card widget.expanded-card) (local (ok message) (pcall (fn [] (widget:set-row row-b)))) (assert (not ok) "set-row should reject expanded node/key changes") (assert (string.find (tostring message) "node/key change" 1 true) "expanded set-row rejection should explain node/key change") (assert (= widget.expanded-card card) "rejected expanded set-row should keep original card") (assert (= widget.expanded-card.node row-a.node) "rejected expanded set-row should keep card bound to original node") (widget:drop))
+(fn outline-row-widget-expand-failure-preserves-compact-interaction [] (local row (make-outline-row-for-node (make-outline-row-failing-node "test:failing"))) (local focus-events []) (local {:widget widget} (make-outline-row-widget {:row row :on-focus (outline-row-focus-event-recorder focus-events)})) (local point widget.point) (local (ok message) (pcall (fn [] (widget:expand!)))) (assert (not ok) "expand! should surface preview build failure") (assert (string.find (tostring message) "preview boom" 1 true) "expand! failure should include preview error") (assert (= (widget:expanded?) false) "failed expansion should leave row compact") (assert (= widget.point point) "failed expansion should keep compact point") (assert (= (type widget.point.on-click) :function) "failed expansion should preserve compact click handler") (widget.point:on-click {:button 1}) (assert (= (. focus-events 1 :node) row.node) "failed expansion should keep compact projection bound to row node") (widget:drop))
 
 (fn outline-builds-reachable-outgoing-depth-first-rows []
     (local {:graph graph :graph-map graph-map} (make-map))
@@ -1159,9 +1157,8 @@
     (graph-map:drop)
     (graph:drop))
 
-(table.insert tests {:name "outline builds reachable outgoing depth-first rows" :fn outline-builds-reachable-outgoing-depth-first-rows})
-(table.insert tests {:name "outline skips incoming-only edges" :fn outline-skips-incoming-only-edges})
-(table.insert tests {:name "outline handles cycles and shared nodes by first occurrence" :fn outline-handles-cycles-and-shared-nodes-by-first-occurrence})
+(table.insert tests {:name "outline builds reachable outgoing depth-first rows" :fn outline-builds-reachable-outgoing-depth-first-rows}) (table.insert tests {:name "outline skips incoming-only edges" :fn outline-skips-incoming-only-edges}) (table.insert tests {:name "outline handles cycles and shared nodes by first occurrence" :fn outline-handles-cycles-and-shared-nodes-by-first-occurrence})
+(table.insert tests {:name "outline row widget measures compact point and label" :fn outline-row-widget-measures-compact-point-and-label}) (table.insert tests {:name "outline row widget keeps compact projection interaction owner" :fn outline-row-widget-keeps-compact-projection-interaction-owner}) (table.insert tests {:name "outline row widget expands to measured card height" :fn outline-row-widget-expands-to-measured-card-height}) (table.insert tests {:name "outline row widget drops compact projection label and expanded card once" :fn outline-row-widget-drops-owned-handles-once}) (table.insert tests {:name "outline row widget set-row rejects compact node change" :fn outline-row-widget-set-row-rejects-compact-node-change}) (table.insert tests {:name "outline row widget set-row rejects expanded node change" :fn outline-row-widget-set-row-rejects-expanded-node-change}) (table.insert tests {:name "outline row widget expand failure preserves compact interaction" :fn outline-row-widget-expand-failure-preserves-compact-interaction})
 (table.insert tests {:name "graph map persists outline mode and roots" :fn graph-map-persists-outline-mode-and-roots})
 (table.insert tests {:name "graph map prunes removed outline roots" :fn graph-map-prunes-removed-outline-roots})
 (table.insert tests {:name "map manager persists outline state per map" :fn map-manager-persists-outline-state-per-map})
