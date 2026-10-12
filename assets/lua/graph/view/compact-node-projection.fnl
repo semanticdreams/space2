@@ -110,6 +110,24 @@
         default
         (. options key)))
 
+(fn attach-point [options]
+    (if options.point
+        (values options.point false)
+        (do
+            (local points (assert options.points "CompactNodeProjection attach! requires :points"))
+            (local position (assert options.position "CompactNodeProjection attach! requires :position"))
+            (local layers (assert options.layers "CompactNodeProjection attach! requires :layers"))
+            (values
+                (GraphNodePresentation.compact-point
+                    {:points points
+                     :position position
+                     :pointer-target options.pointer-target
+                     :depth-offset-step options.depth-offset-step
+                     :base-depth-offset-index options.base-depth-offset-index
+                     :base-layer-index options.base-layer-index
+                     :layers layers})
+                true))))
+
 (fn drop! [record opts]
     (when (and record (not record.dropped?))
         (local options (or opts {}))
@@ -136,7 +154,7 @@
         (when (and (option-enabled? options :drop-focus-node? record.drop-focus-node?)
                    record.focus-node)
             (record.focus-node:drop))
-        (when (and (option-enabled? options :drop-point? true)
+        (when (and (option-enabled? options :drop-point? record.owns-point?)
                    point
                    point.drop)
             (point:drop)))
@@ -144,28 +162,18 @@
 
 (fn attach! [opts]
     (local options (assert opts "CompactNodeProjection attach! requires opts"))
-    (local points (assert options.points "CompactNodeProjection attach! requires :points"))
     (local node (assert options.node "CompactNodeProjection attach! requires :node"))
-    (local position (assert options.position "CompactNodeProjection attach! requires :position"))
-    (local layers (assert options.layers "CompactNodeProjection attach! requires :layers"))
     (local clickables (assert options.clickables "CompactNodeProjection attach! requires :clickables"))
     (local key (assert node.key "CompactNodeProjection node requires key"))
     (assert clickables.register "CompactNodeProjection requires clickables.register")
-    (local point
-          (GraphNodePresentation.compact-point
-              {:points points
-               :position position
-               :pointer-target options.pointer-target
-               :depth-offset-step options.depth-offset-step
-               :base-depth-offset-index options.base-depth-offset-index
-               :base-layer-index options.base-layer-index
-               :layers layers}))
+    (local (point owns-point?) (attach-point options))
     (assert point (.. "CompactNodeProjection failed to create point for " (tostring key)))
     (set point.key key)
     (set point.node node)
     (local record {:node node
                    :key key
                    :point point
+                   :owns-point? owns-point?
                    :presentation point
                    :selectable point
                    :focus-node nil
@@ -178,10 +186,10 @@
                    :owner options.owner
                    :on-focus options.on-focus
                    :on-right-click options.on-right-click
-                    :on-activate options.on-activate
-                    :drop-focus-node? (if (= options.drop-focus-node? nil)
-                                          (not options.focus-node)
-                                          options.drop-focus-node?)})
+                   :on-activate options.on-activate
+                   :drop-focus-node? (if (= options.drop-focus-node? nil)
+                                         (not options.focus-node)
+                                         options.drop-focus-node?)})
     (set point._compact_projection_record record)
     (set point.on-click point-click)
     (set point.on-right-click point-right-click)
@@ -213,7 +221,7 @@
         (set focus-node.activate focus-node-activate)
         (set record.focus-node focus-node)))
     (set record.refresh! (fn [self refresh-opts] (refresh! self refresh-opts)))
-    (set record.drop! (fn [self] (drop! self)))
+    (set record.drop! (fn [self drop-opts] (drop! self drop-opts)))
     (refresh! record {:selected? options.selected? :focused? options.focused?})
     record)
 

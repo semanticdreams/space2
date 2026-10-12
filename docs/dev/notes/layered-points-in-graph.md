@@ -9,8 +9,8 @@ Layered Points In Graph View (Status)
 
 Goal
 ----
-- Add a reusable LayeredPoint widget that renders multiple point layers (stacked radii) for
-  selection/focus outlines.
+- Add a reusable raw LayeredPoint renderer that renders multiple point layers (stacked radii) for
+  selection/focus outlines, plus measured layout wrappers where those points need to participate in widget layout.
 - Update graph node points to use layered borders:
   - Selection border: 0.2 units (theme color).
   - Focus border: 0.1 units (theme input focus outline).
@@ -20,7 +20,7 @@ Goal
 
 What Was Implemented
 --------------------
-1) New LayeredPoint widget
+1) New raw LayeredPoint renderer
    - File: assets/lua/layered-point.fnl
    - Behavior:
      - Accepts a list of layers `{ :size :color :z-offset }`.
@@ -31,6 +31,20 @@ What Was Implemented
      - Uses depth-offset indexes per layer for ordering (no z offsets).
    - Notes:
      - Works with `Points` buffer (8 floats per point) and uses standard point shader.
+     - Does not own widget `Layout` or reserve measured space; spatial graph views use
+       raw layered points directly so large graph maps do not allocate a layout node per point.
+
+1a) Measured LayeredPointBox wrapper
+   - File: assets/lua/layered-point-box.fnl
+   - Behavior:
+     - Owns a raw `LayeredPoint` and a fixed measured footprint for widget/layout contexts.
+     - Keeps the raw point centered within the reserved box and exposes the point for
+       compact graph projection records that need to register interactions against it.
+   - Notes:
+     - Outline rows use `LayeredPointBox` for compact markers so focus and selection rings
+       can grow visually without changing row measurement or descendant point positions.
+     - Interaction ownership stays with graph compact projection records; the box is a
+       measured marker wrapper, not a graph interaction owner.
 
 2) GraphView updated to use LayeredPoint and focus handling
    - File: assets/lua/graph/view/init.fnl

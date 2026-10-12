@@ -224,6 +224,7 @@
     :tests.test-vector-buffer
     :tests.test-points
     :tests.test-layered-point
+    :tests.test-layered-point-box
     :tests.test-renderers
     :tests.test-widget-cuboid
     :tests.test-radial
@@ -243,6 +244,7 @@
     :tests.test-car-state
     :tests.test-heightfield-terrain
       :tests.test-graph-view
+      :tests.test-graph-outline-row-widget
       :tests.test-graph-outline-view
       :tests.test-graph-view-compact-projection
       :tests.test-graph-selection-focus-command
