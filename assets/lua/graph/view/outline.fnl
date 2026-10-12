@@ -528,7 +528,7 @@
 
 (set layout-tree-view! (fn [tree-view]
     (tree-view.layout:measurer)
-    (set tree-view.layout.position (glm.vec3 0 0 0))
+    (set tree-view.layout.position (glm.vec3 0 (- tree-view.layout.measure.y) 0))
     (set tree-view.layout.size (glm.vec3 row-width tree-view.layout.measure.y 0))
     (set tree-view.layout.rotation (glm.quat 1 0 0 0))
     (tree-view.layout:layouter)))
