@@ -68,9 +68,11 @@
   (when (not (fs.exists path))
     (fs.create-dirs path)))
 
-(fn choose-model [server]
-  (local env-provider (os.getenv "OPENCODE_SPACE_TOOLS_PROVIDER_ID"))
-  (local env-model (os.getenv "OPENCODE_SPACE_TOOLS_MODEL_ID"))
+(fn choose-model [server override]
+  (local override-provider (and override override.providerID))
+  (local override-model (and override override.modelID))
+  (local env-provider (if override-provider override-provider (os.getenv "OPENCODE_SPACE_TOOLS_PROVIDER_ID")))
+  (local env-model (if override-model override-model (os.getenv "OPENCODE_SPACE_TOOLS_MODEL_ID")))
   (var result nil)
   (server.config.providers (fn [r] (set result r)))
   (wait-for #(not= result nil) 10000)
@@ -166,13 +168,23 @@
   {:config {:providers fake-providers-response}})
 
 (fn assert-explicit-model-override []
+  (local override {:providerID "openai" :modelID "gpt-5.5"})
+  (local model (choose-model (fake-provider-server) override))
+  (assert-ok (= model.providerID override.providerID) "provider override should be selected")
+  (assert-ok (= model.modelID override.modelID) "model override should be selected"))
+
+(fn assert-env-model-override []
   (local env-provider (os.getenv "OPENCODE_SPACE_TOOLS_PROVIDER_ID"))
   (local env-model (os.getenv "OPENCODE_SPACE_TOOLS_MODEL_ID"))
   (assert-ok (and env-provider env-model)
-             "set OPENCODE_SPACE_TOOLS_PROVIDER_ID and OPENCODE_SPACE_TOOLS_MODEL_ID for online helper regression")
+             "set OPENCODE_SPACE_TOOLS_PROVIDER_ID and OPENCODE_SPACE_TOOLS_MODEL_ID for env override regression")
   (local model (choose-model (fake-provider-server)))
-  (assert-ok (= model.providerID env-provider) "provider override should be selected")
-  (assert-ok (= model.modelID env-model) "model override should be selected"))
+  (assert-ok (= model.providerID env-provider) "env provider override should be selected")
+  (assert-ok (= model.modelID env-model) "env model override should be selected"))
+
+(fn assert-literal-deny []
+  (assert-ok (all-native-tools-denied? ["bash"] {:bash "deny"})
+             "literal deny should deny native bash"))
 
 (fn assert-wildcard-deny-table []
   (assert-ok (all-native-tools-denied? ["bash" "space_probe"]
@@ -185,7 +197,11 @@
              "bounded permission table with an allow entry should not count as fully denied"))
 
 (fn run-helper-regression-tests []
-  (run-test "explicit env model override bypasses generated provider list" assert-explicit-model-override)
+  (run-test "explicit model override bypasses generated provider list" assert-explicit-model-override)
+  (when (and (os.getenv "OPENCODE_SPACE_TOOLS_PROVIDER_ID")
+             (os.getenv "OPENCODE_SPACE_TOOLS_MODEL_ID"))
+    (run-test "explicit env model override bypasses generated provider list" assert-env-model-override))
+  (run-test "literal deny counts as native tool denied" assert-literal-deny)
   (run-test "bounded wildcard deny table counts as native tool denied" assert-wildcard-deny-table)
   (run-test "bounded table with any allow is not fully denied" assert-allow-table-not-denied))
 
