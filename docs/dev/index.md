@@ -3,7 +3,7 @@
 Space is a 3D spatial computing platform and malleable software environment — a runtime where the world, the tools, and the data are projected into one unified graph. Built in C++ with Fennel (Lisp) scripting. GPLv3.
 
 - **Website:** [spaceui.org](https://spaceui.org)
-- **Source:** [github.com/semanticdreams/space2](https://github.com/semanticdreams/space2)
+- **Source:** [github.com/semanticdreams/spacecore](https://github.com/semanticdreams/spacecore)
 
 If you want to build with Space rather than maintain Space itself, start with the [SDK Docs](/sdk/). SDK pages link back here for internals, architecture history, and maintainer workflows.
 

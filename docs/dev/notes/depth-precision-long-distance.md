@@ -8,7 +8,7 @@ tags:
 
 ## Current State
 
-The current scene projection is defined in [assets/lua/app-projection.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/app-projection.fnl):
+The current scene projection is defined in [assets/lua/app-projection.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/app-projection.fnl):
 
 - perspective projection via `glm.perspective`
 - vertical FOV: `0.7853982` radians, about `45` degrees
@@ -17,7 +17,7 @@ The current scene projection is defined in [assets/lua/app-projection.fnl](https
 
 The current renderer is still using a conventional forward-Z depth setup:
 
-- depth comparison: `GL_LESS` in [assets/lua/renderers.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/renderers.fnl)
+- depth comparison: `GL_LESS` in [assets/lua/renderers.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/renderers.fnl)
 - normal depth clears with `GL_DEPTH_BUFFER_BIT`
 - no `glClipControl`
 - no logarithmic depth write in shaders
@@ -311,11 +311,11 @@ This recommendation fits the current codebase because:
 
 If we choose reversed-Z later, the migration checklist should include at least:
 
-- [assets/lua/app-projection.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/app-projection.fnl)
-- [assets/lua/renderers.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/renderers.fnl)
-- [assets/lua/sub-app.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/sub-app.fnl)
-- [assets/lua/next-app/sub-app.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/next-app/sub-app.fnl)
-- [assets/lua/skybox-renderer.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/skybox-renderer.fnl)
+- [assets/lua/app-projection.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/app-projection.fnl)
+- [assets/lua/renderers.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/renderers.fnl)
+- [assets/lua/sub-app.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/sub-app.fnl)
+- [assets/lua/next-app/sub-app.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/next-app/sub-app.fnl)
+- [assets/lua/skybox-renderer.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/skybox-renderer.fnl)
 - depth-reconstructing shaders or Lua-side math that samples depth textures
 - snapshot tests and any scene tests that assume old depth ordering
 

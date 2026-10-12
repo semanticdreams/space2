@@ -119,7 +119,7 @@ jobs:
             *) echo "Unsupported Space Linux artifact: ${SPACE_TARBALL_NAME}" >&2; exit 1 ;;
           esac
           gh release download "${{ inputs.space-version }}" \
-            --repo semanticdreams/space2 \
+            --repo semanticdreams/spacecore \
             --pattern "${SPACE_TARBALL_NAME}" \
             --dir build/space-release
           test -f "build/space-release/${SPACE_TARBALL_NAME}"
@@ -229,7 +229,7 @@ jobs:
           set -euo pipefail
           mkdir -p build/space-release
           gh release download "${{ inputs.space-version }}" \
-            --repo semanticdreams/space2 \
+            --repo semanticdreams/spacecore \
             --pattern "space-windows-x86_64.zip" \
             --dir build/space-release
           test -f build/space-release/space-windows-x86_64.zip

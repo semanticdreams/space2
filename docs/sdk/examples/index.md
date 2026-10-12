@@ -4,7 +4,7 @@ This page curates copyable Space SDK examples without duplicating their READMEs.
 
 ## Snake Space App Template
 
-The [Snake example](https://github.com/semanticdreams/space2/tree/main/examples/snake) is the current app template for a small, hostable Space application.
+The [Snake example](https://github.com/semanticdreams/spacecore/tree/main/examples/snake) is the current app template for a small, hostable Space application.
 
 It demonstrates:
 

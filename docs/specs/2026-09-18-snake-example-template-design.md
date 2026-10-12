@@ -7,7 +7,7 @@ applications. The repository does not yet contain a concrete example directory
 that a new app/game repository can copy as a starting point. The app-distribution
 docs describe the target layout as an app-owned `assets/` tree with Fennel under
 `assets/lua/`, plus a small caller workflow that uses
-`semanticdreams/space2/.github/workflows/bundle.yml`.
+`semanticdreams/spacecore/.github/workflows/bundle.yml`.
 
 Runtime lookup already supports this shape: when Space is launched from an app
 repository, `<cwd>/assets` is part of the asset search path. Running
@@ -100,7 +100,7 @@ examples/
   repository, and how the included release workflow calls Space's reusable bundle
   workflow.
 - `.github/workflows/release.yml` is an illustrative caller workflow for copied
-  repositories. It should use `semanticdreams/space2/.github/workflows/bundle.yml`
+  repositories. It should use `semanticdreams/spacecore/.github/workflows/bundle.yml`
   and pinned placeholders that a new repository updates.
 - `main.fnl` is the entrypoint bridge. It should require `app-config`, require the
   snake app module, define `main`, call it when `run-main` is true, and export

@@ -2,7 +2,7 @@
 
 ## Context
 
-Space now lives at `https://github.com/semanticdreams/space2`, an
+Space now lives at `https://github.com/semanticdreams/spacecore`, an
 organization-owned repository where GitHub merge queue can be used. The previous
 merge-queue workflow update moved agents away from repeatedly updating stale PR
 branches after PR creation, but it intentionally stopped after queue handoff.

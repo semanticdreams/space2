@@ -83,7 +83,7 @@
 - [ ] **Step 1: Add tests for repository, branch, JSON, and config-audit guards**
 
   In `scripts/tests/test_opencode_capabilities.py`, cover:
-  - `ensure_space_repo` accepts a temp git repo with `AGENTS.md`, `.opencode/opencode.json`, and origin `git@example.com:semanticdreams/space2.git`.
+  - `ensure_space_repo` accepts a temp git repo with `AGENTS.md`, `.opencode/opencode.json`, and origin `git@example.com:semanticdreams/spacecore.git`.
   - `ensure_space_repo` rejects repos without Space markers.
   - `validate_branch_name` accepts `automation/daily-devlog/2026-08-05`, `automation/weekly-agent-workflow/2026-W32`, `opencode/workflow-debug/test-123`, `opencode/workflow-debug-pr/test-123`, `feature/opencode-capabilities`, `fix/permission-capabilities`, `docs/opencode-capabilities`, and `chore/opencode-capabilities`.
   - `validate_branch_name` rejects `main`, `origin/main`, `feature/../main`, `feature/bad lock`, `feature/name.lock`, and empty strings.
@@ -101,7 +101,7 @@
 
 - [ ] **Step 3: Implement `scripts/opencode_capabilities.py`**
 
-  Implement the interfaces above using only Python stdlib. `ensure_space_repo` must resolve the repo root, verify git top-level, require `AGENTS.md` and `.opencode/opencode.json`, and require origin URL containing `semanticdreams/space2`. `validate_branch_name` must enforce the accepted branch patterns listed in Step 1 and reject traversal, whitespace, `.lock`, `main`, and `origin/main`.
+  Implement the interfaces above using only Python stdlib. `ensure_space_repo` must resolve the repo root, verify git top-level, require `AGENTS.md` and `.opencode/opencode.json`, and require origin URL containing `semanticdreams/spacecore`. `validate_branch_name` must enforce the accepted branch patterns listed in Step 1 and reject traversal, whitespace, `.lock`, `main`, and `origin/main`.
 
 - [ ] **Step 4: Implement `scripts/verify_opencode_home_config.py`**
 

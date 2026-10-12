@@ -38,7 +38,7 @@ permissions:
 
 jobs:
   bundle:
-    uses: semanticdreams/space2/.github/workflows/bundle.yml@v1
+    uses: semanticdreams/spacecore/.github/workflows/bundle.yml@v1
     with:
       space-version: v1.2.3
       app-name: My Game

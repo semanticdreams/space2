@@ -135,7 +135,7 @@ Everything lives under Space's user data directory:
 ### 1. Clone
 
 ```
-space_repo_clone {url "git@github.com:semanticdreams/space2.git"}
+space_repo_clone {url "git@github.com:semanticdreams/spacecore.git"}
 ```
 
 - Parse URL to derive `repo-id` (host + owner + name).
@@ -442,7 +442,7 @@ ssh://git@gitlab.com/owner/repo  → host=gitlab, owner=owner, name=repo
 
 Repo id: `<host>-<owner>-<repo>` (slugified, alphanumeric with hyphens).
 
-For example, `github.com-semanticdreams-space2`.
+For example, `github.com-semanticdreams-spacecore`.
 
 Host detection enables:
 - `gh` CLI path for GitHub.

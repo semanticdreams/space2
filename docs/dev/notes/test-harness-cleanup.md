@@ -34,10 +34,10 @@ Problems:
 
 This affected:
 
-- [test-demo-browser.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/tests/test-demo-browser.fnl)
-- [test-heightfield-terrain.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/tests/test-heightfield-terrain.fnl)
-- [find-heightfield-support-mismatch.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/tests/find-heightfield-support-mismatch.fnl)
-- [test-heightfield-physics-support-grid.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/tests/e2e/test-heightfield-physics-support-grid.fnl)
+- [test-demo-browser.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/tests/test-demo-browser.fnl)
+- [test-heightfield-terrain.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/tests/test-heightfield-terrain.fnl)
+- [find-heightfield-support-mismatch.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/tests/find-heightfield-support-mismatch.fnl)
+- [test-heightfield-physics-support-grid.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/tests/e2e/test-heightfield-physics-support-grid.fnl)
 
 ### 2. Tests Mutated `app.states` Without Suspending The Current State
 
@@ -51,10 +51,10 @@ That was often good enough in isolated runs, but it was not clean:
 
 This was especially visible in terrain pick / terrain paint tests spread across:
 
-- [test-demo-browser.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/tests/test-demo-browser.fnl)
-- [test-states.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/tests/test-states.fnl)
-- [test-graph-view.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/tests/test-graph-view.fnl)
-- [test-world-nodes.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/tests/test-world-nodes.fnl)
+- [test-demo-browser.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/tests/test-demo-browser.fnl)
+- [test-states.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/tests/test-states.fnl)
+- [test-graph-view.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/tests/test-graph-view.fnl)
+- [test-world-nodes.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/tests/test-world-nodes.fnl)
 
 ### 3. One Test Was Over-Specifying Global Input Plumbing
 
@@ -86,7 +86,7 @@ mattered.
 
 The shared helper now lives in:
 
-- [test-support.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/tests/test-support.fnl)
+- [test-support.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/tests/test-support.fnl)
 
 It currently owns:
 
@@ -163,7 +163,7 @@ So the helper is a practical containment layer, not a fundamental redesign.
 When writing or refactoring tests in this codebase:
 
 - do not hardcode user-home fixture paths
-- prefer [test-support.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/tests/test-support.fnl) for fixture lookup
+- prefer [test-support.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/tests/test-support.fnl) for fixture lookup
 - if a test replaces `app.states`, suspend the current active state first and resume it after restore
 - verify state-heavy cleanup with `tests.fast` or `make test`, not only a narrow module run
 - avoid asserting incidental global plumbing when the test can assert the owned behavior directly

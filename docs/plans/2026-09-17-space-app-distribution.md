@@ -316,7 +316,7 @@
   - Assert workflow has `on.workflow_call.inputs.app-name.required: true`.
   - Assert optional public inputs are exactly `app-id`, `entrypoint`, `assets-dir`, `icon-path`, `linux-profile`, `release-version`.
   - Assert workflow checks out the caller app and separately checks out the Space workflow repository/scripts at the reusable workflow ref parsed from `github.workflow_ref`.
-  - Assert workflow uses `gh release download <space-version> --repo semanticdreams/space2`.
+  - Assert workflow uses `gh release download <space-version> --repo semanticdreams/spacecore`.
   - Assert workflow downloads exact pinned artifact names for Linux and Windows.
   - Assert workflow does not run `make build`, `cmake --build`, `scripts/build-linux.sh`, or `scripts/build-windows-from-linux.sh`.
   - Assert workflow never references `space-app.json`.
@@ -385,7 +385,7 @@
   - Include the exact minimal external repository workflow shape:
     - `on.push.tags: "v*"`
     - `permissions.contents: write`
-    - `uses: semanticdreams/space2/.github/workflows/bundle.yml@v1`
+    - `uses: semanticdreams/spacecore/.github/workflows/bundle.yml@v1`
     - `with.space-version`
     - `with.app-name`
 

@@ -4,7 +4,7 @@
 
 Space uses Orca to run multiple OpenCode sessions in separate worktrees. The
 repository has moved from `https://github.com/semanticdreams/space` to
-`https://github.com/semanticdreams/space2` so it can be organization-owned and
+`https://github.com/semanticdreams/spacecore` so it can be organization-owned and
 eligible for GitHub merge queue. Repository references now need to point at the
 new canonical URL.
 
@@ -83,7 +83,7 @@ The agent contract becomes:
 ### Architecture
 
 - Repository URL references point to the canonical organization-owned URL:
-  `https://github.com/semanticdreams/space2`.
+  `https://github.com/semanticdreams/spacecore`.
 - GitHub owns post-PR freshness through a merge queue on `main`.
 - OpenCode workers remain responsible for implementation, review, commits,
   pre-PR current-base validation, and PR creation.
@@ -162,7 +162,7 @@ Validation is documentation/configuration focused:
 In scope:
 
 - Updating tracked references from `semanticdreams/space` to
-  `semanticdreams/space2` where they refer to the canonical repository, release
+  `semanticdreams/spacecore` where they refer to the canonical repository, release
   page, Actions badges, discussions, source links, clone URLs, or test fixtures.
 - Updating repository policy and docs for merge-queue-based PR integration.
 - Updating OpenCode finishing and automation instructions so agents stop after

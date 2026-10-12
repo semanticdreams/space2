@@ -43,7 +43,7 @@ graph TD
 
 ### StringEntityStore
 
-**File:** [string.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/entities/string.fnl)
+**File:** [string.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/entities/string.fnl)
 
 The `StringEntityStore` manages persistence of string entities to disk using markdown files with YAML frontmatter.
 
@@ -92,7 +92,7 @@ The store emits signals for entity lifecycle events:
 
 ### EntitiesNode
 
-**File:** [entities.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/graph/nodes/entities.fnl)
+**File:** [entities.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/graph/nodes/entities.fnl)
 
 Root node for browsing entity types. Currently supports only the "string" type.
 
@@ -104,7 +104,7 @@ Provides `collect-types` which returns available entity types, and `add-type-nod
 
 ### StringEntityListNode
 
-**File:** [string-entity-list.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/graph/nodes/string-entity-list.fnl)
+**File:** [string-entity-list.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/graph/nodes/string-entity-list.fnl)
 
 Displays a paginated list of all string entities.
 
@@ -123,7 +123,7 @@ Automatically refreshes when the store emits create/update/delete signals.
 
 ### StringEntityNode
 
-**File:** [string-entity.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/graph/nodes/string-entity.fnl)
+**File:** [string-entity.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/graph/nodes/string-entity.fnl)
 
 Represents a single string entity in the graph.
 
@@ -148,13 +148,13 @@ Listens to store signals:
 
 ### EntitiesNodeView
 
-**File:** [entities.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/graph/view/views/entities.fnl)
+**File:** [entities.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/graph/view/views/entities.fnl)
 
 Uses `SearchView` to display available entity types as buttons. Clicking a type calls `node:add-type-node(type-key)`.
 
 ### StringEntityListNodeView
 
-**File:** [string-entity-list.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/graph/view/views/string-entity-list.fnl)
+**File:** [string-entity-list.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/graph/view/views/string-entity-list.fnl)
 
 Layout:
 1. **Create button** — Calls `node:create-entity({})` then `node:add-entity-node(entity)`
@@ -162,7 +162,7 @@ Layout:
 
 ### StringEntityNodeView
 
-**File:** [string-entity.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/graph/view/views/string-entity.fnl)
+**File:** [string-entity.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/graph/view/views/string-entity.fnl)
 
 Layout:
 1. **Action row** — Copy Value, Copy ID, Delete buttons
@@ -174,13 +174,13 @@ Layout:
 
 ### Start Node
 
-**File:** [start.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/graph/nodes/start.fnl)
+**File:** [start.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/graph/nodes/start.fnl)
 
 The `EntitiesNode` is included in the start node's target list, making it accessible from the graph root.
 
 ### Menu Manager
 
-**File:** [menu-manager.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/menu-manager.fnl)
+**File:** [menu-manager.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/menu-manager.fnl)
 
 A "Create String Entity" action is available in the root menu, which:
 1. Creates an entity via `StringEntityStore.get-default()`
@@ -192,7 +192,7 @@ A "Create String Entity" action is available in the root menu, which:
 
 ### Unit Tests
 
-**File:** [test-string-entities.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/tests/test-string-entities.fnl)
+**File:** [test-string-entities.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/tests/test-string-entities.fnl)
 
 Covers:
 - Store CRUD operations
@@ -203,7 +203,7 @@ Covers:
 
 ### E2E Snapshot
 
-**File:** [test-string-entity-view.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/tests/e2e/test-string-entity-view.fnl)
+**File:** [test-string-entity-view.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/tests/e2e/test-string-entity-view.fnl)
 
 Creates a snapshot of the `StringEntityNodeView` rendered in a dialog with sample multiline content.
 
@@ -213,15 +213,15 @@ Creates a snapshot of the `StringEntityNodeView` rendered in a dialog with sampl
 
 | File | Purpose |
 |------|---------|
-| [entities/string.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/entities/string.fnl) | Storage layer |
-| [graph/nodes/entities.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/graph/nodes/entities.fnl) | Entity type browser node |
-| [graph/nodes/string-entity-list.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/graph/nodes/string-entity-list.fnl) | Entity list node |
-| [graph/nodes/string-entity.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/graph/nodes/string-entity.fnl) | Single entity node |
-| [graph/view/views/entities.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/graph/view/views/entities.fnl) | Type browser view |
-| [graph/view/views/string-entity-list.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/graph/view/views/string-entity-list.fnl) | List view |
-| [graph/view/views/string-entity.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/graph/view/views/string-entity.fnl) | Entity editor view |
-| [tests/test-string-entities.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/tests/test-string-entities.fnl) | Unit tests |
-| [tests/e2e/test-string-entity-view.fnl](https://github.com/semanticdreams/space2/blob/main/assets/lua/tests/e2e/test-string-entity-view.fnl) | E2E snapshot test |
+| [entities/string.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/entities/string.fnl) | Storage layer |
+| [graph/nodes/entities.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/graph/nodes/entities.fnl) | Entity type browser node |
+| [graph/nodes/string-entity-list.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/graph/nodes/string-entity-list.fnl) | Entity list node |
+| [graph/nodes/string-entity.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/graph/nodes/string-entity.fnl) | Single entity node |
+| [graph/view/views/entities.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/graph/view/views/entities.fnl) | Type browser view |
+| [graph/view/views/string-entity-list.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/graph/view/views/string-entity-list.fnl) | List view |
+| [graph/view/views/string-entity.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/graph/view/views/string-entity.fnl) | Entity editor view |
+| [tests/test-string-entities.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/tests/test-string-entities.fnl) | Unit tests |
+| [tests/e2e/test-string-entity-view.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/tests/e2e/test-string-entity-view.fnl) | E2E snapshot test |
 
 
 ## See also
