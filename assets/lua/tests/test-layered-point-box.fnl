@@ -76,6 +76,18 @@
                      ["LayeredPointBox" "reserved size"])
   (box:drop))
 
+(fn layered-point-box-rejects-initial-layer-size-larger-than-reserved-size []
+  (assert-fails-with (fn []
+                       (build-box {:reserved-size 12
+                                   :layers [{:size 14}]}))
+                     ["LayeredPointBox" "reserved size"]))
+
+(fn layered-point-box-rejects-initial-default-layer-size-larger-than-reserved-size []
+  (assert-fails-with (fn []
+                       (build-box {:reserved-size 8
+                                   :layers [{}]}))
+                     ["LayeredPointBox" "reserved size"]))
+
 (fn layered-point-box-can-update-reserved-size-explicitly []
   (local box
     (build-box {:reserved-size 12
@@ -128,6 +140,10 @@
                      :fn layered-point-box-builds-from-options-ctx})
 (table.insert tests {:name "LayeredPointBox rejects layer sizes larger than reserved size"
                      :fn layered-point-box-rejects-layer-sizes-larger-than-reserved-size})
+(table.insert tests {:name "LayeredPointBox rejects initial layer size larger than reserved size"
+                     :fn layered-point-box-rejects-initial-layer-size-larger-than-reserved-size})
+(table.insert tests {:name "LayeredPointBox rejects initial default layer size larger than reserved size"
+                     :fn layered-point-box-rejects-initial-default-layer-size-larger-than-reserved-size})
 (table.insert tests {:name "LayeredPointBox can update reserved size explicitly"
                      :fn layered-point-box-can-update-reserved-size-explicitly})
 (table.insert tests {:name "LayeredPointBox drops point and layout once"

@@ -18,6 +18,14 @@
       10.0
       size))
 
+(fn assert-layer-size-within-reserved [size reserved-size]
+  (local resolved (resolved-layer-size size))
+  (when (> resolved reserved-size)
+    (error (string.format "LayeredPointBox layer size %s exceeds reserved size %s"
+                          (tostring resolved)
+                          (tostring reserved-size))))
+  resolved)
+
 (fn LayeredPointBox [opts]
   (local options (or opts {}))
   (assert options.layers "LayeredPointBox requires layers")
@@ -29,6 +37,8 @@
                       options.points
                       (and effective-ctx effective-ctx.points)))
     (assert points "LayeredPointBox requires points")
+    (each [_ layer (ipairs options.layers)]
+      (assert-layer-size-within-reserved layer.size initial-reserved-size))
     (local point
       (LayeredPoint {:points points
                      :ctx effective-ctx
@@ -48,12 +58,7 @@
 
     (fn assert-size-within-reserved [size]
       (assert-not-dropped)
-      (local resolved (resolved-layer-size size))
-      (when (> resolved self.reserved-size)
-        (error (string.format "LayeredPointBox layer size %s exceeds reserved size %s"
-                              (tostring resolved)
-                              (tostring self.reserved-size))))
-      resolved)
+      (assert-layer-size-within-reserved size self.reserved-size))
 
     (local point-set-size point.set-size)
     (local point-set-layer point.set-layer)
