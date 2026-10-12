@@ -21,7 +21,7 @@
              :label label
              :color (glm.vec4 0.2 0.6 0.95 1)
              :sub-color (glm.vec4 0.15 0.5 0.85 1)
-             :size 7.0
+             :size 8.0
              :view HackerNewsUserView}))
     (set node.id id)
     (set node.user options.user)

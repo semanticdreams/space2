@@ -46,7 +46,7 @@
                           :label label
                           :color (glm.vec4 0.2 0.7 0.6 1)
                           :sub-color (glm.vec4 0.1 0.6 0.5 1)
-                          :size 9.0
+                          :size 8.0
                           :view LlmConversationsView}))
   (set node.store store)
   (set node.items-changed (Signal))

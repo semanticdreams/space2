@@ -125,7 +125,7 @@
                     :label (self:child-label entry)
                     :color (glm.vec4 0.7 0.75 0.9 1)
                     :sub-color (glm.vec4 0.55 0.6 0.75 1)
-                    :size 7.0}))
+                    :size 8.0}))
 
 (fn create-child-node [self entry]
     (if (= entry.value-type :table)
@@ -162,7 +162,7 @@
                                 :label label
                                 :color (glm.vec4 0.8 0.45 0.95 1)
                                 :sub-color (glm.vec4 0.65 0.35 0.85 1)
-                                :size 9.0
+                                :size 8.0
                                 :view TableNodeView}))
     (set node.table tbl)
     (set node.key-limit (math.max 8 (or options.key-limit default-key-limit)))

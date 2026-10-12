@@ -52,7 +52,7 @@
                           :label (light-label type-key light-id)
                           :color (glm.vec4 0.82 0.7 0.26 1)
                           :sub-color (glm.vec4 0.64 0.52 0.16 1)
-                          :size 7.0
+                          :size 8.0
                           :view LightNodeView}))
   (set node.world-id world-id)
   (set node.activity-id activity-id)

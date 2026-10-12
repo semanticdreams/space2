@@ -105,7 +105,7 @@
                           :color WORKFLOW_PURPLE
                           :sub-color WORKFLOW_PURPLE_ACCENT
                           :preview WorkflowsNodePreview
-                          :size 9.0}))
+                          :size 8.0}))
   (set node.workflow-store store)
   (set node.runner options.runner)
   (set node.code-store options.code-store)

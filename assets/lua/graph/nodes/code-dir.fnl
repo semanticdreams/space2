@@ -60,7 +60,7 @@
                             :label label
                             :color (glm.vec4 0.45 0.5 0.75 1)
                             :sub-color (glm.vec4 0.35 0.4 0.65 1)
-                            :size 8.5
+                            :size 8.0
                             :view CodeDirNodeView}))
     (set node.kind "code-dir")
     (set node.path absolute-path)

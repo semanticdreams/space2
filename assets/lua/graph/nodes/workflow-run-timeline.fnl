@@ -72,7 +72,7 @@
                           :color TIMELINE_PURPLE
                           :sub-color TIMELINE_PURPLE_ACCENT
                           :preview WorkflowRunTimelinePreview
-                          :size 7.5}))
+                          :size 8.0}))
   (set node.workflow-run-id run-id)
   (set node.workflow-store store)
   (set node.event-items

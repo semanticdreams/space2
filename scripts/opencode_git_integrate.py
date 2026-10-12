@@ -19,6 +19,11 @@ from opencode_capabilities import (
 )
 
 
+_GITHUB_REF_BYTE_LIMIT = 255
+_GIT_HEAD_REF_PREFIX = "refs/heads/"
+_LOCAL_REF_COMPONENT_BYTE_LIMIT = 255
+
+
 def _exit_code_for(result: dict[str, object]) -> int:
     if result.get("status") == "pass":
         return 0
@@ -48,8 +53,19 @@ def _origin_main_is_ancestor_of_head(repo: Path) -> bool:
     )
 
 
+def _is_safe_ref_name(branch: str) -> bool:
+    full_ref = f"{_GIT_HEAD_REF_PREFIX}{branch}"
+    return len(full_ref.encode("utf-8")) <= _GITHUB_REF_BYTE_LIMIT and all(
+        len(part.encode("utf-8")) <= _LOCAL_REF_COMPONENT_BYTE_LIMIT for part in full_ref.split("/")
+    )
+
+
 def _derive_followup_branch_name(source_branch: str, short_head_sha: str) -> str:
-    return f"{source_branch}-followup-{short_head_sha}"
+    candidate = f"{source_branch}-followup-{short_head_sha}"
+    if _is_safe_ref_name(candidate):
+        return candidate
+    return f"fix/followup-{short_head_sha}"
+
 
 
 def _derive_local_main_wrapup_branch_name(short_head_sha: str) -> str:

@@ -20,7 +20,7 @@
                         :label "start"
                         :color (glm.vec4 0 1 0 1)
                         :sub-color (glm.vec4 0 0.8 0 1)
-                        :size 9.0
+                         :size 8.0
                         :view StartNodeView}))
     (set node.targets-changed (Signal))
 

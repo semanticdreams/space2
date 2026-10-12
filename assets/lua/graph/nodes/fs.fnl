@@ -98,7 +98,7 @@
                                 :label label
                                 :color (glm.vec4 0.3 0.6 1.0 1)
                                 :sub-color (glm.vec4 0.15 0.45 0.9 1)
-                                :size 9.0
+                                :size 8.0
                                 :view FsNodeView}))
     (set node.path path)
     (set node.resolve-path M.resolve-path)
