@@ -353,6 +353,8 @@
   (layout-widget! widget)
   (local initial-height widget.layout.measure.y)
   (local initial-label-x widget.label.layout.position.x)
+  (local initial-label-y widget.label.layout.position.y)
+  (local initial-point-y widget.point.position.y)
   (set row-state.selected? true)
   (set row-state.focused? true)
   (widget:refresh)
@@ -360,14 +362,32 @@
   (assert (approx widget.layout.measure.y initial-height)
           "outline row height should not change when selection/focus rings appear")
   (assert (approx widget.label.layout.position.x initial-label-x)
-          "outline label x should not move when selection/focus rings appear")
+           "outline label x should not move when selection/focus rings appear")
+  (assert (approx widget.label.layout.position.y initial-label-y)
+          "outline label y should not move when selection/focus rings appear")
+  (assert (approx widget.point.position.y initial-point-y)
+          "outline point y should not move when selection/focus rings appear")
   (assert (> (. widget.point.layers 1 :size) 0)
           "focus layer should become visible")
   (assert (> (. widget.point.layers 2 :size) 0)
           "selection layer should become visible")
   (widget:drop))
 
-(fn outline-row-marker-and-label-are-top-aligned []
+(fn outline-row-centers-short-label-within-marker-lane []
+  (local {:widget widget} (make-outline-row-widget {:label-scale 0.5}))
+  (layout-widget! widget)
+  (assert widget.marker-box "outline row should expose marker-box")
+  (widget.marker-box.layout:measurer)
+  (widget.label.layout:measurer)
+  (local marker-center-y (+ widget.marker-box.layout.position.y
+                            (/ widget.marker-box.layout.size.y 2.0)))
+  (local label-center-y (+ widget.label.layout.position.y
+                           (/ widget.label.layout.measure.y 2.0)))
+  (assert (approx label-center-y marker-center-y)
+          "short outline label should be vertically centered in the marker lane")
+  (widget:drop))
+
+(fn outline-row-tall-label-remains-top-aligned []
   (local {:widget widget} (make-outline-row-widget {:label-scale 2.0}))
   (layout-widget! widget)
   (assert widget.marker-box "outline row should expose marker-box")
@@ -378,7 +398,9 @@
   (assert (approx (+ widget.marker-box.layout.position.y widget.marker-box.layout.size.y) expected-top)
           "marker box top should match summary content top")
   (assert (approx (+ widget.label.layout.position.y widget.label.layout.measure.y) expected-top)
-          "label top should match summary content top")
+          "tall label top should match summary content top")
+  (assert (approx widget.layout.measure.y (+ widget.label.layout.measure.y 2))
+          "tall label should grow row height instead of being clipped by marker lane")
   (assert (approx widget.point.position.y (+ widget.marker-box.layout.position.y (/ widget.marker-box.layout.size.y 2.0)))
           "point center should come from marker box center, not full label height")
   (widget:drop))
@@ -462,8 +484,10 @@
 
 (table.insert tests {:name "outline row marker measurement is stable across focus and selection"
                      :fn outline-row-marker-measurement-is-stable-across-focus-and-selection})
-(table.insert tests {:name "outline row marker and label are top aligned"
-                     :fn outline-row-marker-and-label-are-top-aligned})
+(table.insert tests {:name "outline row centers short label within marker lane"
+                     :fn outline-row-centers-short-label-within-marker-lane})
+(table.insert tests {:name "outline row tall label remains top aligned"
+                     :fn outline-row-tall-label-remains-top-aligned})
 (table.insert tests {:name "outline focus and selection do not move descendant row points"
                      :fn outline-focus-and-selection-do-not-move-descendant-row-points})
 (table.insert tests {:name "outline row keeps marker box point across expand and collapse"

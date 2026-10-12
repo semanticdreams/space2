@@ -175,6 +175,8 @@
   (state.marker-box.layout:measurer)
   (state.label.layout:measurer)
   (local marker-size state.marker-box.layout.measure)
+  (local label-size state.label.layout.measure)
+  (local label-y-offset (math.max 0 (/ (- marker-size.y label-size.y) 2.0)))
   (local summary-top (+ layout.position.y layout.size.y))
   (local content-top (- summary-top state.vertical-padding))
   (set state.marker-box.layout.position
@@ -187,7 +189,7 @@
   (state.marker-box.layout:layouter)
   (set state.label.layout.position
        (glm.vec3 (+ (point-x state) (/ marker-size.x 2.0) state.label-gap)
-                 (- content-top state.label.layout.measure.y)
+                 (- content-top label-size.y label-y-offset)
                  0.02))
   (set state.label.layout.rotation (glm.quat 1 0 0 0))
   (set state.label.layout.depth-offset-index 1)
