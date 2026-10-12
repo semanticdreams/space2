@@ -35,10 +35,10 @@
           "OutlineRowWidget requires row.node.color"))
 
 (fn selected? [state]
-  (not (not (state.opts.selected? state.row))))
+  (not (not (state.opts.selected? state.row state.opts.owner))))
 
 (fn focused? [state]
-  (not (not (state.opts.focused? state.row))))
+  (not (not (state.opts.focused? state.row state.opts.owner))))
 
 (fn focus-color [state]
   (default-vec4 state.opts.focus-outline-color (glm.vec4 0.2 0.6 1 1)))
@@ -111,7 +111,7 @@
    :layers (projection-layers state)
    :selected? (selected? state)
    :focused? (focused? state)
-   :owner state.self
+    :owner (or state.opts.owner state.self)
    :on-focus state.opts.on-focus
    :on-right-click state.opts.on-right-click
    :on-activate state.opts.on-activate})
@@ -197,23 +197,25 @@
 
 (fn card-collapse-callback [state]
   (fn []
-    (when state.opts.on-collapse
-      (state.opts.on-collapse state.row.node {:owner state.self}))
-    (state.self:collapse!)))
+    (local handled? (and state.opts.on-collapse
+                         (state.opts.on-collapse state.row.node {:owner (if state.opts.owner state.opts.owner state.self)})))
+    (when (not handled?)
+      (state.self:collapse!))))
 
 (fn card-open-callback [state]
   (fn [event]
     (when state.opts.on-open
-      (state.opts.on-open state.row.node event {:owner state.self}))))
+      (state.opts.on-open state.row.node event {:owner (if state.opts.owner state.opts.owner state.self)}))))
 
 (fn card-menu-callback [state]
   (fn [event]
     (when state.opts.on-menu
-      (state.opts.on-menu state.row.node event {:owner state.self}))))
+      (state.opts.on-menu state.row.node event {:owner (if state.opts.owner state.opts.owner state.self)}))))
 
 (fn expanded-card-click-callback [state]
   (fn [_card _event]
-    (state.focus-node:request-focus {:reason :pointer :owner state.self})))
+    (when state.focus-node
+      (state.focus-node:request-focus {:reason :pointer :owner state.self}))))
 
 (fn build-card [state]
   (local builder (GraphNodePresentation.card-builder
@@ -266,7 +268,8 @@
         (state.selector:replace-selectable previous-selectable state.expanded-card)
         (set state.selectable state.expanded-card)
         (set state.self.selectable state.selectable)
-        (set state.focus-node.presentation state.expanded-card)
+        (when state.focus-node
+          (set state.focus-node.presentation state.expanded-card))
         (state.layout:add-child state.expanded-card.layout)
         (refresh! state)
         true)))
@@ -292,7 +295,8 @@
     (if state.expanded-card
         (do
           (unregister-expanded-card! state)
-          (state.focus-node:drop)
+          (when state.focus-node
+            (state.focus-node:drop))
           (state.compact-point:drop))
         (when state.projection
           (CompactNodeProjection.drop! state.projection)))

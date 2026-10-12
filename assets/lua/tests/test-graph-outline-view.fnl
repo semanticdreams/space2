@@ -999,10 +999,10 @@
             "root node circle should start at deterministic tree x position")
     (assert (= (. base-points 2 :position :x) 30)
             "child node circle should indent by depth in tree layout")
-    (assert (= (. base-points 1 :position :y) -12)
-            "root node circle should use deterministic first-row y position")
-    (assert (= (. base-points 2 :position :y) -36)
-            "child node circle should use deterministic traversal-row y position")
+    (assert (> (. base-points 1 :position :y) (. base-points 2 :position :y))
+            "root node circle should remain above child node circle in tree layout")
+    (assert (not (= (math.abs (- (. base-points 1 :position :y) (. base-points 2 :position :y))) 24))
+            "node circle y positions should come from measured tree rows, not fixed stride")
     (assert (= (count-render-events ctx :quad-upsert) 0)
             "non-empty outline rows should not render list-row rectangles")
     (view:drop)
@@ -1012,6 +1012,8 @@
         (assert point.dropped? "dropping outline rows should remove node circle artifacts"))
     (graph-map:drop)
     (graph:drop))
+
+(fn outline-rows-use-measured-tree-layout-instead-of-fixed-stride [] (local {:graph graph :graph-map graph-map} (make-map)) (add-edge! graph-map "test:root" "test:child") (graph-map:set-view-mode! "outline") (graph-map:set-outline-root-keys! ["test:root"]) (local ctx (make-render-ctx)) (local view (GraphView {:graph-map graph-map :ctx ctx :outline-text-scale 1.0})) (local root-record (view-record-for-key view "test:root")) (local child-record (view-record-for-key view "test:child")) (local distance (math.abs (- root-record.point.position.y child-record.point.position.y))) (assert (< distance 24) (.. "outline row spacing should come from measured TreeView rows, got fixed stride " (tostring distance))) (assert (> distance (+ root-record.point.size 1)) (.. "outline row spacing should keep compact points separated by row gap, got " (tostring distance))) (view:drop) (graph-map:drop) (graph:drop))
 
 (fn outline-labels-align-right-of-node-points []
     (local {:graph graph :graph-map graph-map} (make-map))
@@ -1182,6 +1184,7 @@
 (table.insert tests {:name "outline expanded card collapse rebuilds compact row" :fn outline-expanded-card-collapse-rebuilds-compact-row})
 (table.insert tests {:name "outline compact point registrations drop on rebuild and drop" :fn outline-compact-point-registrations-drop-on-rebuild-and-drop})
 (table.insert tests {:name "outline view creates tree node visual artifacts for projected rows" :fn outline-view-creates-tree-node-visual-artifacts-for-projected-rows})
+(table.insert tests {:name "outline rows use measured tree layout instead of fixed stride" :fn outline-rows-use-measured-tree-layout-instead-of-fixed-stride})
 (table.insert tests {:name "outline labels align right of node points" :fn outline-labels-align-right-of-node-points})
 (table.insert tests {:name "outline rebuild resolves row and empty colors from theme" :fn outline-rebuild-resolves-row-and-empty-colors-from-theme})
 (table.insert tests {:name "outline view creates empty state guidance when no roots" :fn outline-view-creates-empty-state-guidance-when-no-roots})
