@@ -73,26 +73,27 @@
   (local override-model (and override override.modelID))
   (local env-provider (if override-provider override-provider (os.getenv "OPENCODE_SPACE_TOOLS_PROVIDER_ID")))
   (local env-model (if override-model override-model (os.getenv "OPENCODE_SPACE_TOOLS_MODEL_ID")))
-  (var result nil)
-  (server.config.providers (fn [r] (set result r)))
-  (wait-for #(not= result nil) 10000)
-  (assert-response-ok result "config providers")
   (if (or env-provider env-model)
       (do
         (assert-ok (and env-provider env-model)
                    "OPENCODE_SPACE_TOOLS_PROVIDER_ID and OPENCODE_SPACE_TOOLS_MODEL_ID must be set together")
         {:providerID env-provider :modelID env-model})
-      (and result.data.default result.data.default.opencode)
-      {:providerID "opencode" :modelID result.data.default.opencode}
-      result.data.default
       (do
-        (local picked [])
-        (each [provider-id model-id (pairs result.data.default)]
-          (when (= (# picked) 0)
-            (table.insert picked {:providerID provider-id :modelID model-id})))
-        (assert-ok (> (# picked) 0) "no default model configured")
-        (. picked 1))
-      (error "no default model configured")))
+        (var result nil)
+        (server.config.providers (fn [r] (set result r)))
+        (wait-for #(not= result nil) 10000)
+        (assert-response-ok result "config providers")
+        (if (and result.data.default result.data.default.opencode)
+            {:providerID "opencode" :modelID result.data.default.opencode}
+            result.data.default
+            (do
+              (local picked [])
+              (each [provider-id model-id (pairs result.data.default)]
+                (when (= (# picked) 0)
+                  (table.insert picked {:providerID provider-id :modelID model-id})))
+              (assert-ok (> (# picked) 0) "no default model configured")
+              (. picked 1))
+            (error "no default model configured")))))
 
 (fn tool-name [tool]
   (if tool.name
@@ -159,28 +160,158 @@
       (set ok false)))
   ok)
 
-(fn fake-providers-response [callback]
+(fn fake-providers-response [state callback]
+  (tset state :calls (+ state.calls 1))
   (callback {:ok true
-             :data {:providers []
-                    :default {:opencode "test-default"}}}))
+              :data {:providers []
+                     :default {:opencode "test-default"}}}))
 
 (fn fake-provider-server []
-  {:config {:providers fake-providers-response}})
+  (local state {:calls 0})
+  {:state state
+   :config {:providers (fn [callback]
+                         (fake-providers-response state callback))}})
+
+(fn explicit-model-override []
+  (local provider-id (os.getenv "OPENCODE_SPACE_TOOLS_PROVIDER_ID"))
+  (local model-id (os.getenv "OPENCODE_SPACE_TOOLS_MODEL_ID"))
+  (if provider-id
+      (do
+        (assert-ok model-id
+                   "OPENCODE_SPACE_TOOLS_PROVIDER_ID and OPENCODE_SPACE_TOOLS_MODEL_ID must be set together")
+        {:providerID provider-id :modelID model-id})
+      model-id
+      (error "OPENCODE_SPACE_TOOLS_PROVIDER_ID and OPENCODE_SPACE_TOOLS_MODEL_ID must be set together")
+      nil))
+
+(fn provider-model-config-extra [model]
+  (when model
+    (local models {})
+    (tset models model.modelID {:name model.modelID})
+    (local provider-config {:models models})
+    (local providers {})
+    (tset providers model.providerID provider-config)
+    {:default_agent "build"
+     :provider providers}))
+
+(fn filter-auth-content-json [provider-id content]
+  (when (and provider-id content (> (# content) 0))
+    (local (ok parsed) (pcall json.loads content))
+    (when (and ok (= (type parsed) "table") (. parsed provider-id))
+      (local filtered {})
+      (tset filtered provider-id (. parsed provider-id))
+      (json.dumps filtered))))
+
+(fn default-auth-content []
+  (local env-content (os.getenv "OPENCODE_AUTH_CONTENT"))
+  (if env-content
+      env-content
+      (do
+        (local home (os.getenv "HOME"))
+        (when home
+          (local auth-path (fs.join-path home ".local/share/opencode/auth.json"))
+          (when (fs.exists auth-path)
+            (fs.read-file auth-path))))))
+
+(fn provider-auth-content [provider-id]
+  (filter-auth-content-json provider-id (default-auth-content)))
+
+(fn copy-env [source]
+  (local input (if (= source nil) {} source))
+  (local env {})
+  (each [k v (pairs input)]
+    (tset env k v))
+  env)
+
+(fn path-only-env []
+  (local env {})
+  (local path (os.getenv "PATH"))
+  (when path
+    (tset env :PATH path))
+  env)
+
+(fn isolated-opencode-env [root bridge-env explicit-model]
+  (local env (copy-env bridge-env))
+  (local home (fs.join-path root "home"))
+  (local data-home (fs.join-path root "xdg-data"))
+  (ensure-dir! home)
+  (ensure-dir! data-home)
+  (tset env :HOME home)
+  (tset env :XDG_DATA_HOME data-home)
+  (local path (os.getenv "PATH"))
+  (when path
+    (tset env :PATH path))
+  (local auth-content (and explicit-model (provider-auth-content explicit-model.providerID)))
+  (when auth-content
+    (tset env :OPENCODE_AUTH_CONTENT auth-content))
+  env)
+
+(fn opencode-server-options [opencode-path bridge root]
+  (local explicit-model (explicit-model-override))
+  {:opencode-path opencode-path
+   :port 0
+   :env (isolated-opencode-env root (bridge:opencode-env) explicit-model)
+   :clear-env true})
+
+(fn opencode-version-check-options [opencode-path]
+  {:args [opencode-path "--version"]
+   :timeout_seconds 5
+   :env (path-only-env)
+   :clear-env true})
 
 (fn assert-explicit-model-override []
   (local override {:providerID "openai" :modelID "gpt-5.5"})
-  (local model (choose-model (fake-provider-server) override))
+  (local server (fake-provider-server))
+  (local model (choose-model server override))
   (assert-ok (= model.providerID override.providerID) "provider override should be selected")
-  (assert-ok (= model.modelID override.modelID) "model override should be selected"))
+  (assert-ok (= model.modelID override.modelID) "model override should be selected")
+  (assert-ok (= server.state.calls 0) "explicit override should not query provider list"))
 
 (fn assert-env-model-override []
   (local env-provider (os.getenv "OPENCODE_SPACE_TOOLS_PROVIDER_ID"))
   (local env-model (os.getenv "OPENCODE_SPACE_TOOLS_MODEL_ID"))
   (assert-ok (and env-provider env-model)
              "set OPENCODE_SPACE_TOOLS_PROVIDER_ID and OPENCODE_SPACE_TOOLS_MODEL_ID for env override regression")
-  (local model (choose-model (fake-provider-server)))
+  (local server (fake-provider-server))
+  (local model (choose-model server))
   (assert-ok (= model.providerID env-provider) "env provider override should be selected")
-  (assert-ok (= model.modelID env-model) "env model override should be selected"))
+  (assert-ok (= model.modelID env-model) "env model override should be selected")
+  (assert-ok (= server.state.calls 0) "env override should not query provider list"))
+
+(fn assert-provider-model-config-extra []
+  (local config (provider-model-config-extra {:providerID "openai" :modelID "gpt-5-test"}))
+  (assert-ok (= config.provider.openai.models.gpt-5-test.name "gpt-5-test")
+             "explicit provider model should be injected into generated config"))
+
+(fn assert-auth-content-filter []
+  (local content (json.dumps {:openai {:type "api" :key "openai-key"}
+                              :anthropic {:type "api" :key "anthropic-key"}}))
+  (local filtered (filter-auth-content-json "openai" content))
+  (local parsed (json.loads filtered))
+  (assert-ok parsed.openai "filtered auth should include requested provider")
+  (assert-ok (not parsed.anthropic) "filtered auth should exclude other providers"))
+
+(fn assert-opencode-server-options-clear-env []
+  (local root (.. "/tmp/space/tests/opencode-env-helper-" (os.time) "-" (math.random 0 99999)))
+  (local bridge {:opencode-env (fn [] {:XDG_CONFIG_HOME "/tmp/space-config"
+                                       :OPENCODE_CONFIG_CONTENT "{\"mcp\":{}}"})})
+  (local (ok opts) (pcall opencode-server-options "opencode" bridge root))
+  (when (fs.exists root)
+    (fs.remove-all root))
+  (assert-ok ok (.. "server options should build: " (tostring opts)))
+  (assert-ok (= opts.clear-env true) "OpenCode server should clear inherited environment")
+  (assert-ok (= opts.env.XDG_CONFIG_HOME "/tmp/space-config") "bridge config env should be preserved")
+  (assert-ok (= opts.env.HOME (fs.join-path root "home")) "HOME should be isolated")
+  (assert-ok (= opts.env.XDG_DATA_HOME (fs.join-path root "xdg-data")) "XDG data should be isolated")
+  (assert-ok (not opts.env.OPENAI_API_KEY) "parent provider API keys should not be copied directly"))
+
+(fn assert-opencode-version-check-clear-env []
+  (local opts (opencode-version-check-options "opencode"))
+  (assert-ok (= opts.clear-env true) "OpenCode version preflight should clear inherited environment")
+  (assert-ok (= opts.timeout_seconds 5) "OpenCode version preflight should retain timeout")
+  (assert-ok opts.env "OpenCode version preflight should pass an explicit env")
+  (assert-ok (not opts.env.HOME) "OpenCode version preflight should not inherit HOME")
+  (assert-ok (not opts.env.OPENAI_API_KEY) "OpenCode version preflight should not inherit provider API keys"))
 
 (fn assert-literal-deny []
   (assert-ok (all-native-tools-denied? ["bash"] {:bash "deny"})
@@ -203,7 +334,11 @@
     (run-test "explicit env model override bypasses generated provider list" assert-env-model-override))
   (run-test "literal deny counts as native tool denied" assert-literal-deny)
   (run-test "bounded wildcard deny table counts as native tool denied" assert-wildcard-deny-table)
-  (run-test "bounded table with any allow is not fully denied" assert-allow-table-not-denied))
+  (run-test "bounded table with any allow is not fully denied" assert-allow-table-not-denied)
+  (run-test "explicit model override injects provider model config" assert-provider-model-config-extra)
+  (run-test "explicit model override filters provider auth content" assert-auth-content-filter)
+  (run-test "opencode server options clear inherited env" assert-opencode-server-options-clear-env)
+  (run-test "opencode version preflight clears inherited env" assert-opencode-version-check-clear-env))
 
 (fn text-from-parts [parts]
   (var text "")
@@ -240,9 +375,11 @@
   (ensure-dir! root)
   (local registry (ToolRegistry {:namespace-prefix "space_"}))
   (register-probe-tool registry state)
+  (local explicit-model (explicit-model-override))
   (local bridge (AgentOpencodeMcpBridgeMod.AgentOpencodeMcpBridge
                   {:tools registry
-                   :data-dir (fs.join-path root "bridge")}))
+                   :data-dir (fs.join-path root "bridge")
+                   :config-extra (provider-model-config-extra explicit-model)}))
   (bridge:start)
   (tset handles :bridge bridge)
   (local bridge-status (bridge:status))
@@ -251,9 +388,7 @@
    :config (json.loads (fs.read-file bridge-status.config-path))})
 
 (fn start-opencode-server [opencode-path bridge handles]
-  (local server (OpencodeSdk.Opencode {:opencode-path opencode-path
-                                       :port 0
-                                       :env (bridge:opencode-env)}))
+  (local server (OpencodeSdk.Opencode (opencode-server-options opencode-path bridge handles.root)))
   (tset handles :server server)
   (print "server: " (server.server.url))
   server)
@@ -438,7 +573,7 @@
       (print (.. "Results: " passed " passed, " failed " failed"))
       (do
         (local opencode-path (if (os.getenv "OPENCODE_PATH") (os.getenv "OPENCODE_PATH") "opencode"))
-        (local check (process.run {:args [opencode-path "--version"] :timeout_seconds 5}))
+        (local check (process.run (opencode-version-check-options opencode-path)))
         (assert-ok (= check.exit-code 0)
                    (.. "opencode unavailable at " opencode-path ": " (if check.stderr check.stderr "")))
         (print "opencode: " (trim-version check.stdout))

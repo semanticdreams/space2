@@ -18,17 +18,58 @@
       (permissions)
       permissions))
 
-(fn write-opencode-config! [config-root mcp-key url permissions]
+(fn table-value? [value]
+  (= (type value) "table"))
+
+(fn copy-table [input]
+  (local source (if (= input nil) {} input))
+  (assert (table-value? source) "copy-table requires a table or nil")
+  (local result {})
+  (each [k v (pairs source)]
+    (tset result k (if (table-value? v) (copy-table v) v)))
+  result)
+
+(fn merge-tables [base overlay]
+  (local overlay-table (if (= overlay nil) {} overlay))
+  (assert (table-value? overlay-table) "merge-tables overlay must be a table or nil")
+  (local result (copy-table base))
+  (each [k v (pairs overlay-table)]
+    (local existing (. result k))
+    (tset result k
+          (if (and (table-value? existing) (table-value? v))
+              (merge-tables existing v)
+              (if (table-value? v) (copy-table v) v))))
+  result)
+
+(fn resolve-config-extra [config-extra]
+  (if (= (type config-extra) "function")
+      (config-extra)
+      config-extra))
+
+(fn validate-config-extra! [extra]
+  (when (not (table-value? extra))
+    (error "OpenCode config extra must be a table or nil"))
+  (when (not= (. extra :permission) nil)
+    (error "OpenCode config extra cannot override bridge-owned permission config"))
+  (when (not= (. extra :mcp) nil)
+    (error "OpenCode config extra cannot override bridge-owned MCP config"))
+  extra)
+
+(fn write-opencode-config! [config-root mcp-key url permissions config-extra]
   (local opencode-dir (fs.join-path config-root "opencode"))
   (ensure-dir! opencode-dir)
   (local mcp {})
   (tset mcp mcp-key {:type "remote"
-                     :url url
-                     :enabled true})
+                      :url url
+                      :enabled true})
+  (local resolved-extra (resolve-config-extra config-extra))
+  (local extra (if (= resolved-extra nil) {} resolved-extra))
+  (validate-config-extra! extra)
+  (local bridge-config {:permission (resolve-permissions permissions)
+                        :mcp mcp})
   (JsonUtils.write-json!
     (config-path config-root)
-    {:permission (resolve-permissions permissions)
-     :mcp mcp}))
+    (merge-tables extra bridge-config)))
 
 (fn merge-status [extras core]
   (local status {})
@@ -56,12 +97,12 @@
   (when server
     (pcall (fn [] (server:stop)))))
 
-(fn start-server-and-write-config! [server host name config-root mcp-key permissions]
+(fn start-server-and-write-config! [server host name config-root mcp-key permissions config-extra]
   (local started-port (server:start host 0))
   (when (not (> started-port 0))
     (error (.. name " got invalid MCP port: " (tostring started-port))))
   (local current-url (remote-url host started-port))
-  (write-opencode-config! config-root mcp-key current-url permissions)
+  (write-opencode-config! config-root mcp-key current-url permissions config-extra)
   {:port started-port :url current-url})
 
 (fn OpencodeMcpBridge [opts]
@@ -75,6 +116,7 @@
   (local host (or opts.host "127.0.0.1"))
   (local force-sse (if (= opts.force-sse false) false true))
   (local status-extra opts.status-extra)
+  (local config-extra opts.config-extra)
   (local http-server-factory (or opts.http-server-factory default-http-server-factory))
   (local mcp-server-factory (or opts.mcp-server-factory
                                (fn [http-server]
@@ -97,7 +139,7 @@
     (ensure-dir! config-root)
     (set server (mcp-server-factory (http-server-factory)))
     (local (ok result) (pcall start-server-and-write-config!
-                              server host name config-root mcp-key permissions))
+                              server host name config-root mcp-key permissions config-extra))
     (when (not ok)
       (cleanup-failed-start! server)
       (set server nil)
@@ -122,12 +164,13 @@
   (fn opencode-env [_self]
     (when (not started?)
       (error (.. name " must be started before building OpenCode env")))
-    {:XDG_CONFIG_HOME config-root})
+    {:XDG_CONFIG_HOME config-root
+     :OPENCODE_CONFIG_CONTENT (fs.read-file (config-path config-root))})
 
   (fn refresh-config! [_self]
     (when (not started?)
       (error (.. name " must be started before refreshing OpenCode config")))
-    (write-opencode-config! config-root mcp-key url permissions)
+    (write-opencode-config! config-root mcp-key url permissions config-extra)
     {:config-path (config-path config-root)
      :url url})
 
@@ -155,6 +198,9 @@
  :remote-url remote-url
  :config-path config-path
  :write-opencode-config! write-opencode-config!
+ :merge-tables merge-tables
+ :resolve-config-extra resolve-config-extra
+ :validate-config-extra! validate-config-extra!
  :resolve-permissions resolve-permissions
  :merge-status merge-status
  :OpencodeMcpBridge OpencodeMcpBridge}
