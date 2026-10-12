@@ -13,7 +13,7 @@ import opencode_capabilities as capabilities
 import verify_opencode_home_config as verify_config
 
 
-def init_git_repo(path: Path, *, origin: str = "git@github.com:semanticdreams/space2.git") -> Path:
+def init_git_repo(path: Path, *, origin: str = "git@github.com:semanticdreams/spacecore.git") -> Path:
     path.mkdir(parents=True)
     subprocess.run(["git", "init"], cwd=path, check=True, stdout=subprocess.DEVNULL)
     subprocess.run(["git", "remote", "add", "origin", origin], cwd=path, check=True)
@@ -34,8 +34,19 @@ def create_repo_opencode_tree(repo: Path) -> None:
     (repo / ".opencode" / "plugins" / "rtk.ts").write_text("export default async () => ({})\n", encoding="utf-8")
 
 
-def test_ensure_space_repo_accepts_space_repo_with_markers(tmp_path: Path) -> None:
-    repo = init_git_repo(tmp_path / "space")
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "git@github.com:semanticdreams/spacecore.git",
+        "git@github.com:semanticdreams/spacecore",
+        "ssh://git@github.com/semanticdreams/spacecore.git",
+        "ssh://git@github.com/semanticdreams/spacecore",
+        "https://github.com/semanticdreams/spacecore.git",
+        "https://github.com/semanticdreams/spacecore",
+    ],
+)
+def test_ensure_space_repo_accepts_spacecore_repo_with_markers(tmp_path: Path, origin: str) -> None:
+    repo = init_git_repo(tmp_path / "space", origin=origin)
     add_space_markers(repo)
 
     assert capabilities.ensure_space_repo(repo) == repo.resolve()
@@ -195,7 +206,7 @@ def test_audit_opencode_home_fails_closed_for_spoofed_outside_checkout_origin(tm
     active_repo = init_git_repo(tmp_path / "active-worktree")
     spoofed_checkout = init_git_repo(
         tmp_path / "spoofed-checkout",
-        origin="git@example.com:attacker/semanticdreams/space2-fake.git",
+        origin="git@example.com:attacker/semanticdreams/spacecore-fake.git",
     )
     create_repo_opencode_tree(active_repo)
     create_repo_opencode_tree(spoofed_checkout)

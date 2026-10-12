@@ -14,7 +14,7 @@ def make_space_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "space"
     repo.mkdir()
     subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL)
-    subprocess.run(["git", "remote", "add", "origin", "git@github.com:semanticdreams/space2.git"], cwd=repo, check=True)
+    subprocess.run(["git", "remote", "add", "origin", "git@github.com:semanticdreams/spacecore.git"], cwd=repo, check=True)
     (repo / "AGENTS.md").write_text("# Repository Guidelines\n", encoding="utf-8")
     (repo / ".opencode").mkdir()
     (repo / ".opencode" / "opencode.json").write_text("{}\n", encoding="utf-8")
