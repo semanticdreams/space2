@@ -42,7 +42,7 @@
                            :sub-color (WorkflowRunNode.status-color (and run-step run-step.status))
                            :preview WorkflowRunStepNodePreview
                            :view WorkflowRunStepNodeView
-                           :size 7.0}))
+                           :size 8.0}))
   (set node.workflow-run-id run-id)
   (set node.workflow-step-id step-id)
   (set node.workflow-store store)

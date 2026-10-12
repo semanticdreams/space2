@@ -13,7 +13,7 @@
              :label "hackernews"
              :color (glm.vec4 1 0.4 0 1)
              :sub-color (glm.vec4 1 0.25 0 1)
-             :size 9.0
+             :size 8.0
              :view HackerNewsRootView}))
 
     (set node.ensure-client options.ensure-client)

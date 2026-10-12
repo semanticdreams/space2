@@ -43,7 +43,7 @@
                           :label "resize terrain"
                           :color (glm.vec4 0.37 0.48 0.58 1)
                           :sub-color (glm.vec4 0.25 0.35 0.44 1)
-                          :size 7.5
+                          :size 8.0
                           :view HeightfieldResizeToolNodeView}))
   (set node.world-id world-id)
   (set node.activity-id activity-id)

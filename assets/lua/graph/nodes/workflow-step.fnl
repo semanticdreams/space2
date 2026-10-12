@@ -88,7 +88,7 @@
                           :color STEP_GREEN
                           :sub-color STEP_GREEN_ACCENT
                           :preview WorkflowStepNodePreview
-                          :size 7.5}))
+                          :size 8.0}))
   (set node.workflow-definition-id definition-id)
   (set node.workflow-step-id step-id)
   (set node.workflow-store store)

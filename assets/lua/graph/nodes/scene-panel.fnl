@@ -25,7 +25,7 @@
                            :label label
                            :color (glm.vec4 0.6 0.5 0.8 1)
                            :sub-color (glm.vec4 0.5 0.4 0.7 1)
-                           :size 7.0
+                           :size 8.0
                            :view ScenePanelNodeView}))
   (set node.world-id world-id)
   (set node.activity-id activity-id)

@@ -29,7 +29,7 @@
              :label (or title (.. "story " id))
              :color (glm.vec4 0.9 0.5 0.2 1)
              :sub-color (glm.vec4 0.8 0.4 0.15 1)
-             :size 7.5
+             :size 8.0
              :view HackerNewsStoryView}))
     (set node.id id)
     (set node.item options.item)

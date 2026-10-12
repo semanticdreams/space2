@@ -27,7 +27,7 @@
                           :label "apply perlin"
                           :color (glm.vec4 0.33 0.49 0.37 1)
                           :sub-color (glm.vec4 0.21 0.35 0.24 1)
-                          :size 7.5
+                          :size 8.0
                           :view HeightfieldPerlinToolNodeView}))
   (set node.world-id world-id)
   (set node.activity-id activity-id)

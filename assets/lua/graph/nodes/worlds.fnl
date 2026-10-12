@@ -17,7 +17,7 @@
                            :label "worlds"
                            :color (glm.vec4 0.75 0.55 0.15 1)
                            :sub-color (glm.vec4 0.65 0.45 0.05 1)
-                           :size 9.0
+                           :size 8.0
                            :view WorldsNodeView}))
   (set node.world-manager world-manager)
   (set node.asset-path-resolver asset-path-resolver)
