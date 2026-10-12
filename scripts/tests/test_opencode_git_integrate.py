@@ -228,6 +228,12 @@ def test_derive_followup_branch_name_appends_followup_suffix() -> None:
     )
 
 
+def test_derive_followup_branch_name_uses_bounded_fallback_when_appended_name_would_be_too_long() -> None:
+    source = "juicyrebel/" + ("nested-segment/" * 20) + "feature"
+
+    assert git_integrate._derive_followup_branch_name(source, "caad43f") == "fix/followup-caad43f"
+
+
 def test_derive_local_main_wrapup_branch_name_uses_fast_dev_local_main_prefix() -> None:
     assert git_integrate._derive_local_main_wrapup_branch_name("caad43f") == "fast-dev/local-main-caad43f"
 
@@ -596,6 +602,34 @@ def test_create_followup_branch_refuses_when_local_target_exists(monkeypatch, tr
     assert runner.checks[runner.calls.index(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"])] is False
 
 
+def test_create_followup_branch_checks_local_conflict_on_bounded_fallback(monkeypatch, trusted_repo: Path) -> None:
+    source = "juicyrebel/" + ("nested-segment/" * 20) + "feature"
+    target = "fix/followup-caad43f"
+    runner = GitRunner(
+        {
+            ("git", "status", "--porcelain"): "",
+            ("git", "branch", "--show-current"): f"{source}\n",
+            ("git", "rev-parse", "--short=7", "HEAD"): "caad43f\n",
+            ("git", "merge-base", "--is-ancestor", "origin/main", "HEAD"): command_result(
+                ["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"],
+                returncode=0,
+            ),
+            ("git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"): command_result(
+                ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"],
+                returncode=0,
+            ),
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    result = git_integrate.create_followup_branch(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert result["evidence"]["followup_branch"] == target
+    assert ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"] in runner.calls
+    assert [call for call in runner.calls if call[:3] == ["git", "switch", "-c"]] == []
+
+
 def test_create_followup_branch_refuses_when_remote_target_exists(monkeypatch, trusted_repo: Path) -> None:
     target = "feature/opencode-capabilities-followup-caad43f"
     runner = GitRunner(
@@ -624,6 +658,38 @@ def test_create_followup_branch_refuses_when_remote_target_exists(monkeypatch, t
     assert result["status"] == "human_decision_required"
     assert [call for call in runner.calls if call[:3] == ["git", "switch", "-c"]] == []
     assert runner.checks[runner.calls.index(["git", "ls-remote", "--exit-code", "--heads", "origin", target])] is False
+
+
+def test_create_followup_branch_checks_remote_conflict_on_bounded_fallback(monkeypatch, trusted_repo: Path) -> None:
+    source = "juicyrebel/" + ("nested-segment/" * 20) + "feature"
+    target = "fix/followup-caad43f"
+    runner = GitRunner(
+        {
+            ("git", "status", "--porcelain"): "",
+            ("git", "branch", "--show-current"): f"{source}\n",
+            ("git", "rev-parse", "--short=7", "HEAD"): "caad43f\n",
+            ("git", "merge-base", "--is-ancestor", "origin/main", "HEAD"): command_result(
+                ["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"],
+                returncode=0,
+            ),
+            ("git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"): command_result(
+                ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"],
+                returncode=1,
+            ),
+            ("git", "ls-remote", "--exit-code", "--heads", "origin", target): command_result(
+                ["git", "ls-remote", "--exit-code", "--heads", "origin", target],
+                returncode=0,
+            ),
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    result = git_integrate.create_followup_branch(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+    assert result["evidence"]["followup_branch"] == target
+    assert ["git", "ls-remote", "--exit-code", "--heads", "origin", target] in runner.calls
+    assert [call for call in runner.calls if call[:3] == ["git", "switch", "-c"]] == []
 
 
 def test_create_followup_branch_switches_to_deterministic_absent_target(monkeypatch, trusted_repo: Path) -> None:
