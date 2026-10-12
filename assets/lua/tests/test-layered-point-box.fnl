@@ -17,6 +17,14 @@
   (local build (LayeredPointBox opts))
   (build {:points points}))
 
+(fn build-box-from-opts-ctx [opts]
+  (local (_vector points) (make-points))
+  (local build
+    (LayeredPointBox {:ctx {:points points}
+                      :reserved-size opts.reserved-size
+                      :layers opts.layers}))
+  (build))
+
 (fn assert-fails-with [f fragments]
   (local (ok err) (pcall f))
   (assert (not ok) "expected call to fail")
@@ -46,6 +54,14 @@
   (assert (approx box.point.position.x 16))
   (assert (approx box.point.position.y -14))
   (assert (approx box.point.position.z 0))
+  (box:drop))
+
+(fn layered-point-box-builds-from-options-ctx []
+  (local box
+    (build-box-from-opts-ctx {:reserved-size 12
+                              :layers [{:size 8}]}))
+  (box.layout:measurer)
+  (assert (approx box.layout.measure.x 12))
   (box:drop))
 
 (fn layered-point-box-rejects-layer-sizes-larger-than-reserved-size []
@@ -108,6 +124,8 @@
                      :fn layered-point-box-measures-reserved-chrome-size})
 (table.insert tests {:name "LayeredPointBox centers point in reserved box"
                      :fn layered-point-box-centers-point-in-reserved-box})
+(table.insert tests {:name "LayeredPointBox builds from options ctx"
+                     :fn layered-point-box-builds-from-options-ctx})
 (table.insert tests {:name "LayeredPointBox rejects layer sizes larger than reserved size"
                      :fn layered-point-box-rejects-layer-sizes-larger-than-reserved-size})
 (table.insert tests {:name "LayeredPointBox can update reserved size explicitly"

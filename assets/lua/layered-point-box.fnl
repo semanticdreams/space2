@@ -24,11 +24,14 @@
   (local initial-reserved-size (assert-reserved-size options.reserved-size))
 
   (fn build [ctx]
-    (local points (or options.points (and ctx ctx.points)))
+    (local effective-ctx (if ctx ctx options.ctx))
+    (local points (if options.points
+                      options.points
+                      (and effective-ctx effective-ctx.points)))
     (assert points "LayeredPointBox requires points")
     (local point
       (LayeredPoint {:points points
-                     :ctx ctx
+                     :ctx effective-ctx
                      :position options.position
                      :pointer-target options.pointer-target
                      :depth-offset-step options.depth-offset-step
