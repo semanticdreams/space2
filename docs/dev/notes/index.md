@@ -60,6 +60,7 @@ Architecture notes, design sketches, debugging logs, and explorations. These are
 - [Multithreading](./multithreading)
 - [Mystery Layout Error](./mystery-layout-error)
 - [Native Build](./native-build)
+- [OpenCode Mcp Bridges](./opencode-mcp-bridges)
 - [Preload](./preload)
 - [Process](./process)
 - [Prof Graph Layout](./prof-graph-layout)

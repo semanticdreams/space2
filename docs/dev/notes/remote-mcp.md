@@ -171,5 +171,6 @@ SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH="$(pwd)/assets" \
 ## See also
 
 - [External Unit MCP](./external-unit-mcp)
+- [OpenCode MCP Bridge Guide](./opencode-mcp-bridges)
 - [Agent Presets](./agent-presets)
-- [Agent Tools](/dev/features/agent-tools), [Agent Runner System](/dev/features/agent-runner-system)`
+- [Agent Tools](/dev/features/agent-tools), [Agent Runner System](/dev/features/agent-runner-system)
