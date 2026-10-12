@@ -113,9 +113,9 @@
   (local world-runtime app.active-world-runtime)
   (local graph-view (and world-runtime world-runtime.graph-view))
   (when (and world-runtime graph-view graph-view.capture-state)
-    (ensure-view-states world-runtime)
+    (assert graph-view.capture-camera-state! "Graph activity requires graph view capture-camera-state!") (ensure-view-states world-runtime)
     (set (. world-runtime.graph-view-states (or map-id "main"))
-         (do (when graph-view.capture-camera-state! (graph-view:capture-camera-state!)) (graph-view:capture-state))))
+         (do (graph-view:capture-camera-state!) (graph-view:capture-state))))
   (and world-runtime
         (. (or world-runtime.graph-view-states {}) (or map-id "main"))))
 
@@ -195,6 +195,8 @@
   (or (= target-kind nil)
       (= target-kind :graph-view)))
 
+
+
 (fn root-actions [context]
   ((. GraphActivityActions :graph-root-actions) context))
 
@@ -226,7 +228,7 @@
   (slot:set-canvas-target-kind! :graph-view)
   (slot:expose-render-target! {:layers [:text]})
   (ensure-view-states world-runtime)
-  (local map-id (view-state-key-for graph-map))
+  (local map-id (view-state-key-for graph-map)) (local stored-state (. world-runtime.graph-view-states map-id))
   (when (and world-runtime.graph-view
              (not (= world-runtime.graph-view-map-id map-id)))
     (capture-graph-view-state-for-key! world-runtime.graph-view-map-id)
@@ -238,9 +240,9 @@
                      :ctx slot.ctx
                      :movables world-runtime.movables
                      :selector object-selector
-                     :view-target slot
-                     :pointer-target slot.pointer-target
-                    :camera slot.camera
+                      :view-target slot
+                      :pointer-target slot.pointer-target :mode-states (and stored-state stored-state.mode_states)
+                     :camera slot.camera
                     :data-dir (assert world-runtime.world-dir
                                       "Graph activity requires runtime.world-dir")})))
    (set slot.root graph-view)
@@ -249,17 +251,14 @@
   (set app.graph-view graph-view)
   (set app.graph-map graph-map)
   (connect-graph-view-mode-handler! graph-map)
-  (local saved-camera-state
-    (and graph-view.persistence
-         graph-view.persistence.saved-camera-state
-         (graph-view.persistence:saved-camera-state)))
+  (assert graph-view.saved-camera-state "Graph activity requires graph view saved-camera-state")
+  (local saved-camera-state (graph-view:saved-camera-state))
   (if saved-camera-state
       (ActivityCameraState.restore-camera! slot-camera saved-camera-state)
       (do
         (ActivityCameraState.restore-camera! slot-camera (default-graph-camera-state))
         (when graph-view.apply-initial-camera-policy!
           (graph-view:apply-initial-camera-policy!))))
-  (local stored-state (. world-runtime.graph-view-states map-id))
   (if stored-state
       (restore-graph-view-state! graph-view stored-state map-id)
       world-runtime.graph-view-state
@@ -283,10 +282,10 @@
   (local world-runtime app.active-world-runtime)
   (local graph-view (and world-runtime world-runtime.graph-view))
   (when (and world-runtime graph-view graph-view.capture-state)
-    (ensure-view-states world-runtime)
+    (assert graph-view.capture-camera-state! "Graph activity requires graph view capture-camera-state!") (ensure-view-states world-runtime)
     (set (. world-runtime.graph-view-states (or world-runtime.graph-view-map-id
-                                                (view-state-key)))
-         (do (when graph-view.capture-camera-state! (graph-view:capture-camera-state!)) (graph-view:capture-state))))
+                                                 (view-state-key)))
+         (do (graph-view:capture-camera-state!) (graph-view:capture-state))))
   (and world-runtime
        (. (or world-runtime.graph-view-states {})
            (or world-runtime.graph-view-map-id (view-state-key))))))
@@ -335,6 +334,7 @@
       (world-runtime.graph-map-manager.maps-will-change:disconnect maps-will-change-handler true))
     (set maps-will-change-handler nil))
   true)
+
 
 (fn capture-and-drop-view-before-map-switch [payload]
   (when (and (= (Activities.active-activity-id) "graph")

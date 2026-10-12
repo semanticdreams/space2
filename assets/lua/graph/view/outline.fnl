@@ -3,6 +3,8 @@
 (local GraphViewNodeViews (require :graph/view/node-views))
 (local GraphNodeActions (require :graph/view/node-actions))
 (local FocusedActions (require :graph/view/focused-actions))
+(local Runtime (require :graph/view/runtime))
+(local ProjectionSelection (require :graph/view/projection-selection))
 (local CompactNodeProjection (require :graph/view/compact-node-projection))
 (local GraphNodePresentation (require :graph/view/presentation))
 (local PanelBounds (require :graph/view/panel-bounds))
@@ -30,6 +32,7 @@
 (local empty-state-message "No outline roots. Focus a node or select exactly one node, then run Set Outline Root (SPC g o r).")
 
 (var rebuild-rows! nil)
+(var focused-menu-position nil)
 
 (fn outline-text-style [ctx color scale]
     (assert scale "GraphOutlineView text style requires scale")
@@ -725,65 +728,111 @@
                  false)))
     (set self.has-visible-nodes?
          (fn [view]
+              (view:assert-not-dropped "has-visible-nodes?")
+              (> (length view.rows) 0))))
+
+(fn visible-row-keys [self]
+    (icollect [_ row (ipairs self.rows)] row.key))
+
+(fn install-projection-selection! [self]
+    (local assert-not-dropped-callback (fn [context] (self:assert-not-dropped context)))
+    (local visible-keys-callback (fn [] (visible-row-keys self)))
+    (local selected-keys-callback (fn [] (graph-map-selected-keys self.graph-map)))
+    (local set-selected-keys-callback (fn [keys]
+                                        (set-graph-map-selected-keys! self.graph-map keys)
+                                        (refresh-row-visuals! self)))
+    (local focused-key-callback (fn [] self.graph-map.focused_node_key))
+    (local focus-key-callback (fn [key opts]
+                                (focus-key! self key opts)
+                                (set self.graph-map.focused_node_key key)
+                                (refresh-row-visuals! self)
+                                true))
+    (local visible-key-callback (fn [key] (visible-key? self key)))
+    (local sync-selector-callback (fn [keys] (sync-selector-selected-keys! self keys)))
+    (ProjectionSelection.install!
+        self
+        {:assert-not-dropped assert-not-dropped-callback
+         :visible-keys visible-keys-callback
+         :selected-keys selected-keys-callback
+         :set-selected-keys! set-selected-keys-callback
+         :focused-key focused-key-callback
+         :focus-key! focus-key-callback
+         :visible-key? visible-key-callback
+         :sync-selector! sync-selector-callback})
+    (set self.has-visible-nodes?
+         (fn [view]
              (view:assert-not-dropped "has-visible-nodes?")
              (> (length view.rows) 0))))
 
 (fn install-focused-actions! [self]
+    (local assert-not-dropped-callback (fn [context] (self:assert-not-dropped context)))
+    (local focused-node-callback (fn []
+                                   (local key self.graph-map.focused_node_key)
+                                   (if (and key (visible-key? self key))
+                                       (. self.row-by-key key :node)
+                                       nil)))
+    (local node-actions-callback (fn [view node] (view:node-actions node)))
+    (local open-node-callback (fn [view node opts] (view:open-node node opts)))
+    (local remove-node-callback (fn [view node] (> (view.graph-map:remove-nodes [node]) 0)))
+    (local reveal-node-callback (fn [view node opts] (view:reveal-node node (default-reveal-options opts))))
+    (local menu-manager-callback (fn [] (get-menu-manager self.ctx)))
+    (local menu-position-callback (fn [view node] (focused-menu-position view node)))
+    (local deps
+           (FocusedActions.generic-deps
+               {:assert-not-dropped assert-not-dropped-callback
+                :focused-node focused-node-callback
+                :node-actions node-actions-callback
+                :open-node open-node-callback
+                :remove-node remove-node-callback
+                :reveal-node reveal-node-callback
+                :menu-manager menu-manager-callback
+                :menu-position menu-position-callback}))
     (FocusedActions.install!
         self
-        {:focused-node (fn [view]
-                         (local key view.graph-map.focused_node_key)
-                         (if (and key (visible-key? view key))
-                             (. view.row-by-key key :node)
-                             nil))
-         :focused-node-actions (fn [view]
-                                 (view:assert-not-dropped "focused-node-actions")
-                                 (local node (view:focused-node))
-                                 (if node (view:node-actions node) []))
-         :run-focused-node-action-slot (fn [view index]
-                                         (view:assert-not-dropped "run-focused-node-action-slot")
-                                         (if (not (= (type index) :number))
-                                             false
-                                             (do
-                                                 (local action (. (view:focused-node-actions) index))
-                                                 (if (and action (= (type action.fn) :function))
-                                                     (do
-                                                         (action.fn nil {})
-                                                         true)
-                                                     false))))
-         :open-focused-node-menu (fn [view]
-                                   (view:assert-not-dropped "open-focused-node-menu")
-                                   (local node (view:focused-node))
-                                   (local manager (get-menu-manager view.ctx))
-                                   (if (and node manager)
-                                       (do
-                                           (manager:open {:actions (view:focused-node-actions)
-                                                          :position {:x 0 :y 0 :z 0}})
-                                           true)
-                                       false))
-         :copy-focused-node-key (fn [view]
-                                  (view:assert-not-dropped "copy-focused-node-key")
-                                  (local node (view:focused-node))
-                                  (if node
-                                      (do
-                                          (local runtime-gl (require :gl))
-                                          (runtime-gl.clipboard-set (tostring node.key))
-                                          true)
-                                      false))
-         :remove-focused-node-from-map (fn [view]
-                                         (view:assert-not-dropped "remove-focused-node-from-map")
-                                         (local node (view:focused-node))
-                                         (if node
-                                             (> (view.graph-map:remove-nodes [node]) 0)
-                                             false))
-         :reveal-focused-node (fn [view opts]
-                                (view:assert-not-dropped "reveal-focused-node")
-                                (local node (view:focused-node))
-                                (if node
-                                    (do
-                                        (view:reveal-node node (default-reveal-options opts))
-                                        true)
-                                    false))}))
+        deps))
+
+(fn runtime-options [options graph-map ctx node-views]
+    {:graph-map graph-map
+     :ctx ctx
+     :camera options.camera
+     :data-dir options.data-dir
+     :persistence options.persistence
+     :mode-states options.mode-states
+     :view-target options.view-target
+     :view-context (resolve-view-context options ctx)
+     :node-views node-views})
+
+(set focused-menu-position (fn [view node]
+    (local key (and node node.key))
+    (local record (and key (row-record-for-key view key)))
+    (if (and record record.point record.point.position)
+        record.point.position
+        {:x 0 :y 0 :z 0})))
+
+(fn capture-outline-projection-state! [view _runtime]
+    (view:assert-not-dropped "capture-outline-projection-state!")
+    {})
+
+(fn restore-outline-projection-state! [view _runtime _projection-state]
+    (view:assert-not-dropped "restore-outline-projection-state!")
+    (sync-map-selection-to-selector! view)
+    (refresh-row-visuals! view)
+    true)
+
+(fn drop-outline-projection! [view _runtime]
+    (disconnect-all! view.connections)
+    (drop-row-handles! view)
+    true)
+
+(fn apply-outline-initial-camera-policy! [_view _runtime]
+    true)
+
+(fn outline-projection-adapter []
+    {:mode "outline"
+     :capture-projection-state! capture-outline-projection-state!
+     :restore-projection-state! restore-outline-projection-state!
+     :drop-projection! drop-outline-projection!
+     :apply-initial-camera-policy! apply-outline-initial-camera-policy!})
 
 (fn GraphOutlineView [options]
     (local graph-map (assert options.graph-map "GraphOutlineView requires :graph-map"))
@@ -800,10 +849,9 @@
                                             :view-context (resolve-view-context options ctx)}))
     (local outline-text-scale options.outline-text-scale)
     (local self (make-outline-view-state graph-map ctx clickables node-views outline-text-scale selector focus pointer-target))
-    (var dropped? false)
-    (set self.assert-not-dropped
-         (fn [_view context]
-             (assert (not dropped?) (.. "GraphOutlineView " context " called after drop"))))
+    (local projection (outline-projection-adapter))
+    (local runtime (Runtime.init! self (runtime-options options graph-map ctx node-views) projection))
+    (Runtime.install! self runtime projection)
     (set self.node-actions
          (fn [view node]
              (view:assert-not-dropped "node-actions")
@@ -862,45 +910,7 @@
              (graph-map:remove-nodes nodes)))
     (set self.update (fn [view _delta] (view:assert-not-dropped "update") true))
     (set self.start-layout (fn [view] (view:assert-not-dropped "start-layout") false))
-    (set self.apply-initial-camera-policy! (fn [view] (view:assert-not-dropped "apply-initial-camera-policy!") true))
-    (set self.capture-state
-         (fn [view]
-             (view:assert-not-dropped "capture-state")
-             {:views (and node-views node-views.capture-state (node-views:capture-state))
-              :selected_node_keys (icollect [_ key (ipairs (graph-map-selected-keys graph-map))]
-                                    (and (visible-key? view key) key))}))
-    (set self.restore-views-state
-         (fn [view state]
-             (view:assert-not-dropped "restore-views-state")
-             (when (and node-views node-views.restore-state state)
-                 (node-views:restore-state state))
-             true))
-    (set self.restore-graph-state
-         (fn [view state]
-             (view:assert-not-dropped "restore-graph-state")
-             (when (and graph-map graph-map.restore-state state)
-                 (graph-map:restore-state state))
-             (refresh-row-visuals! view)
-             true))
-    (set self.restore-state
-         (fn [view state]
-             (view:assert-not-dropped "restore-state")
-             (local payload (options-table state))
-             (when payload.views
-                 (view:restore-views-state payload.views))
-              (when payload.selected_node_keys
-                  (set-outline-selection! view payload.selected_node_keys))
-             (refresh-row-visuals! view)
-             true))
-    (set self.drop
-         (fn [view]
-             (view:assert-not-dropped "drop")
-             (set dropped? true)
-             (disconnect-all! view.connections)
-             (drop-row-handles! view)
-             (when node-views
-                 (node-views:drop-all))))
-    (install-selection-methods! self)
+    (install-projection-selection! self)
     (install-focused-actions! self)
     (install-sync-connections! self selector focus-manager)
     (install-rebuild-connections! self graph-map)
