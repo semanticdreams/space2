@@ -228,8 +228,8 @@
 - Modify: `.github/workflows/build.yml`
 
 **Interfaces:**
-- Consumes: release artifact manifests `build/release-artifacts-${{ matrix.profile }}.txt` and Windows installer outputs under `build/dist`.
-- Produces: workflow artifacts `space-linux-release-${{ matrix.profile }}` and `space-windows-release`.
+- Consumes: release artifact manifests <code v-pre>build/release-artifacts-${{ matrix.profile }}.txt</code> and Windows installer outputs under `build/dist`.
+- Produces: workflow artifacts <code v-pre>space-linux-release-${{ matrix.profile }}</code> and `space-windows-release`.
 - Produces: `publish-release` job with `contents: write` that uploads release assets once per tag run.
 
 - [ ] **Step 1: Add explicit top-level permissions**
