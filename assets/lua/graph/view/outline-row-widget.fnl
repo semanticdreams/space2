@@ -2,6 +2,7 @@
 (local {: Layout} (require :layout))
 (local Text (require :text))
 (local TextStyle (require :text-style))
+(local LayeredPointBox (require :layered-point-box))
 (local CompactNodeProjection (require :graph/view/compact-node-projection))
 (local GraphNodePresentation (require :graph/view/presentation))
 
@@ -70,6 +71,11 @@
    {:size (selected-layer-size state base-size) :color (selection-color state)}
    {:size base-size :color (node-color state.row)}])
 
+(fn marker-reserved-size [state]
+  (+ (node-size state.row)
+     defaults.selection-border-width
+     defaults.focus-border-width))
+
 (fn assert-options [opts]
   (assert opts "OutlineRowWidget requires opts")
   (assert opts.ctx "OutlineRowWidget requires :ctx")
@@ -89,12 +95,26 @@
           :style (TextStyle {:theme ctx.theme
                              :color (default-vec4 state.opts.label-color theme-color)
                              :scale (option-or state.opts.label-scale 1)})})
-   ctx))
+    ctx))
+
+(fn make-marker-box [state]
+  ((LayeredPointBox {:ctx state.ctx
+                     :points (assert state.ctx.points "OutlineRowWidget marker box requires ctx.points")
+                     :position (glm.vec3 0 0 0)
+                     :pointer-target state.pointer-target
+                     :depth-offset-step 1
+                     :base-depth-offset-index 2
+                     :base-layer-index 3
+                     :reserved-size (marker-reserved-size state)
+                     :layers (projection-layers state)})
+   state.ctx))
 
 (fn projection-options [state position]
   {:points (assert state.ctx.points "OutlineRowWidget requires ctx.points")
-   :node state.row.node
-   :position position
+    :node state.row.node
+    :position position
+    :point (assert (and state.marker-box state.marker-box.point)
+                   "OutlineRowWidget projection requires marker box point")
    :pointer-target state.pointer-target
    :depth-offset-step 1
    :base-depth-offset-index 2
@@ -131,15 +151,17 @@
   (layout:mark-layout-dirty))
 
 (fn compact-height [state]
+  (state.marker-box.layout:measurer)
   (state.label.layout:measurer)
-  (+ (math.max (CompactNodeProjection.visible-size state.compact-point)
-               state.label.layout.measure.y)
+  (+ (math.max state.marker-box.layout.measure.y
+                state.label.layout.measure.y)
      (* 2 state.vertical-padding)))
 
 (fn measure-row [state layout]
   (local summary-height (compact-height state))
+  (state.marker-box.layout:measurer)
   (var width (+ (point-x state)
-                (/ (CompactNodeProjection.visible-size state.compact-point) 2.0)
+                (/ state.marker-box.layout.measure.x 2.0)
                 state.label-gap
                 state.label.layout.measure.x))
   (var height summary-height)
@@ -149,25 +171,32 @@
     (set height (+ height state.expanded-gap state.expanded-card.layout.measure.y)))
   (set layout.measure (glm.vec3 width height 0)))
 
-(fn place-label! [state]
-  (local point state.compact-point)
+(fn place-compact-summary! [state layout summary-height]
+  (state.marker-box.layout:measurer)
   (state.label.layout:measurer)
+  (local marker-size state.marker-box.layout.measure)
+  (local summary-top (+ layout.position.y layout.size.y))
+  (local content-top (- summary-top state.vertical-padding))
+  (set state.marker-box.layout.position
+       (glm.vec3 (- (point-x state) (/ marker-size.x 2.0))
+                 (- content-top marker-size.y)
+                 layout.position.z))
+  (set state.marker-box.layout.size (glm.vec3 marker-size.x marker-size.y layout.size.z))
+  (set state.marker-box.layout.rotation layout.rotation)
+  (set state.marker-box.layout.depth-offset-index 0)
+  (state.marker-box.layout:layouter)
   (set state.label.layout.position
-       (glm.vec3 (+ point.position.x (/ (CompactNodeProjection.visible-size point) 2.0) state.label-gap)
-                 (- point.position.y (/ state.label.layout.measure.y 2.0))
+       (glm.vec3 (+ (point-x state) (/ marker-size.x 2.0) state.label-gap)
+                 (- content-top state.label.layout.measure.y)
                  0.02))
   (set state.label.layout.rotation (glm.quat 1 0 0 0))
   (set state.label.layout.depth-offset-index 1)
-  (state.label.layout:layouter))
+  (state.label.layout:layouter)
+  summary-height)
 
 (fn layout-row [state layout]
   (local summary-height (compact-height state))
-  (local visible-height (- summary-height (* 2 state.vertical-padding)))
-  (local center-y (- (+ layout.position.y layout.size.y)
-                     state.vertical-padding
-                     (/ visible-height 2.0)))
-  (state.compact-point:set-position (glm.vec3 (point-x state) center-y 0))
-  (place-label! state)
+  (place-compact-summary! state layout summary-height)
   (when state.expanded-card
     (state.expanded-card.layout:measurer)
     (local card-height state.expanded-card.layout.measure.y)
@@ -184,7 +213,9 @@
     (error "OutlineRowWidget method called after drop"))
   (when (and state.projection (not state.compact-projection-dropped?))
     (CompactNodeProjection.refresh! state.projection {:selected? (selected? state)
-                                                      :focused? (focused? state)}))
+                                                       :focused? (focused? state)}))
+  (when state.marker-box
+    (state.marker-box:refresh))
   (when state.expanded-card
     (local base-size (node-size state.row))
     (state.expanded-card:set-layer-size 1 (focus-layer-size state base-size))
@@ -244,7 +275,7 @@
     (set state.expanded-card nil)
     (set state.self.expanded-card nil)
     (when (not state.dropped?)
-      (state.layout:set-children [state.label.layout]))))
+      (state.layout:set-children [state.marker-box.layout state.label.layout]))))
 
 (fn expand! [state]
   (when state.dropped?
@@ -277,7 +308,6 @@
 (fn restore-compact! [state]
   (when state.compact-projection-dropped?
     (local position state.compact-point.position)
-    (state.compact-point:drop)
     (attach-compact! state position)))
 
 (fn collapse! [state]
@@ -297,9 +327,11 @@
           (unregister-expanded-card! state)
           (when state.focus-node
             (state.focus-node:drop))
-          (state.compact-point:drop))
+          (state.marker-box:drop))
         (when state.projection
           (CompactNodeProjection.drop! state.projection)))
+    (when (and state.marker-box (not state.expanded-card))
+      (state.marker-box:drop))
     (state.label:drop)
     (state.layout:drop)))
 
@@ -320,6 +352,7 @@
    :expanded-gap (option-or opts.expanded-gap defaults.expanded-gap)
    :projection nil
    :label nil
+   :marker-box nil
    :layout nil
    :self nil
    :compact-point nil
@@ -351,6 +384,7 @@
    :selectable nil
    :focus-node nil
    :label nil
+    :marker-box nil
    :expanded-card nil
    :expanded? (fn [_self] (expanded-query state))
    :expand! (fn [_self] (expand! state))
@@ -374,10 +408,12 @@
                            :layouter (layout-layouter-callback state)}))
     (set state.layout layout)
     (set state.self (make-row-self state layout))
-    (attach-compact! state (glm.vec3 0 0 0))
+    (set state.marker-box (make-marker-box state))
+    (set state.self.marker-box state.marker-box)
+    (attach-compact! state state.marker-box.point.position)
     (set state.label (make-label state))
     (set state.self.label state.label)
-    (layout:set-children [state.label.layout])
+    (layout:set-children [state.marker-box.layout state.label.layout])
     state.self))
 
 OutlineRowWidget
