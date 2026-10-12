@@ -34,8 +34,19 @@ def create_repo_opencode_tree(repo: Path) -> None:
     (repo / ".opencode" / "plugins" / "rtk.ts").write_text("export default async () => ({})\n", encoding="utf-8")
 
 
-def test_ensure_space_repo_accepts_space_repo_with_markers(tmp_path: Path) -> None:
-    repo = init_git_repo(tmp_path / "space")
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "git@github.com:semanticdreams/spacecore.git",
+        "git@github.com:semanticdreams/spacecore",
+        "ssh://git@github.com/semanticdreams/spacecore.git",
+        "ssh://git@github.com/semanticdreams/spacecore",
+        "https://github.com/semanticdreams/spacecore.git",
+        "https://github.com/semanticdreams/spacecore",
+    ],
+)
+def test_ensure_space_repo_accepts_spacecore_repo_with_markers(tmp_path: Path, origin: str) -> None:
+    repo = init_git_repo(tmp_path / "space", origin=origin)
     add_space_markers(repo)
 
     assert capabilities.ensure_space_repo(repo) == repo.resolve()
