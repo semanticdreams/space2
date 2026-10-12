@@ -14,6 +14,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 
 permissions:
+  actions: read
   contents: read
 
 env:
@@ -26,6 +27,7 @@ jobs:
       SKIP_KEYRING_TESTS: 1
       XDG_DATA_HOME: /tmp/space/tests/xdg-data
       SPACE_DISABLE_AUDIO: 1
+      CMAKE_GENERATOR: Ninja
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 1G
       CCACHE_BASEDIR: ${{ github.workspace }}
@@ -34,16 +36,136 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Determine test scope
+        id: test-scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          changed_files=""
+          classification_args=(--event "${EVENT_NAME}")
+
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            if git fetch --no-tags --depth=1 origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}"; then
+              if ! changed_files="$(git diff --name-only "origin/${BASE_REF}"...HEAD)"; then
+                echo "Unable to diff pull request against ${BASE_REF}; running full suite."
+                changed_files=""
+              fi
+            fi
+          elif [[ "${EVENT_NAME}" == "push" && -n "${BEFORE_SHA}" && ! "${BEFORE_SHA}" =~ ^0+$ ]]; then
+            if git fetch --no-tags --depth=1 origin "${BEFORE_SHA}"; then
+              if ! changed_files="$(git diff --name-only "${BEFORE_SHA}" HEAD)"; then
+                echo "Unable to diff push against ${BEFORE_SHA}; running full suite."
+                changed_files=""
+              fi
+            fi
+          fi
+
+          while IFS= read -r path; do
+            if [[ -n "${path}" ]]; then
+              classification_args+=(--changed-file "${path}")
+            fi
+          done <<< "${changed_files}"
+
+          python3 scripts/ci_test_scope.py "${classification_args[@]}" | tee "${RUNNER_TEMP}/test-scope.env"
+          cat "${RUNNER_TEMP}/test-scope.env" >> "${GITHUB_OUTPUT}"
+
+          if [[ -n "${changed_files}" ]]; then
+            echo "changed files:"
+            printf '%s\n' "${changed_files}"
+          fi
+
+      - name: Docs-only fast path
+        if: steps.test-scope.outputs.mode == 'docs-only'
+        run: |
+          echo "Skipping native build and test suite: ${{ steps.test-scope.outputs.reason }}."
 
       - name: Install dependencies
+        if: steps.test-scope.outputs.run-runtime-tests == 'true'
         run: |
           sudo apt-get update
           deps=$(awk '/CI_DEPS_START/{flag=1;next}/CI_DEPS_END/{flag=0}flag' docs/dev/building.md | sed -n 's/^sudo apt install //p')
           # sccache not available via apt on Ubuntu 22.04 — install via cargo below
           deps=$(echo "$deps" | sed 's/\bsccache\b//g')
-          sudo apt-get install -y ${deps} ccache
+          sudo apt-get install -y ${deps} ccache ninja-build
+
+      - name: Resolve prebuilt runtime
+        id: prebuilt-runtime
+        if: steps.test-scope.outputs.use-prebuilt-runtime == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+
+          install_prebuilt_runtime() {
+            local run_id artifact_root
+
+            mkdir -p build || return 1
+            run_id="$(gh run list \
+              --repo "${GITHUB_REPOSITORY}" \
+              --workflow test.yml \
+              --branch main \
+              --event push \
+              --status success \
+              --json databaseId \
+              --jq '.[0].databaseId // empty')" || return 1
+
+            if [[ -z "${run_id}" ]]; then
+              echo "No successful main test.yml push run found."
+              return 1
+            fi
+
+            rm -rf prebuilt-runtime build/prebuilt-runtime build/space || return 1
+            gh run download "${run_id}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --name space-linux-minimal-runtime \
+              --dir prebuilt-runtime || return 1
+
+            artifact_root="prebuilt-runtime"
+            if [[ ! -f "${artifact_root}/bin/space" && -f "${artifact_root}/prebuilt-runtime-artifact/bin/space" ]]; then
+              artifact_root="prebuilt-runtime/prebuilt-runtime-artifact"
+            fi
+
+            if [[ ! -f "${artifact_root}/bin/space" || ! -d "${artifact_root}/lib" ]]; then
+              echo "Downloaded prebuilt runtime artifact does not contain bin/space and lib/."
+              return 1
+            fi
+
+            mkdir -p build/prebuilt-runtime || return 1
+            cp -a "${artifact_root}/." build/prebuilt-runtime/ || return 1
+            chmod +x build/prebuilt-runtime/bin/space || return 1
+
+            cat > build/space <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          runtime_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/prebuilt-runtime" && pwd)"
+          export LD_LIBRARY_PATH="${runtime_root}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+          exec "${runtime_root}/bin/space" "$@"
+          EOF
+            chmod +x build/space || return 1
+
+            SPACE_ASSETS_PATH="${GITHUB_WORKSPACE}/assets" \
+              FENNEL_PATH="${GITHUB_WORKSPACE}/assets/lua/?.fnl;${GITHUB_WORKSPACE}/assets/lua/?/init.fnl" \
+              FENNEL_MACRO_PATH="${GITHUB_WORKSPACE}/assets/lua/?.fnl;${GITHUB_WORKSPACE}/assets/lua/?/init.fnl" \
+              ./build/space -m tools.fennel-check:main -- --output summary --target files --file assets/lua/json-utils.fnl || return 1
+          }
+
+          if install_prebuilt_runtime; then
+            echo "available=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "available=false" >> "${GITHUB_OUTPUT}"
+            rm -rf prebuilt-runtime build/prebuilt-runtime build/space
+            echo "Unable to install or smoke-check prebuilt runtime; falling back to full native validation."
+          fi
 
       - name: Setup compiler cache
+        if: steps.test-scope.outputs.run-native == 'true' || steps.prebuilt-runtime.outputs.available == 'false'
         uses: ./.github/actions/setup-linux-compiler-cache
         with:
           cache-scope: linux
@@ -63,6 +185,7 @@ jobs:
             CMakeLists.txt
 
       - name: Configure git for test directories
+        if: steps.test-scope.outputs.run-runtime-tests == 'true'
         run: |
           set -euo pipefail
           git_config="${RUNNER_TEMP}/gitconfig"
@@ -78,25 +201,156 @@ jobs:
           git config --file "${git_config}" protocol.file.allow
 
       - name: Check OpenCode capability wiring
+        if: steps.test-scope.outputs.run-native == 'true' || steps.prebuilt-runtime.outputs.available == 'false'
         run: make opencode-check
 
+      - name: Reset compiler cache stats
+        if: steps.test-scope.outputs.run-native == 'true' || steps.prebuilt-runtime.outputs.available == 'false'
+        run: |
+          ccache -z
+          if command -v sccache >/dev/null 2>&1; then
+            sccache --zero-stats
+          fi
+
       - name: Build
+        if: steps.test-scope.outputs.run-native == 'true' || steps.prebuilt-runtime.outputs.available == 'false'
         env:
           CMAKE_C_COMPILER_LAUNCHER: ccache
           CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: make BUILD_JOBS=$(nproc) build
 
+      - name: Prepare prebuilt Linux runtime artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.test-scope.outputs.run-native == 'true'
+        run: |
+          set -euo pipefail
+
+          artifact_dir="prebuilt-runtime-artifact"
+          dep_manifest="${RUNNER_TEMP}/space-prebuilt-runtime-deps.txt"
+          rm -rf "${artifact_dir}"
+          mkdir -p "${artifact_dir}/bin" "${artifact_dir}/lib"
+          cp build/space "${artifact_dir}/bin/space"
+          chmod +x "${artifact_dir}/bin/space"
+          : > "${dep_manifest}"
+
+          parse_ldd_path() {
+            local line="$1" dep=""
+            if [[ "${line}" == *"=> not found"* ]]; then
+              printf '%s\n' "__MISSING__"
+              return 0
+            fi
+            if [[ "${line}" == *"=>"* ]]; then
+              dep="${line#*=> }"
+              dep="${dep%% (*}"
+            elif [[ "${line}" == /* ]]; then
+              dep="${line%% (*}"
+            fi
+            if [[ -n "${dep}" && -f "${dep}" ]]; then
+              printf '%s\n' "${dep}"
+            fi
+          }
+
+          copy_workspace_dependency() {
+            local dep="$1" lib_dir="$2" current target next packaged_target
+            current="${dep}"
+
+            while [[ -L "${current}" ]]; do
+              target="$(readlink "${current}")"
+              if [[ "${target}" == /* ]]; then
+                next="${target}"
+              else
+                next="$(dirname "${current}")/${target}"
+              fi
+              packaged_target="$(basename "${target}")"
+              ln -sfn "${packaged_target}" "${lib_dir}/$(basename "${current}")"
+              current="${next}"
+            done
+
+            if [[ ! -f "${current}" ]]; then
+              echo "Unable to package dependency target for ${dep}: ${current}" >&2
+              return 1
+            fi
+            cp -L "${current}" "${lib_dir}/$(basename "${current}")"
+          }
+
+          missing_deps=0
+          while IFS= read -r line; do
+            dep="$(parse_ldd_path "${line}")"
+            if [[ "${dep}" == "__MISSING__" ]]; then
+              echo "Missing runtime dependency reported by ldd: ${line}"
+              missing_deps=1
+            elif [[ -n "${dep}" && "${dep}" == "${GITHUB_WORKSPACE}/"* ]]; then
+              printf '%s\n' "${dep}" >> "${dep_manifest}"
+            fi
+          done < <(ldd build/space)
+
+          if [[ "${missing_deps}" -ne 0 ]]; then
+            exit 1
+          fi
+
+          sort -u "${dep_manifest}" | while IFS= read -r dep; do
+            if [[ -n "${dep}" ]]; then
+              copy_workspace_dependency "${dep}" "${artifact_dir}/lib"
+            fi
+          done
+
+          {
+            echo "space"
+            find "${artifact_dir}/lib" -maxdepth 1 -type l -printf '%f -> %l\n' | sort
+            find "${artifact_dir}/lib" -maxdepth 1 -type f -printf '%f\n' | sort
+          } > "${artifact_dir}/manifest.txt"
+
+          smoke_dir="${RUNNER_TEMP}/space-prebuilt-runtime-smoke"
+          smoke_ldd="${RUNNER_TEMP}/space-prebuilt-runtime-smoke.ldd"
+          rm -rf "${smoke_dir}"
+          mkdir -p "${smoke_dir}"
+          cp -a "${artifact_dir}/." "${smoke_dir}/"
+
+          LD_LIBRARY_PATH="${smoke_dir}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" ldd "${smoke_dir}/bin/space" > "${smoke_ldd}"
+          if grep -F "${GITHUB_WORKSPACE}/" "${smoke_ldd}"; then
+            echo "Isolated prebuilt runtime still resolves dependencies from the original workspace." >&2
+            exit 1
+          fi
+
+          SPACE_ASSETS_PATH="${GITHUB_WORKSPACE}/assets" \
+            FENNEL_PATH="${GITHUB_WORKSPACE}/assets/lua/?.fnl;${GITHUB_WORKSPACE}/assets/lua/?/init.fnl" \
+            FENNEL_MACRO_PATH="${GITHUB_WORKSPACE}/assets/lua/?.fnl;${GITHUB_WORKSPACE}/assets/lua/?/init.fnl" \
+            LD_LIBRARY_PATH="${smoke_dir}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" \
+            "${smoke_dir}/bin/space" -m tools.fennel-check:main -- --output summary --target files --file assets/lua/json-utils.fnl
+
+      - name: Upload prebuilt Linux runtime
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.test-scope.outputs.run-native == 'true'
+        uses: actions/upload-artifact@v5
+        with:
+          name: space-linux-minimal-runtime
+          path: prebuilt-runtime-artifact
+          if-no-files-found: error
+          retention-days: 7
+
       - name: ccache stats
+        if: steps.test-scope.outputs.run-native == 'true' || steps.prebuilt-runtime.outputs.available == 'false'
         run: ccache -s
 
       - name: sccache stats
+        if: steps.test-scope.outputs.run-native == 'true' || steps.prebuilt-runtime.outputs.available == 'false'
         run: |
           if command -v sccache >/dev/null 2>&1; then
             sccache --show-stats
             sccache --stop-server || true
           fi
 
+      - name: Run prebuilt runtime validation
+        if: steps.prebuilt-runtime.outputs.available == 'true'
+        run: |
+          set -euo pipefail
+          export SPACE_ASSETS_PATH="${GITHUB_WORKSPACE}/assets"
+          export FENNEL_PATH="${GITHUB_WORKSPACE}/assets/lua/?.fnl;${GITHUB_WORKSPACE}/assets/lua/?/init.fnl"
+          export FENNEL_MACRO_PATH="${GITHUB_WORKSPACE}/assets/lua/?.fnl;${GITHUB_WORKSPACE}/assets/lua/?/init.fnl"
+          ./build/space -m tools.fennel-check:main -- --output summary --target repo
+          ./build/space -m constraints.runner:main -- --output summary --target repo
+          xvfb-run -a ./build/space -m tests.fast:main
+
       - name: Run test suite
+        if: steps.test-scope.outputs.run-native == 'true' || steps.prebuilt-runtime.outputs.available == 'false'
         env:
           SPACE_ASSETS_PATH: ${{ github.workspace }}/assets
           SPACE_TEST_REQUIRE_SSH_FIXTURE: 1
@@ -104,4 +358,5 @@ jobs:
         run: xvfb-run -a ctest --test-dir build --output-on-failure -V --parallel "$(nproc)"
 
       - name: Run e2e test suite
+        if: steps.test-scope.outputs.run-native == 'true' || steps.prebuilt-runtime.outputs.available == 'false' || steps.prebuilt-runtime.outputs.available == 'true'
         run: make test-e2e
