@@ -27,7 +27,7 @@
                           :label "initialize flat"
                           :color (glm.vec4 0.36 0.53 0.37 1)
                           :sub-color (glm.vec4 0.24 0.39 0.25 1)
-                          :size 7.5
+                          :size 8.0
                           :view HeightfieldFlatToolNodeView}))
   (set node.world-id world-id)
   (set node.activity-id activity-id)

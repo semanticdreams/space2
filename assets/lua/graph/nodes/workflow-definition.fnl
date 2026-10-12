@@ -348,7 +348,7 @@
                           :sub-color DEFINITION_BLUE_ACCENT
                           :view WorkflowDefinitionNodeView
                           :preview WorkflowDefinitionNodePreview
-                          :size 8.5}))
+                          :size 8.0}))
   (set node.workflow-definition-id definition-id)
   (set node.workflow-store store)
   (set node.workflow-runner runner)

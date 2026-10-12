@@ -18,7 +18,7 @@
                           :label "raise/lower"
                           :color (glm.vec4 0.52 0.44 0.29 1)
                           :sub-color (glm.vec4 0.38 0.31 0.19 1)
-                          :size 7.5
+                          :size 8.0
                           :view HeightfieldAdjustToolNodeView}))
   (set node.world-id world-id)
   (set node.activity-id activity-id)

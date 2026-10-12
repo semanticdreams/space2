@@ -21,7 +21,7 @@
                 :label (manager:instance-label instance)
                 :color INSTANCE_COLOR
                 :sub-color INSTANCE_ACCENT
-                :size 7.5
+                :size 8.0
                 :view KernelInstanceNodeView}))
 
   (set node.instance-id instance-id)

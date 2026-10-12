@@ -25,7 +25,7 @@
                           :label spec.label
                           :color (glm.vec4 0.78 0.68 0.28 1)
                           :sub-color (glm.vec4 0.62 0.5 0.18 1)
-                          :size 7.5
+                          :size 8.0
                           :view LightTypeNodeView}))
   (set node.world-id world-id)
   (set node.activity-id activity-id)

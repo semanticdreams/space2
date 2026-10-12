@@ -44,7 +44,7 @@
                            :sub-color EVENT_ORANGE_ACCENT
                            :preview WorkflowRunEventNodePreview
                            :view WorkflowRunEventNodeView
-                           :size 6.5}))
+                           :size 8.0}))
   (set node.workflow-run-id run-id)
   (set node.workflow-event-id event-id)
   (set node.workflow-store store)

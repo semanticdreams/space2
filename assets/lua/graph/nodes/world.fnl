@@ -22,7 +22,7 @@
                           :label name
                           :color (glm.vec4 0.8 0.6 0.2 1)
                           :sub-color (glm.vec4 0.7 0.5 0.1 1)
-                          :size 9.0
+                          :size 8.0
                           :view WorldNodeView}))
   (set node.world-id world-id)
   (set node.world-manager world-manager)
