@@ -7,16 +7,20 @@
 (local ProjectionSelection (require :graph/view/projection-selection))
 (local CompactNodeProjection (require :graph/view/compact-node-projection))
 (local GraphNodePresentation (require :graph/view/presentation))
+(local TreeView (require :tree-view))
+(local OutlineRowWidget (require :graph/view/outline-row-widget))
 (local PanelBounds (require :graph/view/panel-bounds))
 (local GraphViewUtils (require :graph/view/utils))
 (local RawRectangle (require :raw-rectangle))
 (local Text (require :text))
 (local TextStyle (require :text-style))
+(local {: Layout} (require :layout))
 
 (local ensure-glm-vec4 GraphViewUtils.ensure-glm-vec4)
 
 (local row-width 640)
 (local row-height 24)
+(local row-gap 2)
 (local row-left-padding 12)
 (local row-depth-indent 18)
 (local node-label-gap 12)
@@ -33,6 +37,7 @@
 
 (var rebuild-rows! nil)
 (var focused-menu-position nil)
+(var layout-tree-view! nil)
 
 (fn outline-text-style [ctx color scale]
     (assert scale "GraphOutlineView text style requires scale")
@@ -120,31 +125,28 @@
 
 (fn drop-row-handles! [self]
     (local row-handles (assert self.row-handles "GraphOutlineView requires row handles"))
-    (when self.empty-state-handle
-        (drop-handle-list! self.empty-state-handle.visuals)
-        (set self.empty-state-handle nil))
-    (each [_ record (ipairs row-handles)]
-        (when record.visuals
-            (drop-handle-list! record.visuals))
-        (drop-expanded-record! self record)
-        (when record.focus-node
-            (set (. self.row-by-focus record.focus-node) nil)
-            (if (and self.rebuilding? record.expanded?)
-                (set (. self.pending-focus-nodes record.row.key) record.focus-node)
-                (when record.expanded?
-                    (record.focus-node:drop))))
-        (when (and record.projection record.projection.drop!)
-            (record.projection:drop!))
-        (when record.focus-node
-            (set record.focus-node nil)))
+    (local old-handles (icollect [_ record (ipairs row-handles)] record))
     (for [idx (length row-handles) 1 -1]
-        (table.remove row-handles idx)))
+        (table.remove row-handles idx))
+    (when self.empty-state-handle
+        (when self.empty-state-handle.drop
+            (self.empty-state-handle:drop))
+        (set self.empty-state-handle nil))
+    (when self.tree-view
+        (self.tree-view:drop)
+        (set self.tree-view nil))
+    (each [_ record (ipairs old-handles)]
+        (when record.focus-node
+            (set (. self.row-by-focus record.focus-node) nil))))
 
 (fn drop-pending-focus-nodes! [self]
     (each [key focus-node (pairs self.pending-focus-nodes)]
         (when focus-node
             (focus-node:drop))
         (set (. self.pending-focus-nodes key) nil)))
+
+(fn graph-outline-uninstalled-drop [_view]
+    nil)
 
 (fn visible-key? [self key]
     (not (= (. self.row-by-key (tostring key)) nil)))
@@ -278,24 +280,12 @@
 
 (fn refresh-row-visual! [self record]
     (local row (assert record.row "GraphOutlineView row visual requires row"))
-    (if record.expanded?
-        (when (and record.point record.point.set-layer-size)
-            (local base-size (or record.point.size (node-size row)))
-            (record.point:set-layer-size focus-layer-index (row-focus-layer-size self row base-size))
-            (record.point:set-layer-size selection-layer-index (if (row-selected? self row)
-                                                                  (+ base-size selection-border-width)
-                                                                  0)))
-        record.projection
-        (CompactNodeProjection.refresh! record.projection
-                                        {:selected? (row-selected? self row)
-                                         :focused? (row-focused? self row)}))
-    (when (and record.point record.visuals)
-        (local label (. record.visuals 2))
-        (when label
-            (place-point-relative-label! record.point label)))
-    (when record.background
-        (set record.background.color (visual-color self row))
-        (record.background:update)))
+    (when record.refresh
+        (record:refresh))
+    (when record.expanded-query
+        (set record.expanded? (record.expanded-query record)))
+    (when self.tree-view
+        (layout-tree-view! self.tree-view)))
 
 (fn refresh-row-visuals! [self]
     (each [_ record (ipairs self.row-handles)]
@@ -451,14 +441,13 @@
                                              :drop-focus-node? false}))
 
 (fn expand-record! [self record node]
-    (if record.expanded?
+    (if (and record.expanded? (record.expanded-query record))
         true
         (do
-            (local previous-selectable record.selectable)
-            (unregister-compact-projection-handles! record)
-            (local card (build-expanded-card! self record node))
-            (register-expanded-card! self record card previous-selectable)
-            (set record.expanded? true)
+            (record:expand!)
+            (when record.expanded-card
+                (set record.point record.expanded-card))
+            (set record.expanded? (record.expanded-query record))
             (set (. self.expanded-row-keys node.key) true)
             (refresh-row-visual! self record)
             true)))
@@ -516,44 +505,167 @@
     (place-point-relative-label! point label)
     label)
 
-(fn attach-row-handles! [self row index]
+(fn noop-selector []
+    {:add-selectables (fn [_self _selectables] nil)
+     :remove-selectables (fn [_self _selectables] nil)
+     :replace-selectable (fn [_self _previous _next] nil)})
+
+(fn graph-outline-row-selected? [row owner]
+    (row-selected? owner row))
+
+(fn graph-outline-row-focused? [row owner]
+    (row-focused? owner row))
+
+(fn graph-outline-card-collapse [_node opts]
+    (expanded-card-collapse opts.owner)
+    true)
+
+(fn graph-outline-card-open [node event opts]
+    (expanded-card-open opts.owner node event))
+
+(fn graph-outline-card-menu [node event opts]
+    (expanded-card-menu opts.owner node event))
+
+(set layout-tree-view! (fn [tree-view]
+    (tree-view.layout:measurer)
+    (set tree-view.layout.position (glm.vec3 0 (- tree-view.layout.measure.y) 0))
+    (set tree-view.layout.size (glm.vec3 row-width tree-view.layout.measure.y 0))
+    (set tree-view.layout.rotation (glm.quat 1 0 0 0))
+    (tree-view.layout:layouter)))
+
+(fn attach-row-handles! [self tree-row]
     (local clickables (assert self.clickables "GraphOutlineView row handles require clickables"))
-    (local base-size (node-size row))
-    (local record {:row row
-                   :label (row-title row)
-                   :label-x (row-label-x row)
-                   :depth row.depth})
-    (local focus-node (. self.pending-focus-nodes row.key))
-    (set (. self.pending-focus-nodes row.key) nil)
-    (local projection
-          (CompactNodeProjection.attach! (projection-options self row index base-size clickables focus-node)))
+    (local row tree-row.item.row)
+    (set row.depth tree-row.depth)
+    (local bounds (PanelBounds.inline-card-bounds))
+    (local record ((OutlineRowWidget {:ctx self.ctx
+                                      :owner self
+                                      :row row
+                                      :clickables clickables
+                                      :selector (or self.selector self.noop-selector)
+                                      :focus self.focus
+                                      :pointer-target self.pointer-target
+                                      :left-padding row-left-padding
+                                      :depth-indent row-depth-indent
+                                      :label-gap point-label-gap
+                                      :vertical-padding 1
+                                      :expanded-gap 3
+                                      :label-scale (row-label-scale self)
+                                      :label-color self.label-color
+                                      :selection-border-color self.selection-border-color
+                                      :focus-outline-color self.focus-outline-color
+                                      :expanded-card-size bounds.default-size
+                                      :expanded-card-min-size bounds.min-size
+                                      :expanded-card-max-size bounds.max-size
+                                      :expanded-card-resize-max-size bounds.resize-max-size
+                                      :selected? graph-outline-row-selected?
+                                      :focused? graph-outline-row-focused?
+                                      :on-focus projection-focus
+                                      :on-right-click projection-right-click
+                                      :on-activate projection-activate
+                                      :on-collapse graph-outline-card-collapse
+                                      :on-open graph-outline-card-open
+                                      :on-menu graph-outline-card-menu}) self.ctx))
     (table.insert self.row-handles record)
     (set record.row row)
-    (set record.projection projection)
-    (set record.point projection.point)
-    (set record.selectable projection.selectable)
-    (set record.focus-node projection.focus-node)
+    (set record.expanded-query record.expanded?)
+    (set record.title (row-title row))
+    (set record.label-x (row-label-x row))
+    (set record.depth row.depth)
+    (set record.visuals [false record.label])
+    (set record.expanded? (record.expanded-query record))
     (when record.focus-node
         (set (. self.row-by-focus record.focus-node) row))
-    (local label (attach-row-label! self row record.point))
-    (set record.visuals [false label])
-    record.point)
+    record)
+
+(fn outline-tree-roots [rows]
+    (local roots [])
+    (local stack [])
+    (each [_ row (ipairs rows)]
+        (local item {:row row :children []})
+        (if (= row.depth 0)
+            (table.insert roots item)
+            (do
+                (local parent (. stack row.depth))
+                (assert parent (.. "GraphOutlineView missing parent for outline row " (tostring row.key)))
+                (table.insert parent.children item)))
+        (set (. stack (+ row.depth 1)) item))
+    roots)
+
+(fn graph-outline-row-builder [self]
+    (fn [tree-row _ctx]
+        (attach-row-handles! self tree-row)))
+
+(fn outline-tree-key [item]
+    item.row.key)
+
+(fn outline-tree-children [item]
+    item.children)
+
+(fn outline-tree-default-expanded? [_row]
+    true)
+
+(fn attach-tree-view! [self]
+    (local tree-view ((TreeView {:roots (outline-tree-roots self.rows)
+                                 :key outline-tree-key
+                                 :children outline-tree-children
+                                 :default-expanded? outline-tree-default-expanded?
+                                 :row-gap row-gap
+                                 :row-builder (graph-outline-row-builder self)}) self.ctx))
+    (set self.tree-view tree-view)
+    (layout-tree-view! tree-view)
+    tree-view)
+
+(fn empty-state-measurer [state]
+    (fn [layout]
+        (state.label.layout:measurer)
+        (set layout.measure (glm.vec3 row-width
+                                      (+ state.label.layout.measure.y 12)
+                                      0))))
+
+(fn empty-state-layouter [state]
+    (fn [layout]
+        (local height layout.size.y)
+        (set state.background.position (glm.vec3 0 (- height) -0.04))
+        (set state.background.size (glm.vec2 row-width height))
+        (state.background:update)
+        (set state.label.layout.position (glm.vec3 row-left-padding
+                                                   (- 0 6)
+                                                   0.02))
+        (set state.label.layout.rotation (glm.quat 1 0 0 0))
+        (set state.label.layout.depth-offset-index 1)
+        (state.label.layout:layouter)))
+
+(fn drop-empty-state-handle! [handle]
+    (drop-handle-list! handle.visuals)
+    (handle.layout:drop))
 
 (fn attach-empty-state! [self]
     (local background
            (create-rectangle! self.ctx
-                              self.default-row-background-color
-                              (glm.vec3 0 (- row-height) -0.04)
-                              (glm.vec2 row-width row-height)
-                              0))
+                               self.default-row-background-color
+                               (glm.vec3 0 0 -0.04)
+                               (glm.vec2 row-width row-height)
+                               0))
     (local label
            (create-text! self.ctx
-                           empty-state-message
-                           (glm.vec3 row-left-padding (- 0 row-height -6) 0.02)
-                           self.label-color
-                           (empty-state-label-scale self)))
+                            empty-state-message
+                            (glm.vec3 0 0 0.02)
+                            self.label-color
+                            (empty-state-label-scale self)))
+    (local state {:background background :label label})
+    (local layout (Layout {:name "graph-outline-empty-state"
+                           :measurer (empty-state-measurer state)
+                           :layouter (empty-state-layouter state)}))
+    (layout:set-children [label.layout])
+    (layout:measurer)
+    (set layout.position (glm.vec3 0 0 0))
+    (set layout.size layout.measure)
+    (layout:layouter)
     (set self.empty-state-handle {:message empty-state-message
-                                   :visuals [background label]})
+                                  :layout layout
+                                  :visuals [background label]
+                                  :drop drop-empty-state-handle!})
     self.empty-state-handle)
 
 (fn make-outline-view-state [graph-map ctx clickables node-views outline-text-scale selector focus pointer-target]
@@ -562,7 +674,8 @@
       :clickables clickables
       :selector selector
       :focus focus
-      :pointer-target pointer-target
+      :pointer-target (or pointer-target {})
+      :noop-selector (noop-selector)
       :selection-border-color (outline-selection-border-color ctx)
       :focus-outline-color (outline-focus-outline-color ctx)
       :label-color (outline-label-color ctx)
@@ -577,7 +690,9 @@
       :node-views node-views
       :outline-text-scale outline-text-scale
       :connections []
-      :row-handles []})
+      :row-handles []
+      :tree-view nil
+      :drop graph-outline-uninstalled-drop})
 
 (fn should-restore-focus-on-rebuild? [self]
     (local focus-manager (and self.focus self.focus.manager))
@@ -588,22 +703,26 @@
 
 (set rebuild-rows! (fn [self]
     (set self.rebuilding? true)
+    (local restore-focus? (should-restore-focus-on-rebuild? self))
+    (local restore-focused-key (and restore-focus? self.graph-map.focused_node_key))
     (drop-row-handles! self)
     (set self.rows (GraphOutline.build-rows self.graph-map self.graph-map.outline_root_keys))
     (set self.row-by-key {})
     (set self.expanded-row-keys {})
     (each [idx row (ipairs self.rows)]
-        (set (. self.row-by-key row.key) row)
-        (attach-row-handles! self row idx))
+        (set (. self.row-by-key row.key) row))
+    (when (> (length self.rows) 0)
+        (attach-tree-view! self))
     (drop-pending-focus-nodes! self)
     (when (= (length self.rows) 0)
         (attach-empty-state! self))
     (set self.rebuilding? false)
     (sync-map-selection-to-selector! self)
-    (when (and self.graph-map.focused_node_key
-               (visible-key? self self.graph-map.focused_node_key)
-               (should-restore-focus-on-rebuild? self))
-        (focus-key! self self.graph-map.focused_node_key {:reason :rebuild}))
+    (when (and restore-focused-key
+               (visible-key? self restore-focused-key)
+               restore-focus?)
+        (focus-key! self restore-focused-key {:reason :rebuild})
+        (set self.graph-map.focused_node_key restore-focused-key))
     self.rows))
 
 (fn connect! [self signal handler]
