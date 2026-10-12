@@ -135,10 +135,11 @@
        :config-dir-name "opencode-mcp-config"
        :mcp-key "space"
        :permissions permissions
-       :host host
-       :http-server-factory http-server-factory
-       :mcp-server-factory mcp-server-factory
-       :status-extra status-extra}))
+        :host host
+        :http-server-factory http-server-factory
+        :mcp-server-factory mcp-server-factory
+        :config-extra opts.config-extra
+        :status-extra status-extra}))
 
   (fn start [self]
     (when started?
