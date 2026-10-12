@@ -224,6 +224,7 @@
     :tests.test-vector-buffer
     :tests.test-points
     :tests.test-layered-point
+    :tests.test-layered-point-box
     :tests.test-renderers
     :tests.test-widget-cuboid
     :tests.test-radial
