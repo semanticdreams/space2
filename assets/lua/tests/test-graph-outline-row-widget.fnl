@@ -438,6 +438,28 @@
           "expand/collapse should not drop shared focus node")
   (widget:drop))
 
+(fn outline-expanded-row-refreshes-marker-focus-and-selection []
+  (set row-state.selected? false)
+  (set row-state.focused? false)
+  (local {:widget widget} (make-outline-row-widget {:selected? row-state-selected?
+                                                    :focused? row-state-focused?}))
+  (local marker-point widget.marker-box.point)
+  (widget:expand!)
+  (assert (= widget.marker-box.point marker-point)
+          "expanded row should keep marker point visible")
+  (assert (= (. marker-point.layers 1 :size) 0)
+          "expanded marker focus layer should start hidden")
+  (assert (= (. marker-point.layers 2 :size) 0)
+          "expanded marker selection layer should start hidden")
+  (set row-state.selected? true)
+  (set row-state.focused? true)
+  (widget:refresh)
+  (assert (> (. marker-point.layers 1 :size) 0)
+          "expanded marker focus layer should refresh while compact projection is detached")
+  (assert (> (. marker-point.layers 2 :size) 0)
+          "expanded marker selection layer should refresh while compact projection is detached")
+  (widget:drop))
+
 (table.insert tests {:name "outline row marker measurement is stable across focus and selection"
                      :fn outline-row-marker-measurement-is-stable-across-focus-and-selection})
 (table.insert tests {:name "outline row marker and label are top aligned"
@@ -446,6 +468,8 @@
                      :fn outline-focus-and-selection-do-not-move-descendant-row-points})
 (table.insert tests {:name "outline row keeps marker box point across expand and collapse"
                      :fn outline-row-keeps-marker-box-point-across-expand-and-collapse})
+(table.insert tests {:name "outline expanded row refreshes marker focus and selection"
+                     :fn outline-expanded-row-refreshes-marker-focus-and-selection})
 
 (local main
   (fn []

@@ -208,14 +208,19 @@
     (set state.expanded-card.layout.rotation layout.rotation)
     (state.expanded-card.layout:layouter)))
 
+(fn refresh-marker-layers! [state]
+  (when state.marker-box
+    (each [idx layer (ipairs (projection-layers state))]
+      (state.marker-box.point:set-layer idx layer))
+    (state.marker-box:refresh)))
+
 (fn refresh! [state]
   (when state.dropped?
     (error "OutlineRowWidget method called after drop"))
   (when (and state.projection (not state.compact-projection-dropped?))
     (CompactNodeProjection.refresh! state.projection {:selected? (selected? state)
                                                        :focused? (focused? state)}))
-  (when state.marker-box
-    (state.marker-box:refresh))
+  (refresh-marker-layers! state)
   (when state.expanded-card
     (local base-size (node-size state.row))
     (state.expanded-card:set-layer-size 1 (focus-layer-size state base-size))
