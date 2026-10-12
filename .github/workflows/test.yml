@@ -101,40 +101,67 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          mkdir -p build
-          if ! run_id="$(gh run list \
-            --repo "${GITHUB_REPOSITORY}" \
-            --workflow test.yml \
-            --branch main \
-            --event push \
-            --status success \
-            --json databaseId \
-            --jq '.[0].databaseId // empty')"; then
-            echo "available=false" >> "${GITHUB_OUTPUT}"
-            echo "Unable to look up successful main test.yml push runs; falling back to full native validation."
-            exit 0
-          fi
+          set -uo pipefail
 
-          if [[ -z "${run_id}" ]]; then
-            echo "available=false" >> "${GITHUB_OUTPUT}"
-            echo "No successful main test.yml push run found; falling back to full native validation."
-            exit 0
-          fi
+          install_prebuilt_runtime() {
+            local run_id artifact_root
 
-          if gh run download "${run_id}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --name space-linux-minimal-runtime \
-            --dir prebuilt-runtime; then
-            if cp prebuilt-runtime/space build/space && chmod +x build/space; then
-              echo "available=true" >> "${GITHUB_OUTPUT}"
-            else
-              echo "available=false" >> "${GITHUB_OUTPUT}"
-              echo "Unable to install prebuilt runtime from run ${run_id}; falling back to full native validation."
+            mkdir -p build || return 1
+            run_id="$(gh run list \
+              --repo "${GITHUB_REPOSITORY}" \
+              --workflow test.yml \
+              --branch main \
+              --event push \
+              --status success \
+              --json databaseId \
+              --jq '.[0].databaseId // empty')" || return 1
+
+            if [[ -z "${run_id}" ]]; then
+              echo "No successful main test.yml push run found."
+              return 1
             fi
+
+            rm -rf prebuilt-runtime build/prebuilt-runtime build/space || return 1
+            gh run download "${run_id}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --name space-linux-minimal-runtime \
+              --dir prebuilt-runtime || return 1
+
+            artifact_root="prebuilt-runtime"
+            if [[ ! -f "${artifact_root}/bin/space" && -f "${artifact_root}/prebuilt-runtime-artifact/bin/space" ]]; then
+              artifact_root="prebuilt-runtime/prebuilt-runtime-artifact"
+            fi
+
+            if [[ ! -f "${artifact_root}/bin/space" || ! -d "${artifact_root}/lib" ]]; then
+              echo "Downloaded prebuilt runtime artifact does not contain bin/space and lib/."
+              return 1
+            fi
+
+            mkdir -p build/prebuilt-runtime || return 1
+            cp -a "${artifact_root}/." build/prebuilt-runtime/ || return 1
+            chmod +x build/prebuilt-runtime/bin/space || return 1
+
+            cat > build/space <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          runtime_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/prebuilt-runtime" && pwd)"
+          export LD_LIBRARY_PATH="${runtime_root}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+          exec "${runtime_root}/bin/space" "$@"
+          EOF
+            chmod +x build/space || return 1
+
+            SPACE_ASSETS_PATH="${GITHUB_WORKSPACE}/assets" \
+              FENNEL_PATH="${GITHUB_WORKSPACE}/assets/lua/?.fnl;${GITHUB_WORKSPACE}/assets/lua/?/init.fnl" \
+              FENNEL_MACRO_PATH="${GITHUB_WORKSPACE}/assets/lua/?.fnl;${GITHUB_WORKSPACE}/assets/lua/?/init.fnl" \
+              ./build/space -m tools.fennel-check:main -- --output summary --target files --file assets/lua/json-utils.fnl || return 1
+          }
+
+          if install_prebuilt_runtime; then
+            echo "available=true" >> "${GITHUB_OUTPUT}"
           else
             echo "available=false" >> "${GITHUB_OUTPUT}"
-            echo "Unable to download prebuilt runtime from run ${run_id}; falling back to full native validation."
+            rm -rf prebuilt-runtime build/prebuilt-runtime build/space
+            echo "Unable to install or smoke-check prebuilt runtime; falling back to full native validation."
           fi
 
       - name: Setup compiler cache
@@ -192,12 +219,110 @@ jobs:
           CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: make BUILD_JOBS=$(nproc) build
 
+      - name: Prepare prebuilt Linux runtime artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.test-scope.outputs.run-native == 'true'
+        run: |
+          set -euo pipefail
+
+          artifact_dir="prebuilt-runtime-artifact"
+          dep_manifest="${RUNNER_TEMP}/space-prebuilt-runtime-deps.txt"
+          rm -rf "${artifact_dir}"
+          mkdir -p "${artifact_dir}/bin" "${artifact_dir}/lib"
+          cp build/space "${artifact_dir}/bin/space"
+          chmod +x "${artifact_dir}/bin/space"
+          : > "${dep_manifest}"
+
+          parse_ldd_path() {
+            local line="$1" dep=""
+            if [[ "${line}" == *"=> not found"* ]]; then
+              printf '%s\n' "__MISSING__"
+              return 0
+            fi
+            if [[ "${line}" == *"=>"* ]]; then
+              dep="${line#*=> }"
+              dep="${dep%% (*}"
+            elif [[ "${line}" == /* ]]; then
+              dep="${line%% (*}"
+            fi
+            if [[ -n "${dep}" && -f "${dep}" ]]; then
+              printf '%s\n' "${dep}"
+            fi
+          }
+
+          copy_workspace_dependency() {
+            local dep="$1" lib_dir="$2" current target next packaged_target
+            current="${dep}"
+
+            while [[ -L "${current}" ]]; do
+              target="$(readlink "${current}")"
+              if [[ "${target}" == /* ]]; then
+                next="${target}"
+              else
+                next="$(dirname "${current}")/${target}"
+              fi
+              packaged_target="$(basename "${target}")"
+              ln -sfn "${packaged_target}" "${lib_dir}/$(basename "${current}")"
+              current="${next}"
+            done
+
+            if [[ ! -f "${current}" ]]; then
+              echo "Unable to package dependency target for ${dep}: ${current}" >&2
+              return 1
+            fi
+            cp -L "${current}" "${lib_dir}/$(basename "${current}")"
+          }
+
+          missing_deps=0
+          while IFS= read -r line; do
+            dep="$(parse_ldd_path "${line}")"
+            if [[ "${dep}" == "__MISSING__" ]]; then
+              echo "Missing runtime dependency reported by ldd: ${line}"
+              missing_deps=1
+            elif [[ -n "${dep}" && "${dep}" == "${GITHUB_WORKSPACE}/"* ]]; then
+              printf '%s\n' "${dep}" >> "${dep_manifest}"
+            fi
+          done < <(ldd build/space)
+
+          if [[ "${missing_deps}" -ne 0 ]]; then
+            exit 1
+          fi
+
+          sort -u "${dep_manifest}" | while IFS= read -r dep; do
+            if [[ -n "${dep}" ]]; then
+              copy_workspace_dependency "${dep}" "${artifact_dir}/lib"
+            fi
+          done
+
+          {
+            echo "space"
+            find "${artifact_dir}/lib" -maxdepth 1 -type l -printf '%f -> %l\n' | sort
+            find "${artifact_dir}/lib" -maxdepth 1 -type f -printf '%f\n' | sort
+          } > "${artifact_dir}/manifest.txt"
+
+          smoke_dir="${RUNNER_TEMP}/space-prebuilt-runtime-smoke"
+          smoke_ldd="${RUNNER_TEMP}/space-prebuilt-runtime-smoke.ldd"
+          rm -rf "${smoke_dir}"
+          mkdir -p "${smoke_dir}"
+          cp -a "${artifact_dir}/." "${smoke_dir}/"
+
+          LD_LIBRARY_PATH="${smoke_dir}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" ldd "${smoke_dir}/bin/space" > "${smoke_ldd}"
+          if grep -F "${GITHUB_WORKSPACE}/" "${smoke_ldd}"; then
+            echo "Isolated prebuilt runtime still resolves dependencies from the original workspace." >&2
+            exit 1
+          fi
+
+          SPACE_ASSETS_PATH="${GITHUB_WORKSPACE}/assets" \
+            FENNEL_PATH="${GITHUB_WORKSPACE}/assets/lua/?.fnl;${GITHUB_WORKSPACE}/assets/lua/?/init.fnl" \
+            FENNEL_MACRO_PATH="${GITHUB_WORKSPACE}/assets/lua/?.fnl;${GITHUB_WORKSPACE}/assets/lua/?/init.fnl" \
+            LD_LIBRARY_PATH="${smoke_dir}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" \
+            "${smoke_dir}/bin/space" -m tools.fennel-check:main -- --output summary --target files --file assets/lua/json-utils.fnl
+
       - name: Upload prebuilt Linux runtime
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.test-scope.outputs.run-native == 'true'
         uses: actions/upload-artifact@v5
         with:
           name: space-linux-minimal-runtime
-          path: build/space
+          path: prebuilt-runtime-artifact
           if-no-files-found: error
           retention-days: 7
 
