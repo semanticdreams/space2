@@ -29,7 +29,7 @@
 - Modify: `README.md`
 
 **Interfaces:**
-- Produces: A short README landing page with no detailed developer procedures. Links to: `https://github.com/semanticdreams/space2/releases/latest`, `docs/user/quick-start.md`, `docs/user/index.md`, `docs/dev/index.md`, `docs/dev/building.md`.
+- Produces: A short README landing page with no detailed developer procedures. Links to: `https://github.com/semanticdreams/spacecore/releases/latest`, `docs/user/quick-start.md`, `docs/user/index.md`, `docs/dev/index.md`, `docs/dev/building.md`.
 
 - [ ] **Step 1: Replace entire README.md content with the slim version**
 
@@ -38,13 +38,13 @@ Write the following content to `README.md`:
 ```markdown
 # space
 
-[![.github/workflows/test.yml](https://github.com/semanticdreams/space2/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/semanticdreams/space2/actions/workflows/test.yml)
-[![.github/workflows/build.yml](https://github.com/semanticdreams/space2/actions/workflows/build.yml/badge.svg?branch=)](https://github.com/semanticdreams/space2/actions/workflows/build.yml)
+[![.github/workflows/test.yml](https://github.com/semanticdreams/spacecore/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/semanticdreams/spacecore/actions/workflows/test.yml)
+[![.github/workflows/build.yml](https://github.com/semanticdreams/spacecore/actions/workflows/build.yml/badge.svg?branch=)](https://github.com/semanticdreams/spacecore/actions/workflows/build.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://opensource.org/license/gpl-3-0)
 
 > **Free Your System** — a programmable, shared, user-owned computing environment for code, knowledge, games, art, and collaboration.
 
-[Quick Start](https://spaceui.org/user/quick-start) · [User Docs](https://spaceui.org/user/) · [Developer Docs](https://spaceui.org/dev/) · [Latest Release](https://github.com/semanticdreams/space2/releases/latest)
+[Quick Start](https://spaceui.org/user/quick-start) · [User Docs](https://spaceui.org/user/) · [Developer Docs](https://spaceui.org/dev/) · [Latest Release](https://github.com/semanticdreams/spacecore/releases/latest)
 
 ## What is space?
 
@@ -57,13 +57,13 @@ space is a 3D spatial computing platform and live programming environment — a 
 
 ## Getting Started
 
-**Prebuilt packages:** [Download the latest release](https://github.com/semanticdreams/space2/releases/latest) — AppImage, .deb, .rpm, .exe, and .zip available.
+**Prebuilt packages:** [Download the latest release](https://github.com/semanticdreams/spacecore/releases/latest) — AppImage, .deb, .rpm, .exe, and .zip available.
 
 **Build from source:** See [Building space](/dev/building) for per-distro dependencies and build instructions.
 
 ## Contribute
 
-[Discussions](https://github.com/semanticdreams/space2/discussions) · [Matrix](https://matrix.to/#/#spaceui.org:matrix.org)
+[Discussions](https://github.com/semanticdreams/spacecore/discussions) · [Matrix](https://matrix.to/#/#spaceui.org:matrix.org)
 
 ## License
 
@@ -180,7 +180,7 @@ Start with:
 
 ## Install from Latest GitHub Release
 
-[Latest release page](https://github.com/semanticdreams/space2/releases/latest)
+[Latest release page](https://github.com/semanticdreams/spacecore/releases/latest)
 ```
 
 Then include the direct download links and install guidance from the original README. Include the RPM runtime dependency sections for Fedora and openSUSE Tumbleweed.
@@ -284,7 +284,7 @@ git commit -m "docs(dev): add remote-control, terminal, e2e-testing, and profili
 
 In `docs/dev/features/cef-in-world-browser.md`, change line 44 from:
 ```markdown
-- See: [README](https://github.com/semanticdreams/space2) (CEF build setup)
+- See: [README](https://github.com/semanticdreams/spacecore) (CEF build setup)
 ```
 to:
 ```markdown
@@ -295,7 +295,7 @@ to:
 
 In `docs/dev/features/development-tooling.md`, change the line containing the README link from:
 ```markdown
-See [README](https://github.com/semanticdreams/space2) — build/install section.
+See [README](https://github.com/semanticdreams/spacecore) — build/install section.
 ```
 to:
 ```markdown
@@ -306,7 +306,7 @@ See [Building space](/dev/building).
 
 In `docs/dev/features/ffmpeg-video-playback.md`, change the line containing the README link from:
 ```markdown
-- See: [README](https://github.com/semanticdreams/space2) (in-world video section)
+- See: [README](https://github.com/semanticdreams/spacecore) (in-world video section)
 ```
 to:
 ```markdown

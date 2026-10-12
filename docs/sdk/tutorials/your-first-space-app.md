@@ -2,7 +2,7 @@
 
 Goal: run and inspect a small app without learning maintainer internals first.
 
-This tutorial uses the [Snake example](https://github.com/semanticdreams/space2/tree/main/examples/snake) as the smallest current app-shaped starting point.
+This tutorial uses the [Snake example](https://github.com/semanticdreams/spacecore/tree/main/examples/snake) as the smallest current app-shaped starting point.
 
 ## Run the Example
 

@@ -14,7 +14,7 @@ from typing import Any
 
 from opencode_capabilities import CapabilityError, ensure_space_repo, failure, human_decision, run_command, success, validate_branch_name
 
-SPACE_REPO = "semanticdreams/space2"
+SPACE_REPO = "semanticdreams/spacecore"
 PR_VIEW_FIELDS = "state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url"
 NONTERMINAL_STATES = {"queued", "waiting", "pending", "in_progress", "in-progress", "expected", "clean", "unknown", None}
 PENDING_ROLLUP_STATUSES = {"queued", "pending", "in-progress", "expected"}

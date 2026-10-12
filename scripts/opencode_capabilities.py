@@ -21,9 +21,9 @@ class CapabilityError(Exception):
 
 
 _TRUSTED_SPACE_REMOTES = (
-    re.compile(r"^git@github\.com:semanticdreams/space2(?:\.git)?$"),
-    re.compile(r"^ssh://git@github\.com/semanticdreams/space2(?:\.git)?$"),
-    re.compile(r"^https://github\.com/semanticdreams/space2(?:\.git)?$"),
+    re.compile(r"^git@github\.com:semanticdreams/spacecore(?:\.git)?$"),
+    re.compile(r"^ssh://git@github\.com/semanticdreams/spacecore(?:\.git)?$"),
+    re.compile(r"^https://github\.com/semanticdreams/spacecore(?:\.git)?$"),
 )
 
 

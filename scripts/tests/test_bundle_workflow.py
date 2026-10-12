@@ -74,7 +74,7 @@ def test_bundle_workflow_downloads_pinned_space_release_artifacts() -> None:
 
     assert "gh release download" in text
     assert "${{ inputs.space-version }}" in text
-    assert "--repo semanticdreams/space2" in text
+    assert "--repo semanticdreams/spacecore" in text
     assert "space-linux-x86_64.tar.gz" in text
     assert "space-linux-x86_64-minimal.tar.gz" in text
     assert "space-windows-x86_64.zip" in text

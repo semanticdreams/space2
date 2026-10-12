@@ -60,7 +60,7 @@ def test_create_always_targets_base_main_validates_head_and_rejects_invalid_bran
                 "--head",
                 "feature/opencode-capabilities",
                 "--fill",
-            ): "https://github.com/semanticdreams/space2/pull/123\n"
+            ): "https://github.com/semanticdreams/spacecore/pull/123\n"
         }
     )
     monkeypatch.setattr(pr_operator, "run_command", runner)
@@ -111,7 +111,7 @@ def test_create_current_uses_validated_current_branch_without_cli_branch_argumen
                 "--head",
                 "feature/opencode-capabilities",
                 "--fill",
-            ): "https://github.com/semanticdreams/space2/pull/123\n",
+            ): "https://github.com/semanticdreams/spacecore/pull/123\n",
         }
     )
     monkeypatch.setattr(pr_operator, "run_command", runner)
@@ -135,7 +135,7 @@ def test_create_current_uses_validated_current_branch_without_cli_branch_argumen
 
 def test_create_current_returns_existing_pr_without_creating(monkeypatch, trusted_repo: Path) -> None:
     head = "31c62bc214b483adc95cbe234ce826b085f66225"
-    pr = {"url": "https://github.com/semanticdreams/space2/pull/123", "state": "OPEN", "headRefOid": head}
+    pr = {"url": "https://github.com/semanticdreams/spacecore/pull/123", "state": "OPEN", "headRefOid": head}
     runner = GhRunner(
         {
             ("git", "branch", "--show-current"): "feature/opencode-capabilities\n",
@@ -168,7 +168,7 @@ def test_create_current_rejects_stale_existing_pr_with_different_head(monkeypatc
     current_head = "31c62bc214b483adc95cbe234ce826b085f66225"
     pr_head = "ef51e29ec41341b874e5528b5634a22497192100"
     pr = {
-        "url": "https://github.com/semanticdreams/space2/pull/119",
+        "url": "https://github.com/semanticdreams/spacecore/pull/119",
         "state": "MERGED",
         "mergedAt": "2026-09-15T12:34:56Z",
         "headRefOid": pr_head,
@@ -197,7 +197,7 @@ def test_create_current_rejects_stale_existing_pr_with_different_head(monkeypatc
         "current_head": current_head,
         "pr_head": pr_head,
         "pr_state": "MERGED",
-        "pr_url": "https://github.com/semanticdreams/space2/pull/119",
+        "pr_url": "https://github.com/semanticdreams/spacecore/pull/119",
         "args": ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS],
     }
     assert runner.calls == [
@@ -210,7 +210,7 @@ def test_create_current_rejects_stale_existing_pr_with_different_head(monkeypatc
 def test_create_current_rejects_matching_head_pr_that_is_not_open(monkeypatch, trusted_repo: Path) -> None:
     head = "31c62bc214b483adc95cbe234ce826b085f66225"
     pr = {
-        "url": "https://github.com/semanticdreams/space2/pull/119",
+        "url": "https://github.com/semanticdreams/spacecore/pull/119",
         "state": "MERGED",
         "mergedAt": "2026-09-15T12:34:56Z",
         "headRefOid": head,
@@ -238,7 +238,7 @@ def test_create_current_rejects_matching_head_pr_that_is_not_open(monkeypatch, t
     assert result["evidence"]["current_head"] == head
     assert result["evidence"]["pr_head"] == head
     assert result["evidence"]["pr_state"] == "MERGED"
-    assert result["evidence"]["pr_url"] == "https://github.com/semanticdreams/space2/pull/119"
+    assert result["evidence"]["pr_url"] == "https://github.com/semanticdreams/spacecore/pull/119"
 
 
 def test_create_current_creates_when_view_reports_no_existing_pr(monkeypatch, trusted_repo: Path) -> None:
@@ -253,7 +253,7 @@ def test_create_current_creates_when_view_reports_no_existing_pr(monkeypatch, tr
         if args == ["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS]:
             return command_result(args, returncode=1, stderr="no pull requests found for branch feature/opencode-capabilities")
         if args == ["gh", "pr", "create", "--base", "main", "--head", "feature/opencode-capabilities", "--fill"]:
-            return command_result(args, "https://github.com/semanticdreams/space2/pull/124\n")
+            return command_result(args, "https://github.com/semanticdreams/spacecore/pull/124\n")
         raise AssertionError(args)
 
     monkeypatch.setattr(pr_operator, "run_command", fake_run)
@@ -261,7 +261,7 @@ def test_create_current_creates_when_view_reports_no_existing_pr(monkeypatch, tr
     result = pr_operator.create_current_pr(trusted_repo)
 
     assert result["status"] == "pass"
-    assert result["evidence"]["url"] == "https://github.com/semanticdreams/space2/pull/124"
+    assert result["evidence"]["url"] == "https://github.com/semanticdreams/spacecore/pull/124"
     assert calls == [
         (["git", "branch", "--show-current"], True),
         (["gh", "pr", "view", "feature/opencode-capabilities", "--json", pr_operator.PR_VIEW_FIELDS], False),
@@ -428,8 +428,8 @@ def test_enable_auto_merge_checks_main_protection_before_auto_merge(monkeypatch,
     )
     runner = GhRunner(
         {
-            ("gh", "api", "repos/semanticdreams/space2/branches/main/protection"): protection,
-            ("gh", "api", "repos/semanticdreams/space2/rulesets"): rulesets,
+            ("gh", "api", "repos/semanticdreams/spacecore/branches/main/protection"): protection,
+            ("gh", "api", "repos/semanticdreams/spacecore/rulesets"): rulesets,
             (
                 "gh",
                 "pr",
@@ -446,8 +446,8 @@ def test_enable_auto_merge_checks_main_protection_before_auto_merge(monkeypatch,
 
     assert result["status"] == "pass"
     assert runner.calls == [
-        ["gh", "api", "repos/semanticdreams/space2/branches/main/protection"],
-        ["gh", "api", "repos/semanticdreams/space2/rulesets"],
+        ["gh", "api", "repos/semanticdreams/spacecore/branches/main/protection"],
+        ["gh", "api", "repos/semanticdreams/spacecore/rulesets"],
         ["gh", "pr", "merge", "feature/opencode-capabilities", "--auto", "--merge"],
     ]
 
@@ -455,10 +455,10 @@ def test_enable_auto_merge_checks_main_protection_before_auto_merge(monkeypatch,
 def test_check_main_protection_requires_test_status_and_merge_queue(monkeypatch, trusted_repo: Path) -> None:
     runner = GhRunner(
         {
-            ("gh", "api", "repos/semanticdreams/space2/branches/main/protection"): json.dumps(
+            ("gh", "api", "repos/semanticdreams/spacecore/branches/main/protection"): json.dumps(
                 {"required_status_checks": {"contexts": ["lint"]}}
             ),
-            ("gh", "api", "repos/semanticdreams/space2/rulesets"): json.dumps([{"rules": []}]),
+            ("gh", "api", "repos/semanticdreams/spacecore/rulesets"): json.dumps([{"rules": []}]),
         }
     )
     monkeypatch.setattr(pr_operator, "run_command", runner)
@@ -498,10 +498,10 @@ def test_check_main_protection_ignores_disabled_non_main_and_unrelated_test_stri
 ) -> None:
     runner = GhRunner(
         {
-            ("gh", "api", "repos/semanticdreams/space2/branches/main/protection"): json.dumps(
+            ("gh", "api", "repos/semanticdreams/spacecore/branches/main/protection"): json.dumps(
                 {"required_status_checks": {"contexts": ["lint"]}}
             ),
-            ("gh", "api", "repos/semanticdreams/space2/rulesets"): json.dumps([ruleset]),
+            ("gh", "api", "repos/semanticdreams/spacecore/rulesets"): json.dumps([ruleset]),
         }
     )
     monkeypatch.setattr(pr_operator, "run_command", runner)
@@ -517,10 +517,10 @@ def test_check_main_protection_accepts_active_main_ruleset_with_required_test_an
 ) -> None:
     runner = GhRunner(
         {
-            ("gh", "api", "repos/semanticdreams/space2/branches/main/protection"): json.dumps(
+            ("gh", "api", "repos/semanticdreams/spacecore/branches/main/protection"): json.dumps(
                 {"required_status_checks": {"contexts": ["lint"]}}
             ),
-            ("gh", "api", "repos/semanticdreams/space2/rulesets"): json.dumps(
+            ("gh", "api", "repos/semanticdreams/spacecore/rulesets"): json.dumps(
                 [
                     {
                         "enforcement": "active",
@@ -550,10 +550,10 @@ def test_check_main_protection_accepts_effective_main_rules_when_ruleset_list_is
 ) -> None:
     runner = GhRunner(
         {
-            ("gh", "api", "repos/semanticdreams/space2/branches/main/protection"): json.dumps(
+            ("gh", "api", "repos/semanticdreams/spacecore/branches/main/protection"): json.dumps(
                 {"required_status_checks": {"contexts": ["lint"]}}
             ),
-            ("gh", "api", "repos/semanticdreams/space2/rulesets"): json.dumps(
+            ("gh", "api", "repos/semanticdreams/spacecore/rulesets"): json.dumps(
                 [
                     {
                         "id": 20232493,
@@ -562,7 +562,7 @@ def test_check_main_protection_accepts_effective_main_rules_when_ruleset_list_is
                     }
                 ]
             ),
-            ("gh", "api", "repos/semanticdreams/space2/rules/branches/main"): json.dumps(
+            ("gh", "api", "repos/semanticdreams/spacecore/rules/branches/main"): json.dumps(
                 [
                     {"type": "pull_request"},
                     {"type": "merge_queue"},
@@ -590,10 +590,10 @@ def test_check_main_protection_accepts_detailed_ruleset_when_effective_rules_are
 ) -> None:
     runner = GhRunner(
         {
-            ("gh", "api", "repos/semanticdreams/space2/branches/main/protection"): json.dumps(
+            ("gh", "api", "repos/semanticdreams/spacecore/branches/main/protection"): json.dumps(
                 {"required_status_checks": {"contexts": ["lint"]}}
             ),
-            ("gh", "api", "repos/semanticdreams/space2/rulesets"): json.dumps(
+            ("gh", "api", "repos/semanticdreams/spacecore/rulesets"): json.dumps(
                 [
                     {
                         "id": 20232493,
@@ -602,11 +602,11 @@ def test_check_main_protection_accepts_detailed_ruleset_when_effective_rules_are
                     }
                 ]
             ),
-            ("gh", "api", "repos/semanticdreams/space2/rules/branches/main"): command_result(
-                ["gh", "api", "repos/semanticdreams/space2/rules/branches/main"],
+            ("gh", "api", "repos/semanticdreams/spacecore/rules/branches/main"): command_result(
+                ["gh", "api", "repos/semanticdreams/spacecore/rules/branches/main"],
                 returncode=404,
             ),
-            ("gh", "api", "repos/semanticdreams/space2/rulesets/20232493"): json.dumps(
+            ("gh", "api", "repos/semanticdreams/spacecore/rulesets/20232493"): json.dumps(
                 {
                     "id": 20232493,
                     "enforcement": "active",
@@ -917,7 +917,7 @@ def test_poll_merge_queue_failed_check_includes_metadata_and_bounded_log_excerpt
     monkeypatch,
     trusted_repo: Path,
 ) -> None:
-    details_url = "https://github.com/semanticdreams/space2/actions/runs/35993871852/job/107614091892"
+    details_url = "https://github.com/semanticdreams/spacecore/actions/runs/35993871852/job/107614091892"
     runner = GhRunner(
         {
             (
@@ -985,7 +985,7 @@ def test_poll_merge_queue_failed_check_includes_fail_markers_outside_tail(
     monkeypatch,
     trusted_repo: Path,
 ) -> None:
-    details_url = "https://github.com/semanticdreams/space2/actions/runs/35993871852/job/107614091892"
+    details_url = "https://github.com/semanticdreams/spacecore/actions/runs/35993871852/job/107614091892"
     filler = [f"filler {index}" for index in range(pr_operator.MAX_FAILED_CHECK_LOG_LINES + 5)]
     log = "\n".join(
         [
@@ -1136,7 +1136,7 @@ def test_actions_log_search_bounds_oversized_matching_line(monkeypatch, trusted_
 
 
 def test_poll_merge_queue_failure_markers_bound_oversized_matching_line(monkeypatch, trusted_repo: Path) -> None:
-    details_url = "https://github.com/semanticdreams/space2/actions/runs/35993871852/job/107614091892"
+    details_url = "https://github.com/semanticdreams/spacecore/actions/runs/35993871852/job/107614091892"
     oversized_match = "[FAIL] " + ("x" * (pr_operator.MAX_FAILED_CHECK_LOG_CHARS * 2))
     log = f"setup\n{oversized_match}\nexpected true\n"
     runner = GhRunner(
@@ -1225,7 +1225,7 @@ def test_actions_log_rejects_tail_plus_slice_combination(trusted_repo: Path) -> 
 
 
 def test_failed_actions_log_bundle_current_writes_full_logs_and_markers(monkeypatch, trusted_repo: Path) -> None:
-    details_url = "https://github.com/semanticdreams/space2/actions/runs/123/job/456"
+    details_url = "https://github.com/semanticdreams/spacecore/actions/runs/123/job/456"
     log = "setup\n[FAIL] bad test\nexpected true\n"
     runner = GhRunner(
         {
@@ -1265,7 +1265,7 @@ def test_poll_merge_queue_continues_when_failed_check_log_waits_for_in_progress_
     monkeypatch,
     trusted_repo: Path,
 ) -> None:
-    details_url = "https://github.com/semanticdreams/space2/actions/runs/35997448859/job/107625178432"
+    details_url = "https://github.com/semanticdreams/spacecore/actions/runs/35997448859/job/107625178432"
     states = iter(
         [
             {

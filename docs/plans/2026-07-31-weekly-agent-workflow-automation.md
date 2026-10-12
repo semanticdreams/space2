@@ -71,7 +71,7 @@
           path.mkdir(parents=True)
           subprocess.run(["git", "init"], cwd=path, check=True, stdout=subprocess.DEVNULL)
       for path in (repo, sibling):
-          subprocess.run(["git", "remote", "add", "origin", "git@example.com:semanticdreams/space2.git"], cwd=path, check=True)
+          subprocess.run(["git", "remote", "add", "origin", "git@example.com:semanticdreams/spacecore.git"], cwd=path, check=True)
       subprocess.run(["git", "remote", "add", "origin", "git@example.com:someone/other.git"], cwd=unrelated, check=True)
       return repo, parent
 

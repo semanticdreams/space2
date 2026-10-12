@@ -21,7 +21,7 @@
 - Rebase and force-push remain forbidden unless the human explicitly requests them.
 - OpenCode users must restart after `.opencode/**` changes.
 - No `.fnl` files are in scope for this plan; Fennel validation ladder is not required unless implementation unexpectedly touches Fennel.
-- HUMAN_DECISION_REQUIRED: GitHub repository settings must have an active merge-queue rule for `semanticdreams/space2:main`. Current API evidence shows active ruleset `19817562` lacks `merge_queue`, while disabled ruleset `20232493` includes it.
+- HUMAN_DECISION_REQUIRED: GitHub repository settings must have an active merge-queue rule for `semanticdreams/spacecore:main`. Current API evidence shows active ruleset `19817562` lacks `merge_queue`, while disabled ruleset `20232493` includes it.
 
 ---
 
@@ -366,16 +366,16 @@
   Run:
 
   ```bash
-  rtk gh api repos/semanticdreams/space2/rulesets
-  rtk gh api repos/semanticdreams/space2/rulesets/19817562
-  rtk gh api repos/semanticdreams/space2/rulesets/20232493
-  rtk gh api repos/semanticdreams/space2/rules/branches/main
+  rtk gh api repos/semanticdreams/spacecore/rulesets
+  rtk gh api repos/semanticdreams/spacecore/rulesets/19817562
+  rtk gh api repos/semanticdreams/spacecore/rulesets/20232493
+  rtk gh api repos/semanticdreams/spacecore/rules/branches/main
   ```
 
   Expected for complete external setup: an active/effective ruleset for `main` includes `merge_queue` and required status check `test`. If active rules still lack `merge_queue`, report `HUMAN_DECISION_REQUIRED` with this exact guidance:
 
   ```text
-  Enable ruleset 20232493 or add the merge_queue rule to active ruleset 19817562 for semanticdreams/space2:main. A disabled ruleset that contains merge_queue is not sufficient.
+  Enable ruleset 20232493 or add the merge_queue rule to active ruleset 19817562 for semanticdreams/spacecore:main. A disabled ruleset that contains merge_queue is not sufficient.
   ```
 
 - [ ] **Step 2: Run focused policy/config tests**

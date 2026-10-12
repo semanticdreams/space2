@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Update Space's repository references for `semanticdreams/space2` and teach the OpenCode finishing workflows to rely on GitHub merge queue after PR creation.
+**Goal:** Update Space's repository references for `semanticdreams/spacecore` and teach the OpenCode finishing workflows to rely on GitHub merge queue after PR creation.
 
 **Architecture:** This is a repository-policy, documentation, and process-configuration change. Tracked URLs move to the new canonical GitHub repository, while pre-PR validation remains strict and post-PR freshness moves to GitHub merge queue. OpenCode config/skill edits must be implemented by subagents and reviewed before commit.
 
@@ -10,10 +10,10 @@
 
 ## Global Constraints
 
-- Canonical repository URL: `https://github.com/semanticdreams/space2`.
-- Canonical SSH repository URL: `git@github.com:semanticdreams/space2.git`.
+- Canonical repository URL: `https://github.com/semanticdreams/spacecore`.
+- Canonical SSH repository URL: `git@github.com:semanticdreams/spacecore.git`.
 - Historical canonical repository references to `https://github.com/semanticdreams/space`, `git@github.com:semanticdreams/space.git`, and `semanticdreams/space` must be updated when they point at the active Space repository, releases, Actions, discussions, source files, clone instructions, badges, or test fixtures.
-- The local `origin` remote has already been updated to `https://github.com/semanticdreams/space2.git` for this worktree.
+- The local `origin` remote has already been updated to `https://github.com/semanticdreams/spacecore.git` for this worktree.
 - Keep pre-PR behavior strict: before final validation and initial PR creation, agents fetch `origin` and verify the branch has accounted for current `origin/main`.
 - Change post-PR behavior: once a PR is open and queued, agents must not update the PR branch solely because `origin/main` advanced.
 - GitHub merge queue is the post-PR freshness gate. Queue conflicts or required-check failures trigger `systematic-debugging` and reviewed fixes.
@@ -48,7 +48,7 @@
 - Test: focused Python/Fennel fixture checks where practical
 
 **Interfaces:**
-- Consumes: canonical URL `https://github.com/semanticdreams/space2` and SSH URL `git@github.com:semanticdreams/space2.git`
+- Consumes: canonical URL `https://github.com/semanticdreams/spacecore` and SSH URL `git@github.com:semanticdreams/spacecore.git`
 - Produces: tracked docs/tests/scripts no longer reference the old canonical `semanticdreams/space` repository
 
 - [ ] **Step 1: Reproduce the stale-reference baseline**
@@ -72,7 +72,7 @@
   with:
 
   ```text
-  https://github.com/semanticdreams/space2
+  https://github.com/semanticdreams/spacecore
   ```
 
   This covers Actions badges, workflow links, release links, discussion links, source-file links, and README references.
@@ -89,8 +89,8 @@
   with:
 
   ```text
-  git@github.com:semanticdreams/space2.git
-  git@example.com:semanticdreams/space2.git
+  git@github.com:semanticdreams/spacecore.git
+  git@example.com:semanticdreams/spacecore.git
   ```
 
   Preserve the `git@example.com:` host in test fixtures that intentionally use a fake host; only the owner/repo path changes.
@@ -106,7 +106,7 @@
   with:
 
   ```text
-  semanticdreams/space2
+  semanticdreams/spacecore
   ```
 
   Do not rename the product, executable, package artifacts, domain `spaceui.org`, or asset filenames that intentionally contain `space` as the product name.
@@ -174,7 +174,7 @@
 
   In `docs/dev/features/opencode-agent-workflow.md`, update the branch and pull request policy section to document:
 
-  - canonical source repository `https://github.com/semanticdreams/space2`;
+  - canonical source repository `https://github.com/semanticdreams/spacecore`;
   - pre-PR current-base validation against `origin/main`;
   - PR creation followed by auto-merge/merge-queue handoff;
   - no stale-branch update loop after PR creation merely because another PR merged;
@@ -186,7 +186,7 @@
   Run:
 
   ```bash
-  rtk rg -n 'semanticdreams/space2|merge queue|merge-group|origin/main|systematic-debugging|implementer.*reviewer|rebase|force-push|HUMAN_DECISION_REQUIRED' AGENTS.md docs/dev/features/opencode-agent-workflow.md
+  rtk rg -n 'semanticdreams/spacecore|merge queue|merge-group|origin/main|systematic-debugging|implementer.*reviewer|rebase|force-push|HUMAN_DECISION_REQUIRED' AGENTS.md docs/dev/features/opencode-agent-workflow.md
   rtk git diff --check AGENTS.md docs/dev/features/opencode-agent-workflow.md
   ```
 
@@ -259,7 +259,7 @@
 
 **Files:**
 - Test: all files changed by Tasks 1–3
-- Test: GitHub rules for `semanticdreams/space2/main`
+- Test: GitHub rules for `semanticdreams/spacecore/main`
 
 **Interfaces:**
 - Consumes: completed Tasks 1–3
@@ -290,8 +290,8 @@
   Run:
 
   ```bash
-  rtk gh api repos/semanticdreams/space2/rules/branches/main
-  rtk gh api repos/semanticdreams/space2/branches/main/protection || true
+  rtk gh api repos/semanticdreams/spacecore/rules/branches/main
+  rtk gh api repos/semanticdreams/spacecore/branches/main/protection || true
   ```
 
   Expected before the human GitHub settings change: rules require pull requests and `test`, but no merge queue rule is visible. Record `HUMAN_DECISION_REQUIRED` unless merge queue is already present.
@@ -326,7 +326,7 @@
 
   Include this human checklist in the final handoff if merge queue is not already enabled:
 
-  - In `semanticdreams/space2`, open the `main` branch ruleset.
+  - In `semanticdreams/spacecore`, open the `main` branch ruleset.
   - Enable **Require merge queue**.
   - Keep required status check `test`.
   - Ensure the CI provider runs `test` for merge-group candidates (`merge_group` for GitHub Actions or `gh-readonly-queue/main` support for external CI).

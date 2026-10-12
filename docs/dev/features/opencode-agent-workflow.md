@@ -464,7 +464,7 @@ unless the human explicitly requests it.
 ## Branch and pull request policy
 
 All agent-driven changes follow these branch and PR rules. The canonical source
-repository is `https://github.com/semanticdreams/space2`.
+repository is `https://github.com/semanticdreams/spacecore`.
 
 ### Pre-PR current-base validation
 

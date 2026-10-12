@@ -17,7 +17,7 @@ The asset path puts Snake assets first and shared Space assets second. That lets
 
 ## Inspect the App Shape
 
-Browse the [Snake example repository path](https://github.com/semanticdreams/space2/tree/main/examples/snake) to see how a small app is organized:
+Browse the [Snake example repository path](https://github.com/semanticdreams/spacecore/tree/main/examples/snake) to see how a small app is organized:
 
 - `assets/lua/main.fnl` is the app entrypoint loaded by `space -m main`.
 - `assets/lua/snake/app.fnl` wires the app-level lifecycle and runtime-facing setup.

@@ -9,7 +9,7 @@ tags:
 ## Old implementation
 - assets/python/z/SubWorld(470).py
 - assets/python/z/SubWorldView(469).py
-- https://github.com/semanticdreams/space2/blob/main/assets/python/z/Renderers(355).py
+- https://github.com/semanticdreams/spacecore/blob/main/assets/python/z/Renderers(355).py
 
 
 ## See also
