@@ -14,6 +14,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 
 permissions:
+  actions: read
   contents: read
 
 env:
@@ -26,6 +27,7 @@ jobs:
       SKIP_KEYRING_TESTS: 1
       XDG_DATA_HOME: /tmp/space/tests/xdg-data
       SPACE_DISABLE_AUDIO: 1
+      CMAKE_GENERATOR: Ninja
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 1G
       CCACHE_BASEDIR: ${{ github.workspace }}
@@ -34,16 +36,109 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Determine test scope
+        id: test-scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          changed_files=""
+          classification_args=(--event "${EVENT_NAME}")
+
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            if git fetch --no-tags --depth=1 origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}"; then
+              if ! changed_files="$(git diff --name-only "origin/${BASE_REF}"...HEAD)"; then
+                echo "Unable to diff pull request against ${BASE_REF}; running full suite."
+                changed_files=""
+              fi
+            fi
+          elif [[ "${EVENT_NAME}" == "push" && -n "${BEFORE_SHA}" && ! "${BEFORE_SHA}" =~ ^0+$ ]]; then
+            if git fetch --no-tags --depth=1 origin "${BEFORE_SHA}"; then
+              if ! changed_files="$(git diff --name-only "${BEFORE_SHA}" HEAD)"; then
+                echo "Unable to diff push against ${BEFORE_SHA}; running full suite."
+                changed_files=""
+              fi
+            fi
+          fi
+
+          while IFS= read -r path; do
+            if [[ -n "${path}" ]]; then
+              classification_args+=(--changed-file "${path}")
+            fi
+          done <<< "${changed_files}"
+
+          python3 scripts/ci_test_scope.py "${classification_args[@]}" | tee "${RUNNER_TEMP}/test-scope.env"
+          cat "${RUNNER_TEMP}/test-scope.env" >> "${GITHUB_OUTPUT}"
+
+          if [[ -n "${changed_files}" ]]; then
+            echo "changed files:"
+            printf '%s\n' "${changed_files}"
+          fi
+
+      - name: Docs-only fast path
+        if: steps.test-scope.outputs.mode == 'docs-only'
+        run: |
+          echo "Skipping native build and test suite: ${{ steps.test-scope.outputs.reason }}."
 
       - name: Install dependencies
+        if: steps.test-scope.outputs.run-runtime-tests == 'true'
         run: |
           sudo apt-get update
           deps=$(awk '/CI_DEPS_START/{flag=1;next}/CI_DEPS_END/{flag=0}flag' docs/dev/building.md | sed -n 's/^sudo apt install //p')
           # sccache not available via apt on Ubuntu 22.04 — install via cargo below
           deps=$(echo "$deps" | sed 's/\bsccache\b//g')
-          sudo apt-get install -y ${deps} ccache
+          sudo apt-get install -y ${deps} ccache ninja-build
+
+      - name: Resolve prebuilt runtime
+        id: prebuilt-runtime
+        if: steps.test-scope.outputs.use-prebuilt-runtime == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          if ! run_id="$(gh run list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --workflow test.yml \
+            --branch main \
+            --event push \
+            --status success \
+            --json databaseId \
+            --jq '.[0].databaseId // empty')"; then
+            echo "available=false" >> "${GITHUB_OUTPUT}"
+            echo "Unable to look up successful main test.yml push runs; falling back to full native validation."
+            exit 0
+          fi
+
+          if [[ -z "${run_id}" ]]; then
+            echo "available=false" >> "${GITHUB_OUTPUT}"
+            echo "No successful main test.yml push run found; falling back to full native validation."
+            exit 0
+          fi
+
+          if gh run download "${run_id}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --name space-linux-minimal-runtime \
+            --dir prebuilt-runtime; then
+            if cp prebuilt-runtime/space build/space && chmod +x build/space; then
+              echo "available=true" >> "${GITHUB_OUTPUT}"
+            else
+              echo "available=false" >> "${GITHUB_OUTPUT}"
+              echo "Unable to install prebuilt runtime from run ${run_id}; falling back to full native validation."
+            fi
+          else
+            echo "available=false" >> "${GITHUB_OUTPUT}"
+            echo "Unable to download prebuilt runtime from run ${run_id}; falling back to full native validation."
+          fi
 
       - name: Setup compiler cache
+        if: steps.test-scope.outputs.run-native == 'true' || steps.prebuilt-runtime.outputs.available == 'false'
         uses: ./.github/actions/setup-linux-compiler-cache
         with:
           cache-scope: linux
@@ -63,6 +158,7 @@ jobs:
             CMakeLists.txt
 
       - name: Configure git for test directories
+        if: steps.test-scope.outputs.run-runtime-tests == 'true'
         run: |
           set -euo pipefail
           git_config="${RUNNER_TEMP}/gitconfig"
@@ -78,25 +174,58 @@ jobs:
           git config --file "${git_config}" protocol.file.allow
 
       - name: Check OpenCode capability wiring
+        if: steps.test-scope.outputs.run-native == 'true' || steps.prebuilt-runtime.outputs.available == 'false'
         run: make opencode-check
 
+      - name: Reset compiler cache stats
+        if: steps.test-scope.outputs.run-native == 'true' || steps.prebuilt-runtime.outputs.available == 'false'
+        run: |
+          ccache -z
+          if command -v sccache >/dev/null 2>&1; then
+            sccache --zero-stats
+          fi
+
       - name: Build
+        if: steps.test-scope.outputs.run-native == 'true' || steps.prebuilt-runtime.outputs.available == 'false'
         env:
           CMAKE_C_COMPILER_LAUNCHER: ccache
           CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: make BUILD_JOBS=$(nproc) build
 
+      - name: Upload prebuilt Linux runtime
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.test-scope.outputs.run-native == 'true'
+        uses: actions/upload-artifact@v5
+        with:
+          name: space-linux-minimal-runtime
+          path: build/space
+          if-no-files-found: error
+          retention-days: 7
+
       - name: ccache stats
+        if: steps.test-scope.outputs.run-native == 'true' || steps.prebuilt-runtime.outputs.available == 'false'
         run: ccache -s
 
       - name: sccache stats
+        if: steps.test-scope.outputs.run-native == 'true' || steps.prebuilt-runtime.outputs.available == 'false'
         run: |
           if command -v sccache >/dev/null 2>&1; then
             sccache --show-stats
             sccache --stop-server || true
           fi
 
+      - name: Run prebuilt runtime validation
+        if: steps.prebuilt-runtime.outputs.available == 'true'
+        run: |
+          set -euo pipefail
+          export SPACE_ASSETS_PATH="${GITHUB_WORKSPACE}/assets"
+          export FENNEL_PATH="${GITHUB_WORKSPACE}/assets/lua/?.fnl;${GITHUB_WORKSPACE}/assets/lua/?/init.fnl"
+          export FENNEL_MACRO_PATH="${GITHUB_WORKSPACE}/assets/lua/?.fnl;${GITHUB_WORKSPACE}/assets/lua/?/init.fnl"
+          ./build/space -m tools.fennel-check:main -- --output summary --target repo
+          ./build/space -m constraints.runner:main -- --output summary --target repo
+          xvfb-run -a ./build/space -m tests.fast:main
+
       - name: Run test suite
+        if: steps.test-scope.outputs.run-native == 'true' || steps.prebuilt-runtime.outputs.available == 'false'
         env:
           SPACE_ASSETS_PATH: ${{ github.workspace }}/assets
           SPACE_TEST_REQUIRE_SSH_FIXTURE: 1
@@ -104,4 +233,5 @@ jobs:
         run: xvfb-run -a ctest --test-dir build --output-on-failure -V --parallel "$(nproc)"
 
       - name: Run e2e test suite
+        if: steps.test-scope.outputs.run-native == 'true' || steps.prebuilt-runtime.outputs.available == 'false' || steps.prebuilt-runtime.outputs.available == 'true'
         run: make test-e2e
