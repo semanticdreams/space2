@@ -90,6 +90,57 @@
   (assert (= (. camera-state.rotation 1) 1)
           "saved-camera-state should return persisted rotation w"))
 
+(fn legacy-camera-loads-as-spatial-mode-camera []
+  (local dir (reset-dir))
+  (fs.create-dirs (fs.join-path dir "graph" "maps" "main"))
+  (local persistence (GraphViewPersistence {:data-dir dir :map-id "main"}))
+  (JsonUtils.write-json! persistence.metadata-path {:camera {:position [11 22 33]}})
+  (local reloaded (GraphViewPersistence {:data-dir dir :map-id "main"}))
+  (local legacy-camera (reloaded:saved-camera-state))
+  (local spatial-camera (reloaded:saved-mode-camera-state "spatial"))
+  (assert (= (. legacy-camera.position 1) 11)
+          "saved-camera-state should load legacy top-level camera x")
+  (assert (= (. spatial-camera.position 1) 11)
+          "spatial mode camera should load legacy top-level camera x")
+  (assert (= (. legacy-camera.position 2) (. spatial-camera.position 2))
+          "legacy and spatial camera y should match")
+  (assert (= (. legacy-camera.position 3) (. spatial-camera.position 3))
+          "legacy and spatial camera z should match"))
+
+(fn mode-camera-states-are-independent []
+  (local dir (reset-dir))
+  (local persistence (GraphViewPersistence {:data-dir dir :map-id "main"}))
+  (persistence:set-mode-camera-state "spatial" {:position [1 2 100]})
+  (persistence:set-mode-camera-state "outline" {:position [20 30 80]})
+  (persistence:persist {} true)
+  (local reloaded (GraphViewPersistence {:data-dir dir :map-id "main"}))
+  (local spatial-camera (reloaded:saved-mode-camera-state "spatial"))
+  (local outline-camera (reloaded:saved-mode-camera-state "outline"))
+  (assert (= (. spatial-camera.position 1) 1)
+          "spatial camera x should reload independently")
+  (assert (= (. spatial-camera.position 2) 2)
+          "spatial camera y should reload independently")
+  (assert (= (. spatial-camera.position 3) 100)
+          "spatial camera z should reload independently")
+  (assert (= (. outline-camera.position 1) 20)
+          "outline camera x should reload independently")
+  (assert (= (. outline-camera.position 2) 30)
+          "outline camera y should reload independently")
+  (assert (= (. outline-camera.position 3) 80)
+          "outline camera z should reload independently"))
+
+(fn malformed-mode-camera-fails-loudly []
+  (local dir (reset-dir))
+  (local persistence (GraphViewPersistence {:data-dir dir :map-id "main"}))
+  (fs.create-dirs (fs.join-path dir "graph" "maps" "main"))
+  (JsonUtils.write-json! persistence.metadata-path {:view_modes {:outline {:camera {:position [1 "bad" 3]}}}})
+  (local (ok err) (pcall (fn [] (GraphViewPersistence {:data-dir dir :map-id "main"}))))
+  (assert (not ok) "malformed mode camera metadata should fail")
+  (assert (string.find (tostring err) "GraphViewPersistence" 1 true)
+          "mode camera error should name GraphViewPersistence")
+  (assert (string.find (tostring err) "camera" 1 true)
+          "mode camera error should name camera field"))
+
 (fn malformed-camera-state-fails-loudly []
   (local dir (reset-dir))
   (local persistence (GraphViewPersistence {:data-dir dir :map-id "main"}))
@@ -227,6 +278,12 @@
 
 (table.insert tests {:name "camera state saves loads and preserves metadata"
                      :fn camera-state-saves-loads-and-preserves-metadata})
+(table.insert tests {:name "legacy-camera-loads-as-spatial-mode-camera"
+                     :fn legacy-camera-loads-as-spatial-mode-camera})
+(table.insert tests {:name "mode-camera-states-are-independent"
+                     :fn mode-camera-states-are-independent})
+(table.insert tests {:name "malformed-mode-camera-fails-loudly"
+                     :fn malformed-mode-camera-fails-loudly})
 (table.insert tests {:name "malformed camera state fails loudly"
                      :fn malformed-camera-state-fails-loudly})
 (table.insert tests {:name "malformed false camera state fails loudly"

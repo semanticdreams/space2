@@ -104,8 +104,68 @@
                                 (do
                                     (self:reveal-node node {:select? true :focus? true :center? true})
                                     true)
+                                 false))})
+
+(fn generic-deps [deps]
+    (local options (assert deps "FocusedActions.generic-deps requires deps"))
+    (local assert-not-dropped (assert options.assert-not-dropped "FocusedActions.generic-deps requires :assert-not-dropped"))
+    (local focused-node (assert options.focused-node "FocusedActions.generic-deps requires :focused-node"))
+    (local node-actions (assert options.node-actions "FocusedActions.generic-deps requires :node-actions"))
+    (local open-node (assert options.open-node "FocusedActions.generic-deps requires :open-node"))
+    (local remove-node (assert options.remove-node "FocusedActions.generic-deps requires :remove-node"))
+    (local reveal-node (assert options.reveal-node "FocusedActions.generic-deps requires :reveal-node"))
+    (local menu-position (or options.menu-position (fn [_self _node] {:x 0 :y 0 :z 0})))
+    {:focused-node (fn [_self] (focused-node))
+     :focused-node-actions (fn [self]
+                             (assert-not-dropped "focused-node-actions")
+                             (local node (focused-node))
+                             (if node (node-actions self node) []))
+     :run-focused-node-action-slot (fn [self index]
+                                     (assert-not-dropped "run-focused-node-action-slot")
+                                     (if (not (= (type index) :number))
+                                         false
+                                         (do
+                                             (local action (. (self:focused-node-actions) index))
+                                             (if (and action (= (type action.fn) :function))
+                                                 (do
+                                                     (action.fn nil {})
+                                                     true)
+                                                 false))))
+     :open-focused-node-menu (fn [self]
+                               (assert-not-dropped "open-focused-node-menu")
+                               (local node (focused-node))
+                               (local manager (and options.menu-manager (options.menu-manager)))
+                               (if (and node manager)
+                                   (do
+                                       (manager:open {:actions (self:focused-node-actions)
+                                                      :position (menu-position self node)})
+                                       true)
+                                   false))
+     :copy-focused-node-key (fn [_self]
+                              (assert-not-dropped "copy-focused-node-key")
+                              (local node (focused-node))
+                              (if node
+                                  (do
+                                      (local runtime-gl (require :gl))
+                                      (runtime-gl.clipboard-set (tostring node.key))
+                                      true)
+                                  false))
+     :remove-focused-node-from-map (fn [self]
+                                     (assert-not-dropped "remove-focused-node-from-map")
+                                     (local node (focused-node))
+                                     (if node
+                                         (remove-node self node)
+                                         false))
+     :reveal-focused-node (fn [self opts]
+                            (assert-not-dropped "reveal-focused-node")
+                            (local node (focused-node))
+                            (if node
+                                (do
+                                    (reveal-node self node opts)
+                                    true)
                                 false))})
 
 {:install! install!
- :spatial-deps spatial-deps
- :resolve-keyboard-node-menu-position resolve-keyboard-node-menu-position}
+  :spatial-deps spatial-deps
+  :generic-deps generic-deps
+  :resolve-keyboard-node-menu-position resolve-keyboard-node-menu-position}

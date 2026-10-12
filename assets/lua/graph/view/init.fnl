@@ -12,8 +12,8 @@
 (local GraphViewSelection (require :graph/view/selection))
 (local GraphViewNodeViews (require :graph/view/node-views))
 (local GraphNodeActions (require :graph/view/node-actions))
-(local FocusedActions (require :graph/view/focused-actions))
-(local GraphViewPersistence (require :graph/view/persistence)) (local ActivityCameraState (require :activity-camera-state)) (local SelectedPreviewCommands (require :graph/view/selected-preview-commands)) (local GraphViewSelectionEditing (require :graph/view/selection-editing))
+(local FocusedActions (require :graph/view/focused-actions)) (local Runtime (require :graph/view/runtime)) (local ProjectionSelection (require :graph/view/projection-selection))
+(local GraphViewPersistence (require :graph/view/persistence)) (local ActivityCameraState (require :activity-camera-state)) (local SelectedPreviewCommands (require :graph/view/selected-preview-commands))
 (local CompactNodeProjection (require :graph/view/compact-node-projection))
 (local NodeBase (require :graph/node-base))
 (local GraphNodePresentation (require :graph/view/presentation))
@@ -131,7 +131,7 @@
                         (set (. next-state k) v))
                     (set next-state.position [position.x position.y position.z])
                     (graph-map:update-island island-id {:state next-state}))
-                        (set (. runtime.positions island-id) nil))))) (fn selected-node-keys [nodes] (assert (= (type nodes) :table) "GraphView selected-node-keys requires nodes table") (icollect [_ node (ipairs nodes)] (and node node.key))) (fn sync-map-selected-node-keys! [graph-map keys] (assert graph-map "GraphView selected-node-key sync requires graph-map") (if graph-map.set-selected-node-keys (graph-map:set-selected-node-keys keys) (do (set graph-map.selected_node_keys keys) graph-map.selected_node_keys)))
+                 (set (. runtime.positions island-id) nil))))) (fn selected-node-keys [nodes] (assert (= (type nodes) :table) "GraphView selected-node-keys requires nodes table") (icollect [_ node (ipairs nodes)] (and node node.key))) (fn sync-map-selected-node-keys! [graph-map keys] (assert graph-map "GraphView selected-node-key sync requires graph-map") (if graph-map.set-selected-node-keys (graph-map:set-selected-node-keys keys) (do (set graph-map.selected_node_keys keys) graph-map.selected_node_keys))) (var visible-nodes-for-keys nil) (var focus-spatial-key! nil) (var install-spatial-focused-actions! nil) (var install-spatial-projection-selection! nil) (var install-spatial-runtime! nil)
 
 (fn GraphView [options]
     (local graph-map options.graph-map)
@@ -366,7 +366,7 @@
         (local current-focus (and payload payload.current))
         (local previous-node (and previous-focus (. node-by-focus previous-focus)))
         (local current-node (and current-focus (. node-by-focus current-focus)))
-        (set focused-node current-node)
+        (set focused-node current-node) (set graph-map.focused_node_key (and current-node current-node.key))
         (when previous-node
             (update-point-state previous-node))
         (when current-node
@@ -1293,8 +1293,9 @@
                :selection selection
                :graph-layout graph-layout
                :island-host island-host
-                :extra-panels []
-                :extra-panel-runtimes []})
+                 :extra-panels []
+                 :extra-panel-runtimes []})
+    (set view._spatial-focused-node (fn [] focused-node))
 
     (fn extra-panel-persistence-matches? [persistence entry]
         (and (= (type persistence) :table)
@@ -1552,18 +1553,27 @@
          (fn [_self node]
              (assert-not-dropped "node-actions")
              (build-node-actions node)))
-    (FocusedActions.install!
+    (install-spatial-focused-actions!
         view
-        (FocusedActions.spatial-deps
-            {:assert-not-dropped assert-not-dropped
-             :focused-node (fn [] focused-node)
-             :get-menu-manager get-menu-manager
-             :get-position get-position
-             :pointer-target (or options.pointer-target (and ctx ctx.pointer-target))
-             :selector selector
-             :toggle-node-presentation toggle-node-presentation
-             :graph-map graph-map}))
-    (GraphViewSelectionEditing.install! view {:assert-not-dropped assert-not-dropped :focused-node (fn [] focused-node) :selected-node? (fn [node] (and node (rawget selected-set node))) :selected-nodes selected-nodes :points registry.points :selector selector :selection selection :focus-nodes focus-nodes})
+        {:assert-not-dropped assert-not-dropped
+         :focused-node view._spatial-focused-node
+         :graph-map graph-map
+         :get-menu-manager get-menu-manager
+         :get-position get-position
+         :pointer-target (or options.pointer-target (and ctx ctx.pointer-target))
+         :selector selector
+         :toggle-node-presentation toggle-node-presentation})
+    (install-spatial-projection-selection!
+        view
+        {:assert-not-dropped assert-not-dropped
+         :graph-map graph-map
+         :nodes-by-index nodes-by-index
+         :points registry.points
+         :selected-nodes selected-nodes
+         :selection selection
+         :focused-node view._spatial-focused-node
+         :focus-nodes focus-nodes
+         :selector selector})
     (SelectedPreviewCommands.install! view assert-not-dropped toggle-node-presentation expanded-nodes)
     (set view.reveal-node
          (fn [_self node-or-key opts]
@@ -1630,17 +1640,25 @@
              (when (and graph-map graph-map.restore-state state)
                  (self:with-batched-updates
                    (fn []
-                       (graph-map:restore-state state))))
-             true))
-    (set view.capture-camera-state!
+                  (graph-map:restore-state state))))
+              true))
+    (set view.saved-camera-state
          (fn [_self]
-             (when (and options.camera
-                        persistence
-                        persistence.set-camera-state
-                        (should-capture-camera-state?))
-                 (local state (capture-current-camera-state))
-                 (persistence:set-camera-state state)
-                 state)))
+             (assert-not-dropped "saved-camera-state")
+             (if (and persistence persistence.saved-mode-camera-state)
+                 (persistence:saved-mode-camera-state "spatial")
+                 (and persistence persistence.saved-camera-state (persistence:saved-camera-state)))))
+    (set view.capture-camera-state!
+          (fn [_self]
+              (when (and options.camera
+                         persistence
+                         (should-capture-camera-state?))
+                  (local state (capture-current-camera-state))
+                  (if persistence.set-mode-camera-state
+                      (persistence:set-mode-camera-state "spatial" state)
+                      (and persistence.set-camera-state
+                           (persistence:set-camera-state state)))
+                  state)))
     (set view.restore-views-state
          (fn [_self state]
              (assert-not-dropped "restore-views-state")
@@ -1847,12 +1865,230 @@
              (each [_ node (pairs nodes)]
                  (drop-node-artifacts node))
              (views:drop-all)
-              (layout:clear)
-              (each [node _ (pairs pinned)]
-                  (set (. pinned node) nil))
-              (when (not capture-ok)
-                  (error capture-err))))
+               (layout:clear)
+               (each [node _ (pairs pinned)]
+                   (set (. pinned node) nil))
+               (when (not capture-ok)
+                   (error capture-err))))
+    (set view._spatial-apply-focused-key!
+         (fn [_self key]
+             (local previous-node focused-node)
+             (local next-node (and key (graph-map:lookup key)))
+             (local next-focus-node (and next-node (. registry.points next-node) (. focus-nodes next-node)))
+             (set focused-node (and next-focus-node next-node))
+             (when (and previous-node (not (= previous-node focused-node)))
+                 (update-point-state previous-node))
+             (when focused-node
+                 (set graph-map.focused_node_key focused-node.key)
+                 (next-focus-node:request-focus)
+                 (update-point-state focused-node))
+             (when (not focused-node)
+                 (set graph-map.focused_node_key nil))
+             focused-node))
+    (install-spatial-runtime!
+        view
+        {:graph-map graph-map
+         :ctx ctx
+         :camera options.camera
+         :data-dir data-dir
+         :persistence persistence
+         :mode-states options.mode-states
+         :view-target options.view-target
+         :view-context (or options.view-context
+                           (and options.view-target options.view-target.build-context)
+                           ctx)
+         :node-views views
+         :should-capture-camera-state? should-capture-camera-state?
+         :capture-current-camera-state capture-current-camera-state})
     view)
+
+(set visible-nodes-for-keys
+     (fn [graph-map points keys]
+         (local nodes [])
+         (each [_ key (ipairs keys)]
+             (local node (graph-map:lookup key))
+             (when (and node (. points node))
+                 (table.insert nodes node)))
+         nodes))
+
+(set focus-spatial-key!
+     (fn [graph-map points focus-nodes key]
+         (local node (graph-map:lookup key))
+         (local focus-node (and node (. points node) (. focus-nodes node)))
+         (if focus-node
+             (do
+                 (focus-node:request-focus)
+                 true)
+             false)))
+
+(fn spatial-projection-state [legacy-state]
+    (local projection-state {})
+    (local source-state (if legacy-state legacy-state {}))
+    (each [key value (pairs source-state)]
+        (when (and (not= key :selected_node_keys)
+                   (not= key :focused_node_key)
+                   (not= key :views))
+            (set (. projection-state key) value)))
+    projection-state)
+
+(set install-spatial-focused-actions!
+     (fn [view deps]
+         (FocusedActions.install!
+             view
+             (FocusedActions.generic-deps
+                 {:assert-not-dropped deps.assert-not-dropped
+                  :focused-node deps.focused-node
+                  :node-actions (fn [action-view node] (action-view:node-actions node))
+                  :open-node (fn [action-view node opts] (action-view:open-node node opts))
+                  :remove-node (fn [_action-view node] (> (deps.graph-map:remove-nodes [node]) 0))
+                  :reveal-node (fn [action-view node _opts]
+                                 (action-view:reveal-node node {:select? true :focus? true :center? true}))
+                  :menu-manager deps.get-menu-manager
+                  :menu-position (fn [_action-view node]
+                                   (FocusedActions.resolve-keyboard-node-menu-position
+                                       {:get-position deps.get-position
+                                        :pointer-target deps.pointer-target
+                                        :selector deps.selector}
+                                       node))}))
+         (set view.toggle-focused-node-preview
+              (fn [_self]
+                  (deps.assert-not-dropped "toggle-focused-node-preview")
+                  (local node (deps.focused-node))
+                  (if node
+                      (do
+                          (deps.toggle-node-presentation node)
+                          true)
+                      false)))))
+
+(set install-spatial-projection-selection!
+     (fn [view deps]
+         (ProjectionSelection.install!
+             view
+              {:assert-not-dropped deps.assert-not-dropped
+               :visible-keys (fn []
+                               (icollect [_ node (ipairs deps.nodes-by-index)]
+                                   (if (and node node.key (. deps.points node)) node.key nil)))
+              :selected-keys (fn [] (selected-node-keys deps.selected-nodes))
+              :set-selected-keys! (fn [keys]
+                                    (deps.selection:set-selection
+                                        (visible-nodes-for-keys deps.graph-map deps.points keys)))
+              :focused-key (fn [] (and (deps.focused-node) (. (deps.focused-node) :key)))
+              :focus-key! (fn [key _opts]
+                            (focus-spatial-key! deps.graph-map deps.points deps.focus-nodes key))
+              :visible-key? (fn [key]
+                              (local node (deps.graph-map:lookup key))
+                              (not (= (and node (. deps.points node)) nil)))
+              :sync-selector! (fn [keys]
+                                (when deps.selector
+                                    (deps.selector:set-selected
+                                        (icollect [_ node (ipairs (visible-nodes-for-keys deps.graph-map deps.points keys))]
+                                            (. deps.points node)))))} )
+         (set view.has-visible-nodes?
+              (fn [self]
+                  (self:assert-not-dropped "has-visible-nodes?")
+                  (> (length deps.nodes-by-index) 0)))))
+
+(set install-spatial-runtime!
+     (fn [view deps]
+         (set view._spatial-capture-state view.capture-state)
+         (set view._spatial-restore-state view.restore-state)
+         (set view._spatial-drop view.drop)
+         (set view._spatial-restore-graph-state view.restore-graph-state)
+         (set view._spatial-restore-views-state view.restore-views-state)
+         (set view._spatial-apply-initial-camera-policy view.apply-initial-camera-policy!)
+         (set view._spatial-projection
+              {:mode "spatial"
+               :capture-projection-state! (fn [runtime-view _runtime]
+                                            (spatial-projection-state
+                                                (runtime-view._spatial-capture-state runtime-view)))
+               :restore-projection-state! (fn [runtime-view runtime projection-state]
+                                            (local state (or projection-state {}))
+                                            (local legacy-state {})
+                                            (each [key value (pairs state)]
+                                                (set (. legacy-state key) value))
+                                            (when runtime-view._spatial-runtime-selected-keys-present?
+                                                (set legacy-state.selected_node_keys runtime.graph-map.selected_node_keys))
+                                            (when (and (= runtime.graph-map.focused_node_key nil)
+                                                       state.focused_node_key)
+                                                (set runtime.graph-map.focused_node_key state.focused_node_key))
+                                            (runtime-view._spatial-restore-state runtime-view legacy-state)
+                                            (runtime-view:_spatial-apply-focused-key! runtime.graph-map.focused_node_key))
+               :drop-projection! (fn [runtime-view _runtime]
+                                   (runtime-view._spatial-drop runtime-view))
+               :apply-initial-camera-policy! (fn [runtime-view _runtime]
+                                               (runtime-view._spatial-apply-initial-camera-policy runtime-view))})
+         (Runtime.install! view
+                           (Runtime.init! view
+                                          {:graph-map deps.graph-map
+                                           :ctx deps.ctx
+                                           :camera deps.camera
+                                           :data-dir deps.data-dir
+                                           :persistence deps.persistence
+                                           :mode-states deps.mode-states
+                                           :view-target deps.view-target
+                                           :view-context deps.view-context
+                                           :node-views {:capture-state (fn [_self]
+                                                                         (and deps.node-views.capture-state
+                                                                              (deps.node-views:capture-state)))
+                                                        :restore-state (fn [_self state]
+                                                                         (when deps.node-views.restore-state
+                                                                             (deps.node-views:restore-state state)))
+                                                        :drop-all (fn [_self] true)}}
+                                          view._spatial-projection)
+                           view._spatial-projection)
+         (set view._runtime-capture-state view.capture-state)
+         (set view._runtime-restore-state view.restore-state)
+         (set view._runtime-drop view.drop)
+         (set view.drop
+              (fn [runtime-view]
+                  (when runtime-view.runtime.dropped?
+                      (error "GraphView drop called after drop"))
+                  (runtime-view._runtime-drop runtime-view)))
+         (set view.restore-graph-state
+              (fn [runtime-view state]
+                  (runtime-view._spatial-restore-graph-state runtime-view state)))
+         (set view.restore-views-state
+              (fn [runtime-view state]
+                  (when runtime-view.runtime.dropped?
+                      (error "GraphView restore-views-state called after drop"))
+                  (runtime-view._spatial-restore-views-state runtime-view state)))
+         (set view.capture-camera-state!
+               (fn [_self]
+                   (Runtime.assert-runtime-live view.runtime "capture-camera-state!")
+                   (when (and deps.camera
+                              deps.persistence
+                              (deps.should-capture-camera-state?))
+                       (local state (deps.capture-current-camera-state))
+                       (when deps.persistence.set-mode-camera-state
+                           (deps.persistence:set-mode-camera-state "spatial" state))
+                       state)))
+         (set view.capture-state
+               (fn [runtime-view]
+                   (when runtime-view.runtime.dropped?
+                       (error "GraphView capture-state called after drop"))
+                   (local state (runtime-view._runtime-capture-state runtime-view))
+                   (local spatial-state (and state.mode_states (. state.mode_states :spatial)))
+                   (when (and spatial-state spatial-state.extra_panels)
+                       (set state.extra_panels spatial-state.extra_panels))
+                   state))
+         (set view.restore-state
+               (fn [runtime-view state]
+                   (when runtime-view.runtime.dropped?
+                       (error "GraphView restore-state called after drop"))
+                   (local payload (or state {}))
+                   (set runtime-view._spatial-runtime-selected-keys-present? (not (= payload.selected_node_keys nil)))
+                   (if (and payload.extra_panels
+                            (not (and payload.mode_states (. payload.mode_states :spatial))))
+                       (do
+                           (local mode-states (or payload.mode_states {}))
+                           (set (. mode-states :spatial) {:extra_panels payload.extra_panels})
+                           (local merged {})
+                           (each [key value (pairs payload)]
+                               (set (. merged key) value))
+                           (set merged.mode_states mode-states)
+                           (runtime-view._runtime-restore-state runtime-view merged))
+                       (runtime-view._runtime-restore-state runtime-view payload))))
+         view))
 
 (set update-islands-after-member-drag-end!
      (fn [graph-map island-host get-position node] (when (and node node.key) (assert graph-map.update-island "GraphView island member alt-drag requires GraphMap.update-island") (local member-key node.key) (local position (get-position nil node)) (each [_ island (ipairs (graph-map:list-islands))] (when (accumulate [found false _ key (ipairs (or island.members []))] (or found (= key member-key))) (local next-state (island-host:state-after-member-drag-end island {:member-key member-key :position position})) (when next-state (graph-map:update-island island.id {:state next-state})))))))

@@ -37,7 +37,7 @@ Related objects become graph-visible only through explicit preview, view, search
 - `graph/world-data.fnl`: activity-owned scene/HUD/canvas state is resolved from `world.state.activity.sessions.<activity-id>` through `WorldData` helpers. Activity-owned graph keys include both `world-id` and `activity-id` (for example `activity-scene:<world-id>:<activity-id>`, `activity-background:<world-id>:<activity-id>`, and `activity-terrain:<world-id>:<activity-id>:<terrain-id>`). Updates mutate the owning activity surface state, then sync to the active surface and persist world. Graph nodes are projections, not the source of truth.
 - Activity hierarchy keys expose `world:<world-id>` → `world-activities:<world-id>` → `world-activity:<world-id>:<activity-id>` → `activity-surfaces:<world-id>:<activity-id>` before reaching concrete surface nodes such as scene, HUD, or canvas.
 - `graph/nodes/*.fnl`: node constructors receive stores/world-manager, resolve domain records from them, and emit signals when underlying data changes.
-- `graph/view/`: owns visual/interactive systems (spatial ForceLayout, points, labels, outline rendering, selection, movables, persistence metadata). Outline rendering is a `GraphView` runtime concern selected from the active `GraphMap.view_mode`; graph node adapters do not track view instances.
+- `graph/view/`: owns visual/interactive systems through a shared runtime shell plus projection adapters. Spatial and outline views are projections over the active `GraphMap`; they are not graph topology owners and graph node adapters do not track view instances.
 
 ### GraphMap outline projection and GraphView rendering
 
@@ -47,8 +47,18 @@ graph-visible objects. The outline projection derives rows from graph-map
 topology; it is not persisted by graph core and is not tracked by graph node
 adapters.
 
-`GraphView` chooses the spatial renderer or outline renderer at runtime and owns
-the resulting UI handles. In outline mode, rows and labels are deterministic
+`GraphView` is a shared runtime shell that chooses the spatial projection or
+outline projection from the active `GraphMap.view_mode` and owns the resulting UI
+handles. Both projections render the same graph-map topology through a common
+lifecycle contract: they attach to the active `GraphMap`, expose their visible
+node keys, adapt selection/focus/reveal/open/drop behavior, capture and restore
+projection-specific camera or view state, and release runtime registrations on
+drop. The spatial projection keeps ForceLayout, edge/island/LOD behavior, and
+spatial camera state in the projection/runtime layer; the outline projection
+keeps row layout, compact point placement, and outline view state in the
+projection/runtime layer. Neither projection owns graph topology or domain data.
+
+In outline mode, rows and labels are deterministic
 visual/layout records only; they do not own click, selection, focus, menu, or
 activation behavior. The compact node presentation for each visible outline node
 owns the same interaction lifecycle as spatial compact nodes: clickables,
@@ -97,7 +107,7 @@ List entity adapters use this contract to keep raw ids available on non-compact 
 - Graph view: `graph/view` (`GraphView`) owns ForceLayout, points, labels, selection, movables, persistence, and node dialogs. It listens to graph signals and can be dropped/recreated without touching the graph model.
 - Persistence: `graph/view/persistence` handles metadata load/save and scheduled writes.
 - Labels and LOD: `graph/view/labels` (`GraphViewLabels`) manages label creation, LOD switching, camera-distance debounce, positioning, and cleanup.
-- Selection: `graph/view/selection` (`GraphViewSelection`) owns selector wiring, selected-node bookkeeping, pruning, and signals.
+- Selection: `graph/view/selection` (`GraphViewSelection`) owns runtime selector wiring, selected-node view bookkeeping, pruning, and signals; persisted selected/focused keys remain `GraphMap` interaction state.
 - Node view wiring: `graph/view/node-views` (`GraphViewNodeViews`) builds/drops node dialogs or HUD embeds.
 - Movables: `graph/view/movables` (`GraphViewMovables`) builds drag targets, registers/unregisters with `app.movables`, forwards position updates, and schedules persistence on drag end.
 - Layout and edges: `graph/view/layout` (`GraphViewLayout`) wraps `ForceLayout`, line updates, node positioning, and rebuilds.

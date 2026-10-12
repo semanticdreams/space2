@@ -13,6 +13,37 @@
 
 (local tests [])
 
+(local shared-view-methods
+       ["update"
+        "drop"
+        "capture-state"
+        "restore-state"
+        "restore-graph-state"
+        "restore-views-state"
+        "remove-nodes"
+        "remove-selected-nodes"
+        "node-actions"
+        "reveal-node"
+        "open-node"
+        "open-focused-node"
+        "selected-node-count"
+        "select-all-visible-nodes"
+        "clear-selection"
+        "focused-node-selected?"
+        "select-focused-node-only"
+        "add-focused-node-to-selection"
+        "remove-focused-node-from-selection"
+        "toggle-focused-node-selection"
+        "focus-selected-node"
+        "saved-camera-state"
+        "capture-camera-state!"
+        "apply-initial-camera-policy!"])
+
+(fn assert-shared-view-method-contract [view label]
+    (each [_ method-name (ipairs shared-view-methods)]
+        (assert (= (type (. view method-name)) :function)
+                (.. label " should expose shared graph-view method " method-name))))
+
 (fn approx [actual expected]
     (< (math.abs (- actual expected)) 0.0001))
 
@@ -441,6 +472,130 @@
     (graph-map:drop)
     (graph:drop))
 
+(fn outline-view-exposes-shared-runtime-camera-contract []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (graph-map:load-by-key "test:root")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (local view (GraphView {:graph-map graph-map :ctx (make-render-ctx)}))
+    (assert (= (type view.saved-camera-state) :function)
+            "outline view should expose saved-camera-state function")
+    (assert (= (type view.capture-camera-state!) :function)
+            "outline view should expose capture-camera-state! function")
+    (assert (= (type view.apply-initial-camera-policy!) :function)
+            "outline view should expose apply-initial-camera-policy! function")
+    (view:drop)
+    (graph-map:drop)
+    (graph:drop))
+
+(fn make-mode-camera-persistence []
+    (local mode-cameras {})
+    {:mode-cameras mode-cameras
+     :saved-mode-camera-state (fn [_self mode]
+                                (and (. mode-cameras mode)
+                                     {:position [(. mode-cameras mode :position 1) (. mode-cameras mode :position 2) (. mode-cameras mode :position 3)]}))
+     :set-mode-camera-state (fn [_self mode camera-state]
+                              (set (. mode-cameras mode) camera-state)
+                              true)})
+
+(fn outline-runtime-persists-outline-camera-state []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (local persistence (make-mode-camera-persistence))
+    (graph-map:load-by-key "test:root")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (local view (GraphView {:graph-map graph-map
+                            :ctx (make-render-ctx)
+                            :camera {:position (glm.vec3 11 22 33)}
+                            :persistence persistence}))
+    (assert view.runtime "outline should install the shared projection runtime")
+    (assert (= view.runtime.mode "outline") "outline runtime should identify outline mode")
+    (local captured (view:capture-camera-state!))
+    (assert (and (approx (. captured.position 1) 11) (approx (. captured.position 2) 22) (approx (. captured.position 3) 33))
+            "outline capture should read the runtime camera")
+    (local saved (view:saved-camera-state))
+    (assert (and (approx (. saved.position 1) 11) (approx (. saved.position 2) 22) (approx (. saved.position 3) 33))
+            "outline saved camera state should use outline mode persistence")
+    (assert (= (. persistence.mode-cameras :spatial) nil)
+            "outline camera capture should not write spatial mode camera state")
+    (view:drop)
+    (graph-map:drop)
+    (graph:drop))
+
+(fn outline-restore-keeps-graph-map-selection-owner []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (add-edge! graph-map "test:root" "test:child")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (local view (GraphView {:graph-map graph-map :ctx (make-render-ctx)}))
+    (view:restore-state {:selected_node_keys ["test:child"]
+                         :mode_states {:outline {:selected_node_keys ["test:root"]}}})
+    (assert (= (table.concat graph-map.selected_node_keys ",") "test:child")
+            "outline restore should keep GraphMap-owned top-level selection")
+    (local captured (view:capture-state))
+    (assert (= (. captured.mode_states :outline :selected_node_keys) nil)
+            "outline projection state should not persist GraphMap-owned selected keys")
+    (view:drop)
+    (graph-map:drop)
+    (graph:drop))
+
+(fn outline-runtime-capture-retains-other-mode-states [] (local {:graph graph :graph-map graph-map} (make-map)) (graph-map:load-by-key "test:root") (graph-map:set-view-mode! "outline") (graph-map:set-outline-root-keys! ["test:root"]) (local view (GraphView {:graph-map graph-map :ctx (make-render-ctx)})) (view:restore-state {:mode_states {:spatial {:extra_panels [{:node-key "test:root"}]} :outline {:stale? true}} :selected_node_keys ["test:root"] :focused_node_key "test:root"}) (local captured (view:capture-state)) (assert (= (. captured.mode_states :spatial :extra_panels 1 :node-key) "test:root") "outline capture should retain non-current spatial mode state") (assert (= (. captured.mode_states :outline :stale?) nil) "outline capture should replace only the current outline mode state") (assert (= (table.concat captured.selected_node_keys ",") "test:root") "outline capture should preserve GraphMap-owned selected keys") (assert (= captured.focused_node_key "test:root") "outline capture should preserve GraphMap-owned focused key") (view:drop) (graph-map:drop) (graph:drop))
+(fn outline-runtime-restore-clears-captured-empty-focus [] (local {:graph graph :graph-map graph-map} (make-map)) (graph-map:load-by-key "test:root") (graph-map:load-by-key "test:stale") (graph-map:set-view-mode! "outline") (graph-map:set-outline-root-keys! ["test:root"]) (local view (GraphView {:graph-map graph-map :ctx (make-render-ctx)})) (set graph-map.focused_node_key nil) (local captured (view:capture-state)) (set graph-map.focused_node_key "test:stale") (view:restore-state captured) (assert (= graph-map.focused_node_key nil) "runtime restore should clear stale GraphMap focus when captured state had no focus") (view:drop) (graph-map:drop) (graph:drop))
+(fn outline-focused-node-menu-opens-at-focused-presentation []
+    (local original-menu-manager app.menu-manager)
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (add-edge! graph-map "test:root" "test:child")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (local ctx (make-render-ctx))
+    (var opened nil)
+    (set ctx.menu-manager {:open (fn [_self opts] (set opened opts))})
+    (set app.menu-manager nil)
+    (local view (GraphView {:graph-map graph-map :ctx ctx}))
+    (set graph-map.focused_node_key "test:child")
+    (local child-record (view-record-for-key view "test:child"))
+    (assert (= (view:open-focused-node-menu) true)
+            "outline focused-node menu should open for focused row")
+    (assert opened "outline focused-node menu should call menu manager")
+    (assert (and (approx opened.position.x child-record.point.position.x)
+                 (approx opened.position.y child-record.point.position.y)
+                 (approx opened.position.z child-record.point.position.z))
+            "outline focused-node menu should open at focused row presentation")
+    (view:drop)
+    (graph-map:drop)
+    (graph:drop)
+    (set app.menu-manager original-menu-manager))
+
+(fn outline-view-exposes-shared-runtime-method-contract []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (graph-map:load-by-key "test:root")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (local view (GraphView {:graph-map graph-map :ctx (make-render-ctx)}))
+    (assert-shared-view-method-contract view "GraphOutlineView")
+    (view:drop)
+    (graph-map:drop)
+    (graph:drop))
+
+(fn outline-selection-methods-fail-fast-after-drop []
+    (local {:graph graph :graph-map graph-map} (make-map))
+    (graph-map:load-by-key "test:root")
+    (graph-map:set-view-mode! "outline")
+    (graph-map:set-outline-root-keys! ["test:root"])
+    (local view (GraphView {:graph-map graph-map :ctx (make-render-ctx)}))
+    (view:drop)
+    (local (ok message) (pcall (fn [] (view:select-all-visible-nodes))))
+    (assert (not ok) "outline select-all-visible-nodes should fail after drop")
+    (local text (tostring message))
+    (assert (string.find text "called after drop" 1 true)
+            "outline dropped guard should explain use after drop")
+    (assert (or (string.find text "GraphOutlineView" 1 true)
+                (string.find text "GraphViewRuntime" 1 true))
+            "outline dropped guard should identify GraphOutlineView or GraphViewRuntime")
+    (graph-map:drop)
+    (graph:drop))
+
+(fn outline-focused-selection-queries-fail-fast-after-drop-without-focus [] (local {:graph graph :graph-map graph-map} (make-map)) (graph-map:load-by-key "test:root") (graph-map:set-view-mode! "outline") (graph-map:set-outline-root-keys! ["test:root"]) (local view (GraphView {:graph-map graph-map :ctx (make-render-ctx)})) (set graph-map.focused_node_key nil) (view:drop) (local (ok message) (pcall (fn [] (view:focused-node-selected?)))) (assert (not ok) "outline focused-node-selected? should fail after drop even without focus") (assert (string.find (tostring message) "called after drop" 1 true) "outline focused selection guard should explain use after drop") (graph-map:drop) (graph:drop))
 (fn outline-reveal-refreshes-node-selection-rings []
     (local {:graph graph :graph-map graph-map} (make-map))
     (add-edge! graph-map "test:root" "test:child")
@@ -1011,6 +1166,13 @@
 (table.insert tests {:name "graph map prunes removed outline roots" :fn graph-map-prunes-removed-outline-roots})
 (table.insert tests {:name "map manager persists outline state per map" :fn map-manager-persists-outline-state-per-map})
 (table.insert tests {:name "outline view exposes visible row selection" :fn outline-view-exposes-visible-row-selection})
+(table.insert tests {:name "outline-view-exposes-shared-runtime-camera-contract" :fn outline-view-exposes-shared-runtime-camera-contract})
+(table.insert tests {:name "outline runtime persists outline camera state" :fn outline-runtime-persists-outline-camera-state})
+(table.insert tests {:name "outline restore keeps graph-map selection owner" :fn outline-restore-keeps-graph-map-selection-owner})
+(table.insert tests {:name "outline runtime capture retains other mode states" :fn outline-runtime-capture-retains-other-mode-states}) (table.insert tests {:name "outline runtime restore clears captured empty focus" :fn outline-runtime-restore-clears-captured-empty-focus})
+(table.insert tests {:name "outline focused-node menu opens at focused presentation" :fn outline-focused-node-menu-opens-at-focused-presentation})
+(table.insert tests {:name "outline view exposes shared runtime method contract" :fn outline-view-exposes-shared-runtime-method-contract})
+(table.insert tests {:name "outline selection methods fail fast after drop" :fn outline-selection-methods-fail-fast-after-drop}) (table.insert tests {:name "outline focused selection queries fail fast after drop without focus" :fn outline-focused-selection-queries-fail-fast-after-drop-without-focus})
 (table.insert tests {:name "outline reveal refreshes node selection rings" :fn outline-reveal-refreshes-node-selection-rings})
 (table.insert tests {:name "outline view rejects unreachable reveal" :fn outline-view-rejects-unreachable-reveal})
 (table.insert tests {:name "outline compact point clicks use real hit testing" :fn outline-compact-point-clicks-use-real-hit-testing})

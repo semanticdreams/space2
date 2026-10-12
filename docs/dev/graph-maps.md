@@ -22,7 +22,7 @@ Implemented:
 - `GraphMap:refresh-adapters-by-scheme` rebuilds visible map-local adapters for a key scheme during graph extension unit reload, preserving topology keys while replacing runtime adapter tables and retargeting explicit map edges.
 - Related objects are added explicitly by preview/view/action/search controls that load selected keys into the active map; graph maps do not perform hidden relationship-hook expansion.
 - `GraphMapManager` owns map records, active map id, legacy migration, create/rename/delete/switch, hydration pruning, capture, and metadata cleanup.
-- `GraphView` attaches to the active `GraphMap`, scopes persistence by map id, and captures/drops/restores runtime view state around map switching.
+- `GraphView` attaches to the active `GraphMap`, selects a projection from `GraphMap.view_mode`, scopes persistence by map id, and captures/drops/restores runtime projection view state around map switching.
 - `GraphMap` stores map-local outline view mode state: `view_mode` defaults to `"spatial"`, and `outline_root_keys` is an ordered list of outline roots for that map.
 - Outline view projects compact rows from the active `GraphMap` by traversing outgoing visible graph-map edges from the configured roots; unreachable graph-map nodes remain in the map but are hidden while the map is in outline mode.
 - Graph canvas context exposes `graph-map`; root actions and node menu actions mutate the active graph map instead of the shared graph.
@@ -99,6 +99,11 @@ Owned per graph map:
 - View mode (`view_mode`), defaulting to `"spatial"` for each map.
 - Ordered outline root keys (`outline_root_keys`) for each map.
 - Open graph node panels.
+
+`GraphMap` owns projection selection and projection inputs such as `view_mode`
+and `outline_root_keys`, plus graph-map interaction state such as
+`selected_node_keys` and `focused_node_key`. It does not own projection runtime
+objects, cameras, row widgets, force-layout instances, or render handles.
 
 ### Outline Mode
 
@@ -183,6 +188,9 @@ island movement is governed by the aggregate body and existing explicit node pin
 
 Runtime only:
 
+- Mode-specific projection view/camera state captured and restored by the shared
+  projection runtime. Spatial and outline camera/view state stay separate even
+  though they use the same capture/restore mechanism.
 - Render point handles and edge line handles.
 - Force-layout instance and indices.
 - Clickable, selectable, focus, movable, and resizable registrations.
@@ -355,18 +363,31 @@ Metadata shape:
  :presentations {node-key :expanded}
  :sizes {node-key [w h]}
  :panels [{:node-key node-key
-           :panel panel-state}]}
+           :panel panel-state}]
+ :view_modes {"spatial" {:camera {:position [x y z]
+                                   :rotation [w x y z]}}
+              "outline" {:camera {:position [x y z]
+                                   :rotation [w x y z]}}}}
 ```
 
-Graph map camera state is interaction/view metadata, not graph topology. Each
-map stores its camera transform in `graph/maps/<graph-map-id>/metadata.json`:
+Graph map camera/view state is interaction/view metadata, not graph topology.
+Projection runtime persists mode-specific view state under `:view_modes`, keyed
+by projection mode. Spatial and outline camera/view state remain separate even
+though both use the same runtime capture/restore mechanism. A spatial camera
+restore must read `:view_modes."spatial"`; an outline camera or view restore must
+read `:view_modes."outline"`.
+
+The legacy top-level `:camera` field may still appear in metadata and is treated
+only as spatial compatibility/migration data:
 
     :camera {:position [x y z]
-             :rotation [w x y z]}
+             :rotation [w x y z]} ; mirrors/fills :view_modes."spatial" only
 
-When switching maps, Graph captures the outgoing map camera and restores the
-target map camera into the stable graph canvas slot camera. Maps without saved
-camera state reset to the default camera and center the first/start node once.
+When switching maps or projections, Graph captures the outgoing projection state
+into that projection's mode-keyed slot and restores the target map/projection
+state into the stable graph canvas slot camera. Maps or projections without
+saved mode-specific camera state reset to the default camera and center the
+first/start node once according to that projection's initial camera policy.
 
 Current graph map view metadata lives under `graph/maps/<graph-map-id>/metadata.json`.
 Legacy `graph-view/metadata.json` data is migration input only, not the current
@@ -463,6 +484,27 @@ Global compatibility can keep `app.graph` and `app.graph-view` during the transi
 `GraphView` attaches to a `GraphMap`, not a shared/raw `Graph`. The transitional
 constructor key `:graph` and raw-Graph compatibility path have been removed; all
 callers must pass a real `GraphMap` via `:graph-map`.
+
+`GraphView` is the shared graph projection runtime. It owns the common lifecycle
+shell for the active graph-map renderer, while projection adapters keep
+mode-specific behavior separate. The active projection is selected from
+`GraphMap.view_mode`; outline remains inside the graph activity rather than being
+moved to a separate activity.
+
+Required projection adapter methods and responsibilities:
+
+- Report the projection `mode` that corresponds to `GraphMap.view_mode`.
+- Return the visible graph-map nodes/node keys for the current projection.
+- Provide selection and focus adapters over `GraphMap.selected_node_keys` and
+  `GraphMap.focused_node_key`.
+- Implement reveal/open behavior for graph nodes in the projection.
+- Capture and restore projection-specific view/camera state without storing graph
+  topology or domain records.
+- Define initial camera/view policy for maps or modes without saved runtime
+  state.
+- Implement projection drop logic that releases clickables, focus/selectable
+  registrations, movables, render handles, labels/rows, edge lines, dialogs, and
+  other runtime-only resources owned by that projection.
 
 Required runtime contract:
 

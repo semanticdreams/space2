@@ -3771,7 +3771,7 @@
             (graph:add-node node {:position (glm.vec3 0 0 0)})
             (local state (view:capture-state))
             (assert (= (type state.selected_node_keys) :table)
-                    "capture-state should emit selected_node_keys")
+                    "capture-state should emit selected_node_keys") (assert state.mode_states "capture-state should emit shared mode_states") (assert (. state.mode_states :spatial) "capture-state should store spatial projection state under spatial mode")
             (assert (= (length state.selected_node_keys) 0)
                     "capture-state should emit empty selected_node_keys when nothing selected")
             (view:drop)
@@ -3790,13 +3790,13 @@
             (view.selection:set-selection [a b])
             (local captured (view:capture-state))
             (assert (= (length captured.selected_node_keys) 2)
-                    "capture-state should include selected node keys")
+                    "capture-state should include selected node keys") (assert (= (. captured.mode_states :spatial :selected_node_keys) nil) "spatial mode state should not duplicate runtime-owned selected_node_keys") (assert (= (. captured.mode_states :spatial :focused_node_key) nil) "spatial mode state should not duplicate runtime-owned focused_node_key") (assert (= (. captured.mode_states :spatial :views) nil) "spatial mode state should not duplicate runtime-owned views")
             (view.selection:set-selection [])
             (assert (= (length view.selected-nodes) 0)
                     "selection should be cleared before restore")
             (view:restore-state captured)
             (assert (= (length view.selected-nodes) 2)
-                    "restore-state should restore selection from captured selected_node_keys")
+                    "restore-state should restore selection from captured selected_node_keys") (view:restore-state {:selected_node_keys [] :mode_states {:spatial {:selected_node_keys ["a"]}}}) (assert (= (length view.selected-nodes) 0) "explicit empty runtime selection should not restore stale spatial selected_node_keys")
             (view:drop)
             (graph:drop))))
 
@@ -4284,7 +4284,21 @@
     (local view (GraphView {:graph-map graph-map
                             :ctx ctx
                             :camera camera
-                            :data-dir "/tmp/space/tests/graph-view-reveal"}))
+                            :data-dir "/tmp/space/tests/graph-view-reveal"})) (assert view.runtime "GraphView should install a shared projection runtime") (assert (= view.runtime.mode "spatial") "GraphView runtime should identify the spatial projection")
+    (local shared-methods ["update" "drop" "capture-state" "restore-state"
+                           "restore-graph-state" "restore-views-state"
+                           "remove-nodes" "remove-selected-nodes" "node-actions"
+                           "reveal-node" "open-node" "open-focused-node"
+                           "selected-node-count" "select-all-visible-nodes"
+                           "clear-selection" "focused-node-selected?"
+                           "select-focused-node-only" "add-focused-node-to-selection"
+                           "remove-focused-node-from-selection"
+                           "toggle-focused-node-selection" "focus-selected-node"
+                           "saved-camera-state" "capture-camera-state!"
+                           "apply-initial-camera-policy!"])
+    (each [_ method-name (ipairs shared-methods)]
+        (assert (= (type (. view method-name)) :function)
+                (.. "GraphView should expose shared graph-view method " method-name)))
     (local point (. view.points node))
     (assert point "GraphView should create a presentation for the node")
     (point:set-position (glm.vec3 42 24 0))
@@ -4298,7 +4312,7 @@
     (assert (= camera.position.x 42) "reveal-node should center camera x on compact node")
     (assert (= camera.position.y 24) "reveal-node should center camera y on compact node")
     (assert (= camera.position.z 100) "reveal-node should preserve camera z")
-    (view:drop)
+    (view:drop) (assert view.runtime.dropped? "GraphView drop should mark the shared runtime dropped")
     (graph-map:drop)
     (graph:drop))
 
@@ -4680,10 +4694,10 @@
             (graph-map:add-node b {:position (glm.vec3 10 0 0)})
             (selector:set-selected [(. view.points b)])
             (local focus-node (. view.focus-nodes a))
-            (focus-node:request-focus)
+            (focus-node:request-focus) (assert (= graph-map.focused_node_key "a") "Spatial focus changes should sync focused_node_key to GraphMap immediately")
             (local result (view:select-focused-node-only))
             (assert (= result true) "Selecting focused node only should report a mutation target")
-            (assert-selection-editing-state view selector graph-map [a] ["a"] "select focused node only")
+            (assert-selection-editing-state view selector graph-map [a] ["a"] "select focused node only") (view:restore-state {:focused_node_key "b"}) (assert (= (ctx.focus.manager:get-focused-node) (. view.focus-nodes b)) "Spatial restore-state should request focus for runtime focused_node_key") (assert (= (view:focused-node) b) "Spatial restore-state should update local focused node")
             (view:drop)
             (graph-map:drop)
             (selector:drop))))
@@ -4951,8 +4965,7 @@
     (assert view.layout.active "GraphView start-layout should start the graph layout path")
     (view:drop)
     (graph-map:drop)
-    (graph:drop))})
-
+    (graph:drop))}) ((. (require :tests.graph-view-runtime-tests) :append-tests) tests)
 (local main
   (fn []
     (local runner (require :tests/runner))
