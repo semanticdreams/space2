@@ -328,6 +328,41 @@
   (when (not ok)
     (error err)))
 
+(fn layout-outline-tree! [view]
+  (local tree (assert view.tree-view "outline measured row repro requires TreeView"))
+  (tree.layout:measurer)
+  (set tree.layout.position (glm.vec3 0 0 0))
+  (set tree.layout.size (glm.vec3 192 tree.layout.measure.y 0))
+  (set tree.layout.rotation (glm.quat 1 0 0 0))
+  (tree.layout:layouter))
+
+(fn outline-expanded-row-remeasures-descendant-placement [ctx]
+  (local env (make-outline-e2e-env ctx {:name "graph-outline-repro-measured-expanded-row"
+                                        :populate populate-child-root!}))
+  (local (ok err)
+    (pcall
+      (fn []
+        (local view (assert env.state.view "outline measured row repro missing view"))
+        (local root-record (row-record view "root"))
+        (local child-record (row-record view "child"))
+        (layout-outline-tree! view)
+        (local tree (assert view.tree-view "outline measured row repro missing TreeView"))
+        (local before-height tree.layout.measure.y)
+        (root-record:expand!)
+        (layout-outline-tree! view)
+        (assert root-record.expanded-card
+                "outline measured row repro requires expanded root card")
+        (local after-height tree.layout.measure.y)
+        (assert (> after-height (+ before-height 8))
+                (.. "expanded outline row should increase measured tree height; before "
+                    (tostring before-height) ", after " (tostring after-height)))
+        (local child-after-y child-record.point.position.y)
+        (assert (< child-after-y root-record.expanded-card.layout.position.y)
+                "descendant compact point should be placed below expanded card bottom"))))
+  (cleanup-outline-e2e-env env)
+  (when (not ok)
+    (error err)))
+
 (var current-style-build nil)
 
 (fn style-outline-populate [graph-map nodes]
@@ -397,10 +432,13 @@
   (local repro-case (os.getenv "SPACE_OUTLINE_REPRO_CASE"))
   (if (= repro-case "click")
       (outline-compact-point-click-focuses-node-without-changing-selection ctx)
+      (= repro-case "layout")
+      (outline-expanded-row-remeasures-descendant-placement ctx)
       (= repro-case "visual")
       (outline-selection-focus-visuals-match-graph-view ctx)
       (do
         (outline-compact-point-click-focuses-node-without-changing-selection ctx)
+        (outline-expanded-row-remeasures-descendant-placement ctx)
         (outline-selection-focus-visuals-match-graph-view ctx))))
 
 (fn run [ctx]
@@ -418,7 +456,7 @@
 (fn main []
   (Harness.with-app {:width 640 :height 360 :units-per-pixel 1}
                      run-context)
-  (print "E2E graph outline compact point click/focus, whitespace miss, visuals, and snapshots complete"))
+  (print "E2E graph outline compact point click/focus, whitespace miss, measured expanded-row layout, visuals, and snapshots complete"))
 
 {:run run
  :run-reproduction-tests run-reproduction-tests
