@@ -12,7 +12,7 @@
    "activity-light" "activity-light-type" "activity-scene" "activity-scene-panel"
    "activity-scene-panels" "activity-skybox" "activity-surface" "activity-surfaces"
    "activity-terrain" "activity-terrain-editor" "activity-terrain-tool" "activity-terrains"
-   "agent-session" "class" "code-dir" "code-entity" "cpp-module" "entities"
+   "agent-session" "class" "code-dir" "code-entity" "code-entity-list" "cpp-module" "entities"
    "fnl-module" "fs" "fs-file-viewer" "hackernews-root" "hackernews-story"
    "hackernews-story-list" "hackernews-user" "hud-panel" "hud-panels" "identity"
    "hosted-app-launcher"
@@ -181,6 +181,11 @@
   (assert-loads graph "string-entity-list")
   (assert-loads graph "string-entity-search")
   (assert-loads graph "dict-entity-list")
+  (local code-browser (assert-loads graph "code-entity-list"))
+  (assert (= code-browser.store options.code-store)
+          "code browser loader should capture the supplied code store")
+  (assert (= (graph:load-by-key "code-entity-list:unexpected") nil)
+          "code browser loader should reject non-exact keys")
   (assert-loads graph (.. "fs:" temp-dir.path))
   (assert-loads graph "llm")
   (assert-loads graph "hosted-app-launcher:workspace")
