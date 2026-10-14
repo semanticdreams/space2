@@ -1,8 +1,8 @@
 ---
 description: Runs only guarded OpenCode home config verification for project-supplied non-secret support links.
 mode: subagent
-model: openai/gpt-5.5
-temperature: 0.1
+model: openai/gpt-6.1-sol
+variant: medium
 steps: 15
 permission:
   read:

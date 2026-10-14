@@ -210,7 +210,7 @@ You MUST complete each phase before proceeding to the next.
    - Proposed minimal fix (scope, files, approach)
    - Exact validation command that would confirm the fix
 
-2. **Dispatch the `debug-advisor`** (gpt-5.5 high). Provide only the evidence
+2. **Dispatch the `debug-advisor`** (gpt-6.1-sol xhigh). Provide only the evidence
    brief path and relevant source-file paths. The advisor is read-only — it
    judges the diagnosis, it does not re-investigate.
 

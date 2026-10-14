@@ -1,8 +1,8 @@
 ---
 description: Runs only guarded Space GitHub PR wrapper operations for auth, protection checks, PR creation, auto-merge, and merge-queue polling.
 mode: subagent
-model: openai/gpt-5.5
-temperature: 0.1
+model: openai/gpt-6.1-sol
+variant: medium
 steps: 25
 permission:
   read: deny

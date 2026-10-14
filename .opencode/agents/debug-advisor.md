@@ -1,9 +1,8 @@
 ---
 description: Validates root-cause diagnoses and proposed fixes with a smarter model before implementation begins
 mode: subagent
-model: openai/gpt-5.5
-variant: high
-temperature: 0.1
+model: openai/gpt-6.1-sol
+variant: xhigh
 steps: 35
 permission:
   read:

@@ -1,9 +1,8 @@
 ---
 description: Fast primary agent for interactive exploration, small scoped changes, and design-preserving local iteration. Escalates to the strict supervisor for risky, ambiguous, architectural, integration, or broad workflow changes.
 mode: primary
-model: openai/gpt-5.5
+model: openai/gpt-6.1-sol
 variant: medium
-temperature: 0.2
 steps: 180
 permission:
   read:

@@ -1,9 +1,8 @@
 ---
 description: Primary coordination agent that follows skills and dispatches subagents for exploration, planning, implementation, review, and adjudication. Never edits code.
 mode: primary
-model: openai/gpt-5.5
+model: openai/gpt-6.1-sol
 variant: high
-temperature: 0.2
 steps: 500
 permission:
   read:
@@ -272,18 +271,18 @@ blocking check, and available evidence.
 
 | Subagent | Use for | Model |
 |----------|---------|-------|
-| **explorer** | Codebase search, file discovery, information gathering | gpt-5.5 |
-| **planner** | Architectural reasoning, spec evaluation, plan creation | gpt-5.5 (high) |
-| **debug-advisor** | Diagnostic judgment: validates root cause + proposed fix before implementation | gpt-5.5 (high) |
-| **implementer** | Task implementation, TDD, fix rounds | gpt-5.5 |
-| **reviewer** | Spec compliance + code quality review, re-review | gpt-5.5 (high) |
-| **adjudicator** | Breaker cap: accept/park/escalate findings | gpt-5.5 (high) |
-| **git-integrator** | Guarded current-branch Git status, fetch, safe merge from origin/main, follow-up branch creation, and push wrappers | gpt-5.5 |
-| **github-operator** | Guarded GitHub auth/protection checks, PR creation, auto-merge, and merge-queue polling wrappers | gpt-5.5 |
-| **pr-recovery-operator** | Guarded stale merged PR recovery wrapper that creates/pushes a deterministic follow-up branch and opens a fresh PR | gpt-5.5 |
-| **config-auditor** | Guarded OpenCode home config verification for project-supplied non-secret support links | gpt-5.5 |
-| **windows-ci-reproducer** | Guarded local Windows CI preflight, setup-host, and Linux cross-build + Wine reproduction | gpt-5.5 |
-| **fast-dev** | Primary peer selected by users for interactive small work; the strict supervisor does not dispatch it as an implementation worker | gpt-5.5 (medium) |
+| **explorer** | Codebase search, file discovery, information gathering | gpt-6.1-sol (medium) |
+| **planner** | Architectural reasoning, spec evaluation, plan creation | gpt-6.1-sol (xhigh) |
+| **debug-advisor** | Diagnostic judgment: validates root cause + proposed fix before implementation | gpt-6.1-sol (xhigh) |
+| **implementer** | Task implementation, TDD, fix rounds | gpt-6.1-sol (high) |
+| **reviewer** | Spec compliance + code quality review, re-review | gpt-6.1-sol (xhigh) |
+| **adjudicator** | Breaker cap: accept/park/escalate findings | gpt-6.1-sol (xhigh) |
+| **git-integrator** | Guarded current-branch Git status, fetch, safe merge from origin/main, follow-up branch creation, and push wrappers | gpt-6.1-sol (medium) |
+| **github-operator** | Guarded GitHub auth/protection checks, PR creation, auto-merge, and merge-queue polling wrappers | gpt-6.1-sol (medium) |
+| **pr-recovery-operator** | Guarded stale merged PR recovery wrapper that creates/pushes a deterministic follow-up branch and opens a fresh PR | gpt-6.1-sol (medium) |
+| **config-auditor** | Guarded OpenCode home config verification for project-supplied non-secret support links | gpt-6.1-sol (medium) |
+| **windows-ci-reproducer** | Guarded local Windows CI preflight, setup-host, and Linux cross-build + Wine reproduction | gpt-6.1-sol (medium) |
+| **fast-dev** | Primary peer selected by users for interactive small work; the strict supervisor does not dispatch it as an implementation worker | gpt-6.1-sol (medium) |
 
 Faster-model swaps for deterministic/search/wrapper agents require exact approved provider/model-id values. Do not use shorthand model names or infer availability from comments.
 

@@ -1,9 +1,8 @@
 ---
 description: Implements approved plans and accepted review findings using targeted local validation by default
 mode: subagent
-model: openai/gpt-5.5
-variant: medium
-temperature: 0.4
+model: openai/gpt-6.1-sol
+variant: high
 steps: 100
 permission:
   read:

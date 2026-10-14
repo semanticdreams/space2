@@ -32,7 +32,7 @@ def agent(name: str, permission_text: str) -> str:
     return f"""---
 description: Test {name} agent
 mode: subagent
-model: openai/gpt-5.5
+model: openai/gpt-6.1-sol
 permission:
 {permission_text}
 ---
