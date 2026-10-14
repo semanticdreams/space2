@@ -145,6 +145,7 @@
     :tests.test-toml
     :tests.test-sql-builder
     :tests.test-string-utils
+    :tests.test-entity-type-catalog
     :tests.test-string-entities
     :tests.test-string-entity-search
     :tests.test-string-entity-create-child

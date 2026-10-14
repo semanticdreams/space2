@@ -39,4 +39,5 @@
         (error result))))
 
 {:descriptors descriptors
+ :entity-types Entities.entity-types
  :register! register!}

@@ -23,6 +23,18 @@
    "string-entity-list" "string-entity-search" "list-entity-list" "dict-entity-list" "link-entity-list" "entities" "notebooks"])
 (local static-schemes ["start" "quit" "class"])
 
+(fn entity-types []
+  [{:id "string" :label "string" :action-name "String Entities"
+    :icon "text_fields" :browser-key "string-entity-list"}
+   {:id "link" :label "link" :action-name "Link Entities"
+    :icon "link" :browser-key "link-entity-list"}
+   {:id "list" :label "list" :action-name "List Entities"
+    :icon "list" :browser-key "list-entity-list"}
+   {:id "dict" :label "dict" :action-name "Dict Entities"
+    :icon "data_object" :browser-key "dict-entity-list"}
+   {:id "code" :label "code" :action-name "Code Entities"
+    :icon "code" :browser-key "code-entity-list"}])
+
 (fn loader-opts [ctx]
   {:owner-id ctx.owner-id :extension-id ctx.extension-id})
 
@@ -160,4 +172,5 @@
       :schemes static-schemes
       :install-loaders install-static})])
 
-{:descriptors descriptors}
+{:descriptors descriptors
+ :entity-types entity-types}
