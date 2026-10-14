@@ -264,6 +264,37 @@ on selection, existing function/node targets unchanged.
 
 ## Final gate
 
+### Task 3 constraint remediation addendum
+
+The native constraint gate reproduced nine diagnostics after Task 3 wiring:
+Main's accepted existing module measure grew 2327 to 2348, Start's unchanged
+fallback fingerprint moved 17 to 16, and five eliminated Entities violations
+left dead baseline entries. Debug advisor confirmed a narrow remediation.
+
+Additional Task 3 files: create
+`assets/lua/graph/extensions/builtins/composition.fnl`; modify
+`assets/lua/constraints/baseline-data.fnl`. Do not add allowances or change rules.
+
+- [ ] Extract the existing built-in option resolution and catalog composition
+  from Main to the focused helper, receiving app and its registry resolver
+  explicitly. Preserve Main's exported ensure API and graph registry ownership:
+
+```fennel
+(fn ensure-built-in-graph-extensions! [opts]
+  ((. (require :graph/extensions/builtins/composition) :ensure!)
+    app opts ensure-graph-extension-registry!))
+```
+
+- [ ] Preserve catalog validation before registry/store work, lazy imports,
+  identity/reuse/conflicting replacement, existing rollback and publication;
+  no circular Main import from the helper. Keep app teardown in Main.
+- [ ] Delete exactly five stale Entities baseline entries; relocate Start's
+  unchanged fingerprint; tighten Main's existing measure to the observed reduced
+  value strictly below 2327. No new baseline allowance, no unrelated compaction.
+- [ ] Rerun compile, repository constraints and Task 3 focused behavioral tests.
+  Include full helper/baseline changes in independent Task 3 review. New
+  diagnostics or scope expansion require renewed diagnosis.
+
 Fetch origin via capability wrapper; evaluate against current origin/main and
 safe-merge if needed, routing conflict/fix changes through implementer/reviewer.
 From reviewed committed clean tree run:
