@@ -1,9 +1,8 @@
 ---
 description: Performs independent full reviews and targeted fix verification without editing code
 mode: subagent
-model: openai/gpt-5.5
-variant: high
-temperature: 0.1
+model: openai/gpt-6.1-sol
+variant: xhigh
 steps: 55
 permission:
   read:

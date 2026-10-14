@@ -1,9 +1,8 @@
 ---
 description: Focused codebase investigation — finds files, patterns, and answers specific questions. Use for targeted repository searches.
 mode: subagent
-model: openai/gpt-5.5
+model: openai/gpt-6.1-sol
 variant: medium
-temperature: 0.7
 steps: 20
 permission:
   read:

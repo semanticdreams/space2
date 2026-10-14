@@ -1,8 +1,8 @@
 ---
 description: Runs only the guarded stale merged current-branch PR recovery wrapper that creates a deterministic follow-up branch and PR.
 mode: subagent
-model: openai/gpt-5.5
-temperature: 0.1
+model: openai/gpt-6.1-sol
+variant: medium
 steps: 15
 permission:
   read: deny

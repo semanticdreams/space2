@@ -1,9 +1,8 @@
 ---
 description: Web-only research agent that fetches and searches public sources for a narrow supervisor brief without local repo access.
 mode: subagent
-model: openai/gpt-5.5
+model: openai/gpt-6.1-sol
 variant: high
-temperature: 0.2
 steps: 35
 permission:
   read: deny

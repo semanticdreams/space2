@@ -1,9 +1,8 @@
 ---
 description: Validates candidate review findings against the plan and codebase, rejecting premature improvements and escalating real design ambiguity
 mode: subagent
-model: openai/gpt-5.5
-variant: high
-temperature: 0.1
+model: openai/gpt-6.1-sol
+variant: xhigh
 steps: 40
 permission:
   read:

@@ -1,9 +1,8 @@
 ---
 description: Converts an approved direction into a bounded, executable implementation plan with acceptance criteria and validation scope
 mode: subagent
-model: openai/gpt-5.5
-variant: high
-temperature: 0.1
+model: openai/gpt-6.1-sol
+variant: xhigh
 steps: 35
 permission:
   read:
