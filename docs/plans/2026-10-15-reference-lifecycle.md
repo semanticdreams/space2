@@ -107,18 +107,17 @@ PY
 check_stage() {
     local filter="$1"; shift
     local file
-    local -a compile=(--target files) constraints=(--target files)
+    local -a compile=(--target files)
     for file in "$@"; do
         compile+=(--file "assets/lua/$file")
-        constraints+=(--file "assets/lua/$file")
     done
     ./build/space -m tools.fennel-check:main -- "${compile[@]}" &&
-    ./build/space -m constraints.runner:main -- "${constraints[@]}" &&
+    ./build/space -m constraints.runner:main -- --target repo --output json &&
     run_focused "$filter" "${FOCUSED_EXPECTED_COUNT:-}"
 }
 ```
 
-`check_stage` accepts a test filter followed by paths relative to `assets/lua/`; it builds explicit `--target files --file <repo-relative-path>` arguments for both native tools. The first focused check is native `tools.fennel-check`/`make fennel-check`, constraints are second, audited focused Fennel tests third. `run_focused(filter, expected_count?)` preserves native exit status and rejects missing/zero execution, mismatched `[RUN]`/summary counts and names outside the literal filter. Logs stay under ignored `build/`; this is a plan-local Bash/Python snippet, not a new CLI/tool or production API. Each task’s command below enumerates its Fennel files explicitly. Run it for RED after adding tests and again for GREEN; RED must be the intended behavioral failure, not a parse or unrelated bootstrap failure. Register new test modules in `assets/lua/tests/fast.fnl`, with the literal test-name prefixes given below.
+`check_stage` accepts a test filter followed by paths relative to `assets/lua/`; it builds explicit `--target files --file <repo-relative-path>` arguments for compilation, then runs the canonical baseline-aware repository constraints gate. The constraints runner intentionally omits repository baselines for explicit-file targets, which expose accepted pre-existing debt in unchanged Graph factories. Repository validation still blocks new, stale, or worsened findings; it is not a filter or bypass. Fix new-code findings rather than baseline them. Any maintenance of existing line-sensitive baseline fingerprints requires independent review of actual data, unchanged or reduced measures, and no new exceptions. The first check is native compilation, constraints are second, audited focused Fennel tests third. `run_focused(filter, expected_count?)` preserves native exit status and rejects missing/zero execution, mismatched `[RUN]`/summary counts and names outside the literal filter. Logs stay under ignored `build/`; this is a plan-local Bash/Python snippet, not a new CLI/tool or production API. Each task’s command below enumerates its compile targets explicitly. Run it for RED after adding tests and again for GREEN; RED must be the intended behavioral failure, not a parse or unrelated bootstrap failure. Register new test modules in `assets/lua/tests/fast.fnl`, with the literal test-name prefixes given below.
 
 Before each new-prefix RED run, declare its planned **named test roster** and count in the implementation report. Record actual `[RUN]` names and count from the retained log for RED/GREEN, and reject discrepancies at the reviewed stage rather than choosing arbitrary future counts. Set `FOCUSED_EXPECTED_COUNT` to that roster's reviewed count when invoking `check_stage`, or pass it as `run_focused`'s second argument. The one source-reviewed existing baseline guard is `run_focused 'workflow-store' 9`; `workflow store` instead selects temporal tests and is not that guard. Nine is supplied source-count evidence, not a claimed execution in this documentation task.
 
