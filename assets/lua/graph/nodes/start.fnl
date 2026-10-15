@@ -7,7 +7,6 @@
 (local QuitNode (require :graph/nodes/quit))
 (local HackerNewsRootNode (require :graph/nodes/hackernews-root))
 (local {:TableNode TableNode} (require :graph/nodes/table))
-(local EntitiesNode (require :graph/nodes/entities))
 (local NotebooksNode (require :graph/nodes/notebooks))
 (local KernelsNode (require :graph/nodes/kernels))
 (local {:WorldsNode WorldsNode} (require :graph/nodes/worlds))
@@ -50,8 +49,7 @@
              (local hosted-app-launcher-node (HostedAppLauncherNode {}))
              (table.insert produced [hosted-app-launcher-node
                                      (or hosted-app-launcher-node.label hosted-app-launcher-node.key)])
-             (local entities-node (EntitiesNode))
-             (table.insert produced [entities-node (or entities-node.label entities-node.key)])
+              (table.insert produced ["entities" "entities"])
              (local notebooks-node (NotebooksNode {}))
              (table.insert produced [notebooks-node (or notebooks-node.label notebooks-node.key)])
              (local kernels-node (KernelsNode {}))
@@ -77,15 +75,22 @@
 
     (set node.add-target
          (fn [self target]
-             (local graph self.graph)
-             (when (and graph target)
-                (local node
-                    (if (= (type target) "function")
-                        (target)
+              (local graph self.graph)
+              (when (= (type target) "string")
+                (assert graph (.. "missing GraphMap for " target))
+                (assert (= (type graph.load-by-key) "function") (.. "missing GraphMap:load-by-key for " target))
+                (assert (= (type graph.add-edge) "function") (.. "missing GraphMap:add-edge for " target)))
+              (when (and graph target)
+                 (local node
+                     (if (= (type target) "string")
+                         (assert (graph:load-by-key target) (.. "failed to load " target))
+                         (= (type target) "function")
+                         (target)
                         target))
                 (assert node "StartNode requires a node to add")
-                (graph:add-edge (GraphEdge {:source self
-                                                :target node})))))
+                 (graph:add-edge (GraphEdge {:source self
+                                                :target node}))
+                 node)))
 
     (set node.actions [])
 

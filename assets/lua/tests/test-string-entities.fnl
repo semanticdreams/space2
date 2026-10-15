@@ -155,7 +155,9 @@
 
 (fn entities-node-creates-with-correct-properties []
   (local EntitiesNode (require :graph/nodes/entities))
-  (local node (EntitiesNode {}))
+  (local {:EntityTypeCatalog EntityTypeCatalog} (require :entities/type-catalog))
+  (local Builtins (require :graph/extensions/builtins))
+  (local node (EntitiesNode {:entity-type-catalog (EntityTypeCatalog {:types (Builtins.entity-types)})}))
   (assert (= node.key "entities") "key should be 'entities'")
   (assert (= node.label "entities") "label should be 'entities'")
   (assert node.color "should have color")

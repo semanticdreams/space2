@@ -61,8 +61,11 @@
              :next_map_id 2
              :maps [{:id "main"
                      :name "Main"
-                     :nodes ["start" "worlds"]
-                     :edges [{:source "start" :target "worlds"}]
+                     :nodes ["start" "worlds" "entities" "code-entity-list" "code-entity:restored"]
+                     :edges [{:source "start" :target "worlds"}
+                             {:source "start" :target "entities"}
+                             {:source "entities" :target "code-entity-list"}
+                             {:source "code-entity-list" :target "code-entity:restored"}]
                      :selected_node_keys ["worlds"]
                      :focused_node_key "start"}]}}))
 
@@ -213,6 +216,7 @@
 (fn built-in-graph-extensions-install-before-homeworld-map-restore []
   (local saved-registry app.graph-extension-registry)
   (local saved-handles app.builtin-graph-extension-handles)
+  (local saved-catalog app.entity-type-catalog)
   (assert (= (type Main.ensure-built-in-graph-extensions!) "function")
           "Main should expose ensure-built-in-graph-extensions!")
   (local registry (GraphExtensionRegistry.GraphExtensionRegistry {:app app}))
@@ -221,14 +225,19 @@
   (local saved-create-default-projection app.create-default-projection)
   (local saved-next-frame app.next-frame)
   (local world-manager (fake-world-manager))
+  (local {:EntityTypeCatalog EntityTypeCatalog} (require :entities/type-catalog))
+  (local Builtins (require :graph/extensions/builtins))
+  (local catalog (EntityTypeCatalog {:types (Builtins.entity-types)}))
+  (local CodeStore (require :entities/code))
+  (local code-store (CodeStore.CodeEntityStore {:base-dir temp-dir.path}))
+  (code-store:create-entity {:id "restored" :name "Restored code"})
   (set app.graph-extension-registry registry)
   (set app.builtin-graph-extension-handles nil)
+  (set app.entity-type-catalog nil)
   (set app.create-default-projection (fn [_viewport] {}))
   (set app.next-frame (fn [callback] (callback)))
   (fs.create-dirs temp-dir.path)
   (write-world-state-with-built-in-map! temp-dir.path)
-  (Main.ensure-built-in-graph-extensions! {:world-manager world-manager
-                                           :asset-path-resolver identity-path})
   (local world (HomeWorld {:id "world-a"
                           :name "home"
                           :type "home"
@@ -238,33 +247,39 @@
   (local ctx {:focus-manager focus-manager
               :focus-root (focus-manager:get-root-scope)})
   (local (ok result)
-    (pcall activate-world! world ctx))
-  (when ok
-    (local graph-map (world.runtime.graph-map-manager:get-active-map))
-    (assert (graph-map:lookup "start")
-            "HomeWorld should hydrate built-in start node before pruning")
-    (assert (graph-map:lookup "worlds")
-            "HomeWorld should hydrate built-in worlds node before pruning")
-    (assert (= (graph-map:edge-count) 1)
-            "HomeWorld should preserve built-in edge restored through registry loaders")
-    (assert (= (. graph-map.selected_node_keys 1) "worlds")
-            "HomeWorld should preserve built-in selected key")
-    (assert (= graph-map.focused_node_key "start")
-            "HomeWorld should preserve built-in focused key")
-    (when world.runtime
+    (pcall
+      (fn exercise-built-in-restore []
+        (Main.ensure-built-in-graph-extensions! {:world-manager world-manager
+                                                :entity-type-catalog catalog :code-store code-store
+                                                :asset-path-resolver identity-path})
+        (activate-world! world ctx)
+        (local graph-map (world.runtime.graph-map-manager:get-active-map))
+        (assert (graph-map:lookup "start") "HomeWorld should hydrate built-in start node before pruning")
+        (assert (graph-map:lookup "worlds") "HomeWorld should hydrate built-in worlds node before pruning")
+        (assert (= (. (graph-map:lookup "entities") :entity-type-catalog) catalog))
+        (assert (= (. (graph-map:lookup "code-entity-list") :store) code-store))
+        (assert (= (. (graph-map:lookup "code-entity:restored") :store) code-store))
+        (assert (= (graph-map:edge-count) 4) "HomeWorld should preserve restored browsing topology")
+        (assert (= (. graph-map.selected_node_keys 1) "worlds") "HomeWorld should preserve built-in selected key")
+        (assert (= graph-map.focused_node_key "start") "HomeWorld should preserve built-in focused key"))))
+  (when world.runtime
       (when world.runtime.unload-canvas-runtime
         (world.runtime:unload-canvas-runtime))
       (registry:uninstall-runtime world.runtime)
       (world.runtime.graph-map-manager:drop)
       (world.runtime.graph:drop)
       (world.runtime.scene:drop)
-      (set world.runtime nil)))
+      (set world.runtime nil))
+  (local retained-catalog app.entity-type-catalog)
+  (each [_ handle (ipairs (or app.builtin-graph-extension-handles []))] (handle:unregister))
   (focus-manager:drop)
   (temp-dir:drop)
   (set app.create-default-projection saved-create-default-projection)
   (set app.next-frame saved-next-frame)
   (set app.graph-extension-registry saved-registry)
   (set app.builtin-graph-extension-handles saved-handles)
+  (set app.entity-type-catalog saved-catalog)
+  (when ok (assert (= retained-catalog catalog) "runtime teardown must not release the app catalog"))
   (if ok result (error result)))
 
 (fn homeworld-requires-graph-extension-registry-before-map-restore []

@@ -1,5 +1,6 @@
 (local Registry (require :graph/extension-registry))
 (local BuiltInGraphExtensions (require :graph/extensions/builtins))
+(local {:EntityTypeCatalog EntityTypeCatalog} (require :entities/type-catalog))
 (local fs (require :fs))
 
 (var temp-counter 0)
@@ -40,7 +41,8 @@
   (local LlmStore (require :llm/conversations/store))
   (local WorkflowStore (require :workflows/store))
   (local options
-    {:string-store (StringEntityStore.StringEntityStore {:base-dir (fs.join-path dir "string")})
+    {:entity-type-catalog (EntityTypeCatalog {:types (BuiltInGraphExtensions.entity-types)})
+     :string-store (StringEntityStore.StringEntityStore {:base-dir (fs.join-path dir "string")})
      :code-store (CodeEntityStore.CodeEntityStore {:base-dir (fs.join-path dir "code")})
      :list-store (ListEntityStore.ListEntityStore {:base-dir (fs.join-path dir "list")})
      :dict-store (DictEntityStore.DictEntityStore {:base-dir (fs.join-path dir "dict")})

@@ -2,91 +2,58 @@
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
 (local Signal (require :signal))
-(local StringEntityListNode (require :graph/nodes/string-entity-list))
-(local LinkEntityListNode (require :graph/nodes/link-entity-list))
-(local ListEntityListNode (require :graph/nodes/list-entity-list))
+(local EntitiesNodeView (require :graph/view/views/entities))
 
-(local GRAY (glm.vec4 0.4 0.4 0.4 1))
-(local GRAY_ACCENT (glm.vec4 0.45 0.45 0.45 1))
+(fn make-type-action [self descriptor]
+  (local id descriptor.id)
+  {:name descriptor.action-name :icon descriptor.icon
+   :fn (fn [_button _event] (self:add-type-node id))})
 
 (fn EntitiesNode [opts]
-  (local options (or opts {}))
-  (local EntitiesNodeView (require :graph/view/views/entities))
+  (local catalog (assert (and opts opts.entity-type-catalog) "EntitiesNode requires :entity-type-catalog"))
+  (assert (and (= (type catalog.list-types) "function") (= (type catalog.get-type) "function"))
+          "EntitiesNode requires entity-type-catalog list-types and get-type methods")
+  (local base (GraphNode {:key "entities" :label "entities"
+                         :color (glm.vec4 0.4 0.4 0.4 1)
+                         :sub-color (glm.vec4 0.45 0.45 0.45 1)
+                         :size 8.0 :view EntitiesNodeView}))
+  (local types-changed (Signal))
+  (local actions [])
+  (var dropped? false)
 
-  (local node
-    (GraphNode {:key "entities"
-                :label "entities"
-                :color GRAY
-                :sub-color GRAY_ACCENT
-                :size 8.0
-                :view EntitiesNodeView}))
-
-  (set node.types-changed (Signal))
-
-  (fn collect-types [_self]
-    (local produced [])
-    (table.insert produced [:string "string"])
-    (table.insert produced [:link "link"])
-    (table.insert produced [:list "list"])
-    (table.insert produced [:dict "dict"])
-    produced)
+  (fn collect-types [self]
+    (assert (not dropped?) "EntitiesNode collect-types after drop")
+    (icollect [_ descriptor (ipairs (self.entity-type-catalog:list-types))]
+      [descriptor.id descriptor.label]))
 
   (fn emit-types [self]
     (local types (collect-types self))
-    (self.types-changed:emit types)
+    (types-changed:emit types)
     types)
 
-  (set node.collect-types collect-types)
-  (set node.emit-types emit-types)
+  (fn add-type-node [self id]
+    (assert (not dropped?) "EntitiesNode add-type-node after drop")
+    (local descriptor (self.entity-type-catalog:get-type id))
+    (local key descriptor.browser-key)
+    (local graph-map (assert self.graph (.. "missing GraphMap for " key)))
+    (assert (= (type graph-map.load-by-key) "function") (.. "missing GraphMap:load-by-key for " key))
+    (assert (= (type graph-map.add-edge) "function") (.. "missing GraphMap:add-edge for " key))
+    (local target (assert (graph-map:load-by-key key) (.. "failed to load " key)))
+    (graph-map:add-edge (GraphEdge {:source self :target target}))
+    target)
 
-  (set node.add-type-node
-       (fn [self type-key]
-         (local graph self.graph)
-         (when graph
-           (if (= type-key :string)
-               (do
-                 (local list-node (StringEntityListNode {}))
-                 (graph:add-edge (GraphEdge {:source self
-                                             :target list-node})))
-               (= type-key :link)
-               (do
-                 (local list-node (LinkEntityListNode {}))
-                 (graph:add-edge (GraphEdge {:source self
-                                             :target list-node})))
-                (= type-key :list)
-                (do
-                  (local list-node (ListEntityListNode {}))
-                  (graph:add-edge (GraphEdge {:source self
-                                              :target list-node})))
-                (= type-key :dict)
-                (do
-                  (local DictEntityListNode (require :graph/nodes/dict-entity-list))
-                  (local list-node (DictEntityListNode {}))
-                  (graph:add-edge (GraphEdge {:source self
-                                              :target list-node})))))))
+  (fn drop [_self]
+    (when (not dropped?)
+      (set dropped? true)
+      (types-changed:clear)))
 
-  (set node.actions
-       [{:name "String Entities"
-         :icon "text_fields"
-         :fn (fn [_button _event]
-                 (node:add-type-node :string))}
-        {:name "Link Entities"
-         :icon "link"
-         :fn (fn [_button _event]
-                 (node:add-type-node :link))}
-         {:name "List Entities"
-          :icon "list"
-          :fn (fn [_button _event]
-                  (node:add-type-node :list))}
-         {:name "Dict Entities"
-          :icon "data_object"
-          :fn (fn [_button _event]
-                  (node:add-type-node :dict))}])
-
-  (set node.drop
-       (fn [self]
-         (self.types-changed:clear)))
-
-  node)
+  (local self {:key base.key :label base.label :color base.color :accent base.accent
+               :kind-badge base.kind-badge :size base.size :view base.view :preview base.preview
+               :mount base.mount :unmount base.unmount
+               :entity-type-catalog catalog :types-changed types-changed :actions actions
+               :collect-types collect-types :emit-types emit-types :add-type-node add-type-node :drop drop})
+  (each [_ descriptor (ipairs (catalog:list-types))]
+    (table.insert actions (make-type-action self descriptor)))
+  self)
 
 EntitiesNode

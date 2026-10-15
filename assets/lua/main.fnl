@@ -2237,54 +2237,9 @@
     (set app.graph-extension-registry (Registry.GraphExtensionRegistry {:app app})))
   app.graph-extension-registry)
 
-(fn built-in-graph-extension-options [opts]
-  (local options (or opts {}))
-  (local StringEntityStore (require :entities/string))
-  (local CodeEntityStore (require :entities/code))
-  (local ListEntityStore (require :entities/list))
-  (local LinkEntityStore (require :entities/link))
-  (local IdentityStore (require :entities/identity))
-  (local NotebookStore (require :notebooks/store))
-  (local LlmStore (require :llm/conversations/store))
-  (local WorkflowStore (require :workflows/store))
-  (local KernelsStore (require :kernels))
-  (local data-dir (or app.user-data-dir (appdirs.user-data-dir "space")))
-  (assert data-dir "built-in graph extensions require app user data dir")
-  {:world-manager (or options.world-manager app.world-manager)
-   :asset-path-resolver (or options.asset-path-resolver
-                            (and app.engine app.engine.get-asset-path))
-   :code-store (or options.code-store app.code-store
-                   (CodeEntityStore.get-default {:base-dir data-dir}))
-   :workflow-store (or options.workflow-store app.workflow-store
-                       (WorkflowStore.get-default {:base-dir data-dir}))
-   :workflow-runner (or options.workflow-runner app.workflow-runner)
-   :string-store (or options.string-store app.string-store
-                     (StringEntityStore.get-default {:base-dir data-dir}))
-    :list-store (or options.list-store app.list-store (ListEntityStore.get-default {:base-dir data-dir}))
-    :dict-store (or options.dict-store app.dict-store ((. (require :entities/dict) :get-default) {:base-dir data-dir}))
-    :link-store (or options.link-store app.link-store
-                   (LinkEntityStore.get-default {:base-dir data-dir}))
-   :identity-store (or options.identity-store app.identity-store
-                       (IdentityStore.get-default {:base-dir data-dir}))
-   :notebook-store (or options.notebook-store app.notebook-store
-                       (NotebookStore.get-default {:base-dir data-dir}))
-   :llm-store (or options.llm-store app.llm-store
-                  (LlmStore.get-default {:base-dir data-dir}))
-   :kernels (or options.kernels app.kernels (KernelsStore.get-default))
-   :hackernews-ensure-client (or options.hackernews-ensure-client
-                                 app.hackernews-ensure-client)})
-
 (fn ensure-built-in-graph-extensions! [opts]
-  (if app.builtin-graph-extension-handles
-      app.builtin-graph-extension-handles
-      (do
-        (local BuiltInGraphExtensions (require :graph/extensions/builtins))
-        (local registry (ensure-graph-extension-registry!))
-        (local handles (BuiltInGraphExtensions.register!
-                         registry
-                         (built-in-graph-extension-options opts)))
-        (set app.builtin-graph-extension-handles handles)
-        handles)))
+  ((. (require :graph/extensions/builtins/composition) :ensure!)
+    app opts ensure-graph-extension-registry!))
 
 (set drop-built-in-graph-extensions!
      (fn []
@@ -2294,6 +2249,7 @@
            (when (and handle handle.unregister)
              (handle:unregister)))
          (set app.builtin-graph-extension-handles nil))
+       (set app.entity-type-catalog nil)
        true))
 
 (set app.ensure-graph-extension-registry! ensure-graph-extension-registry!)

@@ -224,7 +224,9 @@
 
 (fn entities-node-includes-dict-type []
   (local EntitiesNode (require :graph/nodes/entities))
-  (local node (EntitiesNode {}))
+  (local {:EntityTypeCatalog EntityTypeCatalog} (require :entities/type-catalog))
+  (local Builtins (require :graph/extensions/builtins))
+  (local node (EntitiesNode {:entity-type-catalog (EntityTypeCatalog {:types (Builtins.entity-types)})}))
   (local types (node:collect-types))
   (var found false)
   (each [_ t (ipairs types)]
