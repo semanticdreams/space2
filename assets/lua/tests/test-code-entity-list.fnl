@@ -12,15 +12,27 @@
   (assert (string.find (tostring err) text 1 true) (tostring err)))
 
 (fn with-runtime [f]
-  (local graph (Graph {:with-start false :entity-events? false}))
-  (local fixture (Helpers.install-builtins! graph {:only-schemes ["code-entity-list" "code-entity"]}))
+  (local tempfile (require :tempfile))
+  (local LinkStore (require :entities/link))
+  (local IdentityStore (require :entities/identity))
+  (local StringStore (require :entities/string))
+  (local dir (tempfile.TemporaryDirectory {:prefix "code-browser-map-stores-"}))
+  (local link-store (LinkStore.LinkEntityStore {:base-dir dir.path}))
+  (local identity-store (IdentityStore.IdentityStore {:base-dir dir.path}))
+  (local string-store (StringStore.StringEntityStore {:base-dir dir.path}))
+  (local graph (Graph {:with-start false :entity-events? false
+                       :link-store link-store :identity-store identity-store :string-store string-store}))
+  (local fixture (Helpers.install-builtins! graph {:only-schemes ["code-entity-list" "code-entity"]
+                                                  :link-store link-store :identity-store identity-store
+                                                  :string-store string-store}))
   (local map-a (GraphMap {:graph graph :id "code-browser-a"}))
   (local map-b (GraphMap {:graph graph :id "code-browser-b"}))
-  (local (ok result) (pcall f fixture.opts.code-store map-a map-b graph))
+  (local (ok result) (pcall f fixture.opts.code-store map-a map-b graph fixture.opts))
   (map-a:drop)
   (map-b:drop)
   (graph:drop)
   (fixture:drop)
+  (dir:drop)
   (when (not ok) (error result)))
 
 ;; Delegate to real signals; instrumentation remains private to this suite.
@@ -148,6 +160,43 @@
       (store:delete-entity "stale")
       (assert-error (fn stale-record [] (browser:add-entity-node (. stale 1))) "failed to load code-entity:stale")
       (assert (= (map-a:edge-count) 0)))))
+
+(fn fixture-ignores-unrelated-default-links []
+  (local LinkStore (require :entities/link))
+  (local tempfile (require :tempfile))
+  (local fs (require :fs))
+  (local dir (tempfile.TemporaryDirectory {:prefix "code-browser-unrelated-default-"}))
+  ;; Seed only a test-owned stand-in, never the real default singleton.
+  (local unrelated (LinkStore.LinkEntityStore {:base-dir dir.path}))
+  (unrelated:create-entity {:id "unrelated" :source-key "code-entity-list" :target-key "code-entity:shared"})
+  (local path (fs.join-path unrelated.entities-dir "unrelated.json"))
+  (local original-content (fs.read-file path))
+  (local get-default LinkStore.get-default)
+  (fn exercise-maps [store map-a map-b graph options]
+    (local entity (store:create-entity {:id "shared" :name "Shared"}))
+    (each [_ graph-map (ipairs [map-a map-b])]
+      (local browser (assert (graph-map:load-by-key "code-entity-list")))
+      (local target (assert (graph-map:load-by-key "code-entity:shared")))
+      (assert (= (graph-map:edge-count) 0) "fixture must ignore unrelated default-store topology")
+      (assert (= (browser:add-entity-node entity) target))
+      (assert (= (browser:add-entity-node entity) target))
+      (assert (= (graph-map:edge-count) 1)))
+    (assert (= graph.link-store options.link-store))
+    (assert (= graph.identity-store options.identity-store))
+    (assert (= graph.string-store options.string-store))
+    (assert (= (graph:node-count) 0))
+    (assert (= (graph:edge-count) 0)))
+  (set LinkStore.get-default (fn unrelated-default [_opts] unrelated))
+  (local (ok result)
+    (pcall
+      (fn exercise-isolation []
+        (with-runtime exercise-maps)
+        ;; Verify preservation after the fixture and both maps have been dropped.
+        (assert (= (length (unrelated:list-entities)) 1) "unrelated data must remain untouched")
+        (assert (= (fs.read-file path) original-content) "unrelated persisted link must remain byte-for-byte unchanged"))))
+  (set LinkStore.get-default get-default)
+  (dir:drop)
+  (when (not ok) (error result)))
 
 (fn real-store-events-and-node-cleanup []
   (with-runtime
@@ -332,6 +381,7 @@
 (table.insert tests {:name "code browser requires explicit store" :fn browser-requires-store})
 (table.insert tests {:name "code browser lists bounded single-line metadata" :fn listing-is-bounded-single-line-metadata})
 (table.insert tests {:name "code browser exact loader and map-local deduplication" :fn exact-loader-and-map-local-opening})
+(table.insert tests {:name "code browser fixture ignores unrelated default-store links" :fn fixture-ignores-unrelated-default-links})
 (table.insert tests {:name "code browser navigation errors are loud" :fn navigation-errors-are-loud})
 (table.insert tests {:name "code browser real store signals and idempotent cleanup" :fn real-store-events-and-node-cleanup})
 (table.insert tests {:name "code browser two views route and drop independently" :fn two-views-route-and-drop-independently})
