@@ -833,6 +833,18 @@ set_tests_properties(space_ssh_integration PROPERTIES
     ENVIRONMENT "SKIP_KEYRING_TESTS=1;XDG_DATA_HOME=/tmp/space/tests/xdg-data;SPACE_DISABLE_AUDIO=1;SPACE_LOG_DIR=/tmp/space/tests/log;SPACE_ASSETS_PATH=${CMAKE_SOURCE_DIR}/assets;FENNEL_PATH=${CMAKE_SOURCE_DIR}/assets/lua/?.fnl\;${CMAKE_SOURCE_DIR}/assets/lua/?/init.fnl;FENNEL_MACRO_PATH=${CMAKE_SOURCE_DIR}/assets/lua/?.fnl\;${CMAKE_SOURCE_DIR}/assets/lua/?/init.fnl"
 )
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(NAME space_live_dev_integration
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_live_dev_integration.py
+            --space $<TARGET_FILE:${SPACE_TEST_COMMAND_TARGET}> --repo-root ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    set_tests_properties(space_live_dev_integration PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        FIXTURES_REQUIRED space_constraints
+        TIMEOUT 600
+    )
+endif()
+
 add_test(NAME ssh_fixture_strict_mode
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/ssh_fixture.py --self-test
 )

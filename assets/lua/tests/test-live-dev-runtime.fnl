@@ -163,9 +163,11 @@
   (assert (c:faulted?)))
 (add-test "thrown controllers fail explicitly and fault conservatively" thrown-controller)
 
-(fn startup-provenance-and-boundary []
+(fn startup-provenance-body []
   (local platform ((. (require :sysinfo) :platform)))
   (when (not= platform.os "linux") (lua "return true"))
+  (local fixture-root (assert (os.getenv "SPACE_LIVE_DEV_STARTUP_FIXTURE")
+                              "native startup tests require isolated fixture"))
   (local LiveDev (require :live-dev-runtime))
   (local native (. (require :app-config) :live-dev))
   (local fs (require :fs))
@@ -198,6 +200,8 @@
                        :protect-file native.protect-file :launch-recipe recipe} {:args []}))
     (control:mark-ready!)
     (local current (control:status))
+    (assert (= current.checkout-root (.. fixture-root "/checkout")))
+    (assert (= (string.sub paths.record 1 (# fixture-root)) fixture-root))
     (local queried (LiveDev.rpc {:action "status" :expected-instance-id current.instance-id}))
     (assert (= queried.instance-id current.instance-id))
     (assert (= current.schema-version 1))
@@ -238,8 +242,89 @@
   (dir:drop)
   (assert stop-ok (tostring stop-err))
   (assert ok (tostring err)))
+
+(fn startup-endpoint-case [requested]
+  (local platform ((. (require :sysinfo) :platform)))
+  (when (not= platform.os "linux") (lua "return true"))
+  (local fixture-root (assert (os.getenv "SPACE_LIVE_DEV_STARTUP_FIXTURE")
+                              "native startup tests require isolated fixture"))
+  (local LiveDev (require :live-dev-runtime))
+  (local native (. (require :app-config) :live-dev))
+  (local dir ((. (require :tempfile) :TemporaryDirectory) {:prefix "live-dev-endpoint-"}))
+  (local endpoint (.. "ipc://" dir.path "/control.sock"))
+  (var allocated-endpoint nil)
+  (local previous-health app.check-runtime-health)
+  (fn healthy [] true)
+  (fn paths [checkout id]
+    (local allocated (native.private-paths checkout id))
+    (set allocated-endpoint allocated.endpoint)
+    allocated)
+  (fn body []
+    (set app.check-runtime-health healthy)
+    (local argument (if (= requested "explicit") endpoint requested))
+    (local control
+      (LiveDev.start! {:describe-source native.describe-source :private-paths paths
+                       :protect-file native.protect-file :launch-recipe native.launch-recipe}
+                     {:args [(.. "--remote-control=" argument)]}))
+    (local expected (if (= requested "explicit") endpoint allocated-endpoint))
+    (assert (= (. (control:status) :checkout-root) (.. fixture-root "/checkout")))
+    (assert (= (string.sub allocated-endpoint 1 (+ (# fixture-root) 6)) (.. "ipc://" fixture-root)))
+    (assert (= (. (control:status) :endpoint) expected) "startup must bind the resolved endpoint")
+    (control:mark-ready!))
+  (local (ok err) (pcall body))
+  (local (stop-ok stop-err) (pcall LiveDev.stop!))
+  (set app.check-runtime-health previous-health)
+  (callbacks.dispatch)
+  (dir:drop)
+  (assert stop-ok (tostring stop-err))
+  (assert ok (tostring err)))
+
+(fn startup-provenance-and-boundary [] ((. (require :tests.live-dev-startup-fixture) :run) "provenance"))
+(fn startup-auto-endpoint [] ((. (require :tests.live-dev-startup-fixture) :run) "auto"))
+(fn startup-explicit-endpoint [] ((. (require :tests.live-dev-startup-fixture) :run) "explicit"))
+(fn test-native-startup []
+  (assert (os.getenv "SPACE_LIVE_DEV_STARTUP_FIXTURE") "isolated startup child requires fixture environment")
+  (local case-name (. _G.arg 1))
+  (fn auto [] (startup-endpoint-case "auto"))
+  (fn explicit [] (startup-endpoint-case "explicit"))
+  (local selected (if (= case-name "provenance") startup-provenance-body
+                      (= case-name "auto") auto
+                      (= case-name "explicit") explicit
+                      (error "unknown isolated startup case")))
+  ((. (require :tests.runner) :run-tests)
+    {:name "isolated native startup" :tests [{:name case-name :fn selected}]}))
+(fn startup-auto-requires-private-paths []
+  (local LiveDev (require :live-dev-runtime))
+  (local fs (require :fs))
+  (fn describe [source]
+    {:instance-id "no-checkout" :main-source source :source-root (fs.parent source)})
+  (local (ok err) (pcall LiveDev.start! {:describe-source describe} {:args ["--remote-control=auto"]}))
+  (LiveDev.stop!)
+  (assert (not ok) "auto without private checkout paths must fail")
+  (assert (string.find (tostring err) "auto remote control requires private checkout paths" 1 true)
+          "missing private paths must have an explicit diagnostic"))
+
 (table.insert tests {:name "startup publishes public provenance and protects the private restart boundary"
                      :fn startup-provenance-and-boundary})
+(table.insert tests {:name "auto startup binds allocated private IPC endpoint" :fn startup-auto-endpoint})
+(table.insert tests {:name "explicit startup endpoint retains precedence" :fn startup-explicit-endpoint})
+(table.insert tests {:name "auto startup rejects unavailable private checkout paths" :fn startup-auto-requires-private-paths})
+
+(fn native-startup-skips-non-linux []
+  (local sysinfo (require :sysinfo))
+  (local process (require :process))
+  (local before-platform sysinfo.platform)
+  (local before-run process.run)
+  (fn windows [] {:os "windows"})
+  (fn forbidden [_opts] (error "non-Linux startup must not allocate or spawn"))
+  (fn body [] (startup-provenance-and-boundary) (startup-auto-endpoint) (startup-explicit-endpoint))
+  (set sysinfo.platform windows)
+  (set process.run forbidden)
+  (local (ok err) (pcall body))
+  (set sysinfo.platform before-platform)
+  (set process.run before-run)
+  (assert ok (tostring err)))
+(table.insert tests {:name "Linux native startup cases do not allocate on Windows" :fn native-startup-skips-non-linux})
 
 (fn outer-lifetime-case [phase]
   (local Main (require :main))
@@ -392,4 +477,4 @@
 (fn main []
   ((. (require :tests/runner) :run-tests) {:name "live-dev-runtime" :tests tests}))
 
-{:name "live-dev-runtime" :tests tests :main main}
+{:name "live-dev-runtime" :tests tests :main main :test-native-startup test-native-startup}

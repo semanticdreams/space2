@@ -245,7 +245,12 @@
                        :source-root (fs.parent main-source)}))
   (local paths (and bootstrap identity.checkout-root
                    (bootstrap.private-paths identity.checkout-root identity.instance-id)))
-  (local endpoint (or (startup-endpoint options) (and paths paths.endpoint)))
+  (local requested-endpoint (startup-endpoint options))
+  (local endpoint
+    (if (= requested-endpoint "auto")
+        (assert (and paths paths.endpoint) "auto remote control requires private checkout paths")
+        requested-endpoint requested-endpoint
+        (and paths paths.endpoint)))
   (local boundary-check (capture-boundary bootstrap identity))
   (local config (or options.reload-config {}))
   (local preserve (copy preserved-modules))
