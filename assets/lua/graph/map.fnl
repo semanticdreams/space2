@@ -518,35 +518,7 @@
 
     (set self.resolve-key
         (fn [_self key opts]
-            (local options (or opts {}))
-            (if (or (not key) (not (= (type key) "string")))
-                key
-                (do
-                    (local identity-store (and shared-graph shared-graph.identity-store))
-                    (var current key)
-                    (var depth 0)
-                    (local max-depth (or options.max-depth 32))
-                    (local visited (or options.visited {}))
-                    (local identity-prefix "identity:")
-                    (while true
-                        (when (>= depth max-depth)
-                            (lua "return current"))
-                        (when (. visited current)
-                            (error (.. "resolve-key identity cycle detected at " current)))
-                        (set (. visited current) true)
-                        (if (not (= (string.sub current 1 (string.len identity-prefix)) identity-prefix))
-                            (lua "return current")
-                            (do
-                                (local entity-id (string.sub current (+ (string.len identity-prefix) 1)))
-                                (local entity (and identity-store
-                                                   identity-store.get-entity
-                                                   (identity-store:get-entity entity-id)))
-                                (if (not (and entity entity.target-key
-                                             (> (string.len (tostring entity.target-key)) 0)))
-                                    (lua "return current")
-                                    (do
-                                        (set current (tostring entity.target-key))
-                                        (set depth (+ depth 1)))))))))))
+            (shared-graph.identity-store:resolve-key key opts)))
 
     (set self.resolve-node
         (fn [_self key-or-node opts]

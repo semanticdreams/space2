@@ -255,31 +255,7 @@
 
     (set self.resolve-key
         (fn [_self key opts]
-            (local options (or opts {}))
-            (if (or (not key) (not (= (type key) "string")))
-                key
-                (do
-                    (local visited (or options.visited {}))
-                    (local max-depth (or options.max-depth 32))
-                    (var current key)
-                    (var depth 0)
-                    (while true
-                        (when (>= depth max-depth)
-                            (lua "return current"))
-                        (when (. visited current)
-                            (error (.. "resolve-key identity cycle detected at " current)))
-                        (set (. visited current) true)
-                        (local node (or (. nodes current)
-                                        (self:load-by-key current)))
-                        (if (not (and node node.identity-target-key))
-                            (lua "return current")
-                            (do
-                                (local next-key (tostring (or node.identity-target-key "")))
-                                (if (> (string.len next-key) 0)
-                                    (do
-                                        (set current next-key)
-                                        (set depth (+ depth 1)))
-                                    (lua "return current")))))))))
+            (self.identity-store:resolve-key key opts)))
 
     (set self.resolve-node
         (fn [_self key-or-node opts]
@@ -504,23 +480,7 @@
 
     (set self.ensure-identity-key
         (fn [_self target-key opts]
-            (local options (or opts {}))
-            (local key (tostring (or target-key "")))
-            (if (or (= (string.len key) 0)
-                    (= (string.sub key 1 9) "identity:"))
-                key
-                (do
-                    (local existing
-                        (if identity-store.find-by-target-key
-                            (identity-store:find-by-target-key key)
-                            nil))
-                    (if existing
-                        (.. "identity:" (tostring existing.id))
-                        (do
-                            (local node (self:create-identity key options))
-                            (if (and node node.key)
-                                node.key
-                                key)))))))
+            (identity-store:ensure-key (tostring (or target-key "")) opts)))
 
     (fn add-link-edge-for-entity [entity entity-id]
         (local source-key (self:resolve-key entity.source-key))

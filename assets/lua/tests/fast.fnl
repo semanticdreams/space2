@@ -153,6 +153,7 @@
     :tests.test-code-entity-list
     :tests.test-entities-browser
     :tests.test-identity-entities
+    :tests.test-reference-lifecycle-identity
     :tests.test-link-entities
     :tests.test-list-entities
     :tests.test-dict-entities
