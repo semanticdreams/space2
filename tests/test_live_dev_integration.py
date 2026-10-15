@@ -48,6 +48,7 @@ class Fixture:
         self.build.mkdir()
         (self.build / "space").symlink_to(space)
         self.original_main = (self.lua / "main.fnl").read_text()
+        self.narrow_reload_unit_ids = []
         self.module = load_cli(repo)
         self.instances = {}
         self.children = []
@@ -76,6 +77,7 @@ class Fixture:
         first = "(global app (or app {}))"
         assert self.original_main.startswith(first)
         prefix = (first + "\n(require :tests.live-dev-offline)\n"
+                  f'(set app.hot-reload-config {{:enabled true :narrow-reload-unit-ids [{" ".join(json.dumps(unit) for unit in self.narrow_reload_unit_ids)}]}})\n'
                   f"(set app.live-dev-fixture-marker {json.dumps(marker)})\n"
                   '(when app.__live-dev-fixture-fault? (error "fixture load failure"))\n')
         (self.lua / "main.fnl").write_text(prefix + self.original_main[len(first):])
@@ -296,7 +298,7 @@ class Fixture:
             assert path.stat().st_mode & 0o777 == 0o600
 
 
-def watched_hud_routing(fixture, instance):
+def watched_hud_routing(fixture, instance, *, opted_in=False):
     fixture.assert_offline(instance)
     fixture.query(instance, '(do (set _G.__routing-world-manager app.world-manager) true)')
     debug = '(app.hot-reload-controller:debug-state)'
@@ -317,12 +319,14 @@ def watched_hud_routing(fixture, instance):
     hud = fixture.lua / "hud.fnl"
     hud.write_text(hud.read_text() + "\n; fixture watched HUD edit\n")
     after = wait_for_reload(before["reload-count"])
-    assert after["last-target-unit-id"] == "hud", f"ordinary watcher must retain child-path routing: observed {after['last-target-unit-id']}"
-    assert fixture.query(instance, '(= app.world-manager _G.__routing-world-manager)'), "HUD reload replaced world manager"
-    assert fixture.cli("status")["generation"] == generation, "HUD child reload must not advance root generation"
+    target = "hud" if opted_in else "app-root"
+    assert after["last-target-unit-id"] == target, f"watcher eligibility target: expected {target}, observed {after['last-target-unit-id']}"
+    assert fixture.query(instance, '(= app.world-manager _G.__routing-world-manager)') is opted_in, "watcher must replace root unless HUD explicitly opted in"
+    watched_generation = generation if opted_in else generation + 1
+    assert fixture.cli("status")["generation"] == watched_generation, "only root reload advances generation"
     explicit = fixture.cli("reload")
     assert explicit["status"] == "succeeded"
-    assert explicit["generation"] == generation + 1, "explicit root reload must advance generation"
+    assert explicit["generation"] == watched_generation + 1, "explicit root reload must advance generation even with HUD opted in"
     after_explicit = fixture.query(instance, debug)
     assert after_explicit["last-target-unit-id"] == "app-root"
     assert fixture.query(instance, '(not= app.world-manager _G.__routing-world-manager)'), "explicit reload must replace root"
@@ -330,7 +334,7 @@ def watched_hud_routing(fixture, instance):
     main.write_text(main.read_text() + "\n; fixture watched root edit\n")
     after_watched_root = wait_for_reload(after_explicit["reload-count"])
     assert after_watched_root["last-target-unit-id"] == "app-root"
-    assert fixture.cli("status")["generation"] == generation + 2, "watcher-routed root reload must advance generation"
+    assert fixture.cli("status")["generation"] == watched_generation + 2, "watcher-routed root reload must advance generation"
 
 
 def manual_reload_roundtrip(fixture, before):
@@ -466,6 +470,11 @@ def run_scenarios(fixture):
     assert Path(before["checkout-root"]) == fixture.root
     assert Path(before["native-source-root"]) != fixture.root
     watched_hud_routing(fixture, before)
+    fixture.cli("manual")
+    fixture.narrow_reload_unit_ids = ["hud"]
+    fixture.write_marker("v1")
+    before = fixture.cli("restart")
+    watched_hud_routing(fixture, before, opted_in=True)
     before = two_instance_restart(fixture, before)
     arguments = manual_reload_roundtrip(fixture, before)
     rejected = fixture.cli("restart", "--rebuild", expected=1)

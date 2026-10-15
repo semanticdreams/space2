@@ -198,6 +198,16 @@ reloads the broad app root using the existing transactional reload controller.
 Watching remains optional for ordinary development (`SPACE_HOT_RELOAD`); manual
 mode does not acquire a watcher on root reinitialization.
 
+Ordinary watcher requests use structured `reload-pending!` with the canonical
+[reload boundary contract](../reloadable-units.md): owned paths select a candidate,
+then `narrow-reload-unit-ids` determines eligibility before module collection or
+lifecycle mutation. Omitted/empty means app-root only; built-in children are never
+silently opted in. Set `app.hot-reload-config.narrow-reload-unit-ids` before
+process control starts to opt an audited child in. The coordinator forwards this
+list and discovers children from the current root's manager on each transaction.
+Explicit live-dev `reload` always uses `reload-root!`, regardless of that list.
+Watcher child success is health checked but does not advance root generation.
+
 Health checks resolve the *current* root method after reload and require the
 engine, initialized root services, and required root subscription references.
 Only health-checked successful root initialization advances `generation`.

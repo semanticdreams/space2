@@ -438,8 +438,8 @@
                         [(fs.join-path runtime.assets-path "lua")])
        :debounce-ms (or (and override override.debounce-ms) 150)
        :module-name (or (and override override.module-name) "main")
-       :preserve-modules (and override
-                             override.preserve-modules)
+       :narrow-reload-unit-ids (and override override.narrow-reload-unit-ids)
+       :preserve-modules (and override override.preserve-modules)
        :generic? (and override override.generic?)}))
 
 (fn app-root-reload-in-progress? []

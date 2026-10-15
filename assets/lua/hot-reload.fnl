@@ -290,8 +290,16 @@
           "HotReload requires app.engine:now-ms")
   (app.engine:now-ms))
 
+(fn select-eligible-target-unit [candidate root-unit narrow-unit-ids]
+  (var eligible? (= candidate root-unit))
+  (each [_ id (ipairs narrow-unit-ids) &until eligible?]
+    (when (= id candidate.id)
+      (set eligible? true)))
+  (if eligible? candidate root-unit))
+
 (fn HotReloadController [opts]
   (local options (or opts {}))
+  (local narrow-unit-ids (or options.narrow-reload-unit-ids []))
   (local watch-paths
     (icollect [_ path (ipairs (or options.watch-paths []))]
       (normalize-root path)))
@@ -413,10 +421,12 @@
 
   (fn prepare-reload! [transaction result changes root?]
     (local units (live-units))
+    (local root-unit (or (find-root-unit units options) unit))
+    (local candidate (if root? root-unit
+                         (or (resolve-target-unit changes units watch-paths options) root-unit)))
     (local target-unit
-      (assert (if root?
-                  (find-root-unit units options)
-                  (resolve-target-unit changes units watch-paths options))
+      (assert (if root? root-unit
+                  (select-eligible-target-unit candidate root-unit narrow-unit-ids))
               "HotReloadController could not select a target unit"))
     (set transaction.target-unit target-unit)
     (set result.target-unit-id target-unit.id)
@@ -621,6 +631,7 @@
     {:unit unit
      :units-fn all-units
      :root-unit-id unit.id
+     :narrow-reload-unit-ids options.narrow-reload-unit-ids
      :watch-paths (or options.watch-paths [])
      :preserve-modules (or options.preserve-modules default-preserve)
      :debounce-ms (or options.debounce-ms 150)

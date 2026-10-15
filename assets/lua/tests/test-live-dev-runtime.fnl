@@ -391,9 +391,10 @@
   (local Main (require :main))
   (local previous _G.app.hot-reload-config)
   (fn body []
-    (set _G.app.hot-reload-config {:enabled true})
+    (set _G.app.hot-reload-config {:enabled true :narrow-reload-unit-ids ["hud"]})
     (local config (Main.resolve-hot-reload-config))
-    (assert (= config.enabled true) "normalized ordinary watch configuration must retain enabled state"))
+    (assert (= config.enabled true) "normalized ordinary watch configuration must retain enabled state")
+    (assert (= (. config.narrow-reload-unit-ids 1) "hud") "normalization must retain explicit eligibility"))
   (local (ok err) (pcall body))
   (set _G.app.hot-reload-config previous)
   (assert ok (tostring err)))
@@ -430,8 +431,9 @@
     (set HotReload.AppRootController controller)
     (set app.check-runtime-health healthy)
     (set app.unit-manager nil)
-    (local control (LiveDev.start! nil {:args [] :reload-config {:enabled true}}))
+    (local control (LiveDev.start! nil {:args [] :reload-config {:enabled true :narrow-reload-unit-ids ["hud"]}}))
     (assert config.watch?)
+    (assert (= (. (or config.narrow-reload-unit-ids []) 1) "hud") "coordinator must forward explicit eligibility")
     (assert (= (# (config.units-fn)) 0) "startup before root init has no child units")
     (set app.unit-manager {:list first-list})
     (assert (= (config.units-fn) first))
@@ -469,7 +471,7 @@
   (callbacks.dispatch)
   (assert stop-ok (tostring stop-err))
   (assert ok (tostring err)))
-(table.insert tests {:name "startup dynamically discovers children and defers watcher routing without forcing root"
+(table.insert tests {:name "startup forwards explicit eligibility dynamically discovers children and defers watcher routing"
                      :fn startup-watcher-routing})
 
 (fn damaged-root-does-not-update []

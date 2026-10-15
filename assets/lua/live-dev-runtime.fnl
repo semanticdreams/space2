@@ -267,8 +267,9 @@
   (local controller
     (HotReload.AppRootController {:watch-paths (or config.watch-paths [identity.source-root])
                                  :watch? (= config.enabled true) :debounce-ms config.debounce-ms
-                                 :generic? config.generic? :preserve-modules preserve
-                                 :units-fn live-children :on-reload-requested requested}))
+                                  :generic? config.generic? :preserve-modules preserve
+                                  :narrow-reload-unit-ids config.narrow-reload-unit-ids
+                                  :units-fn live-children :on-reload-requested requested}))
   (fn health-check [] (assert app.check-runtime-health "missing current runtime health check") (app.check-runtime-health))
   (fn publish [record]
     (when paths
