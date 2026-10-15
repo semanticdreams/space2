@@ -3,6 +3,7 @@
 (local fs (require :fs))
 (local tempfile (require :tempfile))
 (local HotReload (require :hot-reload))
+(local FileWatch (require :file-watch))
 (local LauncherLaunchable (require :launchables/launcher))
 (local runtime (require :runtime))
 (local Activities (require :activities))
@@ -111,6 +112,7 @@
       (local original-renderers app.renderers)
       (local original-config app.hot-reload-config)
       (local original-controller app.hot-reload-controller)
+      (local original-watcher FileWatch.FileWatcher)
       (local original-worlds-dir app.worlds-dir)
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
@@ -150,9 +152,16 @@
                                                                    "hot-reload"
                                                                    "tests.test-hot-reload-integration"
                                                                    "units"]})))
-            (assert (controller:reload-now! {:changes [{:path (fs.join-path runtime.assets-path "lua" "main.fnl")
-                                                        :action "modified"}]})
+            (controller:use-manual!)
+            (set FileWatch.FileWatcher (fn [_opts] (error "root init reacquired watcher")))
+            (local reload-result (controller:reload-root!))
+            (assert reload-result.ok
                     "Expected root hot reload to succeed")
+            (assert (= reload-result.target-unit-id "app-root"))
+            (assert (= reload-result.rollback "not-needed"))
+            (assert (= app.hot-reload-controller controller)
+                    "Root initialization should preserve the manual controller")
+            (assert (= (. (controller:debug-state) :watch?) false))
             (assert app.world-manager "Expected app.world-manager after reload")
             (assert (= (app.world-manager:active-world-id) before-id)
                     "Expected active world id to roundtrip through full-app reload")
@@ -169,6 +178,7 @@
             true)))
       (local (cleanup-ok cleanup-result)
         (pcall cleanup-app-hot-reload-controller-and-main!))
+      (set FileWatch.FileWatcher original-watcher)
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (set app.hot-reload-config original-config)

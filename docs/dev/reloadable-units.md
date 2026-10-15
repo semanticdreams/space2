@@ -33,7 +33,7 @@ There are three practical layers:
    A unit can be loaded, unloaded, snapshotted, restored, and reloaded.
 
 3. `hot reload controller`
-   Watches files, maps changed paths to a target unit, clears loaded modules for that unit, and performs the reload cycle.
+   Optionally watches files, maps changed paths to a target unit or explicitly selects the root, clears loaded modules for that unit, and performs the reload cycle.
 
 In the current system, changed files route to units by explicit path ownership, not by a module dependency graph.
 
@@ -97,7 +97,7 @@ Current behavior is:
 
 - attempt reload of the chosen target unit
 - if reload fails, attempt rollback to the previous runtime for that same unit
-- if rollback also fails, throw
+- if rollback also fails, `reload-now!` throws; `reload-root!` returns explicit failure evidence
 
 We chose hard failure over silent escalation because:
 
@@ -232,6 +232,65 @@ This is the current routing rule:
 - mixed changes reload the common ancestor
 - no match reloads root
 
+### Watcherless manual mode and explicit root reload
+
+`HotReloadController` and `AppRootController` accept `:watch?`, a boolean that
+defaults to `true`. With `:watch? false`, construction does not acquire a native
+watcher or capture startup file stamps, and `update` does not poll files. Editing
+files alone does not request or execute a reload. `:watch-paths` remains required:
+these roots still provide module ownership when a unit has no explicit
+`:owned-paths`; disabling watching does not disable module invalidation.
+
+```fennel
+(local controller
+  (HotReload.AppRootController {:watch-paths ["/checkout/assets/lua"]
+                                :watch? false}))
+(local result (controller:reload-root!))
+(assert result.ok result.error)
+```
+
+An existing watched controller can be permanently converted with
+`controller:use-manual!() -> true`. Conversion drops its watcher once and clears
+pending filesystem events, debounce deadline, and reload scheduling state.
+Repeated conversion is safe; conversion after `drop` is an error. Root
+initialization reuses the surviving controller rather than reenabling watching.
+Any callback already queued by an external scheduler is still owned by that
+scheduler; conversion does not cancel external callback queues.
+
+`controller:reload-root!()` executes the existing transaction synchronously,
+selecting the configured root rather than routing by changed file paths. It
+returns:
+
+```fennel
+{:ok true
+ :target-unit-id "app-root"
+ :phase "complete"
+ :rollback "not-needed"}
+```
+
+On failure, `:ok` is `false`, `:error` contains the error text, and `:phase`
+identifies the failed forward phase: `"target-selection"`, `"collect-modules"`,
+`"snapshot"`, `"unload"`, `"clear-modules"`, `"load"`, `"restore"`, or
+`"refresh-extensions"`. If selection fails before a target is known,
+`:target-unit-id` identifies the configured root fallback.
+
+`:rollback` is `"not-needed"` for success or a pre-unload failure, `"restored"`
+when rollback rebuilt the prior runtime, and `"failed"` when rollback itself
+failed. The last case also includes `:rollback-error`. Snapshot/selection errors
+do not unload or attempt rollback. The prior `app.__hot-reload-ctx` is restored
+after success, pre-unload failure, and either rollback outcome; rollback retains
+the transaction context while it runs so root infrastructure stays preserved.
+Use after `drop` remains a lifecycle error, not a reload result.
+
+`reload-now!` keeps path routing and its boolean/throw interface: `true` on
+success, `false` on failure unless rollback failed, in which case it throws with
+both errors. Both entry points share one transaction and module/cache handling.
+`debug-state` reports `:watch?` and an empty `:watch-directories` list when there
+is no watcher; `drop` remains idempotent in either mode.
+
+`AppRootController` also forwards `:startup-ignore-ms` and
+`:on-reload-requested`, in addition to `:watch?`, to the underlying controller.
+
 ### Reload algorithm
 
 The reload algorithm is:
@@ -265,6 +324,10 @@ The root app uses the callback path:
 - the callback runs `reload-now!` later
 
 This keeps root reload out of the current engine callback stack.
+
+Explicit `reload-root!` does not enqueue itself. Live callers must defer it until
+the requesting update/signal/remote-control stack has unwound, using the same
+callback boundary. Disabling watching does not make inline root teardown safe.
 
 ## Current Unit Boundaries
 
@@ -347,16 +410,27 @@ The current system is covered at two levels.
 
 ### Focused unit tests
 
-`assets/lua/tests/test-units.fnl` covers:
+`assets/lua/tests/test-units.fnl` covers watcher/controller and module-unit behavior:
 
 - file watcher write/delete events
+- module reload applying edited code and clearing deleted dependencies
+- watcherless construction, passive edits, and explicit-root versus child-path selection
+- manual conversion, pending-event discard, and idempotent teardown
+- structured failure phases, context restoration, rollback, and legacy result handling
+- AppRootController option forwarding
+
+`assets/lua/tests/test-hot-reload-integration.fnl` covers real app/runtime behavior:
+
 - full root app reload roundtrip
 - HUD unit reload preserving panel state
 - HUD file change routing to the HUD unit
 - canvas unit reload
 - canvas file change routing to the canvas unit
 
-These tests use real app/runtime code, not synthetic fake unit objects.
+The root roundtrip converts the controller to manual mode and traps watcher
+acquisition during root reinitialization. Integration tests use real app/runtime
+code; focused controller tests also use small `Units.Unit` fixtures and a
+deterministic watcher fixture for lifecycle/error-path coverage.
 
 ### Real-app live reload test
 
