@@ -87,6 +87,29 @@
   (assert (= (string.sub key 1 9) "identity:") (.. "expected stable reference, got " key))
   (assert (= (identity-store:resolve-key key) terminal) "stable reference must preserve terminal meaning"))
 
+(fn domain-owners [stores]
+  (local EntitiesOwner (require :reference-lifecycle/entities-owner))
+  (local IdentitiesOwner (require :reference-lifecycle/identities-owner))
+  (local WorkflowsOwner (require :reference-lifecycle/workflows-owner))
+  [(EntitiesOwner stores) (IdentitiesOwner stores) (WorkflowsOwner stores)])
+(fn empty-owner [id root]
+  (fn preflight! [_self] true)
+  (fn inventory [_self] {:records {} :sites []})
+  (fn expand [_self _inventory _operation] [])
+  (fn prepare [_self _inventory _operation] {:changes [] :runtime-state []})
+  (fn apply! [_self _change] nil)
+  (fn reconcile! [_self _intent] nil)
+  {:id id :base-dir (fs.absolute root) :preflight! preflight! :inventory inventory
+   :expand expand :prepare prepare :apply! apply! :reconcile! reconcile!})
+(fn apply-preparation! [owners preparation]
+  (local indexed (collect [_ owner (ipairs owners)] owner.id owner))
+  (each [_ phase (ipairs ["replacement" "incoming" "retire"])]
+    (each [_ change (ipairs preparation.changes)]
+      (when (= change.phase phase)
+        (local owner (assert (. indexed change.owner) "missing owner"))
+        (owner:apply! change))))
+  nil)
+
 {:with-root with-root
  :stores stores
  :assert-error assert-error
@@ -94,4 +117,5 @@
  :with-fs-failure with-fs-failure
  :with-graph with-graph
  :with-fields with-fields
- :assert-reference assert-reference}
+ :assert-reference assert-reference
+ :domain-owners domain-owners :empty-owner empty-owner :apply-preparation! apply-preparation!}

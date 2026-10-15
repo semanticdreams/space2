@@ -5,6 +5,7 @@
 (local json (require :json))
 (local JsonUtils (require :json-utils))
 (local IdentityStore (require :entities/identity))
+(local R (require :reference-lifecycle/record-utils))
 
 (fn ensure-dir [path]
   (when (and path fs fs.create-dirs)
@@ -16,10 +17,6 @@
 
 (fn default-string [value]
   (if (= value nil) "" value))
-
-(fn default-number [value]
-  (local n (tonumber value))
-  (if n n 0))
 
 (fn option-table [opts]
   (if (= (type opts) "table") opts {}))
@@ -72,31 +69,38 @@
   item-value)
 
 (fn entity-path [store id]
-  (and store.entities-dir (fs.join-path store.entities-dir (.. (tostring id) ".json"))))
+  (R.record-path store.base-dir store.entities-dir id ".json"))
 
 (fn persisted-entity [entity]
   {:id entity.id
    :name entity.name
-   :items (normalize-items entity.items)
+   :items entity.items
    :created-at entity.created-at
    :updated-at entity.updated-at})
 
 (fn decoded-entity [data]
-  {:id (default-string data.id)
-   :name (default-string data.name)
-   :items (normalize-items data.items)
-   :created-at (default-number data.created-at)
-   :updated-at (default-number data.updated-at)})
+  (local items (R.field data :items :table {}))
+  (each [slot key (pairs items)]
+    (assert (and (= (type slot) :string) (= (type key) :string)) "dict slot and reference must be strings"))
+  {:id (R.require-id data.id)
+   :name (R.field data :name :string "")
+   :items (R.clone items)
+   :created-at (R.field data :created-at :number 0)
+   :updated-at (R.field data :updated-at :number 0)})
 
-(fn read-entity [path]
-  (fn decode []
-    (local data (json.loads (fs.read-file path)))
+(fn decode-entity [_self bytes]
+    (local data (R.decode-json bytes))
     (assert (= (type data) :table) "dict record must be an object")
     (decoded-entity data))
-  (when (and path fs fs.exists (fs.exists path))
-    (local (ok result) (pcall decode))
-    (assert ok (.. "dict read failed at " path ": " (tostring result)))
-    result))
+
+(fn serialize-entity [_self entity]
+  (R.require-id entity.id)
+  (json.dumps (persisted-entity entity)))
+(fn snapshot-entity [self id]
+  (fn decode [bytes] (decode-entity self bytes))
+  (local snapshot (R.snapshot (entity-path self id) "json" decode))
+  (when snapshot.value (assert (= snapshot.value.id id) (.. "dict record id mismatch at " snapshot.path)))
+  snapshot)
 
 (fn copy-record [record] (collect [key value (pairs record)] key value))
 
@@ -118,7 +122,18 @@
   (when (and path fs fs.remove (fs.exists path))
     (local (ok err) (pcall fs.remove path))
     (when (not ok)
-      (error (.. "failed to delete dict entity file " path ": " (tostring err))))))
+       (error (.. "failed to delete dict entity file " path ": " (tostring err))))))
+
+(fn persist-entity! [self id bytes check]
+  (local candidate (decode-entity self bytes))
+  (R.verify-candidate id candidate (serialize-entity self candidate) check "json")
+  (local existed? (not (= (. (snapshot-entity self id) :bytes) false)))
+  (write-entity self candidate)
+  (local published (publish! self candidate))
+  (local signal (if existed? self.dict-entity-updated self.dict-entity-created))
+  (signal:emit published)
+  (self.dict-entity-items-changed:emit {:id id :items published.items})
+  published)
 
 (fn load-entity [store id]
   (when id
@@ -126,10 +141,10 @@
     (if (. store.cache key)
         (. store.cache key)
         (do
-          (local data (read-entity (entity-path store key)))
+          (local data (. (snapshot-entity store key) :value))
           (when data
-            (set (. store.cache key) data))
-          data))))
+            (set (. store.cache key) data)
+            data)))))
 
 (fn emit-items-changed [store entity]
   (store.dict-entity-items-changed:emit {:id entity.id :items entity.items}))
@@ -138,6 +153,7 @@
   (var changed? false)
   (var items-changed? false)
   (each [k v (pairs (table-or-empty updates))]
+    (assert (or (not (= k :id)) (= v entity.id)) "update-entity cannot change id")
     (local items-key? (if (= k :items) true (= k "items")))
     (local current (. entity k))
     (local next-value (if items-key? (normalize-items v identity-store) v))
@@ -157,6 +173,7 @@
 (fn create-entity [self opts]
   (local create-opts (option-table opts))
   (local id (tostring (if create-opts.id create-opts.id (Uuid.v4))))
+  (entity-path self id)
   (local now (os.time))
   (local entity {:id id
                  :name (default-string create-opts.name)
@@ -177,6 +194,7 @@
   entity)
 
 (fn update-entity [self id updates]
+  (assert (or (not updates) (not updates.id) (= updates.id id)) "update-entity cannot change id")
   (local entity (load-entity self id))
   (when entity
     (local candidate (copy-record entity))
@@ -196,9 +214,9 @@
 
 (fn list-entities [self]
   (local candidates [])
-  (each [_ entry (ipairs (fs.list-dir self.entities-dir false))]
+  (each [_ entry (ipairs (R.record-entries self.entities-dir ".json"))]
     (when (and entry.is-file (string.match entry.name "%.json$"))
-      (local data (read-entity entry.path))
+      (local data (. (snapshot-entity self (string.sub entry.name 1 -6)) :value))
       (assert data (.. "dict record disappeared at " entry.path))
       (table.insert candidates data)))
   (local entities (icollect [_ candidate (ipairs candidates)] (publish! self candidate)))
@@ -280,7 +298,9 @@
    :get-item get-item
    :set-item set-item
    :remove-item remove-item
-   :rename-item rename-item})
+   :rename-item rename-item
+   :snapshot-entity snapshot-entity :serialize-entity serialize-entity
+   :decode-entity decode-entity :persist-entity! persist-entity!})
 
 (var default-store nil)
 

@@ -5,6 +5,7 @@
 (local json (require :json))
 (local JsonUtils (require :json-utils))
 (local IdentityStore (require :entities/identity))
+(local R (require :reference-lifecycle/record-utils))
 
 (fn normalize-name [value]
   (if (or (= value nil) (= value :nil)) "" (tostring value)))
@@ -33,20 +34,26 @@
   same?)
 
 (fn notebook-path [store id]
-  (fs.join-path store.notebooks-dir (.. (tostring id) ".json")))
+  (R.record-path store.base-dir store.notebooks-dir id ".json"))
 
-(fn read-notebook [path]
-  (fn decode []
-    (local data (json.loads (fs.read-file path)))
+(fn decode-notebook [_self bytes]
+    (local data (R.decode-json bytes))
     (assert (= (type data) :table) "notebook record must be an object")
-    {:id (tostring (or data.id "")) :name (normalize-name data.name)
-     :items (normalize-items data.items)
-     :created-at (tonumber (or data.created-at 0))
-     :updated-at (tonumber (or data.updated-at 0))})
-  (when (fs.exists path)
-    (local (ok result) (pcall decode))
-    (assert ok (.. "notebook read failed at " path ": " (tostring result)))
-    result))
+    (local items (R.require-array (R.field data :items :table [])))
+    (each [_ key (ipairs items)] (assert (= (type key) :string) "notebook item must be a reference string"))
+    {:id (R.require-id data.id) :name (R.field data :name :string "")
+      :items (R.clone items)
+      :created-at (R.field data :created-at :number 0)
+      :updated-at (R.field data :updated-at :number 0)})
+
+(fn serialize-notebook [_self record]
+  (json.dumps {:id (R.require-id record.id) :name record.name :items record.items
+               :created-at record.created-at :updated-at record.updated-at}))
+(fn snapshot-notebook [self id]
+  (fn decode [bytes] (decode-notebook self bytes))
+  (local snapshot (R.snapshot (notebook-path self id) "json" decode))
+  (when snapshot.value (assert (= snapshot.value.id id) (.. "notebook record id mismatch at " snapshot.path)))
+  snapshot)
 
 (fn publish! [store candidate]
   (local held (. store.cache candidate.id))
@@ -55,17 +62,29 @@
       (do (tset store.cache candidate.id candidate) candidate)))
 
 (fn write-notebook [store notebook]
+  (notebook-path store notebook.id)
   (fs.create-dirs store.notebooks-dir)
   (JsonUtils.write-json! (notebook-path store notebook.id)
                         {:id notebook.id :name notebook.name :items notebook.items
-                         :created-at notebook.created-at :updated-at notebook.updated-at}))
+                          :created-at notebook.created-at :updated-at notebook.updated-at}))
+
+(fn persist-notebook! [self id bytes check]
+  (local candidate (decode-notebook self bytes))
+  (R.verify-candidate id candidate (serialize-notebook self candidate) check "json")
+  (local existed? (not (= (. (snapshot-notebook self id) :bytes) false)))
+  (write-notebook self candidate)
+  (local published (publish! self candidate))
+  (local signal (if existed? self.notebook-updated self.notebook-created))
+  (signal:emit published)
+  (self.notebook-items-changed:emit {:id id :items published.items})
+  published)
 
 (fn load-notebook [store id]
   (when id
     (local key (tostring id))
     (if (. store.cache key) (. store.cache key)
         (do
-          (local candidate (read-notebook (notebook-path store key)))
+          (local candidate (. (snapshot-notebook store key) :value))
           (when candidate (publish! store candidate))))))
 
 (fn commit-update! [store notebook candidate items-changed?]
@@ -78,9 +97,12 @@
   notebook)
 
 (fn create-notebook [self opts]
+  (assert (or (= opts nil) (= (type opts) :table)) "notebook create requires options table")
   (local options (or opts {}))
   (local now (os.time))
-  (local notebook {:id (tostring (or options.id (Uuid.v4)))
+  (local id (R.require-id (tostring (or options.id (Uuid.v4)))))
+  (notebook-path self id)
+  (local notebook {:id id
                    :name (normalize-name options.name)
                    :items (normalize-items options.items self.identity-store)
                    :created-at (or options.created-at now) :updated-at (or options.updated-at now)})
@@ -91,12 +113,14 @@
 
 (fn update-notebook [self id updates]
   (assert (or (= updates nil) (= (type updates) :table)) "notebook update requires options table")
+  (assert (or (not updates) (not updates.id) (= updates.id id)) "update-notebook cannot change id")
   (local notebook (load-notebook self id))
   (when notebook
     (local candidate (copy-record notebook))
     (var changed? false)
     (var items-changed? false)
     (each [key value (pairs (or updates {}))]
+      (assert (or (not (= key :id)) (= value id)) "update-notebook cannot change id")
       (local next-value (if (= key :items) (normalize-items value self.identity-store)
                             (= key :name) (normalize-name value) value))
       (local different? (if (= key :items) (not (items-equal? notebook.items next-value))
@@ -119,9 +143,9 @@
 
 (fn list-notebooks [self]
   (local candidates [])
-  (each [_ entry (ipairs (fs.list-dir self.notebooks-dir false))]
+  (each [_ entry (ipairs (R.record-entries self.notebooks-dir ".json"))]
     (when (and entry.is-file (string.match entry.name "%.json$"))
-      (local candidate (read-notebook entry.path))
+      (local candidate (. (snapshot-notebook self (string.sub entry.name 1 -6)) :value))
       (assert candidate (.. "notebook record disappeared at " entry.path))
       (table.insert candidates candidate)))
   (local notebooks (icollect [_ candidate (ipairs candidates)] (publish! self candidate)))
@@ -193,7 +217,9 @@
    :notebook-items-changed (Signal)
    :get-notebook load-notebook :create-notebook create-notebook :update-notebook update-notebook
    :delete-notebook delete-notebook :list-notebooks list-notebooks :add-item add-item
-   :remove-item remove-item :reorder-items reorder-items :move-item move-item})
+   :remove-item remove-item :reorder-items reorder-items :move-item move-item
+   :snapshot-notebook snapshot-notebook :serialize-notebook serialize-notebook
+   :decode-notebook decode-notebook :persist-notebook! persist-notebook!})
 
 (var default-store nil)
 

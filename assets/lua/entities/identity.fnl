@@ -4,6 +4,7 @@
 (local Uuid (require :uuid))
 (local json (require :json))
 (local JsonUtils (require :json-utils))
+(local R (require :reference-lifecycle/record-utils))
 
 (fn normalize-target-key [value]
   (if (= value nil) "" (= value :nil) "" (tostring value)))
@@ -27,19 +28,24 @@
         held)
       (do (tset cache candidate.id candidate) candidate)))
 
-(fn read-entity [path]
-  (fn decode-required []
-    (local data (json.loads (fs.read-file path)))
+(fn decode-entity [_self bytes]
+    (local data (R.decode-json bytes))
     (assert (= (type data) :table) "identity record must be an object")
-    {:id (tostring (or data.id ""))
-     :target-key (normalize-target-key data.target-key)
-     :created-at (tonumber (or data.created-at 0))
-     :updated-at (tonumber (or data.updated-at 0))
-     :metadata (normalize-metadata data.metadata)})
-  (when (fs.exists path)
-    (local (ok result) (pcall decode-required))
-    (assert ok (.. "identity read failed at " path ": " (tostring result)))
-    result))
+    {:id (R.require-id data.id)
+     :target-key (R.field data :target-key :string "")
+     :created-at (R.field data :created-at :number 0)
+     :updated-at (R.field data :updated-at :number 0)
+     :metadata (R.field data :metadata :table {})})
+
+(fn serialize-entity [_self entity]
+  (json.dumps {:id (R.require-id entity.id) :target-key entity.target-key
+               :created-at entity.created-at :updated-at entity.updated-at :metadata entity.metadata}))
+(fn snapshot-entity [self id]
+  (fn decode [bytes] (decode-entity self bytes))
+  (local path (R.record-path self.base-dir self.entities-dir id ".json"))
+  (local snapshot (R.snapshot path "json" decode))
+  (when snapshot.value (assert (= snapshot.value.id id) (.. "identity record id mismatch at " path)))
+  snapshot)
 
 (fn write-entity [entities-dir path entity]
   (fs.create-dirs entities-dir)
@@ -57,11 +63,22 @@
    :target-key (normalize-target-key options.target-key)
    :created-at (or options.created-at now)
    :updated-at (or options.updated-at now)
-   :metadata (normalize-metadata options.metadata)})
+    :metadata (normalize-metadata options.metadata)})
+
+(fn persist-entity! [self id bytes check]
+  (local candidate (decode-entity self bytes))
+  (R.verify-candidate id candidate (serialize-entity self candidate) check "json")
+  (local before (snapshot-entity self id))
+  (write-entity self.entities-dir before.path candidate)
+  (local published (publish! self.cache candidate))
+  (local signal (if before.value self.identity-updated self.identity-created))
+  (signal:emit published)
+  published)
 
 (fn apply-updates! [candidate updates]
   (var changed? false)
   (each [key value (pairs updates)]
+    (assert (or (not (= key :id)) (= value candidate.id)) "update-entity cannot change id")
     (local next-value (if (= key :target-key) (normalize-target-key value)
                           (= key :metadata) (normalize-metadata value)
                           value))
@@ -121,7 +138,14 @@
   (local identity-deleted (Signal))
 
   (fn entity-path [id]
-    (fs.join-path entities-dir (.. (tostring id) ".json")))
+    (R.record-path base-dir entities-dir id ".json"))
+
+  (fn read-entity [path]
+    (fn decode [bytes] (decode-entity nil bytes))
+    (local value (. (R.snapshot path "json" decode) :value))
+    (when value
+      (assert (= (entity-path value.id) path) (.. "identity record id mismatch at " path))
+      value))
 
   (fn load-entity [id]
     (local key (tostring id))
@@ -162,7 +186,7 @@
 
   (fn list-entities [_self]
     (local candidates [])
-    (each [_ entry (ipairs (fs.list-dir entities-dir false))]
+    (each [_ entry (ipairs (R.record-entries entities-dir ".json"))]
       (when (and entry.is-file (string.match entry.name "%.json$"))
         (local data (read-entity entry.path))
         (assert data (.. "identity record disappeared at " entry.path))
@@ -183,7 +207,8 @@
 
   {:base-dir base-dir
    :root root
-   :entities-dir entities-dir
+    :entities-dir entities-dir
+    :cache cache
    :identity-created identity-created
    :identity-updated identity-updated
    :identity-deleted identity-deleted
@@ -194,7 +219,9 @@
    :list-entities list-entities
    :find-by-target-key find-by-target-key
    :ensure-key ensure-key
-   :resolve-key resolve-key})
+    :resolve-key resolve-key
+    :snapshot-entity snapshot-entity :serialize-entity serialize-entity
+    :decode-entity decode-entity :persist-entity! persist-entity!})
 
 (var default-store nil)
 

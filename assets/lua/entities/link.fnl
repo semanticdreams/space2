@@ -5,22 +5,27 @@
 (local json (require :json))
 (local JsonUtils (require :json-utils))
 (local IdentityStore (require :entities/identity))
+(local R (require :reference-lifecycle/record-utils))
 
 (fn copy-record [record] (collect [key value (pairs record)] key value))
 
 (fn entity-path [store id]
-  (fs.join-path store.entities-dir (.. (tostring id) ".json")))
+  (R.record-path store.base-dir store.entities-dir id ".json"))
 
-(fn read-entity [path]
-  (fn decode []
-    (local data (json.loads (fs.read-file path)))
+(fn decode-entity [_self bytes]
+    (local data (R.decode-json bytes))
     (assert (= (type data) :table) "link record must be an object")
-    {:id (or data.id "") :source-key (or data.source-key "") :target-key (or data.target-key "")
-     :created-at (tonumber (or data.created-at 0)) :metadata (or data.metadata {})})
-  (when (fs.exists path)
-    (local (ok result) (pcall decode))
-    (assert ok (.. "link read failed at " path ": " (tostring result)))
-    result))
+    {:id (R.require-id data.id) :source-key (R.field data :source-key :string "") :target-key (R.field data :target-key :string "")
+     :created-at (R.field data :created-at :number 0) :metadata (R.field data :metadata :table {})})
+
+(fn serialize-entity [_self entity]
+  (json.dumps {:id (R.require-id entity.id) :source-key entity.source-key :target-key entity.target-key
+               :created-at entity.created-at :metadata entity.metadata}))
+(fn snapshot-entity [self id]
+  (fn decode [bytes] (decode-entity self bytes))
+  (local snapshot (R.snapshot (entity-path self id) "json" decode))
+  (when snapshot.value (assert (= snapshot.value.id id) (.. "link record id mismatch at " snapshot.path)))
+  snapshot)
 
 (fn publish! [store candidate]
   (local held (. store.cache candidate.id))
@@ -29,22 +34,36 @@
       (do (tset store.cache candidate.id candidate) candidate)))
 
 (fn write-entity [store entity]
+  (entity-path store entity.id)
   (fs.create-dirs store.entities-dir)
   (JsonUtils.write-json! (entity-path store entity.id)
                         {:id entity.id :source-key entity.source-key :target-key entity.target-key
-                         :created-at entity.created-at :metadata entity.metadata}))
+                          :created-at entity.created-at :metadata entity.metadata}))
+
+(fn persist-entity! [self id bytes check]
+  (local candidate (decode-entity self bytes))
+  (R.verify-candidate id candidate (serialize-entity self candidate) check "json")
+  (local existed? (not (= (. (snapshot-entity self id) :bytes) false)))
+  (write-entity self candidate)
+  (local published (publish! self candidate))
+  (local signal (if existed? self.link-entity-updated self.link-entity-created))
+  (signal:emit published)
+  published)
 
 (fn load-entity [store id]
   (when id
     (local key (tostring id))
     (if (. store.cache key) (. store.cache key)
         (do
-          (local candidate (read-entity (entity-path store key)))
+          (local candidate (. (snapshot-entity store key) :value))
           (when candidate (publish! store candidate))))))
 
 (fn create-entity [self opts]
+  (assert (or (= opts nil) (= (type opts) :table)) "link create requires options table")
   (local options (or opts {}))
-  (local entity {:id (tostring (or options.id (Uuid.v4)))
+  (local id (R.require-id (tostring (or options.id (Uuid.v4)))))
+  (entity-path self id)
+  (local entity {:id id
                  :source-key (self.identity-store:ensure-key (or options.source-key ""))
                  :target-key (self.identity-store:ensure-key (or options.target-key ""))
                  :created-at (or options.created-at (os.time)) :metadata (or options.metadata {})})
@@ -55,10 +74,12 @@
 
 (fn update-entity [self id updates]
   (assert (or (= updates nil) (= (type updates) :table)) "link update requires options table")
+  (assert (or (not updates) (not updates.id) (= updates.id id)) "update-entity cannot change id")
   (local entity (load-entity self id))
   (when entity
     (local candidate (copy-record entity))
     (each [key value (pairs (or updates {}))]
+      (assert (or (not (= key :id)) (= value id)) "update-entity cannot change id")
       (local next-value (if (or (= key :source-key) (= key :target-key))
                             (self.identity-store:ensure-key value) value))
       (tset candidate key next-value))
@@ -78,9 +99,9 @@
 
 (fn list-entities [self]
   (local candidates [])
-  (each [_ entry (ipairs (fs.list-dir self.entities-dir false))]
+  (each [_ entry (ipairs (R.record-entries self.entities-dir ".json"))]
     (when (and entry.is-file (string.match entry.name "%.json$"))
-      (local candidate (read-entity entry.path))
+      (local candidate (. (snapshot-entity self (string.sub entry.name 1 -6)) :value))
       (assert candidate (.. "link record disappeared at " entry.path))
       (table.insert candidates candidate)))
   (local entities (icollect [_ candidate (ipairs candidates)] (publish! self candidate)))
@@ -136,7 +157,9 @@
    :link-entity-created (Signal) :link-entity-updated (Signal) :link-entity-deleted (Signal)
    :get-entity load-entity :create-entity create-entity :update-entity update-entity
    :delete-entity delete-entity :list-entities list-entities
-   :find-edges-for-nodes find-edges-for-nodes :find-entities-for-key find-entities-for-key})
+   :find-edges-for-nodes find-edges-for-nodes :find-entities-for-key find-entities-for-key
+   :snapshot-entity snapshot-entity :serialize-entity serialize-entity
+   :decode-entity decode-entity :persist-entity! persist-entity!})
 
 (var default-store nil)
 
