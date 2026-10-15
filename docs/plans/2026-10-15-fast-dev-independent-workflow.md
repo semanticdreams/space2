@@ -32,6 +32,7 @@ pytest, Git, GitHub CLI.
 - Modify: `.opencode/agents/supervisor.md` (stale fast-dev descriptions only)
 - Modify: `scripts/check_opencode_permissions.py`
 - Test: `scripts/tests/test_check_opencode_permissions.py`
+- Test: `docs/scripts/test-opencode-automation-config.mjs` (diagnosed stale strict-contract assertions)
 - Modify: `docs/dev/features/opencode-agent-workflow.md`
 
 **Interfaces:** Preserve `check_repo(repo_root: Path) -> list[PolicyViolation]`
@@ -102,6 +103,15 @@ deliverable rather than independently useful intermediate tasks.
   changes plus spec/plan to independent review. Fix findings through the current
   strict loop before committing. No external-home inspection, live restarted
   permission testing, new eval framework, or engine build is required.
+
+### Evidence-based validation scope extension
+
+The required docs suite reproduced eight failures in the unchanged JS automation
+test: it requires raw GitHub grants/polling that current strict agents and shared
+skills explicitly deny/delegate. Diagnostic advisor confirmed this mismatch.
+Update that single test file to assert existing guarded strict contracts and the
+separate fast-dev lifecycle, preserving branch-protection/merge-queue coverage.
+Do not change permissions/shared skills/wrappers to satisfy obsolete assertions.
 
 ```bash
 python3 -m pytest scripts/tests/test_check_opencode_permissions.py

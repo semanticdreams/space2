@@ -4,6 +4,26 @@ Be extra rigorous; I'm at risk of losing my job at my hospital.
 Don't be afraid; Hesitancy will hold us back.
 Clean design is important, refactor when reasonable.
 
+## Fast-dev workflow exception
+
+For the user-selected `fast-dev` primary only, its prompt and `fast-dev-wrap-up`
+skill override conflicting process rules below and those imported by domain skills.
+It edits, debugs, validates, and commits directly on `fast-dev/<topic>`; no
+mandatory design/planning docs, implementation or capability workers, advisor
+gates, per-change review, or verbose commit templates. Short intent-focused
+local commits are sufficient. Ordinary completion or a commit request does not
+authorize publishing; integration requires explicit user wrap-up authorization.
+Wrap-up uses one observational `fast-dev-reviewer` review of the whole branch;
+fixes are direct, followed by self-review and revalidation, not mandatory
+independent re-review per fix. Use raw Git/GitHub for this authorized lifecycle.
+
+Retain Space technical standards, domain guidance, validation commands, and
+evidence-based debugging. Do not integrate with unresolved material defects or
+required validation failures; diagnose and fix them rather than bypass them.
+Environment isolation, not narrow tool permissions, bounds this primary's authority.
+All other agents retain their existing process and permission contracts; this
+exception does not change an already-running agent's rules.
+
 ## Branch Convention
 
 The default base branch for pull requests and merges is `main`.

@@ -16,6 +16,11 @@ let workflowDebugContent = ''
 let testWorkflowContent = ''
 let agentsContent = ''
 let opencodeWorkflowContent = ''
+let githubOperatorContent = ''
+let prOperatorContent = ''
+let fastDevContent = ''
+let fastDevReviewerContent = ''
+let fastDevWrapUpContent = ''
 
 async function loadFiles() {
     if (skillContent) return
@@ -27,6 +32,11 @@ async function loadFiles() {
     testWorkflowContent = await readFile(join(repoRoot, '.github', 'workflows', 'test.yml'), 'utf8')
     agentsContent = await readFile(join(repoRoot, 'AGENTS.md'), 'utf8')
     opencodeWorkflowContent = await readFile(join(repoRoot, 'docs', 'dev', 'features', 'opencode-agent-workflow.md'), 'utf8')
+    githubOperatorContent = await readFile(join(repoRoot, '.opencode', 'agents', 'github-operator.md'), 'utf8')
+    prOperatorContent = await readFile(join(repoRoot, 'scripts', 'opencode_pr_operator.py'), 'utf8')
+    fastDevContent = await readFile(join(repoRoot, '.opencode', 'agents', 'fast-dev.md'), 'utf8')
+    fastDevReviewerContent = await readFile(join(repoRoot, '.opencode', 'agents', 'fast-dev-reviewer.md'), 'utf8')
+    fastDevWrapUpContent = await readFile(join(repoRoot, '.opencode', 'skills', 'fast-dev-wrap-up', 'SKILL.md'), 'utf8')
     try {
         notesContent = await readFile(join(repoRoot, 'docs', 'dev', 'notes', 'daily-devlog-automation.md'), 'utf8')
     } catch { /* optional */ }
@@ -42,12 +52,12 @@ test('daily devlog skill mentions GitHub rulesets or effective branch rules, not
         'SKILL.md should mention rulesets or effective branch rules, not only classic protection')
 })
 
-test('daily devlog skill includes effective branch rules command', async () => {
+test('daily devlog delegates effective branch rule verification to the guarded protection capability', async () => {
     await loadFiles()
-    const hasCommand = skillContent.includes('rules/branches/main') ||
-        skillContent.includes('rules/branches/<branch>')
-    assert.ok(hasCommand,
-        'SKILL.md should include gh api repos/<owner>/<repo>/rules/branches/main or equivalent')
+    assert.match(skillContent, /Dispatch `github-operator` to verify branch protection rules and required status checks/)
+    assert.ok(githubOperatorContent.includes('"python3 scripts/opencode_pr_operator.py check-main-protection --repo-root .": allow'))
+    assert.ok(prOperatorContent.includes('f"repos/{SPACE_REPO}/rules/branches/main"'),
+        'the delegated protection wrapper must inspect effective branch rules')
 })
 
 test('daily devlog skill requires verifying required status checks before auto-merge', async () => {
@@ -98,32 +108,37 @@ test('weekly agent workflow skill does not hard-code --squash and instead select
         'SKILL.md should say to use the merge method allowed by verified branch rules')
 })
 
-test('supervisor permissions allow rules/branches/main API', async () => {
+test('supervisor denies direct protection API access and delegates protection checks', async () => {
     await loadFiles()
-    const hasAllow = supervisorContent.includes('gh api repos/*/*/rules/branches/main')
-    assert.ok(hasAllow,
-        'supervisor.md must allow gh api repos/*/*/rules/branches/main*')
+    assert.ok(supervisorContent.includes('"gh api repos/*/*/rules/branches/main*": deny'))
+    assert.match(supervisorContent.replace(/\s+/g, ' '), /Dispatch `github-operator` for GitHub authentication checks, target-branch protection checks/)
 })
 
-test('supervisor permissions allow --merge for daily auto-merge', async () => {
+test('daily auto-merge stays with the guarded GitHub capability', async () => {
     await loadFiles()
-    const hasMergeAllow = /gh pr merge --auto --merge automation\/daily-devlog\/\?\?\?\?-\?\?-\?\?/.test(supervisorContent)
-    assert.ok(hasMergeAllow,
-        'supervisor.md must allow gh pr merge --auto --merge automation/daily-devlog/????-??-??')
+    assert.match(skillContent, /enable auto-merge, and poll for merge only through `github-operator`/)
+    assert.ok(githubOperatorContent.includes('"python3 scripts/opencode_pr_operator.py enable-auto-merge-current --repo-root .": allow'))
+    assert.match(skillContent, /require a rebase-only merge method, do not enable auto-merge automatically/,
+        'rebase-only rules must remain a human-owned decision')
 })
 
-test('supervisor permissions allow --merge for weekly auto-merge', async () => {
+test('weekly auto-merge stays with the guarded GitHub capability', async () => {
     await loadFiles()
-    const hasMergeAllow = /gh pr merge --auto --merge automation\/weekly-agent-workflow\/\?\?\?\?-.?\?\?/.test(supervisorContent)
-    assert.ok(hasMergeAllow,
-        'supervisor.md must allow gh pr merge --auto --merge automation/weekly-agent-workflow/????-W??')
+    assert.match(weeklySkillContent, /Before auto-merge, dispatch `github-operator` for authentication, protection checks, and merge queue proof/)
+    assert.match(weeklySkillContent, /require a rebase-only merge method, do not enable auto-merge automatically/)
+    assert.ok(supervisorContent.includes('"gh *": deny'),
+        'automation must not depend on direct broad GitHub authority')
 })
 
-test('supervisor permissions keep existing --squash daily allow alongside new --merge allow', async () => {
+test('guarded auto-merge requires protection proof instead of raw merge-method grants', async () => {
     await loadFiles()
-    const hasSquashAllow = /gh pr merge --auto --squash automation\/daily-devlog\/\?\?\?\?-\?\?-\?\?/.test(supervisorContent)
-    assert.ok(hasSquashAllow,
-        'supervisor.md should retain the existing --squash daily allow for transitional safety')
+    assert.doesNotMatch(supervisorContent, /"gh pr merge[^\n]*": allow/)
+    assert.match(prOperatorContent, /if not has_test or not has_queue:\s+return human_decision/,
+        'protection verification must fail closed unless both required test and queue are proven')
+    assert.match(prOperatorContent, /protection = check_main_protection\(repo_root\)\s+if protection.get\("status"\) != "pass":\s+return human_decision/,
+        'auto-merge must be gated on the protection result')
+    assert.ok(prOperatorContent.includes('["gh", "pr", "merge", safe, "--auto", "--merge"]'),
+        'the guarded wrapper, not the primary, owns the merge invocation')
 })
 
 test('daily devlog skill attributes work by origin/main landing date, not author date', async () => {
@@ -219,17 +234,17 @@ test('github workflow debug lands through a PR branch instead of local main', as
         'workflow-debug skill must not tell agents to push main directly')
 })
 
-test('supervisor permissions allow workflow-debug final PR branch integration only', async () => {
+test('strict workflow-debug integration delegates topic pushes and PRs and denies main push', async () => {
     await loadFiles()
 
-    assert.ok(supervisorContent.includes('"git push origin HEAD:refs/heads/opencode/workflow-debug-pr/*": allow'),
-        'supervisor should allow pushing workflow-debug final PR branches')
-    assert.ok(supervisorContent.includes('"gh pr create --base main --head opencode/workflow-debug-pr/* --fill": allow'),
-        'supervisor should allow creating workflow-debug final PRs')
-    assert.ok(supervisorContent.includes('"git push origin main": ask'),
-        'direct main push must remain ask-gated, not allowed')
-    assert.ok(!supervisorContent.includes('"git push origin main": allow'),
-        'direct main push must not be allowed')
+    assert.ok(supervisorContent.includes('"git push origin HEAD:refs/heads/opencode/workflow-debug-pr/*": deny'))
+    assert.ok(supervisorContent.includes('"git push origin main": deny'),
+        'direct main push must be denied, not ask-gated')
+    const oneLine = supervisorContent.replace(/\s+/g, ' ')
+    assert.match(oneLine, /Dispatch `git-integrator`[\s\S]*pushing the current branch through `scripts\/opencode_git_integrate.py`/)
+    assert.match(oneLine, /Dispatch `github-operator` for[\s\S]*PR creation/)
+    assert.ok(githubOperatorContent.includes('"python3 scripts/opencode_pr_operator.py create-current --repo-root .": allow'))
+    assert.ok(supervisorContent.includes('"gh *": deny'))
 })
 
 test('daily devlog skill preconditions mention installing locked docs dependencies when node_modules or vitepress is missing', async () => {
@@ -304,8 +319,10 @@ test('opencode workflows monitor queued PRs until merged', async () => {
         const oneLine = content.replace(/\s+/g, ' ')
         assert.match(oneLine, /poll.{0,180}(?:mergedAt|merged)/i,
             `${name} should poll until mergedAt or merged state`)
-        assert.match(content, /gh pr view/i,
-            `${name} should mention gh pr view polling`)
+        assert.match(content, /`github-operator`/,
+            `${name} should delegate GitHub polling`)
+        assert.match(oneLine, /wrapper (?:actions|evidence)/i,
+            `${name} should use guarded wrapper evidence rather than raw CLI authority`)
         assert.match(oneLine, /do not (?:safe-merge|update).{0,220}origin\/main advanced/i,
             `${name} should preserve stale-branch loop prohibition`)
         assert.doesNotMatch(oneLine, /Stop after successful merge-queue handoff/i,
@@ -319,31 +336,72 @@ test('opencode workflows monitor queued PRs until merged', async () => {
     }
 })
 
-test('supervisor permissions allow merge queue polling commands', async () => {
+test('strict merge queue inspection is exposed only through guarded current-branch wrappers', async () => {
     await loadFiles()
-    assert.ok(supervisorContent.includes('gh pr view * --json state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url'),
-        'supervisor should allow gh pr view merge-queue polling')
-    assert.ok(supervisorContent.includes('gh run list --workflow test.yml --event merge_group --limit * --json databaseId,headBranch,headSha,status,conclusion,event,url,displayTitle,createdAt'),
-        'supervisor should allow merge_group run listing')
-    assert.ok(supervisorContent.includes('gh run watch * --exit-status --interval 100'),
-        'supervisor should allow watching merge_group runs')
+    assert.ok(supervisorContent.includes('"gh *": deny'))
+    assert.match(githubOperatorContent, /^    "\*": deny$/m)
+    for (const command of ['view-current', 'poll-merge-queue-current']) {
+        assert.ok(githubOperatorContent.includes(`"python3 scripts/opencode_pr_operator.py ${command} --repo-root .": allow`))
+        assert.ok(supervisorContent.includes(`github-operator ${command}`))
+    }
+    assert.doesNotMatch(githubOperatorContent, /^    "gh[^\n]*": allow$/m)
 })
 
-test('opencode command examples match canonical merge-queue inspection forms', async () => {
+test('guarded polling retains canonical PR fields and a fixed 100-second cadence', async () => {
     await loadFiles()
-    const runtimeFiles = [
-        ['supervisor', supervisorContent],
-        ['finishing', finishingContent],
-        ['daily', skillContent],
-        ['weekly', weeklySkillContent],
-    ]
+    assert.ok(prOperatorContent.includes('PR_VIEW_FIELDS = "state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url"'))
+    assert.ok(prOperatorContent.includes('["gh", "pr", "view", safe, "--json", PR_VIEW_FIELDS]'))
+    assert.match(prOperatorContent, /^DEFAULT_POLL_INTERVAL_SECONDS = 100$/m)
+    assert.ok(prOperatorContent.includes('poll_merge_queue(repo_root, safe, DEFAULT_POLL_TIMEOUT_SECONDS, DEFAULT_POLL_INTERVAL_SECONDS)'))
+    assert.match(prOperatorContent, /if data.get\("mergedAt"\):\s+return success/)
+    assert.match(prOperatorContent, /if data.get\("state"\) == "CLOSED":\s+return human_decision/)
+})
 
-    for (const [name, content] of runtimeFiles) {
-        assert.match(content, /gh pr view [-<][a-z]+[->].*--json state,mergedAt/i,
-            `${name} should use canonical gh pr view <pr-or-branch> form`)
-        assert.doesNotMatch(content, /--json state,mergedAt,\.\.\./,
-            `${name} should not use abbreviated --json state,mergedAt,... form`)
-        assert.match(content, /--exit-status --interval 100/,
-            `${name} should use canonical gh run watch form`)
-    }
+test('fast-dev is direct and local-only until explicit wrap-up, without changing strict contracts', async () => {
+    await loadFiles()
+    assert.match(fastDevContent, /^mode: primary$/m)
+    assert.match(fastDevContent, /^permission: allow$/m)
+    const primary = fastDevContent.replace(/\s+/g, ' ')
+    assert.match(primary, /fast-dev\/<topic>.*before edits/)
+    assert.match(primary, /freshly fetched `origin\/main`/)
+    assert.match(primary, /A commit request is local only/)
+    assert.match(primary, /Only explicit user wrap-up\/integration authorization triggers `fast-dev-wrap-up`/)
+    assert.doesNotMatch(fastDevContent, /supervisor|dispatch `implementer`|micro-design/i)
+    assert.match(agentsContent, /For the user-selected `fast-dev` primary only/)
+    assert.match(agentsContent, /override conflicting process rules below and those imported by domain skills/)
+    assert.match(agentsContent, /Retain Space technical standards/)
+    assert.match(supervisorContent, /^    "gh \*": deny$/m)
+})
+
+test('fast-dev wrap-up reviews the whole branch once and fixes findings directly', async () => {
+    await loadFiles()
+    const wrapUp = fastDevWrapUpContent.replace(/\s+/g, ' ')
+    assert.match(wrapUp, /git log origin\/main\.\.HEAD/)
+    assert.match(wrapUp, /git diff origin\/main\.\.\.HEAD/)
+    assert.match(wrapUp, /base\/head SHAs/)
+    assert.match(wrapUp, /one independent review from `fast-dev-reviewer` covering every accumulated commit and final diff/)
+    assert.match(wrapUp, /Fix findings and failing checks directly/)
+    assert.match(wrapUp, /commit fixes, self-review.*revalidate/)
+    assert.match(wrapUp, /no mandatory independent re-review per fix/)
+    assert.match(wrapUp, /Do not integrate with unresolved material findings or required validation failures/)
+    assert.match(fastDevReviewerContent, /^  bash: allow$/m)
+    assert.match(fastDevReviewerContent, /^  edit: deny$/m)
+    assert.match(fastDevReviewerContent.replace(/\s+/g, ' '), /Do not run tests, builds, commits, GitHub commands/)
+})
+
+test('fast-dev wrap-up keeps protection, polling, and fetched-main completion proof', async () => {
+    await loadFiles()
+    const wrapUp = fastDevWrapUpContent.replace(/\s+/g, ' ')
+    assert.match(wrapUp, /rules\/branches\/main/)
+    assert.match(wrapUp, /require merge queue and required `test` protection for merge-group candidates/)
+    assert.match(wrapUp, /gh pr create --base main --head <topic-branch>/)
+    assert.match(wrapUp, /gh pr merge <pr> --auto/)
+    assert.match(wrapUp, /100-second cadence/)
+    assert.match(wrapUp, /gh pr view <pr> --json state,mergedAt,mergeCommit/)
+    assert.match(wrapUp, /gh run list --workflow test.yml --event merge_group/)
+    assert.match(wrapUp, /gh run watch <relevant-run-id> --exit-status --interval 100/)
+    assert.match(wrapUp, /missing conclusions are not completion/)
+    assert.match(wrapUp, /After queue entry, do not merge main solely because it advances/)
+    assert.match(wrapUp, /Require PR `mergedAt` and `mergeCommit.oid`.*fresh `git fetch origin` and `git merge-base --is-ancestor <merge-sha> origin\/main`/)
+    assert.match(wrapUp, /Preserve branch and worktree/)
 })
