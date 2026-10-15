@@ -4,6 +4,45 @@ The process owns development control above the reloadable `main` application
 root. The Linux checkout lifecycle CLI uses the runtime/provenance protocol
 below. It never scans processes or probes legacy endpoints.
 
+## User-selected live-dev primary
+
+`supervisor` remains the default. Select the exact `live-dev` primary to edit,
+debug, validate, refresh, and checkpoint directly on `live-dev/<topic>`. New topics
+start from freshly fetched `origin/main`; preserve unrelated dirty work and do not
+adopt unrelated commits. The exact fast-dev primary remains on `fast-dev/<topic>`.
+Both have scalar `permission: allow` for appropriately isolated environments, not
+a security sandbox; no other agent's permissions or process boundaries change.
+
+Discover instances in this checkout/worktree before editing. Automatically start
+a missing app with normal user data/settings only when no uncertain/unavailable
+identity blocks startup. If more than one matches, ask the user to select even
+if a saved preference exists. Establish `manual` mode and verify status before
+editing: no filesystem watching and no hooks. After coherent validated changes,
+explicitly reload the broad app root; native changes require rebuild/restart,
+and preserved infrastructure requires restart. Reestablish manual mode after a
+replacement. Never request confirmation for start, reload, rebuild, restart, or
+transient state loss; instance choice is not lifecycle approval.
+
+Inspect terminal operation results and current ready/fault/health evidence.
+Retain both a failed reload and recovery outcome: recovery success never erases
+the original failure. Diagnose/fix directly and revalidate before another refresh.
+Use Space technical guidance and compile → constraints → focused-test order for
+Fennel, without imported mandatory planning/worker/advisor/per-change review gates.
+
+Ordinary completion and commit requests are **local only**: no push, PR, or
+auto-merge until explicit user wrap-up/integration authorization. That authorization
+loads the existing shared `fast-dev-wrap-up` skill and observational `fast-dev-reviewer`,
+without switching primary or duplicating the lifecycle. Caller-prefix matching is
+exact: live-dev uses only `live-dev/<topic>`, fast-dev only `fast-dev/<topic>`.
+Wrap-up reviews every accumulated commit and final diff, fixes directly, revalidates,
+then uses the protected PR/merge queue. Completion requires actual PR merge and
+proof that its merge SHA is in freshly fetched `origin/main`; queue entry is not done.
+See [OpenCode workflow](opencode-agent-workflow.md#fast-interactive-development-flow).
+
+Restart OpenCode after `.opencode/**` changes to load the updated agents/skill.
+Already-running sessions keep their loaded rules; this future live-dev exception
+does not change an ongoing strict supervisor implementation/integration workflow.
+
 ## Checkout lifecycle CLI (Linux)
 
 Run from the checkout/worktree you intend to develop, or supply its path:
