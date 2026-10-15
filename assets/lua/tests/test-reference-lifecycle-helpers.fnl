@@ -110,6 +110,25 @@
         (owner:apply! change))))
   nil)
 
+(fn owners [s world runtime]
+  (assert s.base-dir "test owners require canonical stores")
+  (local out (domain-owners s))
+  (table.insert out (or world (empty-owner "worlds" s.base-dir)))
+  (table.insert out (or runtime (empty-owner "runtime" s.base-dir)))
+  out)
+(fn lifecycle [s world runtime]
+  ((require :reference-lifecycle) {:stores s :owners (owners s world runtime)}))
+(fn ready [s world runtime]
+  (local service (lifecycle s world runtime))
+  (service:start!)
+  service)
+(fn no-writes [f]
+  (fn forbidden [...] (error "unexpected durable write during reconciliation"))
+  (with-fields fs {:write-file forbidden :rename forbidden :remove forbidden :create-dirs forbidden} f))
+(fn raw-list [s id items]
+  ((. (require :json-utils) :write-json!) (fs.join-path s.list-store.entities-dir (.. id ".json"))
+    {:id id :name "" :items items :created-at 1 :updated-at 1}))
+
 {:with-root with-root
  :stores stores
  :assert-error assert-error
@@ -118,4 +137,5 @@
  :with-graph with-graph
  :with-fields with-fields
  :assert-reference assert-reference
- :domain-owners domain-owners :empty-owner empty-owner :apply-preparation! apply-preparation!}
+ :domain-owners domain-owners :empty-owner empty-owner :apply-preparation! apply-preparation!
+ :owners owners :lifecycle lifecycle :ready ready :no-writes no-writes :raw-list raw-list}

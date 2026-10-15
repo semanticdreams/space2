@@ -26,8 +26,8 @@
     (local store (assert (. self.stores (. domain 2)) "missing canonical owning store"))
     (assert (= store.base-dir self.base-dir) "entities owner base-dir mismatch")
     (local notebook? (= (. domain 1) "notebook"))
-    (each [_ method (ipairs (if notebook? ["snapshot-notebook" "serialize-notebook" "decode-notebook" "persist-notebook!" "delete-notebook"]
-                                ["snapshot-entity" "serialize-entity" "decode-entity" "persist-entity!" "delete-entity"]))]
+     (each [_ method (ipairs (if notebook? ["snapshot-notebook" "serialize-notebook" "decode-notebook" "persist-notebook!" "delete-notebook" "reconcile-notebook!"]
+                                 ["snapshot-entity" "serialize-entity" "decode-entity" "persist-entity!" "delete-entity" "reconcile-entity!"]))]
       (assert (= (type (. store method)) :function) (.. "missing store capability: " method)))
     (when (contains? ["list-entity" "dict-entity" "link-entity" "notebook"] (. domain 1))
       (assert (= store.identity-store self.stores.identity-store) "entities owner identity-store mismatch")))
@@ -150,7 +150,18 @@
       (= (. domain 1) "notebook") (store:persist-notebook! id change.after-bytes change.after-check)
       (store:persist-entity! id change.after-bytes change.after-check))
   nil)
-(fn reconcile! [_self _intent] nil)
+(fn reconcile! [self intent]
+  (each [_ change (ipairs intent.changes)]
+    (assert (= change.owner self.id) "wrong reconciliation owner")
+    (local domain (domain-for change.address))
+    (local store (. self.stores (. domain 2)))
+    (local id (string.match change.address "^[^:]+:(.+)$"))
+    (local snapshot (store-snapshot store (. domain 1) id))
+    (assert (= change.path snapshot.path) "entity reconciliation path mismatch")
+    (if (= (. domain 1) "notebook")
+        (store:reconcile-notebook! id change.after-bytes change.before-check change.after-check)
+        (store:reconcile-entity! id change.after-bytes change.before-check change.after-check)))
+  nil)
 (fn EntitiesOwner [stores]
   (local base-dir (fs.absolute stores.base-dir))
   (assert (= base-dir stores.base-dir) "entities owner requires canonical base-dir")

@@ -54,6 +54,23 @@
   (local signal (if existed? self.code-entity-updated self.code-entity-created))
   (signal:emit published)
   published)
+(fn reconcile-entity! [self id bytes before-check after-check]
+  (assert (= (. (snapshot-entity self id) :check) after-check) "code reconciliation after-image mismatch")
+  (assert (= (R.check-bytes bytes "json") after-check) "code frozen after-check mismatch")
+  (local candidate (decode-entity self (if (= bytes false) before-check bytes)))
+  (local check (if (= bytes false) before-check after-check))
+  (R.verify-candidate id candidate (if (= bytes false) before-check (serialize-entity self candidate)) check "json")
+  (if (= bytes false)
+      (do
+        (local held (or (. self.cache id) candidate))
+        (tset self.cache id nil)
+        (self.code-entity-deleted:emit held)
+        held)
+      (do
+        (local published (publish! self candidate))
+        (local signal (if (= before-check false) self.code-entity-created self.code-entity-updated))
+        (signal:emit published)
+        published)))
 (fn get-entity [self id]
   (when id
     (entity-path self id)
@@ -111,7 +128,7 @@
    :get-entity get-entity :create-entity create-entity :update-entity update-entity
    :delete-entity delete-entity :list-entities list-entities
    :snapshot-entity snapshot-entity :serialize-entity serialize-entity
-   :decode-entity decode-entity :persist-entity! persist-entity!})
+   :decode-entity decode-entity :persist-entity! persist-entity! :reconcile-entity! reconcile-entity!})
 (var default-store nil)
 (fn get-default [opts]
   (when (not default-store) (set default-store (CodeEntityStore opts)))

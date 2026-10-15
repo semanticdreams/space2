@@ -140,4 +140,4 @@
 {:snapshot snapshot :check-bytes check-bytes :make-change make-change :clone clone
  :require-id require-id :record-path record-path :record-entries record-entries
  :verify-candidate verify-candidate :require-array require-array
- :decode-json decode-json :field field :record-location record-location}
+  :decode-json decode-json :field field :record-location record-location :comparison-path comparison-path}

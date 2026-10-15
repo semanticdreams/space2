@@ -79,6 +79,25 @@
   (self.notebook-items-changed:emit {:id id :items published.items})
   published)
 
+(fn reconcile-notebook! [self id bytes before-check after-check]
+  (assert (= (. (snapshot-notebook self id) :check) after-check) "notebook reconciliation after-image mismatch")
+  (assert (= (R.check-bytes bytes "json") after-check) "notebook frozen after-check mismatch")
+  (local candidate (decode-notebook self (if (= bytes false) before-check bytes)))
+  (local check (if (= bytes false) before-check after-check))
+  (R.verify-candidate id candidate (if (= bytes false) before-check (serialize-notebook self candidate)) check "json")
+  (if (= bytes false)
+      (do
+        (local held (or (. self.cache id) candidate))
+        (tset self.cache id nil)
+        (self.notebook-deleted:emit held)
+        held)
+      (do
+        (local published (publish! self candidate))
+        (local signal (if (= before-check false) self.notebook-created self.notebook-updated))
+        (signal:emit published)
+        (self.notebook-items-changed:emit {:id id :items published.items})
+        published)))
+
 (fn load-notebook [store id]
   (when id
     (local key (tostring id))
@@ -219,7 +238,7 @@
    :delete-notebook delete-notebook :list-notebooks list-notebooks :add-item add-item
    :remove-item remove-item :reorder-items reorder-items :move-item move-item
    :snapshot-notebook snapshot-notebook :serialize-notebook serialize-notebook
-   :decode-notebook decode-notebook :persist-notebook! persist-notebook!})
+   :decode-notebook decode-notebook :persist-notebook! persist-notebook! :reconcile-notebook! reconcile-notebook!})
 
 (var default-store nil)
 

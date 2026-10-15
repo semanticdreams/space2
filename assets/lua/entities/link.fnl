@@ -50,6 +50,24 @@
   (signal:emit published)
   published)
 
+(fn reconcile-entity! [self id bytes before-check after-check]
+  (assert (= (. (snapshot-entity self id) :check) after-check) "link reconciliation after-image mismatch")
+  (assert (= (R.check-bytes bytes "json") after-check) "link frozen after-check mismatch")
+  (local candidate (decode-entity self (if (= bytes false) before-check bytes)))
+  (local check (if (= bytes false) before-check after-check))
+  (R.verify-candidate id candidate (if (= bytes false) before-check (serialize-entity self candidate)) check "json")
+  (if (= bytes false)
+      (do
+        (local held (or (. self.cache id) candidate))
+        (tset self.cache id nil)
+        (self.link-entity-deleted:emit held)
+        held)
+      (do
+        (local published (publish! self candidate))
+        (local signal (if (= before-check false) self.link-entity-created self.link-entity-updated))
+        (signal:emit published)
+        published)))
+
 (fn load-entity [store id]
   (when id
     (local key (tostring id))
@@ -159,7 +177,7 @@
    :delete-entity delete-entity :list-entities list-entities
    :find-edges-for-nodes find-edges-for-nodes :find-entities-for-key find-entities-for-key
    :snapshot-entity snapshot-entity :serialize-entity serialize-entity
-   :decode-entity decode-entity :persist-entity! persist-entity!})
+   :decode-entity decode-entity :persist-entity! persist-entity! :reconcile-entity! reconcile-entity!})
 
 (var default-store nil)
 

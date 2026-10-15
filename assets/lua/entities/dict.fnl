@@ -135,6 +135,25 @@
   (self.dict-entity-items-changed:emit {:id id :items published.items})
   published)
 
+(fn reconcile-entity! [self id bytes before-check after-check]
+  (assert (= (. (snapshot-entity self id) :check) after-check) "dict reconciliation after-image mismatch")
+  (assert (= (R.check-bytes bytes "json") after-check) "dict frozen after-check mismatch")
+  (local candidate (decode-entity self (if (= bytes false) before-check bytes)))
+  (local check (if (= bytes false) before-check after-check))
+  (R.verify-candidate id candidate (if (= bytes false) before-check (serialize-entity self candidate)) check "json")
+  (if (= bytes false)
+      (do
+        (local held (or (. self.cache id) candidate))
+        (tset self.cache id nil)
+        (self.dict-entity-deleted:emit held)
+        held)
+      (do
+        (local published (publish! self candidate))
+        (local signal (if (= before-check false) self.dict-entity-created self.dict-entity-updated))
+        (signal:emit published)
+        (self.dict-entity-items-changed:emit {:id id :items published.items})
+        published)))
+
 (fn load-entity [store id]
   (when id
     (local key (tostring id))
@@ -300,7 +319,7 @@
    :remove-item remove-item
    :rename-item rename-item
    :snapshot-entity snapshot-entity :serialize-entity serialize-entity
-   :decode-entity decode-entity :persist-entity! persist-entity!})
+   :decode-entity decode-entity :persist-entity! persist-entity! :reconcile-entity! reconcile-entity!})
 
 (var default-store nil)
 

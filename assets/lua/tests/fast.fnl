@@ -155,7 +155,9 @@
     :tests.test-identity-entities
     :tests.test-reference-lifecycle-identity
     :tests.test-reference-lifecycle-writes
-     :tests.test-reference-lifecycle-owners
+      :tests.test-reference-lifecycle-owners
+     :tests.test-reference-lifecycle-commands
+     :tests.test-reference-lifecycle-recovery
     :tests.test-link-entities
     :tests.test-list-entities
     :tests.test-dict-entities

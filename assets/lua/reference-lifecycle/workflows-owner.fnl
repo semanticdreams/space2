@@ -7,7 +7,7 @@
   found)
 (fn preflight! [self]
   (assert (= self.store.base-dir self.base-dir) "workflows owner base-dir mismatch")
-  (each [_ method (ipairs ["snapshot-definition" "serialize-definition" "decode-definition" "persist-definition!" "prepare-step-removal"])]
+  (each [_ method (ipairs ["snapshot-definition" "serialize-definition" "decode-definition" "persist-definition!" "prepare-step-removal" "reconcile-definition!"])]
     (assert (= (type (. self.store method)) :function) (.. "missing workflow capability: " method)))
   true)
 (fn inventory [self]
@@ -71,7 +71,13 @@
   (assert (not (= change.after-bytes false)) "workflow owner cannot retire definitions")
   (self.store:persist-definition! id change.after-bytes change.after-check)
   nil)
-(fn reconcile! [_self _intent] nil)
+(fn reconcile! [self intent]
+  (each [_ change (ipairs intent.changes)]
+    (assert (= change.owner self.id) "wrong reconciliation owner")
+    (local id (assert (string.match change.address "^workflow:(.+)$") "unsupported workflow address"))
+    (assert (= (. (self.store:snapshot-definition id) :path) change.path) "workflow reconciliation path mismatch")
+    (self.store:reconcile-definition! id change.after-bytes change.before-check change.after-check))
+  nil)
 (fn WorkflowsOwner [stores]
   (local base-dir (fs.absolute stores.base-dir))
   (assert (= base-dir stores.base-dir) "workflows owner requires canonical base-dir")

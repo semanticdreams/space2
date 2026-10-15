@@ -416,6 +416,17 @@
   (signal:emit published)
   published)
 
+(fn reconcile-definition! [self id bytes before-check after-check]
+  (assert (not (= bytes false)) "cannot retire workflow definition during reconciliation")
+  (assert (= (. (snapshot-definition self id) :check) after-check) "workflow reconciliation after-image mismatch")
+  (assert (= (R.check-bytes bytes "json") after-check) "workflow frozen after-check mismatch")
+  (local candidate (decode-definition self bytes))
+  (R.verify-candidate id candidate (serialize-definition self candidate) after-check "json")
+  (local published (publish-definition! self candidate))
+  (local signal (if (= before-check false) self.definition-created self.definition-updated))
+  (signal:emit published)
+  published)
+
 (fn write-run! [self run]
   (ensure-dir self.runs-dir)
   (local path (run-path self run.id))
@@ -764,7 +775,7 @@
                 :delete-edge delete-edge
                 :prepare-step-removal prepare-step-removal
                 :snapshot-definition snapshot-definition :serialize-definition serialize-definition
-                :decode-definition decode-definition :persist-definition! persist-definition!
+                 :decode-definition decode-definition :persist-definition! persist-definition! :reconcile-definition! reconcile-definition!
                :create-run create-run
                :get-run get-run
                :list-runs list-runs

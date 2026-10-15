@@ -75,6 +75,24 @@
   (signal:emit published)
   published)
 
+(fn reconcile-entity! [self id bytes before-check after-check]
+  (assert (= (. (snapshot-entity self id) :check) after-check) "identity reconciliation after-image mismatch")
+  (assert (= (R.check-bytes bytes "json") after-check) "identity frozen after-check mismatch")
+  (local candidate (decode-entity self (if (= bytes false) before-check bytes)))
+  (local check (if (= bytes false) before-check after-check))
+  (R.verify-candidate id candidate (if (= bytes false) before-check (serialize-entity self candidate)) check "json")
+  (if (= bytes false)
+      (do
+        (local held (or (. self.cache id) candidate))
+        (tset self.cache id nil)
+        (self.identity-deleted:emit held)
+        held)
+      (do
+        (local published (publish! self.cache candidate))
+        (local signal (if (= before-check false) self.identity-created self.identity-updated))
+        (signal:emit published)
+        published)))
+
 (fn apply-updates! [candidate updates]
   (var changed? false)
   (each [key value (pairs updates)]
@@ -221,7 +239,7 @@
    :ensure-key ensure-key
     :resolve-key resolve-key
     :snapshot-entity snapshot-entity :serialize-entity serialize-entity
-    :decode-entity decode-entity :persist-entity! persist-entity!})
+     :decode-entity decode-entity :persist-entity! persist-entity! :reconcile-entity! reconcile-entity!})
 
 (var default-store nil)
 
