@@ -259,7 +259,7 @@ on selection, existing function/node targets unchanged.
 - [ ] Compile (`make fennel-check`), constraints, then focused suites: catalog,
   code-list, Entities, built-in extensions, runtime plumbing, main events,
   string/link/list/dict/code entities, notebooks, workflow graph, hosted app
-  launcher, graph extension registry. Use tests.<suite>:main commands. Diff check,
+  launcher, graph extension registry. Use `tests.<suite>:main` commands. Diff check,
   independent review, then checkpoint `feat(lua): integrate catalog-driven entity browsing`.
 
 ## Final gate

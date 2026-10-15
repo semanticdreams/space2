@@ -1,558 +1,297 @@
-# Reloadable Units And Hot Reload
+# Reload boundaries and lifecycle units
 
-This note documents the current reloadable unit system in `space`.
+This is the canonical contract for authors and reviewers of Space reload
+boundaries. **Controller-driven development reloads default to app-root.** Smaller
+lifecycle units remain useful, but source ownership alone does not make them
+independently replaceable. Units run trusted code in the existing process; they
+are not a sandbox for untrusted plugins or players.
 
-It is intentionally grounded in the implementation that exists today.
-It is not a copy of the earlier scratch spec in `~/Desktop/space-units.md`.
+## Three different concepts
 
-That earlier note was useful for shaping the work, but several parts of the final design were simplified or changed during implementation.
+- A **module** is an importable source implementation.
+- A **lifecycle unit** owns explicit load/unload and optional snapshot/restore
+  operations. It can organize resources without being safe to replace alone.
+- An **independently supported reload boundary** has an explicit replacement
+  contract: which consumers are recreated, which dependencies remain, how cleanup
+  and state work, and tests demonstrating fresh behavior and recovery limits.
 
-## Goal
+App-root replaces the Fennel app lifecycle inside the existing native process.
+It is the supported development baseline, not a native restart or a transaction
+over all process state. The global `app`, native engine, preserved modules and
+external systems are not universally reset.
 
-The immediate goal was not to turn the whole codebase into fine-grained hot-swappable subsystems on day one.
+`owned-paths` selects a routing candidate, not proof that all consumers of that
+code will be replaced. `parent-id` supplies a lifecycle/routing hierarchy, **not
+a runtime dependency declaration**. Clearing `package.loaded` cannot rewrite a
+function, factory closure, adapter or module table already retained elsewhere.
+For each such reference, choose one of three responses:
 
-The actual goal was:
+1. Recreate the consumer with the new implementation.
+2. Explicitly late-bind through a stable interface whose implementation is updated.
+3. Enlarge the reload boundary to include both provider and consumer.
 
-- make the whole app reloadable first
-- preserve enough runtime state to make that usable during development
-- prove the model with a small number of real child units
-- build the file-watching and routing machinery now so finer units can be added later
+Rebuilding a presentation is insufficient if its retained factory still closes
+over old code. Reloading an enclosing boundary is a valid design, not a failure
+to achieve finer granularity.
 
-This work is mainly for internal development velocity.
-Units are trusted in-process code boundaries, not sandboxed plugins.
+## Current inventory and discovery
 
-## Current Model
+All six built-in leaves below have `parent-id "app-root"`: activities are
+**siblings of canvas**, not its descendants. The controller owns its root unit;
+`app.unit-manager` registers the children and user units.
 
-There are three practical layers:
+| Unit ID / category | Lifecycle responsibility | Independent reload status |
+| --- | --- | --- |
+| `app-root` | `main` initialization, teardown and shell snapshot/restoration | Supported controller development baseline |
+| `hud` | HUD shell, focus scope and panel state | Lifecycle-only by default; experimental direct and explicit opt-in coverage |
+| `canvas` | Canvas runtime over the active world's longer-lived state | Lifecycle-only by default; experimental direct and explicit opt-in coverage |
+| `sandbox-activity` | Sandbox activity registration/session behavior | Lifecycle-only by default, not independently certified |
+| `graph-activity` | Graph activity registration and presentation | Lifecycle-only by default; experimental opt-in coverage |
+| `drawing-activity` | Drawing activity registration, actions and rendering | Lifecycle-only by default; experimental opt-in coverage |
+| `board-activity` | Board activity registration and presentation | Lifecycle-only by default; experimental opt-in coverage |
+| `user-<name>` | Filesystem-discovered user module lifecycle | Discovery is implemented, not independent reload certification |
+| Contracted graph-extension units, e.g. `user-demo-extension` | Descriptor-owned loaders/morphs and explicit adapter refresh | A specific tested narrow seam, requiring controller opt-in; not blanket approval of graph-related code |
 
-1. `module`
-   The source file or `require` target.
+At initialization, `main.ensure-user-code-units!` scans immediate entries in
+`app.code-dir` for flat `<name>.fnl` files (names without dots) and directories
+containing `<name>/init.fnl`. A directory wins over a same-name flat file, including
+module search precedence. Candidates load in name order as `ModuleUnit`s under
+app-root. Flat units own their file; directory units own their directory and init
+file. Failed loads are logged and unregistered. The built-in activity list is
+still explicit, but user-unit startup discovery is not future work.
 
-2. `unit`
-   The live reload boundary.
-   A unit can be loaded, unloaded, snapshotted, restored, and reloaded.
+Discovery and watching are separate. Main's default watch root is the assets
+`lua` directory; it does not automatically include `app.code-dir` or every
+dependency. Configure all required watch roots. The watcher filters for Lua/Fennel
+changes, ignores startup noise and does not treat add/created/unknown events as
+reload requests. It is not a live unit-discovery service; a new unit needs an
+initialization/discovery pass or explicit registration.
 
-3. `hot reload controller`
-   Watches files, maps changed paths to a target unit, clears loaded modules for that unit, and performs the reload cycle.
+## Controller configuration and execution
 
-In the current system, changed files route to units by explicit path ownership, not by a module dependency graph.
-
-## Why "Unit"
-
-We already use `app` as the global runtime root, so "app" was the wrong name for a reloadable thing.
-
-`unit` fits the actual role better:
-
-- it is a loadable code/runtime boundary
-- it is also the target of hot reload
-- it does not imply plugin safety or compatibility guarantees
-
-That unification matters.
-The same abstraction now serves:
-
-- full app reload
-- child subsystem reload
-- future finer-grained reload boundaries
-
-## Core Decisions
-
-### Global `app` stays global
-
-We did not build a strict service container or plugin API.
-Apps or units are trusted code and can mutate the shared global `app` directly.
-
-This was a deliberate choice.
-At this stage we care more about power and iteration speed than API stability or sandboxing.
-
-The tradeoff is explicit:
-
-- load order matters
-- contracts are social
-- refactors can break units
-- unload correctness depends on discipline
-
-### Lifecycle is `load`, `unload`, `snapshot`, `restore`
-
-The earlier note discussed `load`, `start`, `stop`, `snapshot`, and `restore`.
-We did not keep the separate `start` and `stop` phase.
-
-The implemented lifecycle is:
-
-- `load`
-- `unload`
-- `snapshot`
-- `restore`
-
-Reason:
-
-- there is no useful dormant "loaded but not active" phase yet
-- the simpler protocol was enough to get root reload and child reload working
-- splitting the lifecycle earlier would have increased surface area before there was a real need
-
-### Hard fail on child reload failure
-
-We explicitly did not implement "reload child, then escalate to parent/root on failure".
-
-Current behavior is:
-
-- attempt reload of the chosen target unit
-- if reload fails, attempt rollback to the previous runtime for that same unit
-- if rollback also fails, throw
-
-We chose hard failure over silent escalation because:
-
-- we do not yet have a robust mechanism to track, present, and reason about escalation paths
-- silent fallback would hide real lifecycle bugs
-- during development it is better to fail loudly than to mutate larger runtime scopes unexpectedly
-
-### Explicit path ownership, not dependency tracking
-
-Units currently declare `owned-paths`.
-The hot reload router picks the most specific matching unit for a changed file path.
-
-This is simpler than tracking:
-
-- module import graphs
-- dynamic runtime ownership
-- dependency invalidation
-
-It is also easier to reason about while the unit boundaries are still evolving.
-
-The tradeoff is that ownership is manual.
-If a unit owns behavior spread across files that are not listed under its owned roots, routing will miss that relationship.
-
-### Root reload must not run inline from the same engine callback
-
-One implementation lesson mattered enough to count as an architectural rule.
-
-File-triggered root reload must not rebuild the app inline from the same engine callback stack that detected the change.
-
-The current root flow defers actual reload execution through `callbacks` so the reload runs after the current update path unwinds.
-
-Reason:
-
-- rebuilding the root app inline during the live frame/update path was fragile
-- the deferred boundary avoids re-entering teardown/build work from inside the signal stack that requested it
-
-This is a concrete design decision, not just a test harness detail.
-
-### Live test path uses X11 under `xvfb`
-
-The real-app hot reload test runs the actual executable under `xvfb`.
-It explicitly forces `SDL_VIDEODRIVER=x11`.
-
-This was not cosmetic.
-During debugging, the failing path turned out to be a Wayland/EGL swap hang in the test environment rather than a unit reload bug.
-
-That setting is now part of the documented testing setup for live hot reload.
-
-## Unit API
-
-The base implementation lives in `assets/lua/units.fnl`.
-
-`Unit` is a small wrapper around four functions:
+Set configuration **before the controller is constructed** during app
+initialization. Main retains the controller and callback ID across app-root
+reloads; assigning a new config table does not reconfigure an existing watcher.
+These examples run in a bootstrap context with `app.code-dir` initialized:
 
 ```fennel
-(Unit
-  {:id "hud"
-   :parent-id "app-root"
-   :owned-paths ["/abs/path/to/assets/lua/hud.fnl"]
-   :load load-fn
-   :unload unload-fn
-   :snapshot snapshot-fn
-   :restore restore-fn})
+(local fs (require :fs))
+(local runtime (require :runtime))
+(local lua-root (fs.join-path runtime.assets-path "lua"))
+
+;; Root-only, including edits to discovered user-unit sources.
+(set app.hot-reload-config
+     {:enabled true :watch-paths [lua-root app.code-dir]})
 ```
 
-Important details:
-
-- `:id` is required
-- `:load` and `:unload` are required
-- `:snapshot` defaults to a no-op returning `nil`
-- `:restore` defaults to a no-op returning `true`
-- `:reload` is a convenience method that runs `snapshot -> unload -> load -> restore`
-
-`UnitManager.reload-unit` wraps the unit reload and returns structured evidence:
+For an audited extension contract, use this configuration **instead**:
 
 ```fennel
-{:unit-id id
- :reloaded true
- :activity evidence-or-nil}
+(local fs (require :fs))
+(local runtime (require :runtime))
+(local lua-root (fs.join-path runtime.assets-path "lua"))
+
+(set app.hot-reload-config
+     {:enabled true :watch-paths [lua-root app.code-dir]
+      :narrow-reload-unit-ids ["user-demo-extension"]})
 ```
 
-When an activity was active before reload, the manager attempts to reactivate
-that same activity after the unit reload completes. The `:activity` evidence
-records the active activity before and after reload, whether reactivation was
-attempted, whether the activity is registered after reload, whether an active
-session exists after reload, and any activation error. Unit reload failures still
-throw; they are not converted into successful evidence responses.
-
-`ModuleUnit` is a convenience wrapper for units backed by a Lua/Fennel module export table.
-
-The root app reload uses `ModuleUnit` to call:
-
-- `init`
-- `drop`
-- `snapshot`
-- `restore`
-
-from `assets/lua/main.fnl`.
-
-## Hot Reload Controller
-
-The implementation lives in `assets/lua/hot-reload.fnl`.
-
-### File watching
-
-Native file watching is provided by `efsw`, vendored under `external/efsw`, and exposed to Fennel through `src/lua_file_watch.cpp` as the `file-watch` module.
-
-That gives Fennel:
-
-- `FileWatcher`
-- `add-watch`
-- `start`
-- `poll`
-- `drop`
-
-### Routing changed files to units
-
-The controller watches one or more roots and polls filesystem events.
-For each changed file:
-
-1. normalize the path
-2. ignore non-`.fnl` / non-`.lua` files
-3. ignore startup watcher noise
-4. find the unit whose `owned-paths` match the file with the longest path prefix
-
-If multiple changed files map to multiple units in one batch, the controller resolves their common ancestor.
-If nothing matches, it falls back to the root unit.
-
-This is the current routing rule:
-
-- most specific matching unit wins
-- mixed changes reload the common ancestor
-- no match reloads root
-
-### Reload algorithm
-
-The reload algorithm is:
-
-1. resolve target unit
-2. collect currently loaded modules whose source paths live under that unit's owned roots
-3. snapshot the target unit
-4. unload the target unit
-5. clear the collected `package.loaded` entries
-6. load the target unit again
-7. restore the snapshot
-
-If reload fails:
-
-1. restore the previous `package.loaded` entries
-2. call `load`
-3. call `restore` with the pre-reload snapshot
-
-This gives us rollback, but it is not a staged "instantiate new runtime then commit" swap.
-Reload still mutates the live process in place.
-
-### Deferred execution
-
-The controller can either reload immediately or request a reload callback.
-
-The root app uses the callback path:
-
-- file events are debounced
-- `HotReloadController.update` requests reload
-- `main` enqueues a callback
-- the callback runs `reload-now!` later
-
-This keeps root reload out of the current engine callback stack.
-
-## Current Unit Boundaries
-
-### Root unit
-
-The root unit is the whole app, implemented as a `ModuleUnit` targeting `main`.
-
-Its exports are:
-
-- `init`
-- `drop`
-- `snapshot`
-- `restore`
-
-The root unit is still the default fallback when routing cannot target a smaller unit.
-
-### HUD unit
-
-`assets/lua/hud-unit.fnl` is the first real child unit.
-
-It owns the HUD runtime lifecycle:
-
-- create and drop the HUD shell
-- recreate the HUD focus scope
-- snapshot persistent panel state
-- restore panel state after reload
-- rebind shared runtime context such as scene/layout/object-selector references
-
-This proved that a subsystem smaller than the full app could reload while preserving meaningful user-visible state.
-
-### Canvas unit
-
-`assets/lua/canvas-unit.fnl` is the second real child unit.
-
-It sits on top of the active world runtime rather than re-owning all world state directly.
-The world runtime now exposes explicit canvas hooks from `assets/lua/home-world.fnl`:
-
-- `load-canvas-runtime`
-- `unload-canvas-runtime`
-- `capture-canvas-unit-state`
-- `restore-canvas-unit-state`
-
-This is an important design shape.
-The canvas unit is a reload boundary over shared world state, not a separate world replacement.
-
-That separation lets the world continue to own longer-lived state such as:
-
-- scene
-- graph core
-- drawing controller
-- cameras
-- object selector wiring
-
-while the canvas surface/runtime can still be independently reloaded.
-
-## Root State Preservation
-
-Root reload currently preserves a small shell-level snapshot in `main`.
-
-That snapshot includes:
-
-- active world id
-- active canvas feature
-- preferred interaction surface
-- active interaction surface
-- canvas visibility
-
-One implementation detail that mattered in practice:
-
-- active world restoration now snapshots `app.active-world-entry.id` first
-- it only falls back to `app.world-manager:active-world-id()` if needed
-
-That fix was required because the live reload path could have a valid bound active world even when the world-manager accessor was not the strongest source of truth at snapshot time.
-
-During app-root reload, `main` also preserves tray and notify setup instead of dropping and recreating them unconditionally.
-
-## Testing Strategy
-
-The current system is covered at two levels.
-
-### Focused unit tests
-
-`assets/lua/tests/test-units.fnl` covers:
-
-- file watcher write/delete events
-- full root app reload roundtrip
-- HUD unit reload preserving panel state
-- HUD file change routing to the HUD unit
-- canvas unit reload
-- canvas file change routing to the canvas unit
-
-These tests use real app/runtime code, not synthetic fake unit objects.
-
-### Real-app live reload test
-
-`assets/lua/tests/test-live-hot-reload.fnl` starts the actual `space` executable, enables hot reload, edits a watched copy of `main.fnl`, and verifies that live reload actually happens while preserving active world state.
-
-Important properties of this test:
-
-- it runs the real app, not a narrowed harness
-- it uses the remote-control endpoint to inspect state in-process
-- it preserves the temp directory on failure for debugging
-- it forces `SDL_VIDEODRIVER=x11` under `xvfb-run`
-
-This test matters because it catches issues that unit tests alone do not, especially lifecycle bugs that only appear in the actual running executable.
-
-## What Is Still Missing
-
-The current system is intentionally simpler than the original scratch design.
-
-These pieces do not exist yet:
-
-- no separate `start` / `stop` lifecycle phase
-- no module dependency graph
-- no explicit stale/invalidation state machine
-- no automatic parent escalation on child reload failure
-- no staged "build new instance, validate, then commit swap" reload transaction
-- no versioned state migration layer beyond raw `snapshot` / `restore`
-- no generalized unit registry or discovery system beyond the units we wire up directly
-
-There is also still a social rather than enforced contract around teardown.
-Units are responsible for undoing what they install into global `app`.
-The framework does not track ownership for them.
-
-## Current Imperfections
-
-The current design is coherent and usable, but it is not perfect.
-
-These are the main imperfections we are knowingly carrying:
-
-### Units and activities are trusted imperative code
-
-The unit system and the activity system both assume trusted in-process code.
-
-That means:
-
-- units can mutate global `app` directly
-- activities can mutate shared runtime directly
-- rollback can only reliably undo what goes through explicit unit unload paths or activity-context cleanup helpers
-
-This is a deliberate tradeoff for development speed, but it means lifecycle safety is not guaranteed by construction.
-
-### Built-in activity units are still bootstrapped explicitly
-
-Graph, drawing, and board activities behave like ordinary registered activities at runtime, but their unit loading is still wired by a built-in list in `main`.
-
-That means:
-
-- built-in activity units are not discovered dynamically
-- external or user-loaded activity units are not yet part of startup or reload configuration by default
-- the host still knows which built-in activity units should exist at boot time
-
-This is cleaner than hardcoding activity behavior in the host, but it is still not the final external-unit model.
-
-### The system is consistent, but not yet fully generalized
-
-The current model is now internally consistent:
-
-- units own code lifetime
-- activities own active workspace behavior
-- persistence preserves explicit activity ids without inventing built-in defaults
-
-But some surrounding code is still shaped around the built-in development workflow:
-
-- tests commonly seed graph and drawing activities directly
-- built-in activity units are still the only ones exercised by startup
-- external unit discovery, loading, and configuration are still future work
-
-So the architecture is clean for the built-ins we have, but it is not yet the full user-extensible story.
-
-## Why Those Things Are Missing
-
-Most of the missing pieces were omitted on purpose, not forgotten.
-
-The early priority was:
-
-- get real reload working
-- prove it on the root app
-- prove it on at least one or two meaningful child boundaries
-- avoid overdesign before we knew where the hard lifecycle problems were
-
-That was the right tradeoff.
-If we had implemented dependency graphs, escalation logic, and staged transactions first, we would have been designing around hypothetical failures instead of real ones.
-
-## Recommended Next Steps
-
-
-### Units as Loader-Backed Runtime Objects
-
-The unit system is intentionally loader-neutral at the abstraction layer. A unit
-is a runtime object with an id, lifecycle exports (init/drop/snapshot/restore),
-and a backing loader that owns the source of truth.
-
-Today's user units are filesystem-backed: their source lives as `.fnl` files
-under `app.code-dir`, their loader is `"filesystem"`, and their owned-paths
-point to real files on disk. But that is an implementation detail. Future units
-may be backed by database records, remote hosts, generated stores, or other
-loaders.
-
-Callers should use unit handles and source-ids instead of constructing raw
-filesystem paths. The `ExternalUnitService` in
-`assets/lua/llm/external-unit-mcp/service.fnl` classifies each unit's loader and
-exposes loader-neutral operations (resolve, inspect, read-source, apply-patch,
-create-source, reload). Operations fail loudly when the loader lacks a requested
-capability rather than silently falling back to filesystem assumptions.
-
-### External Editing Through MCP Tools
-
-When external OpenCode sessions need to edit user units, they should use the
-`space_unit_*` external MCP tools rather than direct filesystem edits:
-
-- `space_unit_read_source` / `space_unit_apply_patch` / `space_unit_create_source`
-  for source editing with stale-content protection, path containment, Fennel
-  validation, and automatic reload.
-
-- `space_unit_reload` for explicit reload operations.
-
-- `space_unit_run_tests` for test execution in a subprocess.
-
-- `space_unit_read_log` for inspecting the application log after edits.
-
-Direct filesystem edits skip all of these protections: stale-content detection,
-path containment enforcement, source validation, symlink rejection, and reload
-integration. They are an escape hatch that requires explicit human approval and
-a Space-reported local filesystem source handle.
-
-The external unit MCP subsystem lives under `assets/lua/llm/external-unit-mcp/`
-with a standalone entrypoint at `assets/lua/tools/external-unit-mcp-server.fnl`.
-It boots a headless engine, creates an isolated OpenCode config, and exposes
-loader-neutral unit tools on loopback. See [External Unit MCP](./notes/external-unit-mcp)
-for the full workflow.
-
-
-The next useful work is probably one of these:
-
-### 1. Extract another meaningful child unit
-
-Candidates:
-
-- world-manager-adjacent shell state
-- graph-view-facing UI/runtime state
-- another subsystem with a clear snapshot/restore contract
-
-This deepens confidence that the unit model scales beyond HUD and canvas.
-
-### 2. Tighten reload failure visibility
-
-We intentionally hard-fail today, but tooling around that can improve:
-
-- clearer logs
-- better surfaced target unit / owned paths / cleared modules
-- tighter diagnostics in live reload failures
-
-### 3. Decide whether path ownership is enough
-
-`owned-paths` is simple and currently good enough.
-Later we may want a richer mapping if units spread across less tidy source layouts.
-
-That does not mean "build a full dependency graph now".
-It means reevaluating only once the manual path model starts hurting.
-
-### 4. Introduce state migration only when real versioning pressure exists
-
-Right now units snapshot and restore within the same running development session.
-That does not yet justify a heavier migration framework.
-
-If units begin persisting richer long-lived state across larger architectural changes, migration can be added then.
-
-## Summary
-
-The current reloadable unit system is deliberately pragmatic.
-
-It gives us:
-
-- real native file watching
-- whole-app hot reload
-- unit-targeted child reloads
-- state-preserving reload for real subsystems
-- actual live executable coverage
-
-It does not yet attempt to solve every future extension problem.
-That is intentional.
-
-The important thing is that the abstraction is now real:
-
-- a unit is the thing we load
-- a unit is the thing we unload
-- a unit is the thing we snapshot and restore
-- a unit is the thing hot reload targets
-
-That is enough foundation to keep extracting more boundaries as the codebase needs them.
+`narrow-reload-unit-ids` is the canonical optional list of eligible non-root IDs
+in `HotReloadController`, `AppRootController` and `app.hot-reload-config`.
+**Omitted or empty means only the configured root is eligible.** Normal
+development configuration does not opt built-in children in. Listing an ID
+records the caller's audit; it does not certify the unit at runtime.
+
+The pipeline in `assets/lua/hot-reload.fnl` is:
+
+1. Resolve a candidate by longest matching owned path; for multiple owners use
+   their common ancestor, or root if none match.
+2. Apply eligibility: use that candidate only if it is root or explicitly listed;
+   otherwise select root. Listing siblings does not make their parent eligible.
+3. Collect loaded modules under the **final target's** roots, excluding preserved
+   modules, using current or remembered source paths.
+4. Capture the target snapshot, unload, clear collected `package.loaded` entries
+   and Fennel compiled caches, load, restore, then refresh its graph extensions.
+
+This is pre-execution routing, **not failure-triggered escalation**. For example,
+a HUD edit selects root by default, before any HUD-only snapshot or teardown.
+Mixed sibling changes cannot be reduced to just one eligible sibling.
+`controller:debug-state().last-target-unit-id` and `[hot-reload]` target logs
+identify the actual execution target, not merely the ownership candidate.
+
+Main's watcher flow debounces events and requests one deferred callback per
+pending batch via `on-reload-requested`. The callback calls `reload-now!` after
+the detecting update stack unwinds; `AppRootController` forwards this callback.
+By contrast, `controller:reload-now!({:changes changes})` executes synchronously
+and still applies eligibility. A generic controller without a callback executes
+from its update method. Direct synchronous callers must choose a safe execution
+point themselves.
+
+### Recovery and distinct entry points
+
+Controller recovery is in-place best effort: on a protected reload failure it
+tries to unload a successfully loaded failed replacement, clear tracked modules,
+restore backed-up module entries, load/restore the **same** target and refresh
+its extensions. It returns `false` if recovery succeeds and throws if recovery
+fails. Snapshot capture precedes that protected reload block. This is not a staged
+swap: globals, newly introduced/untracked modules, external writes, native effects
+and in-flight work are not universally reversed.
+
+| Entry point | Routing / invalidation | Recovery responsibility |
+| --- | --- | --- |
+| Watcher/controller and controller `reload-now!` | Candidate → eligibility → target-owned loaded-module and Fennel-cache clearing | Same-target tracked-module/snapshot recovery above; no failure escalation |
+| `Unit:reload` | Exactly that unit; snapshot → unload → load → restore → graph refresh; base Unit has no module invalidation | No controller backup/recovery wrapper |
+| `ModuleUnit:reload` | Direct Unit protocol; unload clears remembered owned modules/caches. Configured `module-paths` tracks owned requires during lifecycle calls | Loader-specific clearing, not consumer/dependency invalidation or controller recovery |
+| `SourceUnit:reload` | Direct Unit protocol; unload discards its evaluated module table, load evaluates its captured source | Does not invalidate imported dependencies or gain a controller backup |
+| `UnitManager:reload-unit` | Direct unit reload, then attempts reactivation of the previously active activity and returns evidence | Unit errors throw; reactivation evidence is not a runtime rollback guarantee |
+| Internal agent unit edit/reload tools | Direct manager/unit operations; edit helpers validate source/exports and use loader purge hooks | Edit-specific source restoration and recovery attempts; explicit reload has no edit backup |
+| External `space_unit_apply_patch`, `space_unit_create_source`, `space_unit_reload` | External service calls the manager, not the controller; loader capability and source safety checks | Patch tries source restoration plus recovery reload; create tries removing the new file; explicit reload has no source backup |
+
+**No direct path inherits controller root routing, eligibility, callback deferral
+or module backup.** Outside a specific tested contract, these are caller-managed,
+experimental replacement operations with weaker guarantees. A later watcher
+event is not a protection for an earlier direct edit/reload. Internal reload uses
+`id`; the external tool uses `unit_id` (and source tools use `source_id`).
+See [External Unit MCP](./notes/external-unit-mcp) for its separate editing API.
+
+## Existing mechanisms, not a universal effect system
+
+- **Managed unit signals** (`units.fnl`): `unit:connect-signal` records named
+  connections and disconnects them on unload or failed-load cleanup. Arbitrary
+  `signal:connect` calls do not become unit-owned automatically. Base Unit also
+  attempts its unload function after a failed load; authors must clean partial
+  initialization correctly.
+- **Activity cleanup stacks** (`activities.fnl`): activation can register explicit
+  `ctx:defer-cleanup!` callbacks. Session teardown and activation-failure paths run
+  recorded cleanup in reverse order and report failures. Retained sessions may
+  outlive deactivation; this is not interception of every activity side effect.
+- **Graph registration handles** (`graph/extension-registry.fnl`, `graph/core.fnl`,
+  `morphs/init.fnl`): explicit descriptor/loader/morph handles protect ownership
+  so stale handles cannot remove newer registrations. The registry reverses
+  recorded installation handles on failure; authors must return/record handles
+  and unregister their descriptor on drop. Untracked effects remain their job.
+- **Fresh command composition** (`commands/core.fnl`, `leader-state.fnl`):
+  composition builds new command/binding/prefix collections from ordered current
+  providers rather than repeatedly mutating one catalog. Provider order still
+  matters, and a retained provider closure can still contain stale code.
+- **Graph adapter refresh**: the registry refreshes declared schemes in each live
+  runtime's active map after unit reload. `graph/map.fnl` rebuilds map-local node
+  adapters by key and rewires edges while retaining selection/focus keys. This is
+  not reconstruction of all retained adapters, factories or domain data. The
+  [extension contract](./features/reloadable-graph-extension-units) defines the seam.
+
+These mechanisms enforce local bookkeeping once used. Choosing all resources,
+consumers and cleanup obligations remains an author responsibility; Space has no
+general effect scope or dependency-driven consumer restart engine.
+
+### Root snapshot is data, not migration
+
+`app.snapshot-app-state` (exported as `snapshot` by `main.fnl`) captures
+`active-world-id`, `active-activity-id`,
+`preferred-interaction-surface`, `active-interaction-surface`, `canvas-visible?`
+and `debug-log-content`. Active world capture prefers `app.active-world-entry.id`
+and falls back to the manager accessor. Restore activates the world/activity,
+applies the preferred interaction surface and canvas visibility, and merges log
+history; it does **not** separately restore the captured active interaction
+surface. The root-reload branch of `app.drop` attempts to preserve tray/notify,
+but re-evaluating `main.fnl` clears both references and initialization creates
+replacements. That drop branch is not an end-to-end retention guarantee.
+
+These fields describe current capture/restoration, not a promise of arbitrary
+state preservation or versioned migration. Persistent world/domain state has its
+own owners; snapshots must not accidentally retain executable references that
+defeat replacement.
+
+## Author / reviewer boundary checklist
+
+Before adding an ID to `narrow-reload-unit-ids`, record answers and test evidence:
+
+- [ ] **Ownership:** Which source roots, registrations, native resources and
+  global mutations belong to this boundary? Do watch roots cover relevant edits?
+- [ ] **Consumers/dependencies:** Who retains its functions, tables, factories or
+  adapters? Which consumers are recreated, late-bound or included in a larger
+  boundary? Do not treat `parent-id` as a dependency audit.
+- [ ] **Teardown order:** Are consumers stopped before providers/resources vanish?
+  Does drop clean partial initialization and only remove this owner's handles?
+- [ ] **State:** Which data survives, resets or is rejected? Are snapshots data/keys
+  rather than old closures or instances? What schema changes are unsupported?
+- [ ] **Pending work:** What happens to queued callbacks, timers, async replies and
+  native work from the old implementation? How are stale results rejected?
+- [ ] **Publication:** Can observers see partially replaced registrations or
+  catalogs? Which derived collections are rebuilt from fresh contributions, and
+  when is the new behavior published?
+- [ ] **Failure limits:** Which entry point is used, what is actually recoverable,
+  and what requires explicit restart/operator action? Do not promise external-effect
+  rollback or assume a child failure will escalate.
+- [ ] **Evidence:** Edit behavior and prove existing consumers execute new code,
+  not just that a new instance exists. Repeat success; assert singular handlers,
+  descriptors and morphs; test failed load/refresh followed by valid success and
+  cleanup of the old implementation. Check actual target evidence.
+- [ ] **Fallback:** If any answer is incomplete, leave narrow eligibility off and
+  use the supported enclosing boundary (normally app-root).
+
+Future game/player behavior replacement motivates this contract, but is not an
+implemented protocol. It still needs host-owned game state, explicit frame/tick
+replacement timing, state preservation/reset policy and stale-work handling.
+Multiple players also need separate coordination, authority and security
+decisions; trusted in-process units provide none of that isolation.
+
+## Lessons from OpenCode Reloaded and Cordis
+
+External references below were accessed **2026-10-15**; branch links and upstream
+APIs may evolve. These are comparisons, not dependencies adopted by Space.
+
+### Rebuild derived catalogs, rather than accumulate mutations
+
+[OpenCode Reloaded](https://anoma.ly/notes/opencode-reloaded/) describes stale
+plugin contributions, overwritten policy, inconsistent intermediate states and
+repeated transforms when plugins mutate a shared catalog in place. Its approach
+associates transformations with plugins, removes them with their plugin, and
+applies the remaining ordered transformations once to a fresh catalog per rebuild.
+Order can matter; each transform need not be individually idempotent. The useful
+property is avoiding accidental accumulation across rebuilds, not order independence.
+
+Space's fresh command composition is a local parallel: rebuild a derived result
+from the current providers. It is not a universal catalog reconstruction system,
+and persistent world/domain state should not be treated as a disposable catalog.
+
+### Own explicit effects and dependent lifetimes
+
+[Cordis](https://github.com/cordiverse/cordis) associates explicit reversible
+effects with plugin lifetimes and uses declared injected-service dependencies and
+implementation identity to handle dependent lifetimes, including consumer teardown
+before provider disposal. Its README links a
+[Cordis primer](https://deepseek-harness.github.io/deepseek-harness/en/reference/cordis-primer)
+for a vendored integration; that primer is not a promise of identical upstream APIs.
+The upstream mechanisms are in
+[`fiber.ts`](https://github.com/cordiverse/cordis/blob/main/packages/core/src/fiber.ts),
+[`reflect.ts`](https://github.com/cordiverse/cordis/blob/main/packages/core/src/reflect.ts)
+and [`events.ts`](https://github.com/cordiverse/cordis/blob/main/packages/core/src/events.ts).
+Module code replacement is a separate mechanism in
+[`packages/hmr`](https://github.com/cordiverse/cordis/blob/main/packages/hmr/src/index.ts).
+
+Space has explicit signals, cleanup stacks and registration handles, but not
+Cordis's general effect scope, injected-service identity tracking or automatic
+dependent restart. The lesson is to declare ownership and consumer lifetimes,
+not assume re-importing a module updates them. Neither explicit disposers nor
+fresh catalogs imply automatic rollback of arbitrary mutations or external effects.
+
+## Evidence and further reading
+
+- `assets/lua/tests/test-units.fnl`: deterministic eligibility matrix, wrapper
+  callback deferral, edited ModuleUnit behavior and deleted-module clearing.
+- `assets/lua/tests/test-hot-reload-integration.fnl`: real main configuration,
+  repeated default root reloads of main/HUD paths, active world/log preservation,
+  stable controller/callback IDs and singular cache searcher; also experimental
+  direct HUD/canvas and explicit opt-in child fixtures, not general freshness proof.
+- `assets/lua/tests/test-graph-extension-units.fnl` and
+  `test-graph-extension-runtime-plumbing.fnl`: the contracted extension seam,
+  repeated registration/refresh cleanup, recovery and subsequent success.
+- `assets/lua/tests/test-live-hot-reload.fnl`: real executable watcher/deferred
+  reload with active-world preservation; Linux X11 under `xvfb` is required.
+  Ordinary `make test` does not replace the explicit slow integration/live gates.
+
+For runtime validation, use project-native compile checks, then constraints,
+then focused tests as described in [Development Tooling](./features/development-tooling).
+See also [Hot Reload Units](./features/hot-reload-units) and
+[Lifecycle Centralization](./lifecycle-centralization).

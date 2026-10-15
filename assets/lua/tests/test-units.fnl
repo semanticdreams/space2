@@ -318,6 +318,142 @@
 (table.insert tests {:name "path separator rejects backslash on POSIX"
                      :fn path-separator-rejects-backslash-on-posix})
 
+(fn with-fake-reload-watcher [f]
+  (with-temp-dir
+    (fn [dir]
+      (local original-watcher FileWatch.FileWatcher)
+      (local original-now-ms app.engine.now-ms)
+      (local state {:now-ms 0 :events [] :controller nil :dropped? false})
+      (set FileWatch.FileWatcher
+           (fn [_opts]
+             {:add-watch (fn [_self _path _recursive?] true)
+              :start (fn [_self] true)
+              :poll (fn [_self]
+                      (local events state.events)
+                      (set state.events [])
+                      events)
+              :directories (fn [_self] [dir])
+              :drop (fn [_self] (set state.dropped? true))}))
+      (set app.engine.now-ms (fn [_self] state.now-ms))
+      (local (ok result) (pcall f dir state))
+      (local (cleanup-ok cleanup-err)
+        (pcall (fn []
+                 (when state.controller
+                   (state.controller:drop)))))
+      (set FileWatch.FileWatcher original-watcher)
+      (set app.engine.now-ms original-now-ms)
+      (if (not ok) (error result)
+          (not cleanup-ok) (error cleanup-err)
+          result))))
+
+(fn record-deferred-request! [spy state controller]
+  (assert (= controller state.controller) "Callback must receive the controller")
+  (set spy.requests (+ spy.requests 1)))
+
+(fn app-root-wrapper-defers-watcher-reload-until-requested-execution []
+  (local module-name "__test_app_root_deferred_reload")
+  (local previous-module (. package.loaded module-name))
+  (local previous-log-session _G.__space_debug_log_session_started)
+  (local spy {:requests 0 :unloads 0 :restores 0})
+  (set (. package.loaded module-name)
+       {:init (fn [] true)
+        :drop (fn [] (set spy.unloads (+ spy.unloads 1)))
+        :snapshot (fn [] {:marker "deferred"})
+        :restore (fn [snapshot]
+                   (assert (= snapshot.marker "deferred"))
+                   (set spy.restores (+ spy.restores 1)))})
+  (local (ok result)
+    (pcall with-fake-reload-watcher
+      (fn [dir state]
+        (set state.controller
+             (HotReload.AppRootController
+               {:watch-paths [dir]
+                :module-name module-name
+                :debounce-ms 10
+                :on-reload-requested #(record-deferred-request! spy state $1)}))
+        (set state.now-ms 6000)
+        (set state.events [{:path (fs.join-path dir "changed.fnl") :action "modified"}])
+        (state.controller:update 0)
+        (set state.now-ms 6011)
+        (state.controller:update 0)
+        (state.controller:update 0)
+        (assert (= spy.requests 1) "Expected one deferred request per pending batch")
+        (assert (= spy.unloads 0) "Watcher update must not execute reload inline")
+        (assert (= (. (state.controller:debug-state) :pending-event-count) 1))
+        (assert (state.controller:reload-now!))
+        (assert (= spy.unloads 1))
+        (assert (= spy.restores 1))
+        (assert (= (. (state.controller:debug-state) :pending-event-count) 0))
+        (state.controller:update 0)
+        (assert (= spy.requests 1) "Successful reload must clear the pending batch")
+        true)))
+  (set (. package.loaded module-name) previous-module)
+  (set _G.__space_debug_log_session_started previous-log-session)
+  (if ok result (error result)))
+
+(table.insert tests {:name "app root wrapper defers watcher reload until requested execution"
+                     :fn app-root-wrapper-defers-watcher-reload-until-requested-execution})
+
+(fn record-reload-phase! [calls id phase ctx]
+  (assert (= ctx.target-unit.id id) "Lifecycle context must identify the executed target")
+  (table.insert calls (.. id ":" phase)))
+
+(fn counted-reload-unit [id parent-id path calls]
+  (Units.Unit
+    {:id id :parent-id parent-id :owned-paths [path]
+     :snapshot (fn [ctx]
+                 (record-reload-phase! calls id "snapshot" ctx)
+                 {:unit-id id})
+     :unload #(record-reload-phase! calls id "unload" $1)
+     :load #(record-reload-phase! calls id "load" $1)
+     :restore (fn [snapshot ctx]
+                (assert (= snapshot.unit-id id) "Restore must receive the target's snapshot")
+                (record-reload-phase! calls id "restore" ctx))}))
+
+(fn check-hot-reload-eligibility [scenario dir state]
+  (local calls [])
+  (local root (counted-reload-unit "dev-root" nil dir calls))
+  (local group-path (fs.join-path dir "group"))
+  (local group (counted-reload-unit "group" "dev-root" group-path calls))
+  (local a (counted-reload-unit "a" "group" (fs.join-path group-path "a") calls))
+  (local b (counted-reload-unit "b" "group" (fs.join-path group-path "b") calls))
+  (local other (counted-reload-unit "other" "dev-root" (fs.join-path dir "other") calls))
+  (local paths {:a (fs.join-path group-path "a" "code.fnl")
+                :b (fs.join-path group-path "b" "code.fnl")
+                :other (fs.join-path dir "other" "code.fnl")
+                :root (fs.join-path dir "root.fnl")
+                :unmatched (fs.join-path (fs.parent dir) "unmatched.fnl")})
+  (set state.controller
+       (HotReload.HotReloadController
+         {:unit root :units [group a b other] :root-unit-id "dev-root"
+          :watch-paths [dir] :narrow-reload-unit-ids scenario.allowlist}))
+  (local changes (icollect [_ key (ipairs scenario.changes)]
+                   {:path (. paths key) :action "modified"}))
+  (assert (state.controller:reload-now! {:changes changes}))
+  (local expected (icollect [_ phase (ipairs ["snapshot" "unload" "load" "restore"])]
+                    (.. scenario.target ":" phase)))
+  (assert (= (fennel.view calls) (fennel.view expected))
+          (.. "Only final target may execute: " (fennel.view calls)))
+  (local debug-state (state.controller:debug-state))
+  (assert (= debug-state.last-target-unit-id scenario.target) "Debug target must match execution")
+  (assert (= debug-state.last-reload-change-count (length changes)))
+  (assert (= debug-state.reload-count 1)))
+
+(each [_ scenario (ipairs [{:name "omitted defaults to root" :changes [:a] :target "dev-root"}
+                       {:name "empty defaults to root" :allowlist [] :changes [:a] :target "dev-root"}
+                       {:name "explicit leaf" :allowlist ["a"] :changes [:a] :target "a"}
+                       {:name "unlisted sibling" :allowlist ["a"] :changes [:b] :target "dev-root"}
+                       {:name "unlisted other" :allowlist ["a"] :changes [:other] :target "dev-root"}
+                       {:name "leaves do not certify ancestor" :allowlist ["a" "b"] :changes [:a :b] :target "dev-root"}
+                       {:name "explicit common ancestor" :allowlist ["group"] :changes [:a :b] :target "group"}
+                       {:name "cross branch common root" :allowlist ["a" "other"] :changes [:a :other] :target "dev-root"}
+                       {:name "root owned" :allowlist ["a"] :changes [:root] :target "dev-root"}
+                       {:name "unmatched" :allowlist ["a"] :changes [:unmatched] :target "dev-root"}
+                       {:name "empty changes" :allowlist ["a"] :changes [] :target "dev-root"}])]
+  (table.insert tests {:name (.. "hot reload eligibility " scenario.name)
+                       :fn #(with-fake-reload-watcher
+                              (fn [dir state] (check-hot-reload-eligibility scenario dir state)))}))
+
 (local main
   (fn []
     (local runner (require :tests/runner))

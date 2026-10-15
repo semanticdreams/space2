@@ -8,29 +8,44 @@ tags:
   - lifecycle
   - centralization
 created: 2026-07-14
-updated: 2026-07-14
+updated: 2026-10-15
 ---
 
 # Lifecycle ownership centralization
 
 ## Summary
 
-The April 2026 push to replace implicit, signal-driven ownership with explicit, centralized lifecycle management. A prerequisite for hot-reload, activities, and reliable teardown.
+The April 2026 push to replace implicit, signal-driven ownership with explicit,
+centralized lifecycle management. Ownership is a prerequisite for hot reload,
+activities and reliable teardown, not proof of independently fresh replacement.
+See the [reload boundary contract](/dev/reloadable-units) before enabling a
+smaller boundary.
 
 ## What was done
 
 1. **Centralized frame update** — single update entry point owns the full update pass (`2026-04-15`)
-2. **Signal lifecycle hardening** — signals disconnect when owners drop; graph views explicitly cleaned up before rebuild (`2026-04-16`)
+2. **Signal lifecycle hardening** — explicitly managed connections disconnect on owner teardown; graph views explicitly cleaned up before rebuild (`2026-04-16`)
 3. **Double-drop fix** — composite view children teardown clarified (`2026-04-16`)
 4. **UnitManager** — explicit unit registry, SourceUnit, and runtime unit lifecycle (`2026-05-08`)
 5. **Activity lifecycle centralization** — workspace shell owns activate/deactivate lifecycle (`2026-04-30`, migrated from canvas modes in July 2026)
 
 ## Results
 
-- Eliminated the most common runtime crash class (stale callbacks after drop)
-- Enabled hot-reload: units can be safely unloaded and reloaded
-- Enabled activity switching: activities activate/deactivate with clean transitions
-- Enabled panel transfer: panels move between surfaces with transaction safety
+- Reduced stale-callback-after-drop failures through explicit teardown ownership.
+- Enabled lifecycle reload operations; controller-driven development reloads now
+  default to app-root. Built-in child lifecycles and experimental narrow fixtures
+  do not establish that every retained consumer uses fresh code.
+- Activity activation supports explicit cleanup stacks and staged runtime hooks;
+  panel transfer has its own scoped transaction behavior. Neither is universal
+  side-effect rollback for unit reloads.
+
+`Unit:connect-signal` tracks named connections and disconnects them on unload or
+failed-load cleanup. It does not automatically own arbitrary `signal:connect`
+calls, pending callbacks, timers or async work. Authors must register cleanup,
+order consumer/provider teardown, and address retained executable references.
+Direct Unit/manager/agent/MCP reloads do not inherit controller root eligibility
+or its tracked-module recovery. These limits remain even with centralized
+lifecycle ownership.
 
 ## Related
 

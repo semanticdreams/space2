@@ -19,7 +19,7 @@
 - Docs-only PRs may skip native validation only when every changed path is under `docs/` or is a root `*.md` file.
 - Prebuilt-runtime PRs may skip native compilation only when every changed path is under `assets/`, `docs/`, or is a root `*.md` file.
 - Any change to `.github/`, `scripts/`, `src/`, `apps/`, `external/`, `ffi/`, `tests/`, `CMakeLists.txt`, `Makefile`, `*.cmake`, or any other non-asset/non-doc path requires full native validation.
-- For prebuilt-runtime validation, set `SPACE_ASSETS_PATH` to `${{ github.workspace }}/assets` and set `FENNEL_PATH`/`FENNEL_MACRO_PATH` to `${{ github.workspace }}/assets/lua/?.fnl;${{ github.workspace }}/assets/lua/?/init.fnl`.
+- For prebuilt-runtime validation, set `SPACE_ASSETS_PATH` to <code v-pre>${{ github.workspace }}/assets</code> and set `FENNEL_PATH`/`FENNEL_MACRO_PATH` to <code v-pre>${{ github.workspace }}/assets/lua/?.fnl;${{ github.workspace }}/assets/lua/?/init.fnl</code>.
 - Keep recent Ninja and per-run compiler cache stat improvements unless review finds a correctness issue.
 
 ---
@@ -327,7 +327,7 @@ After `Build` and before tests, add:
 
 Add a `Resolve prebuilt runtime` step with `id: prebuilt-runtime`, running when `steps.test-scope.outputs.use-prebuilt-runtime == 'true'`. It must:
 
-1. Use `GH_TOKEN: ${{ github.token }}`.
+1. Use <code v-pre>GH_TOKEN: ${{ github.token }}</code>.
 2. Query latest successful `test.yml` push run on `main`.
 3. Download only artifact `space-linux-minimal-runtime` from that run.
 4. Install it to `build/space` and `chmod +x build/space`.
