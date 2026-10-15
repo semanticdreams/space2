@@ -290,14 +290,8 @@ def test_stale_merged_pr_recovery_routes_through_recovery_operator():
         assert missing_terms == [], f"{path.relative_to(REPO_ROOT)} missing {missing_terms}"
 
 
-def test_local_main_wrapup_and_vertical_slice_handoff_are_documented():
+def test_legacy_strict_local_main_recovery_remains_documented():
     required = {
-        REPO_ROOT / ".opencode" / "agents" / "fast-dev.md": [
-            "local `main`",
-            "feature branch",
-            "strict supervisor",
-            "vertical slice handoff",
-        ],
         REPO_ROOT / ".opencode" / "agents" / "supervisor.md": [
             "create-local-main-wrapup-branch",
             "fast-dev/local-main-",
@@ -311,10 +305,9 @@ def test_local_main_wrapup_and_vertical_slice_handoff_are_documented():
             "Do not push",
         ],
         REPO_ROOT / "docs" / "dev" / "features" / "opencode-agent-workflow.md": [
-            "Local main wrap-up",
+            "Legacy strict-flow local-main recovery",
             "create-local-main-wrapup-branch",
             "fast-dev/local-main-<short-head-sha>",
-            "Vertical slice handoff",
         ],
     }
 
@@ -324,7 +317,7 @@ def test_local_main_wrapup_and_vertical_slice_handoff_are_documented():
         assert missing == [], f"{path.relative_to(REPO_ROOT)} missing {missing}"
 
 
-def test_workflow_docs_do_not_recommend_raw_github_polling_commands():
+def test_strict_workflow_does_not_recommend_raw_github_polling_commands():
     forbidden_commands = [
         "gh pr view",
         "gh run list",
@@ -333,7 +326,6 @@ def test_workflow_docs_do_not_recommend_raw_github_polling_commands():
     documented_paths = [
         REPO_ROOT / ".opencode" / "skills" / "finishing-a-development-branch" / "SKILL.md",
         REPO_ROOT / ".opencode" / "agents" / "supervisor.md",
-        REPO_ROOT / "docs" / "dev" / "features" / "opencode-agent-workflow.md",
     ]
 
     for path in documented_paths:
@@ -342,6 +334,113 @@ def test_workflow_docs_do_not_recommend_raw_github_polling_commands():
             text = text.split("---\n", 2)[2]
         present_commands = [command for command in forbidden_commands if command in text]
         assert present_commands == [], f"{path.relative_to(REPO_ROOT)} recommends {present_commands}"
+
+
+def scalar_agent(name: str, mode: str, action: str) -> str:
+    return agent(name, "  bash: deny\n").replace(
+        "mode: subagent", f"mode: {mode}"
+    ).replace("permission:\n  bash: deny", f"permission: {action}")
+
+
+def test_fast_dev_primary_accepts_scalar_allow(tmp_path: Path):
+    repo = make_repo(tmp_path)
+    write_file(repo / ".opencode/agents/fast-dev.md", scalar_agent("fast-dev", "primary", "allow"))
+    assert load_checker().check_repo(repo) == []
+
+
+@pytest.mark.parametrize(
+    "name,mode,action",
+    [
+        ("example-agent", "primary", "allow"),
+        ("fast-dev-copy", "primary", "allow"),
+        ("fast-dev", "subagent", "allow"),
+        ("fast-dev", "all", "allow"),
+        ("fast-dev", "primary", "ask"),
+        ("example-agent", "subagent", "ask"),
+    ],
+)
+def test_fast_dev_scalar_grant_is_exact_name_mode_and_action_only(tmp_path: Path, name: str, mode: str, action: str):
+    repo = make_repo(tmp_path)
+    write_file(repo / f".opencode/agents/{name}.md", scalar_agent(name, mode, action))
+    assert "permission-profile" in violation_codes(repo)
+
+
+def test_fast_dev_primary_requires_broad_scalar_profile(tmp_path: Path):
+    repo = make_repo(tmp_path, agent_name="fast-dev")
+    assert "permission-profile" in violation_codes(repo)
+
+
+FAST_DEV_REVIEWER_PERMISSIONS = (
+    "  read: allow\n  glob: allow\n  grep: allow\n  list: allow\n  lsp: allow\n"
+    "  edit: deny\n  task: deny\n  external_directory: deny\n"
+    "  webfetch: deny\n  websearch: deny\n  question: deny\n  bash: allow\n"
+)
+
+
+def test_fast_dev_reviewer_observational_profile_passes(tmp_path: Path):
+    repo = make_repo(tmp_path, agent_name="fast-dev-reviewer", permission_text=FAST_DEV_REVIEWER_PERMISSIONS)
+    assert load_checker().check_repo(repo) == []
+
+
+@pytest.mark.parametrize("key", ["edit", "task", "external_directory", "webfetch", "websearch", "question"])
+def test_fast_dev_reviewer_rejects_operational_grants(tmp_path: Path, key: str):
+    permissions = FAST_DEV_REVIEWER_PERMISSIONS.replace(f"  {key}: deny", f"  {key}: allow")
+    repo = make_repo(tmp_path, agent_name="fast-dev-reviewer", permission_text=permissions)
+    assert "role-boundary" in violation_codes(repo)
+
+
+@pytest.mark.parametrize("key", ["read", "glob", "grep", "list", "lsp", "bash"])
+def test_fast_dev_reviewer_requires_inspection_access(tmp_path: Path, key: str):
+    permissions = FAST_DEV_REVIEWER_PERMISSIONS.replace(f"  {key}: allow", f"  {key}: deny")
+    repo = make_repo(tmp_path, agent_name="fast-dev-reviewer", permission_text=permissions)
+    assert "role-boundary" in violation_codes(repo)
+
+
+def test_fast_dev_reviewer_requires_subagent_mode(tmp_path: Path):
+    repo = make_repo(tmp_path)
+    text = agent("fast-dev-reviewer", FAST_DEV_REVIEWER_PERMISSIONS).replace("mode: subagent", "mode: primary")
+    write_file(repo / ".opencode/agents/fast-dev-reviewer.md", text)
+    assert "role-boundary" in violation_codes(repo)
+
+
+def test_fast_dev_primary_contract_is_direct_branch_scoped_and_local_only():
+    text = (REPO_ROOT / ".opencode/agents/fast-dev.md").read_text(encoding="utf-8")
+    keys, _ = load_checker()._frontmatter(text)
+    assert keys["permission"] == "allow"
+    assert keys["mode"] == "primary"
+    for term in ["fast-dev/<topic>", "origin/main", "before edits", "unmerged", "dirty", "local only", "explicit", "fast-dev-wrap-up", "space-fennel", "space-graph-doctrine"]:
+        assert term in text
+    for term in ["supervisor", "micro-design", "dispatch `implementer`", "capability agents", "vertical slice handoff"]:
+        assert term not in text.lower()
+
+
+def test_fast_dev_reviewer_contract_covers_all_commits_without_operations():
+    text = (REPO_ROOT / ".opencode/agents/fast-dev-reviewer.md").read_text(encoding="utf-8")
+    for term in ["base/head SHAs", "every accumulated commit", "final diff", "file/line", "coverage gaps", "Do not run tests", "GitHub", "process artifacts"]:
+        assert term in text
+    assert "supervisor" not in text.lower()
+
+
+def test_fast_dev_wrap_up_contract_requires_review_direct_fixes_and_fetched_main_proof():
+    text = (REPO_ROOT / ".opencode/skills/fast-dev-wrap-up/SKILL.md").read_text(encoding="utf-8")
+    for term in [
+        "explicit", "commit request", "git fetch origin", "git merge origin/main",
+        "git log origin/main..HEAD", "git diff origin/main...HEAD", "base/head SHAs",
+        "fast-dev-reviewer", "one independent review", "Fix findings", "self-review",
+        "no mandatory independent re-review", "gh pr create", "gh pr merge", "--auto",
+        "gh pr view", "gh run list", "gh run watch", "100", "mergedAt", "mergeCommit",
+        "git merge-base --is-ancestor <merge-sha> origin/main", "merge queue", "required `test`",
+        "space-testing-runtime", "unresolved material", "required validation failures",
+    ]:
+        assert term in text
+    assert "supervisor" not in text.lower()
+
+
+def test_fast_dev_agents_exception_retains_technical_guidance_and_overrides_imported_process():
+    text = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    exception = text.split("## Fast-dev workflow exception", 1)[1].split("## Branch Convention", 1)[0]
+    for term in ["selected `fast-dev` primary", "imported by domain skills", "planning", "review", "commit", "explicit", "technical", "evidence", "unresolved material", "required validation failures"]:
+        assert term in exception
 
 
 def test_finishing_skill_does_not_recommend_branch_deletion():

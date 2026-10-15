@@ -274,7 +274,14 @@ def _check_no_ask_actions(path: Path, repo_root: Path, raw: str) -> list[PolicyV
 
 def _check_role_boundaries(path: Path, repo_root: Path, name: str, raw: str) -> list[PolicyViolation]:
     violations: list[PolicyViolation] = []
-    if name == "reviewer":
+    if name == "fast-dev-reviewer":
+        for key in ("edit", "task", "external_directory", "webfetch", "websearch", "question"):
+            if not _has_scalar_permission(raw, key, "deny"):
+                violations.append(_violation(path, repo_root, "role-boundary", f"fast-dev-reviewer must keep {key}: deny"))
+        for key in ("read", "glob", "grep", "list", "lsp", "bash"):
+            if not _has_scalar_permission(raw, key, "allow"):
+                violations.append(_violation(path, repo_root, "role-boundary", f"fast-dev-reviewer must keep {key}: allow for inspection"))
+    elif name == "reviewer":
         for key in ("edit", "task", "external_directory", "webfetch", "websearch", "question", "bash"):
             if not _has_scalar_permission(raw, key, "deny"):
                 violations.append(_violation(path, repo_root, "role-boundary", f"reviewer must keep {key}: deny"))
@@ -291,6 +298,19 @@ def _check_role_boundaries(path: Path, repo_root: Path, name: str, raw: str) -> 
             if not _has_scalar_permission(raw, key, "allow"):
                 violations.append(_violation(path, repo_root, "role-boundary", f"web-researcher must keep {key}: allow"))
     return violations
+
+
+def _check_permission_profile(path: Path, repo_root: Path, keys: dict[str, str]) -> list[PolicyViolation]:
+    """Only the canonical fast-dev primary may grant all tools at once."""
+    permission = keys.get("permission", "")
+    if path.stem == "fast-dev":
+        if keys.get("mode") != "primary" or permission != "allow":
+            return [_violation(path, repo_root, "permission-profile", "fast-dev must use mode: primary and scalar permission: allow")]
+    elif permission and permission != "deny":
+        return [_violation(path, repo_root, "permission-profile", "scalar permission grants are reserved for the fast-dev primary")]
+    if path.stem == "fast-dev-reviewer" and keys.get("mode") != "subagent":
+        return [_violation(path, repo_root, "role-boundary", "fast-dev-reviewer must keep mode: subagent")]
+    return []
 
 
 def _check_capability_boundary(path: Path, repo_root: Path, name: str, raw: str) -> list[PolicyViolation]:
@@ -403,6 +423,7 @@ def _check_agents(repo_root: Path) -> list[PolicyViolation]:
         missing = REQUIRED_AGENT_KEYS - set(keys)
         if missing:
             violations.append(_violation(path, repo_root, "agent-frontmatter", f"agent frontmatter missing: {', '.join(sorted(missing))}"))
+        violations.extend(_check_permission_profile(path, repo_root, keys))
         violations.extend(_check_no_ask_actions(path, repo_root, raw))
         violations.extend(_check_unsafe_text(path, repo_root, raw))
         violations.extend(_check_role_boundaries(path, repo_root, name, raw))
