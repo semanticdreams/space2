@@ -715,6 +715,11 @@ endif()
 
 function(space_configure_app_target target_name)
     target_link_libraries(${target_name} ${PROJECT_NAME}_lib)
+    target_compile_definitions(${target_name} PRIVATE
+        SPACE_NATIVE_SOURCE_ROOT="${CMAKE_SOURCE_DIR}"
+        SPACE_NATIVE_BUILD_ROOT="${CMAKE_BINARY_DIR}"
+        SPACE_NATIVE_BUILD_PROFILE="${SPACE_BUILD_PROFILE}"
+        SPACE_NATIVE_CEF_ENABLED=$<BOOL:${SPACE_ENABLE_CEF}>)
     set_target_properties(${target_name} PROPERTIES
         INSTALL_RPATH "\$ORIGIN/../lib"
     )
@@ -1069,6 +1074,11 @@ add_test(NAME test_realtime_core COMMAND test_realtime_core)
 set_tests_properties(test_realtime_core PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
+
+add_executable(test_live_dev_bootstrap tests/test_live_dev_bootstrap.cpp src/live_dev_bootstrap.cpp)
+target_include_directories(test_live_dev_bootstrap PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(test_live_dev_bootstrap lua Boost::headers)
+add_test(NAME test_live_dev_bootstrap COMMAND test_live_dev_bootstrap)
 
 add_executable(test_executable_path
     tests/test_executable_path.cpp

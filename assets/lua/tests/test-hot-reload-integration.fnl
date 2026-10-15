@@ -11,6 +11,18 @@
 
 (local tests [])
 
+(fn start-test-control! [endpoint]
+  (local LiveDev (require :live-dev-runtime))
+  (LiveDev.start! nil {:args [] :endpoint endpoint :reload-config app.hot-reload-config}))
+
+(fn stop-test-control! []
+  ((. (require :live-dev-runtime) :stop!)))
+
+(fn dispatch-control! [] ((. (require :callbacks) :dispatch)))
+(fn check-async-result! [id]
+  (_G.remote_control.resolve id "after-root-reload")
+  (assert (= (. (_G.remote_control.poll id) :value) "after-root-reload")))
+
 (fn restore-test-runner-app-services! []
   (AppBootstrap.init-themes)
   (AppBootstrap.init-lights)
@@ -66,11 +78,9 @@
       (error body-result)))
 
 (fn cleanup-app-hot-reload-controller-and-main! []
-  (when app.hot-reload-controller
-    (app.hot-reload-controller:drop)
-    (set app.hot-reload-controller nil))
   (when (= (type (. (require :main) :drop)) :function)
-    (drop-main-and-restore-test-fixture!)))
+    (drop-main-and-restore-test-fixture!))
+  (stop-test-control!))
 
 (fn cleanup-main-if-engine! []
   (when (and (= (type (. (require :main) :drop)) :function) app.engine)
@@ -105,7 +115,7 @@
 
 (fn full-app-root-reload-roundtrips-active-world []
   (with-temp-dir
-    (fn [_dir]
+    (fn [dir]
       (local Main (require-main!))
       (local DebugLog (require :debug-log))
       (local original-init-renderers AppBootstrap.init-renderers)
@@ -115,6 +125,7 @@
       (local original-watcher FileWatch.FileWatcher)
       (local original-worlds-dir app.worlds-dir)
       (local watch-root (fs.join-path runtime.assets-path "lua"))
+      (local endpoint (.. "ipc://" (fs.join-path dir "control.sock")))
       (set AppBootstrap.init-renderers
            (fn [opts]
              (set app.renderers (make-renderer-stub))
@@ -131,7 +142,11 @@
         (pcall
           (fn []
             ((. Main :install-app-shell!))
+            (local control (start-test-control! endpoint))
+            (local transport app.remote-control)
+            (local async-id (_G.remote_control.create))
             ((. Main :init))
+            (control:mark-ready!)
             (DebugLog.log "test" "root reload marker")
             (local before-debug-log (fs.read-file DebugLog.log-path))
             (assert (string.find before-debug-log "root reload marker" 1 true)
@@ -145,20 +160,20 @@
             (local before-id created-world.id)
             (assert (app.world-manager:activate-world-id before-id)
                     "Expected to activate created world before reload")
-            (local controller
-              (or app.hot-reload-controller
-                  (HotReload.AppRootController {:watch-paths [watch-root]
-                                                :preserve-modules ["app-bootstrap"
-                                                                   "hot-reload"
-                                                                   "tests.test-hot-reload-integration"
-                                                                   "units"]})))
-            (controller:use-manual!)
+            (local controller (assert app.hot-reload-controller "outer controller missing"))
+            (control:request 1 "manual")
+            (dispatch-control!)
             (set FileWatch.FileWatcher (fn [_opts] (error "root init reacquired watcher")))
-            (local reload-result (controller:reload-root!))
-            (assert reload-result.ok
+            (control:request 2 "reload")
+            (dispatch-control!)
+            (local reload-result (control:operation 2))
+            (assert (= reload-result.status "succeeded")
                     "Expected root hot reload to succeed")
-            (assert (= reload-result.target-unit-id "app-root"))
+            (assert (= reload-result.action "reload"))
             (assert (= reload-result.rollback "not-needed"))
+            (assert (= (. (control:status) :generation) 2))
+            (assert (= app.remote-control transport) "root reload must retain the RC object")
+            (check-async-result! async-id)
             (assert (= app.hot-reload-controller controller)
                     "Root initialization should preserve the manual controller")
             (assert (= (. (controller:debug-state) :watch?) false))
@@ -172,9 +187,7 @@
                     "Expected installed fennel cache searcher after root reload")
             (assert (= (count-searcher-occurrences package.__space_fennel_cache_searcher) 1)
                     "Expected exactly one installed fennel cache searcher after root reload")
-            (when (and controller controller.drop)
-              (controller:drop))
-            (set app.hot-reload-controller nil)
+            (stop-test-control!)
             true)))
       (local (cleanup-ok cleanup-result)
         (pcall cleanup-app-hot-reload-controller-and-main!))
@@ -185,6 +198,17 @@
       (set app.hot-reload-controller original-controller)
       (set app.worlds-dir original-worlds-dir)
       (finish-protected-result ok result cleanup-ok cleanup-result))))
+
+(fn check-test-control! [control controller]
+  (local LiveDev (require :live-dev-runtime))
+  (assert (= app.hot-reload-controller controller)
+          "Root drop must preserve borrowed process control")
+  (assert (= (LiveDev.current) control)))
+
+(fn cleanup-test-control! [Main]
+  (local (ok result) (pcall cleanup-main-var-if-engine! Main))
+  (local (stop-ok stop-result) (pcall stop-test-control!))
+  (finish-protected-result ok result stop-ok stop-result))
 
 (fn drop-app-cleans-hot-reload-controller-and-callback []
   (with-temp-dir
@@ -208,19 +232,19 @@
         (pcall
           (fn []
             ((. Main :install-app-shell!))
+            (local control (start-test-control!))
+            (local controller app.hot-reload-controller)
             ((. Main :init))
             (assert app.hot-reload-controller
                     "Expected app.hot-reload-controller after init")
-            (assert app.hot-reload-callback-id
-                    "Expected app.hot-reload-callback-id after init")
-            ((. Main :drop))
-            (assert (= app.hot-reload-controller nil)
-                    "Expected drop to clear app.hot-reload-controller")
             (assert (= app.hot-reload-callback-id nil)
-                    "Expected drop to clear app.hot-reload-callback-id")
+                    "Root init must not create process-owned callbacks")
+            ((. Main :drop))
+            (check-test-control! control controller)
+            (stop-test-control!)
             true)))
       (local (cleanup-ok cleanup-result)
-        (pcall cleanup-main-var-if-engine! Main))
+        (pcall cleanup-test-control! Main))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (set app.hot-reload-config original-config)
@@ -1030,6 +1054,103 @@
       (set AppBootstrap.init-renderers original-init-renderers)
       (finish-protected-result ok result cleanup-ok cleanup-result))))
 
+(fn normal-startup-first-reload []
+  (local AppConfig (require :app-config))
+  (local LiveDev (require :live-dev-runtime))
+  (local ErrorReporting (require :error-reporting))
+  (local before-reporting-init ErrorReporting.init)
+  (local before-renderers app.renderers)
+  (local before-main package.loaded.main)
+  (local engine app.engine)
+  (local updated engine.events.updated)
+  (local before {:run engine.run :shutdown engine.shutdown :connect updated.connect
+                 :disconnect updated.disconnect :run-main AppConfig.run-main
+                 :config app.hot-reload-config :renderers AppBootstrap.init-renderers
+                 :suppressed app.__suppress-main-run?})
+  (local state {:connections 0 :active 0 :snapshots 0 :unloads 0 :inside-run false :handlers {} :reporting-inits 0})
+  (fn connect [self handler]
+    (when (= handler app.update)
+      (set state.connections (+ state.connections 1))
+      (set state.active (+ state.active 1))
+      (tset state.handlers handler true))
+    (before.connect self handler))
+  (fn disconnect [self handler allow-missing?]
+    (when (. state.handlers handler)
+      (set state.active (- state.active 1))
+      (tset state.handlers handler nil))
+    (before.disconnect self handler allow-missing?))
+  (fn renderers [opts]
+    (local previous-renderer-factory package.loaded.renderers)
+    (set package.loaded.renderers make-renderer-stub)
+    (local (ok result) (pcall before.renderers opts))
+    (set package.loaded.renderers previous-renderer-factory)
+    (assert ok (tostring result))
+    result)
+  (fn shutdown [_self] (set state.shutdown true))
+  (fn init-reporting [_opts]
+    (set state.reporting-inits (+ state.reporting-inits 1))
+    true)
+  (fn run [_self]
+    (set state.inside-run true)
+    (local root (assert (. package.loaded :main) "normal startup must publish root exports before run"))
+    (each [_ key (ipairs [:init :drop :snapshot :restore])]
+      (assert (= (type (. root key)) :function) (.. "current root export missing: " key)))
+    (local world app.world-manager)
+    (local handler app.update-handler)
+    (local old-snapshot root.snapshot)
+    (local old-drop root.drop)
+    (fn snapshot []
+      (assert state.inside-run)
+      (assert (= app.world-manager world) "snapshot must inspect the existing root")
+      (assert (= app.update-handler handler) "snapshot must not reevaluate main")
+      (set state.snapshots (+ state.snapshots 1))
+      (old-snapshot))
+    (fn unload []
+      (assert (= app.world-manager world) "unload must drop the existing root")
+      (set state.unloads (+ state.unloads 1))
+      (old-drop))
+    (set root.snapshot snapshot)
+    (set root.drop unload)
+    (local control (assert (LiveDev.current)))
+    (control:request 1 "manual") (dispatch-control!)
+    (control:request 2 "reload") (dispatch-control!)
+    (local op (control:operation 2))
+    (assert (= op.status "succeeded") (tostring op.error))
+    (assert (= state.snapshots 1))
+    (assert (= state.unloads 1))
+    (assert (= state.connections 2) "root must initialize exactly once per generation")
+    (assert (= state.active 1) "first reload must not leave duplicate root subscriptions")
+    (assert (= (. (control:status) :generation) 2))
+    (set state.current (. package.loaded :main))
+    (assert (not= state.current root))
+    (set state.inside-run false))
+  (fn body []
+    (set ErrorReporting.init init-reporting)
+    (set engine.run run) (set engine.shutdown shutdown)
+    (set updated.connect connect) (set updated.disconnect disconnect)
+    (set AppBootstrap.init-renderers renderers)
+    (set app.hot-reload-config {:enabled true :generic? true
+                               :preserve-modules ["app-bootstrap" "tests.test-hot-reload-integration"]})
+    (set AppConfig.run-main true) (set app.__suppress-main-run? nil)
+    (local returned (require-main!))
+    (assert (= state.reporting-inits 1) "normal startup must call only the isolated reporting initializer")
+    (assert (= returned state.current) "initial require must return the latest root exports")
+    (assert (= state.active 0))
+    (assert state.shutdown)
+    (assert (= (LiveDev.current) nil)))
+  (local (ok err) (pcall body))
+  (set ErrorReporting.init before-reporting-init)
+  (set engine.run before.run) (set engine.shutdown before.shutdown)
+  (set updated.connect before.connect) (set updated.disconnect before.disconnect)
+  (set AppConfig.run-main before.run-main) (set app.__suppress-main-run? before.suppressed)
+  (set AppBootstrap.init-renderers before.renderers) (set app.hot-reload-config before.config)
+  (set app.renderers before-renderers)
+  (set package.loaded.main before-main)
+  (local (stop-ok stop-err) (pcall LiveDev.stop!))
+  (restore-test-runner-app-services!)
+  (assert stop-ok (tostring stop-err))
+  (assert ok (tostring err)))
+
 (table.insert tests {:name "full app root reload roundtrips active world"
                      :fn full-app-root-reload-roundtrips-active-world})
 (table.insert tests {:name "drop app cleans hot reload controller and callback"
@@ -1059,7 +1180,9 @@
 (table.insert tests {:name "unloading active drawing activity updates shell state"
                      :fn unloading-active-drawing-activity-updates-shell-state})
 (table.insert tests {:name "hot reload routes drawing activity actions file changes to drawing activity unit"
-                     :fn hot-reload-routes-drawing-activity-actions-file-changes-to-drawing-activity-unit})
+                      :fn hot-reload-routes-drawing-activity-actions-file-changes-to-drawing-activity-unit})
+(table.insert tests {:name "normal startup first reload snapshots the still-running existing root"
+                     :fn normal-startup-first-reload})
 
 (local main
   (fn []

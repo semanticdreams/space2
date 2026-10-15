@@ -1,0 +1,395 @@
+(local callbacks (require :callbacks))
+(local tests [])
+
+(fn fixture [overrides body]
+  (local LiveDev (require :live-dev-runtime))
+  (local state {:reloads 0 :updates 0 :drops 0 :quits 0 :published []})
+  (fn reload-root! [_self]
+    (set state.reloads (+ state.reloads 1))
+    (if state.throw-reload (error "controller threw")
+        (or state.result {:ok true :phase "complete" :rollback "not-needed"})))
+  (fn use-manual! [_self] (set state.manual true) true)
+  (fn update [_self _delta]
+    (set state.updates (+ state.updates 1))
+    (when state.on-update (state.on-update)))
+  (fn drop [_self] (set state.drops (+ state.drops 1)))
+  (fn health-check [] (assert (not state.unhealthy) "unhealthy") true)
+  (fn publisher [status]
+    (assert (not state.publish-fails) "publisher failed")
+    (table.insert state.published status))
+  (fn unpublish [] (set state.unpublished true))
+  (fn launch-recipe [] {:cwd "/fixture" :argv ["argument with spaces"]})
+  (fn boundary-check [] (not state.changed))
+  (fn quit [] (set state.quits (+ state.quits 1)))
+  (local options
+    {:identity {:instance-id "fixture" :checkout-root "/fixture"}
+     :controller {:reload-root! reload-root! :use-manual! use-manual! :update update :drop drop}
+     :health-check health-check :publisher publisher :unpublish unpublish
+     :launch-recipe launch-recipe :boundary-check boundary-check :quit quit})
+  (each [k v (pairs (or overrides {}))] (tset options k v))
+  (local control (LiveDev.LiveDevRuntime options))
+  (local (ok result) (pcall body control state))
+  (control:drop)
+  (callbacks.dispatch)
+  (if ok result (error result)))
+
+(fn add-test [name body]
+  (fn run [] (fixture nil body))
+  (table.insert tests {:name name :fn run}))
+
+(fn deferred-poll []
+  (var control nil)
+  (var accepted nil)
+  (var ticks 0)
+  (fn tick [_self limit]
+    (assert (= limit 1))
+    (set ticks (+ ticks 1))
+    (when (= ticks 1) (set accepted (control:request 1 "reload")))
+    1)
+  (fn drop [_self] true)
+  (fn check [c state]
+    (set control c)
+    (c:start) (c:mark-ready!)
+    (callbacks.dispatch)
+    (assert (= accepted.status "pending"))
+    (assert (= state.reloads 0))
+    (callbacks.dispatch)
+    (assert (= state.reloads 1))
+    (assert (= (. (c:operation 1) :status) "succeeded"))
+    (assert (= (. (c:operation 1) :error) false))
+    (assert (= (. (c:operation 1) :rollback-error) false) "success must retain explicit absent error fields")
+    (assert (= (. (c:status) :generation) 2)))
+  (fixture {:transport {:tick tick :drop drop}} check))
+(table.insert tests {:name "native callback polling yields acceptance before reload" :fn deferred-poll})
+
+(fn request-ids [c state]
+  (c:start) (c:mark-ready!)
+  (local first (c:request 1 "manual"))
+  (assert (= (. (c:request 1 "reload") :action) first.action))
+  (assert (not (pcall c.request c 2 "reload")))
+  (callbacks.dispatch)
+  (assert state.manual)
+  (for [id 2 66]
+    (c:request id "reload") (callbacks.dispatch))
+  (assert (= state.reloads 65))
+  (assert (not (pcall c.request c 1 "reload")))
+  (assert (not (pcall c.operation c 1)))
+  (assert (= (. (c:status) :next-request-id) 67))
+  (c:request 67 "quit")
+  (assert (= state.quits 0))
+  (callbacks.dispatch)
+  (assert (= state.quits 1)))
+(add-test "request IDs deduplicate reject overlap and expire without execution" request-ids)
+
+(fn reload-failures [c state]
+  (c:start) (c:mark-ready!)
+  (each [id phase (ipairs ["snapshot" "load"])]
+    (set state.result {:ok false :phase phase :error "expected failure"
+                       :rollback (if (= phase "snapshot") "not-needed" "restored")})
+    (c:request id "reload") (callbacks.dispatch)
+    (local result (c:operation id))
+    (assert (= result.status "failed"))
+    (assert (= result.phase phase))
+    (assert (not (c:faulted?)))
+    (assert (= (. (c:status) :generation) 1)))
+  (set state.result {:ok false :phase "load" :error "load failed"
+                     :rollback "failed" :rollback-error "rollback failed"})
+  (c:request 3 "reload") (callbacks.dispatch)
+  (assert (c:faulted?))
+  (assert (. (c:operation 3) :recovery-required))
+  (assert (= (. (c:operation 3) :rollback-error) "rollback failed"))
+  (local updates state.updates)
+  (callbacks.dispatch)
+  (assert (= state.updates updates))
+  (assert (not (pcall c.request c 4 "reload")))
+  (c:request 4 "quit") (callbacks.dispatch)
+  (assert (= state.quits 1)))
+(add-test "failed reloads preserve phase rollback and fault only damaged roots" reload-failures)
+
+(fn health-failure [c state]
+  (c:start) (c:mark-ready!)
+  (set state.unhealthy true)
+  (c:request 1 "reload") (callbacks.dispatch)
+  (assert (= (. (c:operation 1) :phase) "health"))
+  (assert (= (. (c:operation 1) :status) "failed"))
+  (assert (c:faulted?))
+  (assert (= (. (c:status) :generation) 1)))
+(add-test "health failure latches fault without generation advancement" health-failure)
+
+(fn publisher-failure [c state]
+  (c:start) (c:mark-ready!)
+  (c:request 1 "reload")
+  (set state.publish-fails true)
+  (callbacks.dispatch)
+  (assert (= (. (c:operation 1) :status) "failed"))
+  (assert (= (. (c:operation 1) :phase) "publish"))
+  (assert (c:faulted?))
+  (assert (= state.reloads 0)))
+(add-test "publisher failure is visible and cannot strand a running operation" publisher-failure)
+
+(fn restart-boundary [c state]
+  (c:start) (c:mark-ready!)
+  (set state.changed true)
+  (c:request 1 "reload") (callbacks.dispatch)
+  (assert (= (. (c:operation 1) :phase) "restart-required"))
+  (assert (= state.reloads 0))
+  (c:request 2 "quit") (callbacks.dispatch)
+  (assert (= state.quits 1)))
+(add-test "restart boundary rejects mutation but leaves quit available" restart-boundary)
+
+(fn drop-queued [c state]
+  (c:start) (c:mark-ready!)
+  (c:request 1 "reload")
+  (c:drop) (c:drop)
+  (callbacks.dispatch)
+  (assert (= state.reloads 0))
+  (assert (= state.drops 1))
+  (assert state.unpublished)
+  (assert (= (. (c:operation 1) :status) "failed")))
+(add-test "drop is idempotent and queued operations never execute afterwards" drop-queued)
+
+(fn start-failure [c state]
+  (set state.publish-fails true)
+  (assert (not (pcall c.start c)))
+  (c:drop)
+  (assert (= state.drops 1)))
+(add-test "start publication errors propagate and cleanup remains possible" start-failure)
+
+(fn thrown-controller [c state]
+  (c:start) (c:mark-ready!)
+  (set state.throw-reload true)
+  (c:request 1 "reload") (callbacks.dispatch)
+  (assert (= (. (c:operation 1) :status) "failed"))
+  (assert (c:faulted?)))
+(add-test "thrown controllers fail explicitly and fault conservatively" thrown-controller)
+
+(fn startup-provenance-and-boundary []
+  (local platform ((. (require :sysinfo) :platform)))
+  (when (not= platform.os "linux") (lua "return true"))
+  (local LiveDev (require :live-dev-runtime))
+  (local native (. (require :app-config) :live-dev))
+  (local fs (require :fs))
+  (local json (require :json))
+  (local fennel (require :fennel))
+  (local tempfile (require :tempfile))
+  (local dir (tempfile.TemporaryDirectory {:prefix "live-dev-boundary-"}))
+  (local previous-path fennel.path)
+  (local previous-health _G.app.check-runtime-health)
+  (var executable-identity "original")
+  (var paths nil)
+  (fn describe [source]
+    (local identity (native.describe-source source))
+    (set identity.executable-identity executable-identity)
+    identity)
+  (fn private-paths [checkout id]
+    (set paths (native.private-paths checkout id))
+    paths)
+  (fn recipe [] {:cwd "private fixture" :argv ["argument with spaces"]})
+  (fn healthy [] true)
+  (fn body []
+    (set _G.app.check-runtime-health healthy)
+    (local macro-source (fs.read-file (fennel.search-module "macros")))
+    (local macro-path (fs.join-path dir.path "macros.fnl"))
+    (fs.write-file macro-path macro-source)
+    (local startup-path (.. dir.path "/?.fnl;" previous-path))
+    (set fennel.path startup-path)
+    (local control
+      (LiveDev.start! {:describe-source describe :private-paths private-paths
+                       :protect-file native.protect-file :launch-recipe recipe} {:args []}))
+    (control:mark-ready!)
+    (local current (control:status))
+    (local queried (LiveDev.rpc {:action "status" :expected-instance-id current.instance-id}))
+    (assert (= queried.instance-id current.instance-id))
+    (assert (= current.schema-version 1))
+    (assert (= current.generation 1))
+    (assert (= current.main-source (fs.absolute (fennel.search-module "main"))))
+    (local record (json.loads (fs.read-file paths.record)))
+    (assert (= record.instance-id current.instance-id))
+    (assert (= record.endpoint current.endpoint))
+    (assert (= record.argv nil))
+    (assert (= record.environment nil))
+    (assert (= record.launch-recipe nil))
+    (assert (not (pcall LiveDev.rpc {:action "quit" :request-id 1 :expected-instance-id "wrong"})))
+    (local launch (LiveDev.rpc {:action "launch-recipe" :expected-instance-id current.instance-id}))
+    (assert (= launch.cwd "private fixture") "RPC must use the retained private recipe accessor")
+    (fs.write-file (fs.join-path dir.path "remote-control.fnl") "{}\n")
+    (control:request 1 "manual") (callbacks.dispatch)
+    (assert (= (. (control:operation 1) :phase) "restart-required"))
+    (fs.remove (fs.join-path dir.path "remote-control.fnl"))
+    (fs.write-file macro-path (.. macro-source "\n;; changed infrastructure\n"))
+    (callbacks.dispatch)
+    (assert (not (control:faulted?)) "boundary checks must not run in the background")
+    (control:request 2 "manual") (callbacks.dispatch)
+    (assert (= (. (control:operation 2) :phase) "restart-required"))
+    (fs.write-file macro-path macro-source)
+    (set executable-identity "changed")
+    (control:request 3 "reload") (callbacks.dispatch)
+    (assert (= (. (control:operation 3) :phase) "restart-required"))
+    (set executable-identity "original")
+    (control:request 4 "manual") (callbacks.dispatch)
+    (assert (= (. (control:operation 4) :status) "succeeded"))
+    (assert (= (. (control:status) :generation) 1))
+    (LiveDev.stop!)
+    (assert (not (fs.exists paths.record))))
+  (local (ok err) (pcall body))
+  (set fennel.path previous-path)
+  (set _G.app.check-runtime-health previous-health)
+  (local (stop-ok stop-err) (pcall LiveDev.stop!))
+  (dir:drop)
+  (assert stop-ok (tostring stop-err))
+  (assert ok (tostring err)))
+(table.insert tests {:name "startup publishes public provenance and protects the private restart boundary"
+                     :fn startup-provenance-and-boundary})
+
+(fn outer-lifetime-case [phase]
+  (local Main (require :main))
+  (local events [])
+  (fn event! [name]
+    (table.insert events name)
+    (when (= phase name) (error (.. "failure in " name)))
+    true)
+  (fn start [_self] (event! "start"))
+  (fn run [_self] (event! "run"))
+  (fn shutdown [_self] (event! "shutdown"))
+  (fn ready [_self] (event! "ready"))
+  (fn start-control [] (event! "control") {:mark-ready! ready})
+  (fn init [] (event! "init"))
+  (fn drop [] (event! "drop"))
+  (fn stop [] (event! "stop"))
+  (local (ok err)
+    (pcall Main.run-app! {:engine {:start start :run run :shutdown shutdown}
+                         :start-control start-control :init init :drop drop :stop-control stop}))
+  (if phase
+      (do
+        (assert (not ok))
+        (assert (string.find (tostring err) (.. "failure in " phase) 1 true)))
+      (assert ok (tostring err)))
+  (local expected
+    (if (= phase "start") "start,shutdown"
+        (= phase "control") "start,control,stop,shutdown"
+        (= phase "init") "start,control,init,drop,stop,shutdown"
+        (= phase "ready") "start,control,init,ready,drop,stop,shutdown"
+        "start,control,init,ready,run,drop,stop,shutdown"))
+  (assert (= (table.concat events ",") expected)))
+
+(fn outer-lifetime []
+  (outer-lifetime-case nil)
+  (each [_ phase (ipairs ["start" "control" "init" "ready" "run" "drop" "stop" "shutdown"])]
+    (outer-lifetime-case phase)))
+(table.insert tests {:name "outer startup always finalizes root control and engine in order" :fn outer-lifetime})
+
+(fn required-boundary-source []
+  (local LiveDev (require :live-dev-runtime))
+  (local fennel (require :fennel))
+  (local previous fennel.search-module)
+  (fn search [name]
+    (if (= name "json-utils") nil (previous name)))
+  (set fennel.search-module search)
+  (local (ok err) (pcall LiveDev.start! nil {:args []}))
+  (set fennel.search-module previous)
+  (LiveDev.stop!)
+  (assert (not ok) "missing retained source must fail startup explicitly")
+  (assert (string.find (tostring err) "json-utils" 1 true)))
+(table.insert tests {:name "missing retained infrastructure source fails startup explicitly" :fn required-boundary-source})
+
+(fn watch-config []
+  (local Main (require :main))
+  (local previous _G.app.hot-reload-config)
+  (fn body []
+    (set _G.app.hot-reload-config {:enabled true})
+    (local config (Main.resolve-hot-reload-config))
+    (assert (= config.enabled true) "normalized ordinary watch configuration must retain enabled state"))
+  (local (ok err) (pcall body))
+  (set _G.app.hot-reload-config previous)
+  (assert ok (tostring err)))
+(table.insert tests {:name "ordinary watch configuration survives transfer to the outer owner" :fn watch-config})
+
+(fn damaged-root-does-not-update []
+  (require :main)
+  (local LiveDev (require :live-dev-runtime))
+  (local previous-current LiveDev.current)
+  (local previous-queue _G.app.next-frame-queue)
+  (fn faulted? [_self] true)
+  (fn current [] {:faulted? faulted?})
+  (set LiveDev.current current)
+  (set _G.app.next-frame-queue nil)
+  (local (ok err) (pcall _G.app.update 1))
+  (set LiveDev.current previous-current)
+  (set _G.app.next-frame-queue previous-queue)
+  (assert ok (tostring err)))
+(table.insert tests {:name "faulted control suppresses damaged root frame updates" :fn damaged-root-does-not-update})
+
+(fn accepted-action-preempts-watcher [action]
+  (var control nil)
+  (var ticks 0)
+  (var watcher-requests 0)
+  (fn tick [_self _limit]
+    (set ticks (+ ticks 1))
+    (when (= ticks 1) (control:request 1 action))
+    1)
+  (fn drop [_self] true)
+  (fn check [c state]
+    (set control c)
+    (fn due-watcher []
+      (when (and (= state.reloads 0) (not state.manual))
+        (set watcher-requests (+ watcher-requests 1))
+        (c:request 2 "reload")))
+    (set state.on-update due-watcher)
+    (c:start) (c:mark-ready!)
+    (callbacks.dispatch)
+    (assert (not (c:faulted?)) "accepted external action must preempt a due watcher")
+    (assert (= watcher-requests 0))
+    (assert (= state.updates 0))
+    (assert (= (. (c:operation 1) :status) "pending"))
+    (assert (not (pcall c.request c 2 "reload")) "external overlap must still be rejected")
+    (callbacks.dispatch)
+    (assert (= (. (c:operation 1) :status) "succeeded"))
+    (assert (not (c:faulted?)))
+    (assert (= watcher-requests 0)))
+  (fixture {:transport {:tick tick :drop drop}} check))
+(fn manual-preempts-watcher [] (accepted-action-preempts-watcher "manual"))
+(fn reload-preempts-watcher [] (accepted-action-preempts-watcher "reload"))
+(table.insert tests {:name "accepted manual action preempts due internal watcher work" :fn manual-preempts-watcher})
+(table.insert tests {:name "accepted reload action preempts due internal watcher work" :fn reload-preempts-watcher})
+
+(fn fault-between-acceptance-and-execution [action]
+  (var control nil)
+  (var ticks 0)
+  (fn tick [_self _limit]
+    (set ticks (+ ticks 1))
+    (when (= ticks 1)
+      (control:request 1 action)
+      (error "send failed after acceptance"))
+    0)
+  (fn drop [_self] true)
+  (fn check [c state]
+    (set control c)
+    (c:start) (c:mark-ready!)
+    (callbacks.dispatch)
+    (assert (c:faulted?))
+    (assert (= (. (c:operation 1) :status) "pending"))
+    (callbacks.dispatch)
+    (assert (= state.reloads 0) "latched fault must cancel queued root mutation")
+    (assert (not state.manual) "latched fault must cancel queued manual mutation")
+    (local op (c:operation 1))
+    (assert (= op.status "failed"))
+    (assert op.recovery-required)
+    (assert (= op.rollback "not-needed"))
+    (assert (string.find op.error "send failed after acceptance" 1 true))
+    (local current (c:status))
+    (assert current.faulted)
+    (assert (not current.ready))
+    (assert (= current.generation 1))
+    (c:request 2 "quit") (callbacks.dispatch)
+    (assert (= state.quits 1))
+    (assert (= (. (c:operation 2) :status) "succeeded")))
+  (fixture {:transport {:tick tick :drop drop}} check))
+(fn fault-cancels-queued-reload [] (fault-between-acceptance-and-execution "reload"))
+(fn fault-cancels-queued-manual [] (fault-between-acceptance-and-execution "manual"))
+(table.insert tests {:name "fault after acceptance cancels queued reload but permits quit" :fn fault-cancels-queued-reload})
+(table.insert tests {:name "fault after acceptance cancels queued manual action but permits quit" :fn fault-cancels-queued-manual})
+
+(fn main []
+  ((. (require :tests/runner) :run-tests) {:name "live-dev-runtime" :tests tests}))
+
+{:name "live-dev-runtime" :tests tests :main main}
