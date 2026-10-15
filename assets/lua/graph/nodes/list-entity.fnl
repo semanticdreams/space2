@@ -3,7 +3,6 @@
         :node-id node-id} (require :graph/node-base))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
 (local Signal (require :signal))
-(local IdentityStore (require :entities/identity))
 (local ListEntityStore (require :entities/list))
 (local Utils (require :graph/view/utils))
 (local KeyLoaderUtils (require :graph/key-loader-utils))
@@ -139,11 +138,20 @@
             (load-visible-node graph target-key)
             nil))))
 
+(fn remove-target-items! [self removed-key]
+  (local current (self:get-entity))
+  (when current
+    (each [_ item-key (ipairs current.items)]
+      (when (= (self.identity-store:resolve-key item-key) removed-key)
+        (self:remove-item item-key)))))
+
 (fn ListEntityNode [opts]
   (local options (or opts {}))
   (local entity-id (assert options.entity-id "ListEntityNode requires entity-id"))
-  (local identity-store (or options.identity-store (IdentityStore.get-default)))
   (local store (or options.store (ListEntityStore.get-default)))
+  (local identity-store (assert store.identity-store "ListEntityNode store requires identity-store"))
+  (assert (or (not options.identity-store) (= options.identity-store identity-store))
+          "ListEntityNode identity-store mismatch with owning store")
   (local ListEntityNodeView (require :graph/view/views/list-entity))
 
   (local entity (store:get-entity entity-id))
@@ -179,26 +187,6 @@
   (set node.get-entity
        (fn [self]
          (self.store:get-entity self.entity-id)))
-
-  (fn ensure-identity-key [self node-key]
-    (local key (tostring (or node-key "")))
-    (if (= (string.len key) 0)
-        key
-        (if (= (string.sub key 1 (string.len IDENTITY_KEY_PREFIX)) IDENTITY_KEY_PREFIX)
-            key
-            (do
-              (local graph self.graph)
-              (if (and graph graph.ensure-identity-key)
-                  (graph:ensure-identity-key key)
-                  (do
-                    (local existing
-                      (if self.identity-store.find-by-target-key
-                          (self.identity-store:find-by-target-key key)
-                          nil))
-                    (if existing
-                        (.. IDENTITY_KEY_PREFIX (tostring existing.id))
-                        (.. IDENTITY_KEY_PREFIX
-                            (tostring (. (self.identity-store:create-entity {:target-key key}) :id))))))))))
 
   (set node.add-item-nodes
        (fn [self]
@@ -254,8 +242,7 @@
 
   (set node.add-item
        (fn [self node-key]
-         (local stable-key (ensure-identity-key self node-key))
-         (self.store:add-item self.entity-id stable-key)
+          (self.store:add-item self.entity-id node-key)
          (self:add-item-nodes)))
 
   (set node.remove-item
@@ -364,8 +351,8 @@
                          (local removed-key (and removed-node removed-node.key))
                          (when (and removed-key (not (identity-key? removed-key)))
                            (local entity (self:get-entity))
-                           (when (and entity (entity-contains-node-key? entity removed-key))
-                             (self:remove-item removed-key)))))))))
+                            (when entity
+                              (remove-target-items! self removed-key)))))))))
          (local morphed-signal (and graph graph.node-morphed))
          (when (and morphed-signal (not graph-node-morphed-handler))
            (set graph-node-morphed-signal morphed-signal)
@@ -436,7 +423,7 @@
   (fn [graph opts]
     (local options (or opts {}))
     (local store (or options.store (ListEntityStore.get-default)))
-    (local identity-store (or options.identity-store (IdentityStore.get-default)))
+    (local identity-store (or options.identity-store store.identity-store))
     (graph:register-key-loader SCHEME
       (fn [key]
         (local entity-id (KeyLoaderUtils.extract-id SCHEME key))

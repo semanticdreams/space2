@@ -16,12 +16,6 @@
   (fn subject-key [item]
   (and item item.subject-key))
 
-(fn same-subject? [item key]
-  (and item item.subject-key key
-       (not (= (tostring item.subject-key) ""))
-       (not (= (tostring key) ""))
-       (= (tostring item.subject-key) (tostring key))))
-
 (fn BoardView [opts]
   (local options (or opts {}))
   (local board (assert options.board "BoardView requires :board"))
@@ -29,6 +23,12 @@
   (local ctx (assert (or options.ctx canvas.build-context)
                      "BoardView requires build context"))
   (local link-store (or options.link-store (LinkEntityStore.get-default)))
+  (local identity-store (assert link-store.identity-store "BoardView link-store requires identity-store"))
+  (fn same-key? [left right]
+    (and left right (not (= left "")) (not (= right ""))
+         (= (identity-store:resolve-key left) (identity-store:resolve-key right))))
+  (fn same-subject? [item key]
+    (and item (same-key? item.subject-key key)))
   (local layer ((FloatLayer {:name "board-layer"
                              :depth-layer-step 8}) ctx))
   (local pointer-target (or (and ctx ctx.pointer-target) canvas))
@@ -328,9 +328,9 @@
           (assert (and link link.id) "BoardView.connect-items requires link entity with id")
           (local persisted-link (link-store:get-entity link.id))
           (assert persisted-link "BoardView.connect-items link entity missing from store")
-          (assert (= (tostring persisted-link.source-key) (tostring source-key))
+          (assert (same-key? persisted-link.source-key source-key)
                   "BoardView.connect-items link source-key does not match source item")
-          (assert (= (tostring persisted-link.target-key) (tostring target-key))
+          (assert (same-key? persisted-link.target-key target-key)
                   "BoardView.connect-items link target-key does not match target item")
           (board:add-connector {:source-item-id source.id
                                 :target-item-id target.id

@@ -1,15 +1,13 @@
 (local fennel (require :fennel))
+(local original-require require)
 
 ;; Snapshot _G.app existence before the global form creates/uses it.
 ;; If _G.app was nil, restore it to nil after setup so the module
 ;; does not permanently create a global that didn't exist before.
 (local app-existed-before (not (= nil _G.app)))
 
-;; Module-level: only safe globals that don't need restore.
+;; Setup may temporarily need app; preserve its original absence below.
 (global app (or _G.app {}))
-(set app.themes {:get-active-theme (fn [] {:font "default-font"
-                                             :text {:scale 1.0}})
-                 :get-color (fn [] [1 1 1 1])})
 
 ;; Wrapper that snapshots/restores dotted global paths.
 ;; Keys not starting with 'package.' or 'app.' are prefixed with 'app.'.
@@ -107,9 +105,7 @@
   ;; Test Image Path
   (local image-res (icons:resolve "/tmp/some-icon.png"))
   (assert (= image-res.type :image) "Absolute path should identify as image")
-  (assert (= image-res.path "/tmp/some-icon.png") "Path should be preserved")
-
-  (print "test-icons-resolve passed"))
+  (assert (= image-res.path "/tmp/some-icon.png") "Path should be preserved"))
 
 (fn test-icon-widget-render []
   ;; Mock Context with Icons service
@@ -140,7 +136,40 @@
   ;; We know it's a Text widget underneath for material icons, checking children
   ;; would rely on implementation details but we can verify it doesn't crash.
   
-  (print "test-icon-widget-render passed"))
+  (widget:drop))
+
+(fn check-reimport-preserves-theme []
+  (local module-name "tests.test-icons")
+  (local previous-app _G.app)
+  (local previous-themes (and previous-app previous-app.themes))
+  (local previous-cache package.loaded)
+  (local previous-module (. previous-cache module-name))
+  (local (import-ok result)
+    (pcall (fn []
+             (tset previous-cache module-name nil)
+             (original-require module-name))))
+  (local imported-app _G.app)
+  (local imported-themes (and imported-app imported-app.themes))
+  ;; Restore every observed field/cache entry BEFORE any assertion or rethrow.
+  (when previous-app (tset previous-app :themes previous-themes))
+  (tset _G :app previous-app)
+  (tset previous-cache module-name previous-module)
+  (set package.loaded previous-cache)
+  (assert import-ok (tostring result))
+  (assert (= imported-app previous-app) "icon reimport must preserve app existence/identity")
+  (assert (= imported-themes previous-themes) "icon reimport must preserve actual theme provider identity/absence")
+  (assert (= (. package.loaded module-name) previous-module) "reimport fixture must restore module cache"))
+
+(fn test-reimport-preserves-theme []
+  (check-reimport-preserves-theme)
+  (fn without-theme []
+    (tset app :themes nil)
+    (check-reimport-preserves-theme))
+  (with-restored-app-fields [:themes] without-theme))
+
+(local tests [{:name "icons resolves material and image references" :fn test-icons-resolve}
+              {:name "icons renders native material font" :fn test-icon-widget-render}
+              {:name "icons reimport preserves theme provider and module cache" :fn test-reimport-preserves-theme}])
 
 (fn main []
   ;; Snapshot _G.app existence and engine state before mocking.
@@ -160,7 +189,9 @@
 
   (local (ok err) (pcall (fn []
     (test-icons-resolve)
+    (print "test-icons-resolve passed")
     (test-icon-widget-render)
+    (print "test-icon-widget-render passed")
     (print "All icon tests passed."))))
 
   ;; Always restore state, even if tests failed.
@@ -174,4 +205,4 @@
   ;; Re-raise any test error after cleanup
   (if (not ok) (error err)))
 
-{:main main}
+{:name "icons" :tests tests :main main}

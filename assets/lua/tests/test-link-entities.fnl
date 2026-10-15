@@ -1,5 +1,5 @@
 (local fs (require :fs))
-
+(local H (require :tests/test-reference-lifecycle-helpers))
 (local tests [])
 
 (var temp-counter 0)
@@ -59,8 +59,8 @@
                                           :target-key "node-b"}))
       (assert entity "entity should be created")
       (assert entity.id "entity should have id")
-      (assert (= entity.source-key "node-a") "entity should have correct source-key")
-      (assert (= entity.target-key "node-b") "entity should have correct target-key")
+      (H.assert-reference store.identity-store entity.source-key "node-a")
+      (H.assert-reference store.identity-store entity.target-key "node-b")
       (assert entity.created-at "entity should have created-at"))))
 
 (fn link-entity-store-retrieves-entities []
@@ -71,8 +71,8 @@
       (local retrieved (store:get-entity entity.id))
       (assert retrieved "entity should be retrieved")
       (assert (= retrieved.id entity.id) "retrieved entity should have same id")
-      (assert (= retrieved.source-key "node-a") "retrieved entity should have correct source-key")
-      (assert (= retrieved.target-key "node-b") "retrieved entity should have correct target-key"))))
+      (H.assert-reference store.identity-store retrieved.source-key "node-a")
+      (H.assert-reference store.identity-store retrieved.target-key "node-b"))))
 
 (fn link-entity-store-updates-entities []
   (with-temp-store
@@ -81,9 +81,9 @@
                                           :target-key "node-b"}))
       (local updated (store:update-entity entity.id {:source-key "node-c"}))
       (assert updated "entity should be updated")
-      (assert (= updated.source-key "node-c") "source-key should be updated")
+      (H.assert-reference store.identity-store updated.source-key "node-c")
       (local retrieved (store:get-entity entity.id))
-      (assert (= retrieved.source-key "node-c") "persisted source-key should be updated"))))
+      (H.assert-reference store.identity-store retrieved.source-key "node-c"))))
 
 (fn link-entity-store-deletes-entities []
   (with-temp-store

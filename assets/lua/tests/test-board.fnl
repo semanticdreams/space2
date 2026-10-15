@@ -16,7 +16,7 @@
 (local Canvas (require :canvas))
 (local Camera (require :camera))
 (local {: FocusManager} (require :focus))
-
+(local H (require :tests/test-reference-lifecycle-helpers))
 ;; Minimal Scene stub providing the activity-slot lifecycle needed by
 ;; board-activity-unit (ensure, activate, deactivate, capture, restore).
 ;; This avoids requiring a full Scene with BuildContext, layout roots,
@@ -156,10 +156,10 @@
               "Board should record connector")
       (local link (link-store:get-entity connector.semantic-link-id))
       (assert link "Board connector should reference persisted link entity")
-      (assert (= link.source-key "string-entity:source")
-              "Link entity should store source subject key")
-      (assert (= link.target-key "string-entity:target")
-              "Link entity should store target subject key")
+      (H.assert-reference link-store.identity-store link.source-key
+                          "string-entity:source")
+      (H.assert-reference link-store.identity-store link.target-key
+                          "string-entity:target")
       (assert (. view.connector-records connector.id)
               "BoardView should render connector record")
       (link-store:update-entity connector.semantic-link-id
@@ -1813,10 +1813,10 @@
               "connect-items should use second item as target")
       (local link (link-store:get-entity connector.semantic-link-id))
       (assert link "connect-items should create a persisted link entity")
-      (assert (= link.source-key "sk:a")
-              "Link entity should store source subject key from first item")
-      (assert (= link.target-key "sk:b")
-              "Link entity should store target subject key from second item")
+      (H.assert-reference link-store.identity-store link.source-key
+                          "sk:a")
+      (H.assert-reference link-store.identity-store link.target-key
+                          "sk:b")
       (view:drop)
       (BoardRegistry.unregister-owner owner)
       true)))
@@ -1887,10 +1887,10 @@
                                     :position (glm.vec3 20 0 0)}))
       (local connector (view:connect-items source target))
       (local link (link-store:get-entity connector.semantic-link-id))
-      (assert (= link.source-key "sk:src")
-              "connect-items should set source-key from first argument")
-      (assert (= link.target-key "sk:tgt")
-              "connect-items should set target-key from second argument")
+      (H.assert-reference link-store.identity-store link.source-key
+                          "sk:src")
+      (H.assert-reference link-store.identity-store link.target-key
+                          "sk:tgt")
       (assert (= connector.source-item-id source.id)
               "Board connector source-item-id should match first argument")
       (assert (= connector.target-item-id target.id)

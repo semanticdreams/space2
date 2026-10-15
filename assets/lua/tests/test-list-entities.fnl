@@ -1,5 +1,5 @@
 (local fs (require :fs))
-
+(local H (require :tests/test-reference-lifecycle-helpers))
 (local tests [])
 
 (var temp-counter 0)
@@ -36,7 +36,7 @@
       (assert entity.id "entity should have id")
       (assert (= entity.name "My List") "entity should have correct name")
       (assert (= (length entity.items) 2) "entity should have two items")
-      (assert (= (. entity.items 1) "node-a") "items should preserve ordering")
+      (H.assert-reference store.identity-store (. entity.items 1) "node-a")
       (assert entity.created-at "entity should have created-at")
       (assert entity.updated-at "entity should have updated-at"))))
 
@@ -126,8 +126,8 @@
       (store:remove-item entity.id "b")
       (local retrieved (store:get-entity entity.id))
       (assert (= (length retrieved.items) 2) "should remove one item")
-      (assert (= (. retrieved.items 1) "a") "should preserve order after removal")
-      (assert (= (. retrieved.items 2) "c") "should preserve order after removal"))))
+      (H.assert-reference store.identity-store (. retrieved.items 1) "a")
+      (H.assert-reference store.identity-store (. retrieved.items 2) "c"))))
 
 (fn list-entity-store-moves-items []
   (with-temp-store
@@ -135,9 +135,9 @@
       (local entity (store:create-entity {:name "x" :items ["a" "b" "c"]}))
       (store:move-item entity.id 1 3)
       (local retrieved (store:get-entity entity.id))
-      (assert (= (. retrieved.items 1) "b") "move should reorder items")
-      (assert (= (. retrieved.items 2) "c") "move should reorder items")
-      (assert (= (. retrieved.items 3) "a") "move should reorder items"))))
+      (H.assert-reference store.identity-store (. retrieved.items 1) "b")
+      (H.assert-reference store.identity-store (. retrieved.items 2) "c")
+      (H.assert-reference store.identity-store (. retrieved.items 3) "a"))))
 
 (fn list-entity-store-emits-items-changed-signal []
   (with-temp-store
@@ -254,7 +254,7 @@
     (fn [store root]
       (local Graph (require :graph/init))
       (local IdentityStore (require :entities/identity))
-      (local identity-store (IdentityStore.IdentityStore {:base-dir (fs.join-path root "identity")}))
+      (local identity-store store.identity-store)
       (local entity (store:create-entity {:name "x"}))
       (local {:ListEntityNode ListEntityNode} (require :graph/nodes/list-entity))
       (local node (ListEntityNode {:entity-id entity.id
@@ -291,7 +291,7 @@
       (local Graph (require :graph/init))
       (local IdentityStore (require :entities/identity))
       (local StringEntityStore (require :entities/string))
-      (local identity-store (IdentityStore.IdentityStore {:base-dir (fs.join-path root "identity")}))
+      (local identity-store store.identity-store)
       (local string-store (StringEntityStore.StringEntityStore {:base-dir (fs.join-path root "string")}))
       (local string-entity (string-store:create-entity {:value "soon gone"}))
       (local source-key (.. "string-entity:" string-entity.id))
@@ -321,7 +321,7 @@
       (local Graph (require :graph/init))
       (local IdentityStore (require :entities/identity))
       (local StringEntityStore (require :entities/string))
-      (local identity-store (IdentityStore.IdentityStore {:base-dir (fs.join-path root "identity")}))
+      (local identity-store store.identity-store)
       (local string-store (StringEntityStore.StringEntityStore {:base-dir (fs.join-path root "string")}))
       (local a (string-store:create-entity {:value "a"}))
       (local b (string-store:create-entity {:value "b"}))
@@ -355,7 +355,7 @@
       (local Graph (require :graph/init))
       (local {:GraphNode GraphNode} (require :graph/node-base))
       (local IdentityStore (require :entities/identity))
-      (local identity-store (IdentityStore.IdentityStore {:base-dir (fs.join-path root "identity")}))
+      (local identity-store store.identity-store)
       (local target-key "manual-target:late")
       (local identity (identity-store:create-entity {:target-key "manual-target:old"}))
       (local identity-key (.. "identity:" identity.id))
@@ -385,7 +385,7 @@
     (fn [store root]
       (local Graph (require :graph/init))
       (local IdentityStore (require :entities/identity))
-      (local identity-store (IdentityStore.IdentityStore {:base-dir (fs.join-path root "identity")}))
+      (local identity-store store.identity-store)
       (local identity (identity-store:create-entity {:target-key "string-entity:s1"}))
       (local identity-key (.. "identity:" identity.id))
       (local entity (store:create-entity {:name "x"

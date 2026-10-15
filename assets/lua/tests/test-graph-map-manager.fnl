@@ -200,7 +200,7 @@
                                            :target-key "test:b"})
                 (local graph (Graph {:with-start false
                                      :entity-events? false
-                                     :link-store link-store}))
+                                     :link-store link-store :identity-store link-store.identity-store}))
                 (graph:register-key-loader "test"
                     (fn [key]
                         (Graph.GraphNode {:key key})))
@@ -232,8 +232,8 @@
             (fn []
                 (local LinkEntityStore (require :entities/link))
                 (local IdentityStore (require :entities/identity))
-                (local link-store (LinkEntityStore.LinkEntityStore {:base-dir (fs.join-path dir "link")}))
-                (local identity-store (IdentityStore.IdentityStore {:base-dir (fs.join-path dir "identity")}))
+                (local link-store (LinkEntityStore.LinkEntityStore {:base-dir dir}))
+                (local identity-store link-store.identity-store)
                 (identity-store:create-entity {:id "alias" :target-key "test:a"})
                 (link-store:create-entity {:id "identity-link-a-b"
                                            :source-key "identity:alias"
@@ -278,7 +278,7 @@
                                            :target-key "test:b"})
                 (local graph (Graph {:with-start false
                                      :entity-events? false
-                                     :link-store link-store}))
+                                     :link-store link-store :identity-store link-store.identity-store}))
                 (graph:register-key-loader "test"
                     (fn [key]
                         (Graph.GraphNode {:key key})))

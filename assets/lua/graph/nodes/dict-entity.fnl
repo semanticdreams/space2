@@ -3,7 +3,6 @@
         :node-id node-id} (require :graph/node-base))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
 (local Signal (require :signal))
-(local IdentityStore (require :entities/identity))
 (local DictEntityStore (require :entities/dict))
 (local Utils (require :graph/view/utils))
 (local KeyLoaderUtils (require :graph/key-loader-utils))
@@ -121,31 +120,13 @@
       (set found? true)))
   found?)
 
-(fn ensure-identity-key [self node-key]
-  (local key (tostring (if node-key node-key "")))
-  (if (= (string.len key) 0)
-      key
-      (if (identity-key? key)
-          key
-          (do
-            (local graph self.graph)
-            (if (and graph graph.ensure-identity-key)
-                (graph:ensure-identity-key key)
-                (do
-                  (local existing
-                    (if self.identity-store.find-by-target-key
-                        (self.identity-store:find-by-target-key key)
-                        nil))
-                  (if existing
-                      (.. IDENTITY_KEY_PREFIX (tostring existing.id))
-                      (.. IDENTITY_KEY_PREFIX
-                          (tostring (. (self.identity-store:create-entity {:target-key key}) :id))))))))))
-
 (fn node-options [opts]
   (local options (options-table opts))
   (local entity-id (assert options.entity-id "DictEntityNode requires entity-id"))
-  (local identity-store (if options.identity-store options.identity-store (IdentityStore.get-default)))
   (local store (if options.store options.store (DictEntityStore.get-default)))
+  (local identity-store (assert store.identity-store "DictEntityNode store requires identity-store"))
+  (assert (or (not options.identity-store) (= options.identity-store identity-store))
+          "DictEntityNode identity-store mismatch with owning store")
   (values options entity-id identity-store store))
 
 (fn refresh-label [self]
@@ -238,8 +219,7 @@
          (self:refresh-label)))
   (set node.set-item
        (fn [self item-key node-key]
-         (local stable-key (ensure-identity-key self node-key))
-         (self.store:set-item self.entity-id item-key stable-key)
+          (self.store:set-item self.entity-id item-key node-key)
          (self:add-item-nodes)))
   (set node.remove-item
        (fn [self item-key]
@@ -325,7 +305,7 @@
   (fn [graph opts]
     (local options (options-table opts))
     (local store (if options.store options.store (DictEntityStore.get-default)))
-    (local identity-store (if options.identity-store options.identity-store (IdentityStore.get-default)))
+    (local identity-store (if options.identity-store options.identity-store store.identity-store))
     (graph:register-key-loader SCHEME
       (fn [key]
         (local entity-id (KeyLoaderUtils.extract-id SCHEME key))
