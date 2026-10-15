@@ -318,6 +318,236 @@
 (table.insert tests {:name "path separator rejects backslash on POSIX"
                      :fn path-separator-rejects-backslash-on-posix})
 
+(fn make-reload-fixture-root [dir state]
+  (fn snapshot [_ctx]
+    (when (= state.fail "snapshot")
+      (set app.__hot-reload-ctx :snapshot-leak)
+      (error "snapshot trap"))
+    {:value "previous"})
+  (fn unload [_ctx]
+    (set state.unloads (+ state.unloads 1))
+    (when (= state.fail "unload") (error "unload trap")))
+  (fn load [ctx]
+    (assert ctx "fixture load requires context")
+    (assert (and app.__hot-reload-ctx
+                 (= app.__hot-reload-ctx.target-unit.id "app-root"))
+            "forward load and rollback must retain the root transaction context")
+    (when (and (= state.fail "load") (not (= ctx.reload-phase "rollback")))
+      (error "load trap"))
+    (when (and state.rollback-fails? (= ctx.reload-phase "rollback"))
+      (error "load trap"))
+    (set state.root-loads (+ state.root-loads 1)))
+  (fn restore [snapshot ctx]
+    (assert (= snapshot.value "previous"))
+    (set state.restores (+ state.restores 1))
+    (when (and (= state.fail "restore") (not (= ctx.reload-phase "rollback")))
+      (error "restore trap")))
+  (Units.Unit {:id "app-root" :owned-paths [dir]
+               :snapshot snapshot :unload unload :load load :restore restore}))
+
+(fn make-reload-fixture-controller [dir state opts]
+  (local root (make-reload-fixture-root dir state))
+  (fn load-child [_ctx] (set state.child-loads (+ state.child-loads 1)))
+  (fn unload-child [_ctx] true)
+  (local child
+    (Units.Unit {:id "child" :parent-id "app-root"
+                 :owned-paths [(fs.join-path dir "child.fnl")]
+                 :load load-child :unload unload-child}))
+  (fn live-children [_root]
+    (when state.selection-fails? (error "selection trap"))
+    [child])
+  (local config
+    {:unit root :root-unit-id "app-root" :watch-paths [dir]
+     :watch? opts.watch? :debounce-ms 10 :startup-ignore-ms 0
+     :narrow-reload-unit-ids opts.narrow-reload-unit-ids
+     :on-reload-requested opts.on-reload-requested :units-fn live-children})
+  (if opts.app-root?
+      (HotReload.AppRootController config)
+      (HotReload.HotReloadController config)))
+
+(fn with-reload-fixture [opts body]
+  (fn run-in-dir [dir]
+    (local original-engine app.engine)
+    (local original-ctx app.__hot-reload-ctx)
+    (local original-watcher FileWatch.FileWatcher)
+    (local state {:root-loads 0 :child-loads 0 :unloads 0 :restores 0 :clock 0})
+    (var controller nil)
+    (fn fixture-now-ms [_self] state.clock)
+    (set app.engine {:now-ms fixture-now-ms})
+    (when opts.watcher
+      (set FileWatch.FileWatcher opts.watcher))
+    (fn run-body []
+      (set controller (make-reload-fixture-controller dir state opts))
+      (body controller state dir))
+    (fn cleanup [] (when controller (controller:drop)))
+    (local (ok result) (pcall run-body))
+    (local (cleanup-ok cleanup-error) (pcall cleanup))
+    (set FileWatch.FileWatcher original-watcher)
+    (set app.engine original-engine)
+    (set app.__hot-reload-ctx original-ctx)
+    (assert cleanup-ok cleanup-error)
+    (if ok result (error result)))
+  (with-temp-dir run-in-dir))
+
+(fn manual-reload-never-acquires-watcher-and-selects-root []
+  (with-reload-fixture
+    {:watch? false :narrow-reload-unit-ids ["child"]
+     :watcher (fn [_opts] (error "manual mode constructed watcher"))}
+    (fn [controller state dir]
+      (fs.write-file (fs.join-path dir "child.fnl") "{:edited true}\n")
+      (set state.clock 100)
+      (assert (= (controller:update 0) false))
+      (assert (= state.root-loads 0))
+      (assert (= state.child-loads 0))
+      (local debug (controller:debug-state))
+      (assert (= debug.watch? false))
+      (assert (= (# debug.watch-directories) 0))
+      (assert (= (. debug.watch-paths 1) dir))
+      (assert (controller:reload-now! {:changes [{:path (fs.join-path dir "child.fnl")}]}))
+      (assert (= state.child-loads 1))
+      (assert (= state.root-loads 0))
+      (local result (controller:reload-root!))
+      (assert result.ok)
+      (assert (= result.target-unit-id "app-root"))
+      (assert (= result.phase "complete"))
+      (assert (= result.rollback "not-needed"))
+      (assert (= state.root-loads 1))
+      (assert (= state.child-loads 1))
+      (assert (= (. (controller:debug-state) :last-target-unit-id) "app-root"))
+      (assert (controller:drop))
+      (assert (controller:drop)))))
+
+(fn check-watcher-conversion [app-root?]
+  (local events [])
+  (var drops 0)
+  (var polls 0)
+  (var requests 0)
+  (fn poll [_self]
+    (set polls (+ polls 1))
+    (local batch [])
+    (while (> (# events) 0) (table.insert batch (table.remove events)))
+    batch)
+  (fn make-watcher [_opts]
+    {:add-watch (fn [_self _path _recursive] true)
+     :start (fn [_self] true)
+     :poll poll
+     :directories (fn [_self] [])
+     :drop (fn [_self] (set drops (+ drops 1)))})
+  (with-reload-fixture
+    {:watcher make-watcher :app-root? app-root?
+     :on-reload-requested (fn [_controller] (set requests (+ requests 1)))}
+    (fn [controller state dir]
+      (assert (= (. (controller:debug-state) :watch?) true) "watching defaults to true")
+      (assert (= (. (controller:debug-state) :startup-ignore-ms) 0))
+      (table.insert events {:path (fs.join-path dir "child.fnl") :action "modified"})
+      (controller:update 0)
+      (set state.clock 11)
+      (controller:update 0)
+      (assert (= requests 1))
+      (assert (> (. (controller:debug-state) :pending-event-count) 0))
+      (assert (controller:use-manual!))
+      (assert (controller:use-manual!))
+      (assert (= drops 1))
+      (assert (= (. (controller:debug-state) :pending-event-count) 0))
+      (assert (= (. (controller:debug-state) :pending-deadline-ms) nil))
+      (local before-polls polls)
+      (assert (= (controller:update 0) false))
+      (assert (= polls before-polls))
+      (assert (= requests 1))
+      (when (not app-root?)
+        (assert (. (controller:reload-root!) :ok)))
+      (controller:drop)
+      (controller:drop)
+      (assert (= drops 1))
+      (assert (not (pcall controller.use-manual! controller))))))
+
+(fn manual-conversion-discards-scheduled-filesystem-reload []
+  (check-watcher-conversion false)
+  (check-watcher-conversion true))
+
+(fn app-root-forwards-manual-construction []
+  (with-reload-fixture
+    {:app-root? true :watch? false
+     :watcher (fn [_opts] (error "manual app root constructed watcher"))}
+    (fn [controller _state _dir]
+      (assert (= (. (controller:debug-state) :watch?) false))
+      (assert (= (controller:update 0) false)))))
+
+(fn root-reload-captures-failure-phases-and-restores-context []
+  (with-reload-fixture
+    {:watch? false}
+    (fn [controller state _dir]
+      (local sentinel {})
+      (set app.__hot-reload-ctx sentinel)
+      (set state.selection-fails? true)
+      (local selection (controller:reload-root!))
+      (assert (= selection.ok false))
+      (assert (= selection.target-unit-id "app-root"))
+      (assert (= selection.phase "target-selection"))
+      (assert (= selection.rollback "not-needed"))
+      (assert (string.find selection.error "selection trap" 1 true))
+      (assert (= app.__hot-reload-ctx sentinel))
+      (assert (= (controller:reload-now!) false))
+      (set state.selection-fails? false)
+      (set state.fail "snapshot")
+      (local snapshot (controller:reload-root!))
+      (assert (= snapshot.ok false))
+      (assert (= snapshot.phase "snapshot"))
+      (assert (= snapshot.rollback "not-needed"))
+      (assert (string.find snapshot.error "snapshot trap" 1 true))
+      (assert (= state.unloads 0))
+      (assert (= app.__hot-reload-ctx sentinel))
+      (each [_ phase (ipairs ["unload" "load" "restore"])]
+        ;; Fail only the forward load; rollback uses a distinct context.
+        (set state.fail phase)
+        (local result (controller:reload-root!))
+        (assert (= result.ok false))
+        (assert (= result.phase phase))
+        (assert (= result.rollback "restored"))
+        (assert (string.find result.error (.. phase " trap") 1 true))
+        (assert (= app.__hot-reload-ctx sentinel)))
+      (set state.fail "restore")
+      (assert (= (controller:reload-now!) false))
+      (set state.rollback-fails? true)
+      (local failed (controller:reload-root!))
+      (assert (= failed.ok false))
+      (assert (= failed.phase "restore"))
+      (assert (= failed.rollback "failed"))
+      (assert (string.find failed.rollback-error "load trap" 1 true))
+      (assert (= app.__hot-reload-ctx sentinel))
+      (local (legacy-ok legacy-error) (pcall controller.reload-now! controller))
+      (assert (not legacy-ok))
+      (assert (string.find legacy-error "rollback=" 1 true))
+      (assert (= app.__hot-reload-ctx sentinel))
+      (set state.fail nil)
+      (set state.rollback-fails? false)
+      (assert (. (controller:reload-root!) :ok))
+      (assert (= app.__hot-reload-ctx sentinel)))))
+
+(fn controller-validates-options-before-watcher-acquisition []
+  (local original FileWatch.FileWatcher)
+  (var acquired? false)
+  (set FileWatch.FileWatcher (fn [_opts] (set acquired? true) (error "watcher trap")))
+  (local (ok result)
+    (pcall
+      (fn []
+        (each [_ opts (ipairs [{:watch-paths [runtime.assets-path]}
+                               {:unit {:id "app-root"} :watch-paths [runtime.assets-path] :watch? "no"}])]
+          (assert (not (pcall HotReload.HotReloadController opts)))
+          (assert (not acquired?) "invalid options must fail before acquiring a watcher")))))
+  (set FileWatch.FileWatcher original)
+  (if ok result (error result)))
+
+(table.insert tests {:name "manual reload never acquires watcher and selects root"
+                     :fn manual-reload-never-acquires-watcher-and-selects-root})
+(table.insert tests {:name "manual conversion discards scheduled filesystem reload"
+                     :fn manual-conversion-discards-scheduled-filesystem-reload})
+(table.insert tests {:name "root reload captures failure phases and restores context"
+                     :fn root-reload-captures-failure-phases-and-restores-context})
+(table.insert tests {:name "controller validates options before watcher acquisition"
+                     :fn controller-validates-options-before-watcher-acquisition})
+(table.insert tests {:name "app root forwards manual construction"
+                     :fn app-root-forwards-manual-construction})
 (fn with-fake-reload-watcher [f]
   (with-temp-dir
     (fn [dir]

@@ -185,12 +185,14 @@ Once your agent environment is connected to a Space checkout, these repository c
 ### Fast interactive development flow
 
 `supervisor` remains the default and retains its strict workflow. Users may select
-the independent `fast-dev` primary for direct interactive development. Its short
-prompt uses agent-local scalar `permission: allow`: environment isolation, not
-narrow command permissions or operational workers, bounds its authority. Use it
-only in an appropriately isolated environment; this is not a security sandbox.
+the independent `fast-dev` or `live-dev` primary for direct interactive development.
+Only those exact primary identities use agent-local scalar `permission: allow`:
+environment isolation, not narrow command permissions or operational workers,
+bounds their authority. Use these agents only in an appropriately isolated
+environment; this is not a security sandbox.
 
-- Before edits, use a dedicated `fast-dev/<topic>` branch. New topics start from
+- Before edits, fast-dev uses `fast-dev/<topic>` and live-dev uses `live-dev/<topic>`.
+  These are caller-specific, not interchangeable prefixes. New topics start from
   freshly fetched `origin/main`; deliberately continue existing unmerged work
   only when its commits belong to the current task. Preserve unrelated dirty
   state and clarify ownership rather than discard or automatically stash it.
@@ -204,21 +206,45 @@ only in an appropriately isolated environment; this is not a security sandbox.
   `AGENTS.md` exception overrides imported planning/delegation/review process,
   not technical guidance. Other agents and shared skills retain their contracts.
 
+#### Live-dev explicit refresh
+
+Live-dev adds a checkout/worktree-scoped Linux app loop to the same direct/local
+workflow. Discover verified instances with `python3 scripts/live_dev.py discover --repo-root .`;
+automatically `start` a missing app with normal user data/settings only when no
+unavailable/uncertain identity blocks startup. If more than one matches, ask the
+user to select, even with a saved preference, then use `select --instance <instance-id>`.
+Run `manual` and inspect status before editing: there is no filesystem watching
+and no hooks. Validate coherent changes before explicit broad app-root `reload`.
+Use `restart --rebuild` for native changes and `restart` for preserved reload/control
+infrastructure or `macros.fnl`; reestablish manual mode after replacement.
+
+Never ask for confirmation for start, reload, rebuild, restart, or transient state
+loss. Choosing an instance is not lifecycle approval. Inspect terminal JSON, exit
+status and current ready/fault/health evidence; acceptance is not completion.
+Retain both a failed reload and its recovery outcome, even if recovery succeeds;
+diagnose/fix directly, revalidate, and refresh rather than hide the original failure.
+Ordinary completion and commit requests stay **local only**; a validated app does
+not authorize publishing. See [Live development](live-dev.md) for full CLI commands,
+terminal evidence, privacy boundaries and the preserved-module restart list.
+
 #### Explicit wrap-up
 
 Only explicit wrap-up/integration authorization loads `fast-dev-wrap-up`.
-Fast-dev commits intended pending work, fetches current `origin/main`, safely
-merges when needed, and validates proportionally. One observational
+This is one shared skill, not a second live-dev finishing workflow. It accepts
+selected fast-dev only on `fast-dev/<topic>` and selected live-dev only on
+`live-dev/<topic>`; a mismatch blocks integration, not an invitation to switch
+primaries. The selected caller commits intended pending work, fetches current
+`origin/main`, safely merges when needed, and validates proportionally. One observational
 `fast-dev-reviewer` inspects every accumulated commit and the final diff using
 recorded base/head SHAs, user intent, and validation evidence. It has read/search
 and `bash: allow` for Git inspection, with `edit: deny`; its operating contract
 prohibits mutations, tests/builds, commits, and GitHub operations. It is not an
 exact-command sandbox. Missing process artifacts are not findings.
 
-Fast-dev fixes findings and failures directly, commits, self-reviews, and
+The selected caller fixes findings and failures directly, commits, self-reviews, and
 revalidates; there is no mandatory independent re-review per fix. Unresolved
 material defects or required failures block integration. After reconciling
-pre-PR base changes and checking clean state and repository/PR identity, fast-dev
+pre-PR base changes and checking clean state and repository/PR identity, the caller
 uses raw `git`/`gh` to push only the topic branch, create/reuse a main-targeting PR,
 and enable auto-merge under active merge-queue/required-test protection.
 
@@ -310,7 +336,7 @@ until a later live MCP reload or smoke check succeeds.
 
 ## Strict-flow permission capability model
 
-The strict workflow uses guarded capabilities to reduce routine OpenCode permission friction without broadening normal agent authority. The independent fast-dev lifecycle above does not use capability workers or wrappers; their permissions and implementation are unchanged.
+The strict workflow uses guarded capabilities to reduce routine OpenCode permission friction without broadening normal agent authority. The independent fast-dev/live-dev lifecycle above does not use capability workers or wrappers; their permissions and implementation are unchanged.
 
 - **Routine project-scoped operations** stay with normal agents when they are already part of the assigned role and repository workflow, such as focused validation commands and local Git inspection (`git status`, `git diff`).
 - **Privileged bounded operations** go through capability agents instead of broad direct permissions. `git-integrator` handles reviewed Git integration boundaries, `github-operator` handles bounded GitHub PR/check/merge-queue operations and guarded failed-CI log bundles, `pr-recovery-operator` handles the single stale merged PR recovery wrapper, `windows-ci-reproducer` handles bounded Windows CI local reproduction, and `config-auditor` verifies repo-local OpenCode policy and configuration.
@@ -444,9 +470,9 @@ invoke `systematic-debugging`; and continue investigating even when the failure
 appears unrelated, flaky, timing-dependent, or environmental.
 
 In the strict flow, repository fixes, generated-file repairs, and conflict resolutions go through
-`implementer` → `reviewer` → pass before commit. Fast-dev fixes these directly,
-self-reviews, and revalidates under its scoped exception. Agents rerun validation from a
-clean tree and proceed only when the required suite is green, or when systematic
+`implementer` → `reviewer` → pass before commit. Selected fast-dev and live-dev fix
+these directly, self-review, and revalidate under their scoped exception. Agents rerun
+validation from a clean tree and proceed only when the required suite is green, or when systematic
 debugging establishes a true human-input blocker such as missing credentials,
 inaccessible infrastructure, an unsafe git-history decision, unreproducible
 behavior after reasonable evidence gathering, or a product/API/data/architecture
@@ -455,8 +481,8 @@ choice.
 Before final validation, PR creation, or a ready-to-merge claim, agents fetch
 `origin` and evaluate the branch against current `origin/main`. If the branch is
 behind, they use a safe merge from `origin/main` when permitted, inspect resulting
-fixes under the selected workflow, and rerun validation. Fast-dev never rebases
-or force-pushes; other agents retain their existing explicit-human exceptions.
+fixes under the selected workflow, and rerun validation. Neither fast-dev nor
+live-dev rebases or force-pushes; other agents retain their existing explicit-human exceptions.
 
 ## Branch and pull request policy
 
@@ -481,17 +507,17 @@ repository is `https://github.com/semanticdreams/spacecore`.
 In the strict flow, after implementation is complete — reviewed, committed, all tests passing, and
 the tree clean — the default integration action is to push the current branch,
 create a pull request targeting `main`, and enable auto-merge to hand the PR off
-to GitHub's merge queue. For fast-dev, only explicit wrap-up authorizes integration.
+to GitHub's merge queue. For selected fast-dev and live-dev, only explicit wrap-up authorizes integration.
 
 After the PR is open and queued, agents keep running and poll until the PR is
 actually merged. Queue handoff alone is not success; success means the PR is
-merged (`mergedAt` present or equivalent merged state). Fast-dev additionally
-requires the merge SHA's ancestry in freshly fetched `origin/main`.
+merged (`mergedAt` present or equivalent merged state). Fast-dev and live-dev additionally
+require the merge SHA's ancestry in freshly fetched `origin/main`.
 
 Strict-flow agents poll through `github-operator` wrapper actions such as `view-current`
 and `poll-merge-queue-current`. The supervisor treats the wrapper JSON evidence
 as the source of truth and does not run raw GitHub CLI polling commands.
-Fast-dev uses direct GitHub CLI inspection as documented in `fast-dev-wrap-up`.
+Fast-dev and live-dev use direct GitHub CLI inspection as documented in the shared `fast-dev-wrap-up`.
 
 The following states are non-terminal: `queued`, `waiting`, `pending`,
 `in-progress`, `expected`, or `null`/missing conclusion on merge-group runs.
@@ -506,7 +532,7 @@ queue timeouts.
   post-PR freshness.
 - **Queue failures are actionable blockers.** Merge conflicts and merge-group
   required-check failures trigger `systematic-debugging`. Repository fixes follow
-  strict `implementer` → `reviewer` → pass flow, or fast-dev's direct fix,
+  strict `implementer` → `reviewer` → pass flow, or selected fast-dev/live-dev's direct fix,
   self-review, and revalidation flow. After fixes are committed,
   validation passes against current `origin/main`, and the branch is
   pushed, requeue the PR.

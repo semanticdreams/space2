@@ -308,20 +308,25 @@
   (local preserve-modules {})
   (each [_ module-name (ipairs (or options.preserve-modules []))]
     (set (. preserve-modules module-name) true))
-  (local watcher (FileWatch.FileWatcher {:generic? (or options.generic? false)}))
-  (each [_ path (ipairs watch-paths)]
-    (watcher:add-watch path true))
-  (logging.info (string.format
-                  "[hot-reload] starting watcher roots=%s"
-                  (table.concat watch-paths ", ")))
-  (watcher:start)
-  (logging.info "[hot-reload] watcher started")
-
   (local unit (assert options.unit "HotReloadController requires :unit"))
+  (assert (= (type unit.id) :string) "HotReloadController requires string unit.id")
+  (local fallback-target-id (or options.root-unit-id options.unit-id unit.id))
+  (assert (= (type fallback-target-id) :string) "HotReloadController requires string root unit id")
+  (assert (or (= options.watch? nil) (= (type options.watch?) :boolean))
+          "HotReloadController :watch? must be a boolean")
+  (var watch? (not (= options.watch? false)))
   (local debounce-ms (or options.debounce-ms 150))
   (local startup-ignore-ms (or options.startup-ignore-ms 5000))
   (local on-reload-requested options.on-reload-requested)
-  (local startup-stamps (capture-startup-file-stamps watch-paths))
+  (assert (and (= (type debounce-ms) :number) (>= debounce-ms 0))
+          "HotReloadController :debounce-ms must be nonnegative")
+  (assert (and (= (type startup-ignore-ms) :number) (>= startup-ignore-ms 0))
+          "HotReloadController :startup-ignore-ms must be nonnegative")
+  (assert (or (= on-reload-requested nil) (= (type on-reload-requested) :function))
+          "HotReloadController :on-reload-requested must be a function")
+  (assert (or (= options.units-fn nil) (= (type options.units-fn) :function))
+          "HotReloadController :units-fn must be a function")
+  (local startup-stamps (if watch? (capture-startup-file-stamps watch-paths) {}))
   (local known-module-paths (capture-known-module-paths))
   (var pending-events [])
   (var pending-deadline-ms nil)
@@ -335,12 +340,23 @@
   (var last-reload-module-count 0)
   (var last-target-unit-id unit.id)
   (local started-at-ms (now-ms))
+  (var watcher nil)
+  (when watch?
+    (set watcher (FileWatch.FileWatcher {:generic? (or options.generic? false)}))
+    (fn start-watching []
+      (each [_ path (ipairs watch-paths)]
+        (watcher:add-watch path true))
+      (watcher:start))
+    (local (ok err) (pcall start-watching))
+    (when (not ok)
+      (watcher:drop)
+      (error err)))
 
   (fn live-units []
     (collect-live-units unit options))
 
   (logging.info (string.format
-                  "[hot-reload] watching %s roots=%s debounce=%dms"
+                  "[hot-reload] controller %s roots=%s debounce=%dms"
                   unit.id
                   (table.concat watch-paths ", ")
                   debounce-ms))
@@ -385,107 +401,154 @@
     (Units.refresh-graph-extensions-for-unit! target-unit.id)
     true)
 
-  (fn handle-reload-failure [target-unit module-names backup snapshot err failed-target-loaded?]
+  (fn handle-reload-failure [transaction result err]
+    (local target-unit transaction.target-unit)
+    (set result.ok false)
+    (set result.error (tostring err))
     (logging.error (string.format "[hot-reload] reload failed for %s: %s"
-                                  target-unit.id
-                                  err))
-    (local (rollback-ok rollback-err)
-      (pcall rollback! target-unit module-names backup snapshot failed-target-loaded?))
-    (if rollback-ok
-        (do
+                                  result.target-unit-id result.error))
+    (when transaction.mutated?
+      (local (rollback-ok rollback-err)
+        (pcall rollback! target-unit transaction.module-names transaction.backup
+               transaction.snapshot transaction.target-loaded?))
+      (set result.rollback (if rollback-ok "restored" "failed"))
+      (if rollback-ok
           (logging.warn (string.format
                           "[hot-reload] rollback restored previous runtime for %s"
                           target-unit.id))
-          false)
-        (error (string.format
-                 "HotReload rollback failed for %s: reload=%s rollback=%s"
-                 target-unit.id
-                 err
-                 rollback-err))))
+          (set result.rollback-error (tostring rollback-err))))
+    result)
 
-  (fn perform-reload! [changes]
+  (fn prepare-reload! [transaction result changes root?]
     (local units (live-units))
     (local root-unit (or (find-root-unit units options) unit))
-    (local candidate (or (resolve-target-unit changes units watch-paths options) root-unit))
+    (local candidate (if root? root-unit
+                         (or (resolve-target-unit changes units watch-paths options) root-unit)))
     (local target-unit
-      (select-eligible-target-unit candidate root-unit narrow-unit-ids))
+      (assert (if root? root-unit
+                  (select-eligible-target-unit candidate root-unit narrow-unit-ids))
+              "HotReloadController could not select a target unit"))
+    (set transaction.target-unit target-unit)
+    (set result.target-unit-id target-unit.id)
+    (set last-target-unit-id target-unit.id)
+    (set result.phase "collect-modules")
     (local module-roots (unit-owned-paths target-unit watch-paths))
     (local module-names (collect-owned-loaded-modules module-roots preserve-modules known-module-paths))
+    (set transaction.module-names module-names)
+    (set transaction.backup (capture-loaded-modules module-names))
     (logging.info (string.format
                     "[hot-reload] begin target=%s changes=%d"
                     target-unit.id
                     (length changes)))
     (set last-reload-change-count (length changes))
     (set last-reload-module-count (length module-names))
-    (set last-target-unit-id target-unit.id)
-    (local backup (capture-loaded-modules module-names))
     (local reload-ctx {:changes changes
                        :module-names module-names
                        :target-unit target-unit})
+    (set transaction.ctx reload-ctx)
+    (set result.phase "snapshot")
     (logging.info (string.format
                     "[hot-reload] snapshot target=%s"
                     target-unit.id))
-    (local snapshot (target-unit:snapshot reload-ctx))
+    (set transaction.snapshot (target-unit:snapshot reload-ctx))
+    (when app
+      (set app.__hot-reload-ctx reload-ctx)))
+
+  (fn reload-target! [transaction result]
+    (local target-unit transaction.target-unit)
+    (local module-names transaction.module-names)
+    (local reload-ctx transaction.ctx)
+    (set result.phase "unload")
+    (set transaction.mutated? true)
+    (logging.info (string.format "[hot-reload] unload target=%s" target-unit.id))
+    (target-unit:unload reload-ctx)
+    (set result.phase "clear-modules")
+    (logging.info (string.format "[hot-reload] clear-modules target=%s count=%d names=%s"
+                                target-unit.id (length module-names) (table.concat module-names ", ")))
+    (clear-loaded-modules! module-names)
+    (each [_ module-name (ipairs module-names)]
+      (local source-path (. known-module-paths module-name))
+      (when source-path
+        (fennel-cache.clear-fennel-module-cache! module-name source-path)))
+    (set result.phase "load")
+    (logging.info (string.format "[hot-reload] load target=%s" target-unit.id))
+    (when (= target-unit.id "app-root")
+      (set _G.__space_debug_log_session_started true))
+    (target-unit:load reload-ctx)
+    (set transaction.target-loaded? true)
+    (set result.phase "restore")
+    (logging.info (string.format "[hot-reload] restore target=%s" target-unit.id))
+    (target-unit:restore transaction.snapshot reload-ctx)
+    (set result.phase "refresh-extensions")
+    (Units.refresh-graph-extensions-for-unit! target-unit.id))
+
+  (fn perform-reload! [changes root?]
+    (local result {:ok false
+                   :target-unit-id fallback-target-id
+                   :phase "target-selection" :rollback "not-needed"})
+    (local transaction {})
     (local previous-reload-ctx (and app app.__hot-reload-ctx))
-    (when app
-      (set app.__hot-reload-ctx reload-ctx))
-    (var target-loaded-after-unload? false)
-    (local (ok err)
-      (pcall
-        (fn []
-          (logging.info (string.format
-                          "[hot-reload] unload target=%s"
-                          target-unit.id))
-          (target-unit:unload reload-ctx)
-           (logging.info (string.format
-                           "[hot-reload] clear-modules target=%s count=%d names=%s"
-                           target-unit.id
-                           (length module-names)
-                           (table.concat module-names ", ")))
-           (clear-loaded-modules! module-names)
-           (each [_ module-name (ipairs module-names)]
-             (local source-path (. known-module-paths module-name))
-             (when source-path
-               (fennel-cache.clear-fennel-module-cache! module-name source-path)))
-           (logging.info (string.format
-                          "[hot-reload] load target=%s"
-                          target-unit.id))
-           (when (= target-unit.id "app-root")
-             (set _G.__space_debug_log_session_started true))
-           (target-unit:load reload-ctx)
-           (set target-loaded-after-unload? true)
-           (logging.info (string.format
-                          "[hot-reload] restore target=%s"
-                          target-unit.id))
-           (target-unit:restore snapshot reload-ctx)
-           (Units.refresh-graph-extensions-for-unit! target-unit.id))))
-    (when app
-      (set app.__hot-reload-ctx previous-reload-ctx))
+    (fn run-transaction []
+      (prepare-reload! transaction result changes root?)
+      (reload-target! transaction result))
+    (local (ok err) (pcall run-transaction))
     (if ok
         (do
           (set pending-events [])
           (set pending-deadline-ms nil)
           (set reload-count (+ reload-count 1))
+          (set result.ok true)
+          (set result.phase "complete")
           (logging.info (string.format
                           "[hot-reload] reloaded %s modules=%d changes=%d total=%d"
-                          target-unit.id
-                          (length module-names)
+                          result.target-unit-id
+                          (length transaction.module-names)
                           (length changes)
-                          reload-count))
-          true)
-        (handle-reload-failure target-unit module-names backup snapshot err target-loaded-after-unload?)))
+                          reload-count)))
+        (handle-reload-failure transaction result err))
+    (when app
+      (set app.__hot-reload-ctx previous-reload-ctx))
+    result)
+
+  (fn legacy-result [result]
+    (if result.ok true
+        (= result.rollback "failed")
+        (error (.. result.error " rollback=" result.rollback-error))
+        false))
 
   (fn reload-now! [_self opts]
     (assert (not dropped?) "HotReloadController.reload-now! called after drop")
     (set reload-scheduled? false)
     (local options-arg (or opts {}))
     (local changes (clone-table (or options-arg.changes pending-events)))
-    (perform-reload! changes))
+    (legacy-result (perform-reload! changes false)))
+
+  (fn reload-root! [_self]
+    (assert (not dropped?) "HotReloadController.reload-root! called after drop")
+    (set reload-scheduled? false)
+    (perform-reload! (clone-table pending-events) true))
+
+  (fn reload-pending! [_self]
+    (assert (not dropped?) "HotReloadController.reload-pending! called after drop")
+    (set reload-scheduled? false)
+    (perform-reload! (clone-table pending-events) false))
+
+  (fn use-manual! [_self]
+    (assert (not dropped?) "HotReloadController.use-manual! called after drop")
+    (when watcher
+      (watcher:drop)
+      (set watcher nil))
+    (set watch? false)
+    (set pending-events [])
+    (set pending-deadline-ms nil)
+    (set reload-scheduled? false)
+    true)
 
   (fn update [self _delta]
     (assert (not dropped?) "HotReloadController.update called after drop")
     (set update-count (+ update-count 1))
-    (collect-pending-fs-events!)
+    (when watcher
+      (collect-pending-fs-events!))
     (if (and pending-deadline-ms
              (> (length pending-events) 0)
              (>= (now-ms) pending-deadline-ms))
@@ -499,8 +562,9 @@
         false))
 
   (fn debug-state [_self]
-    {:watch-paths (clone-table watch-paths)
-     :watch-directories (clone-table (watcher:directories))
+    {:watch? watch?
+     :watch-paths (clone-table watch-paths)
+     :watch-directories (if watcher (clone-table (watcher:directories)) [])
      :debounce-ms debounce-ms
      :startup-ignore-ms startup-ignore-ms
      :now-ms (now-ms)
@@ -519,9 +583,12 @@
   (fn drop [_self]
     (when (not dropped?)
       (set dropped? true)
-      (watcher:drop)
+      (when watcher
+        (watcher:drop)
+        (set watcher nil))
       (set pending-events [])
-      (set pending-deadline-ms nil))
+      (set pending-deadline-ms nil)
+      (set reload-scheduled? false))
     true)
 
   {:unit unit
@@ -531,6 +598,9 @@
    :reload-count (fn [_self] reload-count)
    :debug-state debug-state
    :reload-now! reload-now!
+   :reload-root! reload-root!
+   :reload-pending! reload-pending!
+   :use-manual! use-manual!
    :update update
    :drop drop})
 
@@ -565,6 +635,8 @@
      :watch-paths (or options.watch-paths [])
      :preserve-modules (or options.preserve-modules default-preserve)
      :debounce-ms (or options.debounce-ms 150)
+     :watch? options.watch?
+     :startup-ignore-ms options.startup-ignore-ms
      :on-reload-requested options.on-reload-requested
      :generic? (or options.generic? false)}))
 

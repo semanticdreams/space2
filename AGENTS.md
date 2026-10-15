@@ -6,13 +6,19 @@ Clean design is important, refactor when reasonable.
 
 ## Fast-dev workflow exception
 
-For the user-selected `fast-dev` primary only, its prompt and `fast-dev-wrap-up`
-skill override conflicting process rules below and those imported by domain skills.
-It edits, debugs, validates, and commits directly on `fast-dev/<topic>`; no
+For the user-selected `fast-dev` primary and user-selected `live-dev` primary only,
+their prompts and the shared `fast-dev-wrap-up` skill override conflicting process
+rules below and those imported by domain skills. These exact identities edit,
+debug, validate, and commit directly: fast-dev on `fast-dev/<topic>`, live-dev on
+`live-dev/<topic>`. Checkpoints are local only; no
 mandatory design/planning docs, implementation or capability workers, advisor
 gates, per-change review, or verbose commit templates. Short intent-focused
 local commits are sufficient. Ordinary completion or a commit request does not
 authorize publishing; integration requires explicit user wrap-up authorization.
+The selected caller must use its own corresponding branch prefix, not the other's.
+Live-dev establishes manual mode before editing and explicitly refreshes after
+validated changes, with no filesystem watching or lifecycle confirmation prompts.
+The default `supervisor` is unchanged.
 Wrap-up uses one observational `fast-dev-reviewer` review of the whole branch;
 fixes are direct, followed by self-review and revalidation, not mandatory
 independent re-review per fix. Use raw Git/GitHub for this authorized lifecycle.
@@ -20,8 +26,8 @@ independent re-review per fix. Use raw Git/GitHub for this authorized lifecycle.
 Retain Space technical standards, domain guidance, validation commands, and
 evidence-based debugging. Do not integrate with unresolved material defects or
 required validation failures; diagnose and fix them rather than bypass them.
-Environment isolation, not narrow tool permissions, bounds this primary's authority.
-All other agents retain their existing process and permission contracts; this
+Environment isolation, not narrow tool permissions, bounds these primaries' authority.
+For all other agents, retain their existing process and permission contracts; this
 exception does not change an already-running agent's rules.
 
 ## Branch Convention

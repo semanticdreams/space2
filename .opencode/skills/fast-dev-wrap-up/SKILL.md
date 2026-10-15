@@ -1,16 +1,30 @@
 ---
 name: fast-dev-wrap-up
-description: Use ONLY when the user explicitly asks fast-dev to wrap up or integrate the current work, not for ordinary task completion or a commit request.
+description: Use ONLY when the selected fast-dev or live-dev primary receives explicit user wrap-up/integration authorization.
 ---
 
-# Fast-dev wrap-up
+# Shared fast-dev / live-dev wrap-up
+
+This one skill serves both named callers: ordinary task completion and a commit request
+do not authorize publishing. Explicit user wrap-up/integration authorization does.
+Keep the selected caller; do not reject live-dev merely because this skill's name
+starts with fast-dev. Do not switch primaries to use it, even under deadline pressure.
+
+| Selected primary | Required branch |
+| --- | --- |
+| `fast-dev` | `fast-dev/<topic>` |
+| `live-dev` | `live-dev/<topic>` |
+
+Verify the exact selected caller and its corresponding branch: prefixes are not interchangeable.
+An unknown caller or caller/branch mismatch blocks this path; report the mismatch
+and clarify ownership rather than silently renaming, switching, or adopting unrelated work.
 
 Own finishing directly with raw `git` and `gh`. No direct main push, rebase,
 force-push, branch deletion, or worktree cleanup.
 
 ## Prepare and review
 
-- Confirm `fast-dev/<topic>`, intended scope, and ownership of dirty state.
+- Confirm the selected caller's matching branch, intended scope, and ownership of dirty state.
   Inspect status and staged/unstaged diffs; commit only intended pending work.
 - `git fetch origin`; use current `origin/main`, never local `main`. If behind,
   `git merge origin/main` safely; resolve conflicts directly, commit, and inspect

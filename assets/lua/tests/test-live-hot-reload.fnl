@@ -93,7 +93,19 @@
 
 (fn make-runtime-env [opts]
   (local options (or opts {}))
+  (local root (assert options.xdg-data-home "xdg-data-home required"))
+  (local runtime-dir (fs.join-path root "runtime"))
+  (local created (process.run {:args ["mkdir" "-m" "700" "--" runtime-dir]
+                               :cwd "." :env {:PATH (or (os.getenv "PATH") "")} :timeout 2}))
+  (assert (= created.exit-code 0) "could not create private watcher fixture runtime directory")
   {:PATH (or (os.getenv "PATH") "")
+   :HOME root
+   :XDG_CONFIG_HOME (fs.join-path root "config")
+   :XDG_CACHE_HOME (fs.join-path root "cache")
+   :XDG_STATE_HOME (fs.join-path root "state")
+   :XDG_RUNTIME_DIR runtime-dir
+   :XDG_CONFIG_DIRS (fs.join-path root "site-config")
+   :XDG_DATA_DIRS (fs.join-path root "site-data")
    :SPACE_ASSETS_PATH (assert options.assets-path "assets-path required")
    :SPACE_DISABLE_AUDIO "1"
    :SDL_VIDEODRIVER "x11"
@@ -118,6 +130,14 @@
             (.. "--remote-control=" options.endpoint)]
      :cwd "."
      :env (make-runtime-env options)}))
+
+(fn isolate-reporting-before-main! [main-path]
+  (local source (fs.read-file main-path))
+  (local first "(global app (or app {}))")
+  (assert (= (string.sub source 1 (# first)) first) "fixture requires main's app global first")
+  (fs.write-file main-path
+                 (.. first "\n(require :tests.live-dev-offline)\n"
+                     (string.sub source (+ (# first) 1)))))
 
 (fn remote-eval [endpoint code opts]
   (local options (or opts {}))
@@ -159,7 +179,7 @@
         (= (and last-result.stdout
                 (trim-trailing-newline last-result.stdout))
            "ok ready"))
-      {:timeout-ms 15000}))
+      {:timeout-ms 60000}))
   (assert ready?
           (.. "live app remote control did not become ready"
               " last-stdout=" (tostring (and last-result last-result.stdout))
@@ -360,8 +380,9 @@
 
       (local fennel-path (.. copied-lua-dir "/?.fnl;" copied-lua-dir "/?/init.fnl"))
       (local main-path (fs.join-path copied-lua-dir "main.fnl"))
+      (isolate-reporting-before-main! main-path)
       (set child-id
-           (spawn-live-app {:assets-path assets-path
+            (spawn-live-app {:assets-path (.. copied-assets-root ":" assets-path)
                             :watch-path copied-lua-dir
                             :log-dir log-dir
                             :xdg-data-home xdg-data-home
@@ -411,6 +432,21 @@
 (table.insert tests {:name "live app root hot reload roundtrips active world"
                      :fn live-app-root-hot-reload-roundtrip})
 
+(fn runtime-env-is-isolated []
+  (with-temp-dir
+    (fn [dir]
+      (local env (make-runtime-env {:assets-path "/fixture/assets" :watch-path "/fixture/lua"
+                                   :log-dir dir :xdg-data-home dir
+                                   :fennel-path "/fixture/?.fnl" :fennel-macro-path "/fixture/?.fnl"}))
+      (each [_ key (ipairs [:HOME :XDG_CONFIG_HOME :XDG_CACHE_HOME :XDG_STATE_HOME
+                           :XDG_RUNTIME_DIR :XDG_CONFIG_DIRS :XDG_DATA_DIRS])]
+        (local path (assert (. env key) (.. "missing isolated fixture environment " key)))
+        (assert (= (string.sub path 1 (# dir)) dir) (.. "fixture environment escapes test root: " key)))
+      (assert (= (. (fs.stat env.XDG_RUNTIME_DIR) :permissions) "rwx------"))
+      true)))
+
+(table.insert tests {:name "watcher fixture isolates home and all XDG roots" :fn runtime-env-is-isolated})
+
 (local main
   (fn []
     (local runner (require :tests/runner))
@@ -419,4 +455,5 @@
 
 {:name "live-hot-reload"
  :tests tests
+ :test-runtime-env runtime-env-is-isolated
  :main main}

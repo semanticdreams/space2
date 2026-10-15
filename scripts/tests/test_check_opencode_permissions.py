@@ -342,9 +342,10 @@ def scalar_agent(name: str, mode: str, action: str) -> str:
     ).replace("permission:\n  bash: deny", f"permission: {action}")
 
 
-def test_fast_dev_primary_accepts_scalar_allow(tmp_path: Path):
+@pytest.mark.parametrize("name", ["fast-dev", "live-dev"])
+def test_direct_primary_accepts_scalar_allow(tmp_path: Path, name: str):
     repo = make_repo(tmp_path)
-    write_file(repo / ".opencode/agents/fast-dev.md", scalar_agent("fast-dev", "primary", "allow"))
+    write_file(repo / f".opencode/agents/{name}.md", scalar_agent(name, "primary", "allow"))
     assert load_checker().check_repo(repo) == []
 
 
@@ -356,17 +357,24 @@ def test_fast_dev_primary_accepts_scalar_allow(tmp_path: Path):
         ("fast-dev", "subagent", "allow"),
         ("fast-dev", "all", "allow"),
         ("fast-dev", "primary", "ask"),
+        ("fast-dev", "primary", "deny"),
+        ("live-dev-copy", "primary", "allow"),
+        ("live-dev", "subagent", "allow"),
+        ("live-dev", "all", "allow"),
+        ("live-dev", "primary", "ask"),
+        ("live-dev", "primary", "deny"),
         ("example-agent", "subagent", "ask"),
     ],
 )
-def test_fast_dev_scalar_grant_is_exact_name_mode_and_action_only(tmp_path: Path, name: str, mode: str, action: str):
+def test_direct_scalar_grant_is_exact_name_mode_and_action_only(tmp_path: Path, name: str, mode: str, action: str):
     repo = make_repo(tmp_path)
     write_file(repo / f".opencode/agents/{name}.md", scalar_agent(name, mode, action))
     assert "permission-profile" in violation_codes(repo)
 
 
-def test_fast_dev_primary_requires_broad_scalar_profile(tmp_path: Path):
-    repo = make_repo(tmp_path, agent_name="fast-dev")
+@pytest.mark.parametrize("name", ["fast-dev", "live-dev"])
+def test_direct_primary_requires_broad_scalar_profile(tmp_path: Path, name: str):
+    repo = make_repo(tmp_path, agent_name=name)
     assert "permission-profile" in violation_codes(repo)
 
 
@@ -441,6 +449,89 @@ def test_fast_dev_agents_exception_retains_technical_guidance_and_overrides_impo
     exception = text.split("## Fast-dev workflow exception", 1)[1].split("## Branch Convention", 1)[0]
     for term in ["selected `fast-dev` primary", "imported by domain skills", "planning", "review", "commit", "explicit", "technical", "evidence", "unresolved material", "required validation failures"]:
         assert term in exception
+
+
+def live_dev_prompt() -> str:
+    path = REPO_ROOT / ".opencode/agents/live-dev.md"
+    assert path.exists(), "the user-selected live-dev primary must exist"
+    return path.read_text(encoding="utf-8")
+
+
+def test_live_dev_primary_is_exact_direct_local_only_profile():
+    text = live_dev_prompt()
+    keys, _ = load_checker()._frontmatter(text)
+    assert {key: keys[key] for key in ("mode", "model", "variant", "steps", "permission")} == {
+        "mode": "primary", "model": "openai/gpt-6.1-sol", "variant": "medium",
+        "steps": "180", "permission": "allow",
+    }
+    for term in [
+        "live-dev/<topic>", "before edits", "freshly fetched `origin/main`", "unmerged",
+        "dirty", "local only", "task completion", "commit request", "PR creation",
+        "explicit user wrap-up/integration", "fast-dev-wrap-up", "space-fennel",
+        "space-fennel-ui", "space-graph-doctrine", "space-testing-runtime",
+        "quit and restart OpenCode",
+    ]:
+        assert term in text
+
+
+def test_live_dev_loop_establishes_manual_mode_before_edits_and_validates_before_refresh():
+    text = live_dev_prompt()
+    for term in [
+        "discover --repo-root .", "start --repo-root .", "normal user data/settings",
+        "more than one", "ask the user to select", "select --repo-root . --instance <instance-id>",
+        "manual --repo-root .", "confirm `mode: manual` before editing",
+        "no filesystem watching", "no hooks", "Validate before refresh",
+        "reload --repo-root .", "broad app-root", "restart --repo-root . --rebuild",
+        "preserved", "restart --repo-root .", "macros.fnl", "Never request confirmation",
+        "transient state loss", "status --repo-root . --request-id <request-id>",
+        "terminal", "health", "acceptance alone is not success", "nonzero",
+        "both the failed reload and recovery", "Diagnose", "fix directly",
+    ]:
+        assert term in text
+    assert text.index("manual --repo-root .") < text.index("Validate before refresh") < text.index("reload --repo-root .")
+
+
+def test_live_dev_scoped_exception_preserves_default_and_other_agent_contracts():
+    text = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    exception = text.split("## Fast-dev workflow exception", 1)[1].split("## Branch Convention", 1)[0]
+    for term in [
+        "selected `fast-dev` primary", "selected `live-dev` primary", "`live-dev/<topic>`",
+        "exact identities", "default `supervisor`", "local only", "explicit user wrap-up",
+        "imported by domain skills", "technical", "no filesystem watching",
+        "all other agents", "already-running agent",
+    ]:
+        assert term in exception
+    config = json.loads((REPO_ROOT / ".opencode/opencode.json").read_text(encoding="utf-8"))
+    assert config["default_agent"] == "supervisor"
+
+
+def test_shared_wrap_up_matches_selected_caller_to_its_own_branch_only():
+    text = (REPO_ROOT / ".opencode/skills/fast-dev-wrap-up/SKILL.md").read_text(encoding="utf-8")
+    keys, _ = load_checker()._frontmatter(text)
+    assert keys["description"] == (
+        "Use ONLY when the selected fast-dev or live-dev primary receives explicit user wrap-up/integration authorization."
+    )
+    for term in [
+        "| `fast-dev` | `fast-dev/<topic>` |", "| `live-dev` | `live-dev/<topic>` |",
+        "selected caller", "mismatch", "Do not switch primaries", "not interchangeable",
+        "ordinary task completion", "commit request", "do not authorize publishing",
+    ]:
+        assert term in text
+    assert not (REPO_ROOT / ".opencode/skills/live-dev-wrap-up").exists()
+    reviewer = (REPO_ROOT / ".opencode/agents/fast-dev-reviewer.md").read_text(encoding="utf-8")
+    assert "fast-dev and live-dev" in reviewer
+
+
+@pytest.mark.parametrize("path", ["docs/dev/features/opencode-agent-workflow.md", "docs/dev/features/live-dev.md"])
+def test_live_dev_documented_local_loop_and_shared_explicit_wrap_up(path: str):
+    text = (REPO_ROOT / path).read_text(encoding="utf-8")
+    for term in [
+        "live-dev/<topic>", "local only", "fast-dev-wrap-up", "fast-dev-reviewer",
+        "manual", "before editing", "validated", "more than one", "select",
+        "no filesystem watching", "confirmation", "failed reload", "recovery",
+        "Restart OpenCode", "origin/main",
+    ]:
+        assert term in text
 
 
 def test_finishing_skill_does_not_recommend_branch_deletion():
