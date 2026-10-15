@@ -184,51 +184,62 @@ Once your agent environment is connected to a Space checkout, these repository c
 
 ### Fast interactive development flow
 
-`supervisor` remains the default OpenCode agent for Space. It owns the strict
-workflow, high-risk development, branch finishing, PR creation, and merge-queue
-follow-through. `fast-dev` is a second primary agent that users may select for
-interactive exploration, quick local iteration, and small scoped changes when the
-work is clearly bounded.
+`supervisor` remains the default and retains its strict workflow. Users may select
+the independent `fast-dev` primary for direct interactive development. Its short
+prompt uses agent-local scalar `permission: allow`: environment isolation, not
+narrow command permissions or operational workers, bounds its authority. Use it
+only in an appropriately isolated environment; this is not a security sandbox.
 
-Fast mode is lower ceremony, not lower rigor:
+- Before edits, use a dedicated `fast-dev/<topic>` branch. New topics start from
+  freshly fetched `origin/main`; deliberately continue existing unmerged work
+  only when its commits belong to the current task. Preserve unrelated dirty
+  state and clarify ownership rather than discard or automatically stash it.
+- Edit, debug, validate, and make short intent-focused local commits directly.
+  Exploration delegation is optional. No mandatory design/plan, worker or advisor
+  gate, routine review, or verbose commit template applies.
+- A commit request and ordinary task completion are **local only**. Neither
+  authorizes push, PR creation, or auto-merge.
+- Load relevant Space domain skills and retain their technical standards,
+  validation commands, and evidence-based debugging. The identity-scoped
+  `AGENTS.md` exception overrides imported planning/delegation/review process,
+  not technical guidance. Other agents and shared skills retain their contracts.
 
-- `fast-dev` may perform read-only exploration directly and may use `explorer`
-  for targeted repository searches.
-- Before edits, `fast-dev` performs a micro-design assessment that names the
-  desired behavior, owning abstraction, pattern to follow, design risks, and
-  validation surface.
-- `fast-dev` does not edit repository files directly. Repository mutations still
-  route through `implementer` -> `reviewer` -> pass before completion.
-- `fast-dev` does not create PRs, push branches, enable auto-merge, or poll merge
-  queues by default.
-- Final integration stays with the strict `supervisor` and finishing workflow
-  unless the human explicitly requests a different path under a later approved
-  design.
+#### Explicit wrap-up
 
-Fast mode is eligible only when the user asks for interactive development, a
-small scoped change, a targeted bugfix, a focused refactor, or read-only
-exploration; the ownership boundary is clear or can be clarified with a brief
-micro-design note; the validation surface is targeted and local; no new
-product/API/data/architecture decision is required; and the task does not require
-final integration, PR creation, merge-queue operation, or privileged repository
-recovery.
+Only explicit wrap-up/integration authorization loads `fast-dev-wrap-up`.
+Fast-dev commits intended pending work, fetches current `origin/main`, safely
+merges when needed, and validates proportionally. One observational
+`fast-dev-reviewer` inspects every accumulated commit and the final diff using
+recorded base/head SHAs, user intent, and validation evidence. It has read/search
+and `bash: allow` for Git inspection, with `edit: deny`; its operating contract
+prohibits mutations, tests/builds, commits, and GitHub operations. It is not an
+exact-command sandbox. Missing process artifacts are not findings.
 
-Escalate from `fast-dev` to the strict `supervisor` when clean design requires
-broad refactoring or a new abstraction, multiple subsystems or independent tasks
-are involved, the user asks for branch finishing or ready-to-merge work, the
-reviewer flags design-integrity issues that cannot be fixed locally, validation
-failure diagnosis requires the full `systematic-debugging` workflow, or the task
-touches high-risk workflow policy, capability boundaries, auth, secrets, graph
-topology/persistence, broad runtime initialization, packaging, or release
-behavior.
+Fast-dev fixes findings and failures directly, commits, self-reviews, and
+revalidates; there is no mandatory independent re-review per fix. Unresolved
+material defects or required failures block integration. After reconciling
+pre-PR base changes and checking clean state and repository/PR identity, fast-dev
+uses raw `git`/`gh` to push only the topic branch, create/reuse a main-targeting PR,
+and enable auto-merge under active merge-queue/required-test protection.
 
-#### Local main wrap-up
+It polls PR and relevant merge-group checks at 100-second cadence until actually
+merged, diagnoses actionable failures directly, and reports specific human-owned
+access/settings/ownership/decision/timeout blockers. Pending is not completion;
+do not merge main solely for freshness after queue entry. Completion requires
+`mergedAt`, the PR merge SHA, a fresh fetch, and successful
+`git merge-base --is-ancestor <merge-sha> origin/main`. Preserve branch/worktree;
+no direct main push, rebase, or force-push.
 
-Fast interactive development may happen on local `main` when the human chooses
-that workflow, but local `main` is only a workspace. It is not an integration
-target and must never be pushed directly or used as the head of a pull request.
-Reviewed local-main commits are wrapped up by converting them to a deterministic
-feature branch through the guarded Git capability:
+Restart OpenCode to load the new agents/skill. Static policy and source checks
+validate supported configuration forms, not effective runtime/global permission
+overrides after restart; already-running sessions retain their loaded rules.
+
+#### Legacy strict-flow local-main recovery
+
+The retained local-main conversion wrapper is a legacy strict-flow recovery
+path, not permission for new fast-dev work on `main`. Local `main` must never be
+pushed directly or used as a PR head. The strict flow can convert existing
+reviewed local-main commits through the guarded Git capability:
 
 ```bash
 python3 scripts/opencode_git_integrate.py create-local-main-wrapup-branch --repo-root .
@@ -252,21 +263,6 @@ creation through `github-operator`, auto-merge/queue setup, and merge-queue
 polling. Raw privileged Git/GitHub commands, direct `main` pushes, rebase, reset,
 force-push, clean, and branch deletion remain forbidden.
 
-#### Vertical slice handoff
-
-When `fast-dev` completes a bounded vertical slice that should inform broader
-work, it hands off to the strict `supervisor` instead of expanding scope in place.
-The handoff records:
-
-- branch or commit range;
-- problem solved by the vertical slice;
-- current abstraction ownership;
-- validation evidence;
-- design risks already avoided;
-- known limits and proposed expansion seams;
-- whether the slice is ready for PR integration or should become input to a new
-  strict supervisor spec/plan.
-
 ### Strict-flow low-ceremony paths
 
 The strict `supervisor` also has opt-in low-ceremony paths for work that does
@@ -283,7 +279,7 @@ not need a full planning session:
 - **Single-Task Low-Risk Path:** execute one small SDD task without expanding it
   into a multi-agent program when there are no independent subtasks.
 
-No low-ceremony path skips independent review for mutations, and no path claims
+No strict low-ceremony path skips independent review for mutations, and no path claims
 ready-to-merge before finishing validation and PR CI.
 
 Restart OpenCode after `.opencode/**` changes. Agent definitions, skill instructions, and permission rules are loaded at startup and are not hot-reloaded.
@@ -312,9 +308,9 @@ are reported as blockers. If a live OpenCode session cannot be established, the
 agent report must not claim live validation; use `validation-mode: disk-only`
 until a later live MCP reload or smoke check succeeds.
 
-## Permission capability model
+## Strict-flow permission capability model
 
-Space uses guarded capabilities to reduce routine OpenCode permission friction without broadening normal agent authority.
+The strict workflow uses guarded capabilities to reduce routine OpenCode permission friction without broadening normal agent authority. The independent fast-dev lifecycle above does not use capability workers or wrappers; their permissions and implementation are unchanged.
 
 - **Routine project-scoped operations** stay with normal agents when they are already part of the assigned role and repository workflow, such as focused validation commands and local Git inspection (`git status`, `git diff`).
 - **Privileged bounded operations** go through capability agents instead of broad direct permissions. `git-integrator` handles reviewed Git integration boundaries, `github-operator` handles bounded GitHub PR/check/merge-queue operations and guarded failed-CI log bundles, `pr-recovery-operator` handles the single stale merged PR recovery wrapper, `windows-ci-reproducer` handles bounded Windows CI local reproduction, and `config-auditor` verifies repo-local OpenCode policy and configuration.
@@ -423,7 +419,7 @@ external-directory permissions.
 
 ### Capability preflight
 
-Privileged Git, GitHub, and OpenCode configuration operations route through
+In the strict flow, privileged Git, GitHub, and OpenCode configuration operations route through
 capability agents and repo-local wrapper scripts, not through broad direct Git or
 GitHub commands. Run `make opencode-check` before finishing integration work and
 after merging or otherwise changing `.opencode/**` files so missing capability
@@ -447,8 +443,9 @@ tests, relevant output, current branch state, and `git status --porcelain`;
 invoke `systematic-debugging`; and continue investigating even when the failure
 appears unrelated, flaky, timing-dependent, or environmental.
 
-Repository fixes, generated-file repairs, and conflict resolutions go through
-`implementer` → `reviewer` → pass before commit. Agents rerun validation from a
+In the strict flow, repository fixes, generated-file repairs, and conflict resolutions go through
+`implementer` → `reviewer` → pass before commit. Fast-dev fixes these directly,
+self-reviews, and revalidates under its scoped exception. Agents rerun validation from a
 clean tree and proceed only when the required suite is green, or when systematic
 debugging establishes a true human-input blocker such as missing credentials,
 inaccessible infrastructure, an unsafe git-history decision, unreproducible
@@ -457,9 +454,9 @@ choice.
 
 Before final validation, PR creation, or a ready-to-merge claim, agents fetch
 `origin` and evaluate the branch against current `origin/main`. If the branch is
-behind, they use a safe merge from `origin/main` when permitted, route resulting
-fixes through review, and rerun validation. Agents do not rebase or force-push
-unless the human explicitly requests it.
+behind, they use a safe merge from `origin/main` when permitted, inspect resulting
+fixes under the selected workflow, and rerun validation. Fast-dev never rebases
+or force-pushes; other agents retain their existing explicit-human exceptions.
 
 ## Branch and pull request policy
 
@@ -470,30 +467,31 @@ repository is `https://github.com/semanticdreams/spacecore`.
 
 - Pull requests target `main`.
 - Final validation and PR creation require a branch that is current with `origin/main`. Diff/base checks always use `origin/main`, not local `main`. Local `main` may be stale or contain unrelated local commits.
-- Before final validation, PR creation, or a ready-to-merge claim, fetch `origin` and evaluate the branch against current `origin/main`. If the branch is behind, use a safe merge from `origin/main` when permitted, route resulting fixes through review, and rerun validation.
+- Before final validation, PR creation, or a ready-to-merge claim, fetch `origin` and evaluate the branch against current `origin/main`. If the branch is behind, use a safe merge from `origin/main` when permitted, inspect/fix under the selected workflow, and rerun validation.
 - Do not push directly to `main`, and never open a pull request from `main`.
   Agent-driven integration work must happen on a feature branch. The only
-  exception is the documented human-selected `fast-dev` local-main workspace:
-  local `main` may hold reviewed local commits temporarily, but before final
-  validation, push, or PR integration it must be converted through
+  recovery for existing reviewed local-main commits is the legacy strict flow:
+  before final validation, push, or PR integration convert through
   `create-local-main-wrapup-branch` into
   `fast-dev/local-main-<short-head-sha>` and then follow the normal feature
   branch pull-request flow.
 
 ### Post-PR merge queue
 
-After implementation is complete — reviewed, committed, all tests passing, and
+In the strict flow, after implementation is complete — reviewed, committed, all tests passing, and
 the tree clean — the default integration action is to push the current branch,
 create a pull request targeting `main`, and enable auto-merge to hand the PR off
-to GitHub's merge queue.
+to GitHub's merge queue. For fast-dev, only explicit wrap-up authorizes integration.
 
 After the PR is open and queued, agents keep running and poll until the PR is
 actually merged. Queue handoff alone is not success; success means the PR is
-merged (`mergedAt` present or equivalent merged state).
+merged (`mergedAt` present or equivalent merged state). Fast-dev additionally
+requires the merge SHA's ancestry in freshly fetched `origin/main`.
 
-Agents poll through `github-operator` wrapper actions such as `view-current`
+Strict-flow agents poll through `github-operator` wrapper actions such as `view-current`
 and `poll-merge-queue-current`. The supervisor treats the wrapper JSON evidence
 as the source of truth and does not run raw GitHub CLI polling commands.
+Fast-dev uses direct GitHub CLI inspection as documented in `fast-dev-wrap-up`.
 
 The following states are non-terminal: `queued`, `waiting`, `pending`,
 `in-progress`, `expected`, or `null`/missing conclusion on merge-group runs.
@@ -508,8 +506,9 @@ queue timeouts.
   post-PR freshness.
 - **Queue failures are actionable blockers.** Merge conflicts and merge-group
   required-check failures trigger `systematic-debugging`. Repository fixes follow
-  the standard `implementer` → `reviewer` → pass flow. After reviewed fixes are
-  committed, validation passes against current `origin/main`, and the branch is
+  strict `implementer` → `reviewer` → pass flow, or fast-dev's direct fix,
+  self-review, and revalidation flow. After fixes are committed,
+  validation passes against current `origin/main`, and the branch is
   pushed, requeue the PR.
 - If merge queue is not enabled or cannot be verified, agents report
   `HUMAN_DECISION_REQUIRED` with the exact GitHub setting needed and do not
