@@ -7,7 +7,7 @@
   (fn reload-root! [_self]
     (set state.reloads (+ state.reloads 1))
     (if state.throw-reload (error "controller threw")
-        (or state.result {:ok true :phase "complete" :rollback "not-needed"})))
+        (or state.result {:ok true :target-unit-id "app-root" :phase "complete" :rollback "not-needed"})))
   (fn use-manual! [_self] (set state.manual true) true)
   (fn update [_self _delta]
     (set state.updates (+ state.updates 1))
@@ -23,7 +23,8 @@
   (fn quit [] (set state.quits (+ state.quits 1)))
   (local options
     {:identity {:instance-id "fixture" :checkout-root "/fixture"}
-     :controller {:reload-root! reload-root! :use-manual! use-manual! :update update :drop drop}
+     :controller {:reload-root! reload-root! :reload-pending! reload-root!
+                  :use-manual! use-manual! :update update :drop drop}
      :health-check health-check :publisher publisher :unpublish unpublish
      :launch-recipe launch-recipe :boundary-check boundary-check :quit quit})
   (each [k v (pairs (or overrides {}))] (tset options k v))
@@ -147,6 +148,15 @@
   (assert state.unpublished)
   (assert (= (. (c:operation 1) :status) "failed")))
 (add-test "drop is idempotent and queued operations never execute afterwards" drop-queued)
+
+(fn drop-watcher-queued [c state]
+  (c:start) (c:mark-ready!)
+  (c:request-watched!)
+  (c:drop)
+  (callbacks.dispatch)
+  (assert (= state.reloads 0))
+  (assert (= (. (c:operation 1) :status) "failed")))
+(add-test "drop cancels deferred watcher transaction through the same lifetime gate" drop-watcher-queued)
 
 (fn start-failure [c state]
   (set state.publish-fails true)
@@ -389,6 +399,79 @@
   (assert ok (tostring err)))
 (table.insert tests {:name "ordinary watch configuration survives transfer to the outer owner" :fn watch-config})
 
+(fn startup-watcher-routing []
+  (local LiveDev (require :live-dev-runtime))
+  (local HotReload (require :hot-reload))
+  (local previous-factory HotReload.AppRootController)
+  (local previous-manager app.unit-manager)
+  (local previous-health app.check-runtime-health)
+  (local state {:roots 0 :watched 0 :due false :watched-target "hud" :health-checks 0})
+  (var config nil)
+  (fn healthy [] (set state.health-checks (+ state.health-checks 1)) true)
+  (fn reload-root! [_self]
+    (set state.roots (+ state.roots 1))
+    {:ok true :target-unit-id "app-root" :phase "complete" :rollback "not-needed"})
+  (fn reload-pending! [_self]
+    (set state.watched (+ state.watched 1))
+    {:ok true :target-unit-id state.watched-target :phase "complete" :rollback "not-needed"})
+  (fn update [self _delta]
+    (when state.due
+      (set state.due false)
+      (config.on-reload-requested self)))
+  (fn drop [_self] true)
+  (fn controller [opts]
+    (set config opts)
+    {:reload-root! reload-root! :reload-pending! reload-pending! :update update :drop drop})
+  (local first [{:id "hud"}])
+  (local second [{:id "replacement-hud"}])
+  (fn first-list [_self] first)
+  (fn second-list [_self] second)
+  (fn body []
+    (set HotReload.AppRootController controller)
+    (set app.check-runtime-health healthy)
+    (set app.unit-manager nil)
+    (local control (LiveDev.start! nil {:args [] :reload-config {:enabled true}}))
+    (assert config.watch?)
+    (assert (= (# (config.units-fn)) 0) "startup before root init has no child units")
+    (set app.unit-manager {:list first-list})
+    (assert (= (config.units-fn) first))
+    (set app.unit-manager {:list second-list})
+    (assert (= (config.units-fn) second) "provider must discover the current root's manager dynamically")
+    (control:mark-ready!)
+    (assert (= (. (control:status) :generation) 1))
+    (set state.due true)
+    (callbacks.dispatch)
+    (assert (= state.watched 0) "watch transaction must be deferred beyond polling")
+    (callbacks.dispatch)
+    (assert (= state.watched 1) "watch callback must execute pending child-routed transaction")
+    (assert (= state.roots 0))
+    (assert (= (. (control:status) :generation) 1) "successful HUD child reload must not advance root generation")
+    (assert (= (. (control:operation 1) :status) "succeeded"))
+    (assert (= state.health-checks 2) "child reload must still be health checked")
+    (control:request (. (control:status) :next-request-id) "reload")
+    (callbacks.dispatch)
+    (assert (= state.roots 1) "explicit reload must still force root")
+    (assert (= (. (control:status) :generation) 2) "successful explicit root reload advances generation")
+    (set state.watched-target "app-root")
+    (set state.due true)
+    (callbacks.dispatch)
+    (callbacks.dispatch)
+    (assert (= state.watched 2))
+    (assert (= (. (control:status) :generation) 3) "successful watcher-routed root reload advances generation")
+    (assert (= (. (control:operation 3) :status) "succeeded"))
+    (assert (= state.health-checks 4))
+    (assert (not (pcall control.request control 99 "watch-reload")) "watch scheduling is not a public action"))
+  (local (ok err) (pcall body))
+  (local (stop-ok stop-err) (pcall LiveDev.stop!))
+  (set HotReload.AppRootController previous-factory)
+  (set app.unit-manager previous-manager)
+  (set app.check-runtime-health previous-health)
+  (callbacks.dispatch)
+  (assert stop-ok (tostring stop-err))
+  (assert ok (tostring err)))
+(table.insert tests {:name "startup dynamically discovers children and defers watcher routing without forcing root"
+                     :fn startup-watcher-routing})
+
 (fn damaged-root-does-not-update []
   (require :main)
   (local LiveDev (require :live-dev-runtime))
@@ -443,7 +526,7 @@
   (fn tick [_self _limit]
     (set ticks (+ ticks 1))
     (when (= ticks 1)
-      (control:request 1 action)
+      (if (= action "watch-reload") (control:request-watched!) (control:request 1 action))
       (error "send failed after acceptance"))
     0)
   (fn drop [_self] true)
@@ -471,8 +554,10 @@
   (fixture {:transport {:tick tick :drop drop}} check))
 (fn fault-cancels-queued-reload [] (fault-between-acceptance-and-execution "reload"))
 (fn fault-cancels-queued-manual [] (fault-between-acceptance-and-execution "manual"))
+(fn fault-cancels-queued-watcher [] (fault-between-acceptance-and-execution "watch-reload"))
 (table.insert tests {:name "fault after acceptance cancels queued reload but permits quit" :fn fault-cancels-queued-reload})
 (table.insert tests {:name "fault after acceptance cancels queued manual action but permits quit" :fn fault-cancels-queued-manual})
+(table.insert tests {:name "fault after watcher scheduling cancels its transaction but permits quit" :fn fault-cancels-queued-watcher})
 
 (fn main []
   ((. (require :tests/runner) :run-tests) {:name "live-dev-runtime" :tests tests}))

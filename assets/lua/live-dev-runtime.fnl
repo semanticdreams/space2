@@ -56,7 +56,8 @@
 
 (fn reload! [s op]
   (set op.phase "reload")
-  (local result (s.controller:reload-root!))
+  (local result (if (= op.action "watch-reload") (s.controller:reload-pending!)
+                   (s.controller:reload-root!)))
   (assert (= (type result) :table) "controller did not return ReloadResult")
   (set op.phase result.phase)
   (set op.rollback result.rollback)
@@ -72,7 +73,8 @@
       (do
         (set op.phase "health")
         (check-health! s)
-        (set s.generation (+ s.generation 1))
+        (when (= result.target-unit-id "app-root")
+          (set s.generation (+ s.generation 1)))
         (set s.ready true))))
 
 (fn execute-action! [s op]
@@ -81,7 +83,7 @@
     (assert (s.opts.boundary-check) "restart-required: preserved infrastructure changed")
     (set op.phase "publish")
     (publish! s))
-  (if (= op.action "reload") (reload! s op)
+  (if (or (= op.action "reload") (= op.action "watch-reload")) (reload! s op)
       (= op.action "manual")
       (do
         (set op.phase "manual")
@@ -124,7 +126,7 @@
       (do
         (assert (> id s.high-water) "request-id expired")
         (assert (not s.pending) "operation already pending or running")
-        (assert (or (= action "manual") (= action "reload") (= action "quit")) "unknown action")
+        (assert (or (= action "manual") (= action "reload") (= action "watch-reload") (= action "quit")) "unknown action")
         (assert (or (= action "quit") (and s.ready (not s.faulted))) "runtime not healthy; restart required")
         (local op {:request-id id :action action :instance-id s.identity.instance-id
                    :generation s.generation :status "pending" :phase "queued"
@@ -187,11 +189,14 @@
   (fn operation [_self id]
     (copy (assert (. s.operations id) "unknown or expired request-id")))
   (fn describe [_self] (status s))
-  (fn request [_self id action] (request! s id action))
+  (fn request [_self id action]
+    (assert (not= action "watch-reload") "watch scheduling is internal")
+    (request! s id action))
+  (fn request-watched! [_self] (request! s (+ s.high-water 1) "watch-reload"))
   (fn faulted? [_self] s.faulted)
   (fn drop [_self] (drop! s))
   {:start start :mark-ready! mark-ready! :status describe :request request
-   :operation operation :faulted? faulted? :drop drop})
+   :request-watched! request-watched! :operation operation :faulted? faulted? :drop drop})
 
 (fn current [] active)
 (fn stop! []
@@ -256,12 +261,14 @@
   (local preserve (copy preserved-modules))
   (each [_ name (ipairs (or config.preserve-modules []))] (table.insert preserve name))
   (fn requested [_controller]
-    (when active (active:request (. (active:status) :next-request-id) "reload")))
+    (when active (active:request-watched!)))
+  (fn live-children [_root]
+    (if app.unit-manager (app.unit-manager:list) []))
   (local controller
     (HotReload.AppRootController {:watch-paths (or config.watch-paths [identity.source-root])
                                  :watch? (= config.enabled true) :debounce-ms config.debounce-ms
                                  :generic? config.generic? :preserve-modules preserve
-                                 :on-reload-requested requested}))
+                                 :units-fn live-children :on-reload-requested requested}))
   (fn health-check [] (assert app.check-runtime-health "missing current runtime health check") (app.check-runtime-health))
   (fn publish [record]
     (when paths

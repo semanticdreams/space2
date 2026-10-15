@@ -184,12 +184,12 @@ class Fixture:
             record = self.module._validate_record(result, self.root)
             self.instances[record["instance-id"]] = record
 
-    def query(self, instance, expression):
+    def query(self, instance, expression, *, timeout=5):
         # Use the same real Space client and envelope parser, never pyzmq.
         previous = dict(os.environ)
         try:
             os.environ.update(self.env)
-            return self.module._remote_code(instance, f"(do (local json (require :json)) (json.dumps {expression}))", 5)
+            return self.module._remote_code(instance, f"(do (local json (require :json)) (json.dumps {expression}))", timeout)
         finally:
             os.environ.clear()
             os.environ.update(previous)
@@ -202,16 +202,15 @@ class Fixture:
         assert self.query(instance, "_G.__live-dev-offline-inits") >= 1
 
     def wait_instance(self, child):
-        deadline = time.monotonic() + 60
-        while time.monotonic() < deadline:
-            assert child.poll() is None, "ordinary fixture app exited during startup"
-            result = self.cli("discover")
-            for instance in result["instances"]:
-                if instance["pid"] == child.pid and instance["ready"]:
-                    self.remember(instance)
-                    return instance
-            time.sleep(0.05)
-        raise AssertionError("ordinary fixture app startup timed out")
+        previous = dict(os.environ)
+        try:
+            os.environ.update(self.env)
+            instance = self.module._wait_started(self.root, child, 60)
+            self.remember(instance)
+            return instance
+        finally:
+            os.environ.clear()
+            os.environ.update(previous)
 
     def ordinary_start(self):
         log = (self.base / "logs/ordinary.log").open("ab")
@@ -295,6 +294,43 @@ class Fixture:
             assert self.env["LIVE_DEV_SENTINEL_SECRET"] not in text
             assert '"environment"' not in text and '"argv"' not in text
             assert path.stat().st_mode & 0o777 == 0o600
+
+
+def watched_hud_routing(fixture, instance):
+    fixture.assert_offline(instance)
+    fixture.query(instance, '(do (set _G.__routing-world-manager app.world-manager) true)')
+    debug = '(app.hot-reload-controller:debug-state)'
+    def wait_for_reload(previous_count):
+        deadline = time.monotonic() + 60
+        while True:
+            remaining = deadline - time.monotonic()
+            assert remaining > 0, "watched edit did not execute"
+            state = fixture.query(instance, debug, timeout=remaining)
+            assert time.monotonic() < deadline, "watched edit observation exceeded deadline"
+            if state["reload-count"] > previous_count:
+                return state
+            time.sleep(0.05)
+    generation = fixture.cli("status")["generation"]
+    before = fixture.query(instance, debug)
+    # Let the ordinary watcher's intentional startup-noise window expire.
+    time.sleep(max(0, (before["startup-ignore-ms"] - before["now-ms"]) / 1000) + 5.1)
+    hud = fixture.lua / "hud.fnl"
+    hud.write_text(hud.read_text() + "\n; fixture watched HUD edit\n")
+    after = wait_for_reload(before["reload-count"])
+    assert after["last-target-unit-id"] == "hud", f"ordinary watcher must retain child-path routing: observed {after['last-target-unit-id']}"
+    assert fixture.query(instance, '(= app.world-manager _G.__routing-world-manager)'), "HUD reload replaced world manager"
+    assert fixture.cli("status")["generation"] == generation, "HUD child reload must not advance root generation"
+    explicit = fixture.cli("reload")
+    assert explicit["status"] == "succeeded"
+    assert explicit["generation"] == generation + 1, "explicit root reload must advance generation"
+    after_explicit = fixture.query(instance, debug)
+    assert after_explicit["last-target-unit-id"] == "app-root"
+    assert fixture.query(instance, '(not= app.world-manager _G.__routing-world-manager)'), "explicit reload must replace root"
+    main = fixture.lua / "main.fnl"
+    main.write_text(main.read_text() + "\n; fixture watched root edit\n")
+    after_watched_root = wait_for_reload(after_explicit["reload-count"])
+    assert after_watched_root["last-target-unit-id"] == "app-root"
+    assert fixture.cli("status")["generation"] == generation + 2, "watcher-routed root reload must advance generation"
 
 
 def manual_reload_roundtrip(fixture, before):
@@ -381,7 +417,7 @@ def prepublication_hang(fixture):
             '(hang-marker:write "entered") (hang-marker:close)\n(while true)\n')
     main.write_text(original.replace(offline, offline + hang, 1))
     try:
-        launcher = fixture.cli_process("start")
+        launcher = fixture.cli_process("start", "--timeout", "5")
         deadline = time.monotonic() + 20
         while True:
             fixture.collect_app_spawns()
@@ -395,9 +431,14 @@ def prepublication_hang(fixture):
         receipt = next(iter(fixture.app_spawns.values()))
         assert receipt["pidfd"] is not None
         assert not select.select([receipt["pidfd"]], [], [], 0)[0]
-        fixture.stop_app_spawns()
         result = fixture.result(launcher, expected=1)
-        assert result["error"] == "startup-exited"
+        assert result["error"] == "startup-timeout"
+        assert not select.select([receipt["pidfd"]], [], [], 0)[0], "timeout child must still be alive"
+        retry = fixture.cli("start", expected=1)
+        assert retry["error"] == "startup-in-progress"
+        fixture.collect_app_spawns(require_accounted=True)
+        assert len(fixture.app_spawns) == 1, "timeout retry launched a duplicate prepublication app"
+        fixture.stop_app_spawns()
     finally:
         main.write_text(original)
 
@@ -424,6 +465,7 @@ def run_scenarios(fixture):
     assert len(fixture.cli("discover")["instances"]) == 1
     assert Path(before["checkout-root"]) == fixture.root
     assert Path(before["native-source-root"]) != fixture.root
+    watched_hud_routing(fixture, before)
     before = two_instance_restart(fixture, before)
     arguments = manual_reload_roundtrip(fixture, before)
     rejected = fixture.cli("restart", "--rebuild", expected=1)

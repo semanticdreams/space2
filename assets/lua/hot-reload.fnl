@@ -518,6 +518,11 @@
     (set reload-scheduled? false)
     (perform-reload! (clone-table pending-events) true))
 
+  (fn reload-pending! [_self]
+    (assert (not dropped?) "HotReloadController.reload-pending! called after drop")
+    (set reload-scheduled? false)
+    (perform-reload! (clone-table pending-events) false))
+
   (fn use-manual! [_self]
     (assert (not dropped?) "HotReloadController.use-manual! called after drop")
     (when watcher
@@ -584,6 +589,7 @@
    :debug-state debug-state
    :reload-now! reload-now!
    :reload-root! reload-root!
+   :reload-pending! reload-pending!
    :use-manual! use-manual!
    :update update
    :drop drop})

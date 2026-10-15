@@ -345,8 +345,10 @@ def test_restart_after_verified_app_exit_uses_recipe(live_dev, checkout, monkeyp
               "argv": ["-m", "main", "--custom", 'quoted λ'], "environment": {"SECRET": "private"}}
     monkeypatch.setattr(live_dev, "discover", lambda *a, **k: [])
     launches = []
-    monkeypatch.setattr(live_dev, "_launch", lambda root, saved: launches.append(saved))
-    monkeypatch.setattr(live_dev, "_wait_started", lambda *a: replacement)
+    def launch_and_wait(root, saved, *args):
+        launches.append(saved)
+        return replacement
+    monkeypatch.setattr(live_dev, "_launch_and_wait", launch_and_wait)
     assert live_dev.restart_instance(checkout, record, recipe) == replacement
     assert launches == [recipe]
 
@@ -535,6 +537,47 @@ def cleanup_record(fixture, record):
     path.chmod(0o600)
 
 
+@pytest.mark.parametrize("invalid_record", [False, True])
+def test_fixture_ordinary_readiness_restores_env_and_preserves_errors(live_dev, checkout, monkeypatch, invalid_record):
+    fixture = cleanup_fixture(live_dev, checkout)
+    fixture.env["LIVE_DEV_READINESS_SENTINEL"] = "isolated"
+    before = dict(os.environ)
+    child = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.buffer.read()"], stdin=subprocess.PIPE)
+    ready = child_record(live_dev, checkout, child)
+    peer = dict(record_for(live_dev, checkout), **{"instance-id": "other-ready-instance"})
+    observed = []
+    def discover(*args, **kwargs):
+        observed.append(os.environ.get("LIVE_DEV_READINESS_SENTINEL"))
+        if invalid_record:
+            raise live_dev.LiveDevError("invalid-record")
+        if len(observed) == 1:
+            raise live_dev.LiveDevError("unavailable")
+        return [peer] if len(observed) == 2 else [peer, ready]
+    def cli(command):
+        assert command == "discover"
+        try:
+            return {"instances": live_dev.discover(checkout)}
+        except live_dev.LiveDevError as error:
+            # The old fixture aborts here instead of using its bounded wait.
+            raise AssertionError("CLI exit=1: " + error.code) from None
+    monkeypatch.setattr(live_dev, "discover", discover)
+    monkeypatch.setattr(fixture, "cli", cli)
+    try:
+        if invalid_record:
+            with pytest.raises(live_dev.LiveDevError, match="invalid-record"):
+                fixture.wait_instance(child)
+            assert observed == ["isolated"], "invalid metadata must fail immediately"
+            assert child.poll() is None, "readiness failure must not stop the owned child"
+        else:
+            assert fixture.wait_instance(child) == ready
+            assert fixture.instances == {ready["instance-id"]: ready}
+            assert observed == ["isolated"] * 3, "wait must tolerate unavailable but not select the healthy peer"
+        assert dict(os.environ) == before, "fixture environment must be restored on success and failure"
+    finally:
+        child.communicate(b"x", timeout=5)
+        fixture.cleanup()
+
+
 def test_fixture_cleanup_normalizes_owned_records(live_dev, checkout, monkeypatch):
     fixture = cleanup_fixture(live_dev, checkout)
     record = integral_record(live_dev, checkout)
@@ -705,6 +748,123 @@ def child_record(live_dev, checkout, child):
     return record
 
 
+@pytest.mark.parametrize("restart", [False, True])
+def test_prepublication_timeout_retry_never_launches_duplicate(live_dev, checkout, monkeypatch, restart):
+    children = []
+    recipe = {"executable": sys.executable, "argv": ["-c", "import sys; sys.stdin.buffer.read()"],
+              "cwd": str(checkout), "environment": dict(os.environ, PRIVATE_RECIPE="never-persist")}
+    def launch(root, saved):
+        child = subprocess.Popen([saved["executable"], *saved["argv"]], stdin=subprocess.PIPE)
+        children.append(child)
+        return child
+    monkeypatch.setattr(live_dev, "_default_recipe", lambda *a: recipe)
+    monkeypatch.setattr(live_dev, "_launch", launch)
+    try:
+        with pytest.raises(live_dev.LiveDevError, match="startup-timeout"):
+            if restart:
+                old = dict(record_for(live_dev, checkout), **{"process-start": "0"})
+                live_dev.restart_instance(checkout, old, recipe, timeout=0.1)
+            else:
+                live_dev.ensure_started(checkout, timeout=0.1)
+        assert len(children) == 1 and children[0].poll() is None
+        assert list(live_dev._registered_records(checkout)) == [], "child must still be prepublication"
+        intent = live_dev._read_json(live_dev._partition(checkout) / "launch.json")
+        assert intent["state"] == "spawned"
+        owned = child_record(live_dev, checkout, children[0])
+        assert all(intent["process"][key] == owned[key] for key in live_dev.PROCESS_IDENTITY if key != "instance-id")
+        with pytest.raises(live_dev.LiveDevError):
+            live_dev.ensure_started(checkout, timeout=0.1)
+        assert len(children) == 1, "live prepublication child must block retry, not authorize a duplicate"
+        for path in live_dev._partition(checkout).glob("*.json"):
+            assert "never-persist" not in path.read_text()
+            assert path.stat().st_mode & 0o777 == 0o600
+        # Only confirmed exit of this exact owned child allows the next launch.
+        children[0].communicate(b"x", timeout=5)
+        with pytest.raises(live_dev.LiveDevError, match="startup-timeout"):
+            live_dev.ensure_started(checkout, timeout=0.1)
+        assert len(children) == 2
+    finally:
+        for child in children:
+            if child.poll() is None:
+                child.communicate(b"x", timeout=5)
+
+
+def test_pending_launch_can_rejoin_verified_publication(live_dev, checkout, monkeypatch):
+    child = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.buffer.read()"], stdin=subprocess.PIPE)
+    record = child_record(live_dev, checkout, child)
+    path = live_dev._partition(checkout) / "launch.json"
+    live_dev._write_json(path, {"schema-version": 1, "checkout-root": str(checkout), "state": "spawned",
+                               "process": {key: record[key] for key in live_dev.PROCESS_IDENTITY}})
+    publish(live_dev, checkout, record)
+    monkeypatch.setattr(live_dev, "remote_request", lambda *args: record)
+    monkeypatch.setattr(live_dev, "_launch", lambda *args: pytest.fail("published owned child duplicated"))
+    try:
+        assert live_dev.ensure_started(checkout) == record
+        assert not path.exists()
+    finally:
+        child.communicate(b"x", timeout=5)
+
+
+@pytest.mark.parametrize("kind", ["pending", "malformed", "image-mismatch"])
+def test_uncertain_owned_launch_blocks_without_signaling(live_dev, checkout, monkeypatch, kind):
+    record = record_for(live_dev, checkout)
+    intent = {"schema-version": 1, "checkout-root": str(checkout), "state": "spawned",
+              "process": {key: record[key] for key in live_dev.PROCESS_IDENTITY}}
+    if kind == "pending":
+        intent = {"schema-version": 1, "checkout-root": str(checkout), "state": "pending"}
+    elif kind == "malformed":
+        intent["process"]["boot-id"] = None
+    else:
+        intent["process"]["executable-identity"] = "0:0:0:0:0"
+    path = live_dev._partition(checkout) / "launch.json"
+    live_dev._write_json(path, intent)
+    monkeypatch.setattr(live_dev, "_launch", lambda *args: pytest.fail("uncertain child duplicated"))
+    monkeypatch.setattr(live_dev.signal, "pidfd_send_signal", lambda *args: pytest.fail("uncertain child signaled"))
+    with pytest.raises(live_dev.LiveDevError):
+        live_dev.ensure_started(checkout)
+    assert live_dev._read_json(path) == intent
+
+
+@pytest.mark.parametrize("version", [True, False, None, "1", {}, []])
+def test_malformed_launch_schema_cannot_authorize_stale_cleanup(live_dev, checkout, monkeypatch, version):
+    record = dict(record_for(live_dev, checkout), **{"process-start": "0"})
+    intent = {"schema-version": version, "checkout-root": str(checkout), "state": "spawned",
+              "process": {key: record[key] for key in live_dev.PROCESS_IDENTITY}}
+    path = live_dev._partition(checkout) / "launch.json"
+    live_dev._write_json(path, intent)
+    monkeypatch.setattr(live_dev, "_default_recipe", lambda *args: pytest.fail("invalid launch metadata authorized a new recipe"))
+    with pytest.raises(live_dev.LiveDevError, match="invalid-launch-record"):
+        live_dev.ensure_started(checkout)
+    assert live_dev._read_json(path) == intent
+
+
+@pytest.mark.parametrize("exit_before_wait", [False, True])
+def test_exited_owned_startup_releases_launch_blocker(live_dev, checkout, monkeypatch, exit_before_wait):
+    recipe = {"executable": sys.executable}
+    children = []
+    def launch(*args):
+        child = subprocess.Popen([sys.executable, "-c", "pass"])
+        children.append(child)
+        if exit_before_wait:
+            child.wait(timeout=5)
+        return child
+    monkeypatch.setattr(live_dev, "_launch", launch)
+    try:
+        with pytest.raises(live_dev.LiveDevError, match="startup-exited"):
+            live_dev._launch_and_wait(checkout, recipe, 1)
+        assert not (live_dev._partition(checkout) / "launch.json").exists()
+    finally:
+        for child in children:
+            child.wait(timeout=5)
+
+
+def test_confirmed_popen_failure_releases_launch_intent(live_dev, checkout):
+    recipe = {"executable": sys.executable, "argv": [], "environment": {}, "cwd": "/nonexistent-live-dev-cwd"}
+    with pytest.raises(live_dev.LiveDevError, match="launch-failed"):
+        live_dev._launch_and_wait(checkout, recipe, 1)
+    assert not (live_dev._partition(checkout) / "launch.json").exists()
+
+
 def test_saved_selection_app_exit_start_replaces_stale(live_dev, checkout, monkeypatch, capsys):
     child = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.buffer.read(1)"], stdin=subprocess.PIPE)
     old = child_record(live_dev, checkout, child)
@@ -714,8 +874,10 @@ def test_saved_selection_app_exit_start_replaces_stale(live_dev, checkout, monke
     new = dict(record_for(live_dev, checkout), **{"instance-id": "replacement"})
     launched = []
     monkeypatch.setattr(live_dev, "_default_recipe", lambda *a: {})
-    monkeypatch.setattr(live_dev, "_launch", lambda *a: launched.append(True))
-    monkeypatch.setattr(live_dev, "_wait_started", lambda *a: new)
+    def launch_and_wait(*args):
+        launched.append(True)
+        return new
+    monkeypatch.setattr(live_dev, "_launch_and_wait", launch_and_wait)
     assert live_dev.main(["start", "--repo-root", str(checkout)]) == 0
     assert json.loads(capsys.readouterr().out)["instance-id"] == "replacement"
     assert live_dev._load_selection(checkout)["instance-id"] == "replacement"
@@ -759,13 +921,13 @@ def test_restart_preserves_other_healthy_instance(live_dev, checkout, monkeypatc
     def stop(instance, timeout):
         stopped.append(instance["instance-id"])
         selected_path.unlink()
-    def launch(*args):
+    def launch_and_wait(*args):
         records[replacement["instance-id"]] = replacement
         publish(live_dev, checkout, replacement)
+        return replacement
     monkeypatch.setattr(live_dev, "_stop_instance", stop)
     monkeypatch.setattr(live_dev, "remote_request", lambda instance, *a: dict(records[instance["instance-id"]]))
-    monkeypatch.setattr(live_dev, "_launch", launch)
-    monkeypatch.setattr(live_dev, "_wait_started", lambda *a: replacement)
+    monkeypatch.setattr(live_dev, "_launch_and_wait", launch_and_wait)
     if recovery:
         monkeypatch.setattr(live_dev, "_recipe", lambda *a: {})
         monkeypatch.setattr(live_dev, "_operate", lambda *a: {"status": "failed", "recovery-required": True})
@@ -1080,7 +1242,7 @@ def test_concurrent_same_target_restart_launches_one_replacement(live_dev, check
         return replacement_child
     def attempt():
         try:
-            return live_dev.restart_instance(checkout, selected, {}, timeout=3)
+            return live_dev.restart_instance(checkout, selected, {"executable": sys.executable}, timeout=3)
         except live_dev.LiveDevError as error:
             return error.code
     monkeypatch.setattr(live_dev, "_checkout_lock", coordinated_lock)

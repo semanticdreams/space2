@@ -32,6 +32,8 @@ IDENTITY = ("instance-id", "checkout-root", "source-root", "main-source", "pid",
             "native-source-root", "native-build-root", "build-profile", "cef-enabled", "endpoint")
 PUBLIC = IDENTITY + ("schema-version", "ready", "faulted", "mode", "generation",
                      "next-request-id", "capabilities", "error")
+PROCESS_IDENTITY = ("instance-id", "checkout-root", "pid", "uid", "boot-id", "process-start",
+                    "executable", "executable-identity")
 
 
 def _public(record):
@@ -122,9 +124,9 @@ def _identity_numbers(record):
     return normalized
 
 
-def _validate_identity(record, root):
+def _validate_process_identity(record, root):
     record = _identity_numbers(record)
-    if any(key not in record for key in IDENTITY):
+    if any(key not in record for key in PROCESS_IDENTITY):
         raise LiveDevError("invalid-record")
     if (not isinstance(record["instance-id"], str)
             or not re.fullmatch(r"[A-Za-z0-9-]{1,64}", record["instance-id"])
@@ -143,6 +145,14 @@ def _validate_identity(record, root):
     if (not isinstance(executable_identity, str)
             or not re.fullmatch(r"[0-9]+:[0-9]+:[0-9]+:-?[0-9]+:[0-9]{1,9}", executable_identity)
             or int(executable_identity.rsplit(":", 1)[1]) >= 1000000000
+            or not isinstance(record["executable"], str) or not Path(record["executable"]).is_absolute()):
+        raise LiveDevError("invalid-record")
+    return record
+
+
+def _validate_identity(record, root):
+    record = _validate_process_identity(record, root)
+    if (any(key not in record for key in IDENTITY)
             or not isinstance(record["build-profile"], str) or not record["build-profile"]
             or type(record["cef-enabled"]) is not bool):
         raise LiveDevError("invalid-record")
@@ -437,6 +447,81 @@ def _wait_started(root, child, timeout, previous=None):
     raise LiveDevError("startup-timeout", pid=child.pid)
 
 
+def _check_pending_launch(root, instances=None):
+    """A missing app record never disowns a child launched by this checkout."""
+    path = _partition(root) / "launch.json"
+    try:
+        intent = _read_json(path)
+        if (not isinstance(intent, dict) or type(intent.get("schema-version")) not in (int, float)
+                or intent["schema-version"] != 1
+                or intent.get("checkout-root") != str(root)
+                or intent.get("state") not in ("pending", "spawned")):
+            raise LiveDevError("invalid-launch-record")
+        if intent["state"] == "pending":
+            # Interrupted capture: no inference from missing publication/PID.
+            raise LiveDevError("startup-unverified")
+        record = _validate_process_identity(intent["process"], root)
+    except FileNotFoundError:
+        return
+    except (OSError, ValueError, KeyError, TypeError):
+        raise LiveDevError("invalid-launch-record") from None
+    try:
+        _check_process(record)
+    except LiveDevError as error:
+        if error.code != "stale-instance":
+            raise
+        path.unlink()
+        return
+    if instances is None:
+        instances = discover(root)
+    for instance in instances:
+        if instance.get("ready") is True and all(instance.get(key) == record[key] for key in PROCESS_IDENTITY if key != "instance-id"):
+            path.unlink()
+            return
+    raise LiveDevError("startup-in-progress", pid=record["pid"])
+
+
+def _launch_and_wait(root, recipe, timeout, previous=None):
+    _check_pending_launch(root)
+    path = _partition(root) / "launch.json"
+    # Persist intent before Popen. Only public image/process identity is stored;
+    # argv, environment, and all other recipe context remain in memory.
+    executable = Path(recipe["executable"]).resolve(strict=True)
+    image = _executable_identity(executable)
+    intent = {"schema-version": 1, "checkout-root": str(root), "state": "pending"}
+    _write_json(path, intent)
+    try:
+        child = _launch(root, recipe)
+    except LiveDevError as error:
+        if error.code == "launch-failed":  # Popen confirmed that no child exec'd.
+            path.unlink()
+        raise
+    try:
+        # This exact direct child has not been polled/reaped: PID reuse cannot
+        # race capture. Verify the intended kernel image, not PID alone.
+        proc = Path("/proc") / str(child.pid)
+        record = {"instance-id": "launch-" + uuid.uuid4().hex, "checkout-root": str(root),
+                  "pid": child.pid, "uid": proc.stat().st_uid,
+                  "boot-id": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+                  "process-start": (proc / "stat").read_text().rsplit(")", 1)[1].split()[19],
+                  "executable": str(executable), "executable-identity": image}
+        _check_process(record)
+        _write_json(path, dict(intent, state="spawned", process=record))
+        result = _wait_started(root, child, timeout, previous)
+        if any(result.get(key) != record[key] for key in PROCESS_IDENTITY if key != "instance-id"):
+            raise LiveDevError("identity-mismatch")
+        _check_process(record)
+    except BaseException:
+        # A timeout/error does not release ownership of a living child. The
+        # next invocation can clear only proven exit or verified publication.
+        if child.poll() is not None:
+            path.unlink()
+            raise LiveDevError("startup-exited", exit=child.returncode) from None
+        raise
+    path.unlink()
+    return result
+
+
 def _stale_preference(saved):
     try:
         _check_process(saved)
@@ -462,14 +547,14 @@ def ensure_started(repo_root, timeout=30, selection=None, saved_selection=None):
     root = canonical_checkout(repo_root)
     with _checkout_lock(root, timeout):
         instances = discover(root)
+        _check_pending_launch(root, instances)
         if selection is not None:
             return choose_instance(instances, selection)
         if instances:
             return _choose_preferred(instances, saved_selection)
         if saved_selection is not None:
             _stale_preference(saved_selection)
-        child = _launch(root, _default_recipe(root))
-        return _wait_started(root, child, timeout)
+        return _launch_and_wait(root, _default_recipe(root), timeout)
 
 
 def _recipe(instance, timeout):
@@ -649,6 +734,7 @@ def _restart_peer_snapshot(root, instance, timeout):
 def _restart_locked(root, instance, recipe, rebuild, timeout, authorized_peers):
     # Revalidate after ownership acquisition. Never promote a replacement or
     # newcomer seen while waiting into the previously authorized peer set.
+    _check_pending_launch(root)
     peers, _target_registered = _restart_peer_snapshot(root, instance, timeout)
     if _instance_set(peers) != authorized_peers:
         raise LiveDevError("replacement-conflict", candidates=peers)
@@ -660,8 +746,7 @@ def _restart_locked(root, instance, recipe, rebuild, timeout, authorized_peers):
     remaining = discover(root)
     if _instance_set(remaining) != authorized_peers:
         raise LiveDevError("replacement-conflict", candidates=remaining)
-    child = _launch(root, recipe)
-    replacement = _wait_started(root, child, timeout, instance["instance-id"])
+    replacement = _launch_and_wait(root, recipe, timeout, instance["instance-id"])
     if _instance_set(discover(root), replacement["instance-id"]) != authorized_peers:
         raise LiveDevError("replacement-conflict")
     _save_selection(root, replacement)
