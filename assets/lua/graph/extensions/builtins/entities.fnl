@@ -50,6 +50,7 @@
     (loader-opts ctx)))
 
 (fn install-entity-loaders [options graph ctx]
+  (local catalog (assert options.entity-type-catalog "builtin-graph-entities requires :entity-type-catalog"))
   (local string-store (assert options.string-store "builtin-graph-entities requires :string-store"))
   (local code-store (assert options.code-store "builtin-graph-entities requires :code-store"))
   (local list-store (assert options.list-store "builtin-graph-entities requires :list-store"))
@@ -92,7 +93,7 @@
   (fn make-dict-entity-list [] (DictEntityListNode {:store dict-store
                                                     :identity-store identity-store}))
   (fn make-link-entity-list [] (LinkEntityListNode {:store link-store}))
-  (fn make-entities [] (EntitiesNode {}))
+  (fn make-entities [] (EntitiesNode {:entity-type-catalog catalog}))
   (fn make-notebooks [] (NotebooksNode {:store notebook-store}))
   (add! (register-store-node-loader graph ctx "string-entity" string-store
       make-string-entity))

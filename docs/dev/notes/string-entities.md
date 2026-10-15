@@ -94,13 +94,21 @@ The store emits signals for entity lifecycle events:
 
 **File:** [entities.fnl](https://github.com/semanticdreams/spacecore/blob/main/assets/lua/graph/nodes/entities.fnl)
 
-Root node for browsing entity types. Currently supports only the "string" type.
+Root node for browsing entity types from an injected immutable catalog. The
+built-in catalog exposes string, link, list, dict, and code. See
+[Entity-type catalog](../features/entity-type-catalog.md) for startup composition
+and its separation from graph loader installation.
 
 - **Key:** `"entities"`
 - **Label:** `"entities"`
 - **Color:** Gray
 
-Provides `collect-types` which returns available entity types, and `add-type-node` which creates a child list node for the selected type.
+Requires `:entity-type-catalog`. `collect-types` returns `[type-id, label]` rows in
+catalog order; generated actions use that same order. `add-type-node` resolves the
+selected descriptor's browser key through its containing GraphMap, adds an
+explicit display edge, and returns the browser adapter. The SearchView presents
+rows alphabetically. Unknown types, missing context and unresolved browser keys
+raise explicit errors rather than silently omitting navigation.
 
 ### StringEntityListNode
 

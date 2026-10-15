@@ -151,6 +151,7 @@
     :tests.test-string-entity-create-child
     :tests.test-code-entities
     :tests.test-code-entity-list
+    :tests.test-entities-browser
     :tests.test-identity-entities
     :tests.test-link-entities
     :tests.test-list-entities
