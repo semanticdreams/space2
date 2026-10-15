@@ -102,6 +102,40 @@
 
 ;; Slow full-app / hot-reload integration tests moved from tests.test-units.
 
+(fn test-hot-reload-config [watch-root narrow-unit-ids]
+  {:enabled true
+   :watch-paths [watch-root]
+   :narrow-reload-unit-ids narrow-unit-ids
+   :preserve-modules ["app-bootstrap" "hot-reload" "tests.test-hot-reload-integration" "units"]})
+
+(fn assert-root-reload-state! [controller callback-id world-id DebugLog]
+  (assert (= (. (controller:debug-state) :last-target-unit-id) "app-root")
+          "Default controller execution must target app root")
+  (assert app.world-manager "Expected app.world-manager after reload")
+  (assert (= (app.world-manager:active-world-id) world-id)
+          "Expected active world id to roundtrip through full-app reload")
+  (assert (string.find (fs.read-file DebugLog.log-path) "root reload marker" 1 true)
+          "Expected root reload to preserve debug.log history")
+  (assert (= app.hot-reload-controller controller) "Root reload must retain its controller")
+  (assert (= app.hot-reload-callback-id callback-id) "Root reload must retain its callback ID")
+  (assert package.__space_fennel_cache_searcher "Expected installed fennel cache searcher")
+  (assert (= (count-searcher-occurrences package.__space_fennel_cache_searcher) 1)
+          "Expected exactly one installed fennel cache searcher after repeated reloads"))
+
+(fn assert-default-root-roundtrips! [watch-root DebugLog]
+  (local controller (assert app.hot-reload-controller "Main must construct the reload controller"))
+  (local callback-id (assert app.hot-reload-callback-id "Main must register the reload callback"))
+  (DebugLog.log "test" "root reload marker")
+  (local created-world (app.world-manager:create-home-world {:activate? false}))
+  (assert (app.world-manager:activate-world-id created-world.id))
+  (each [_ filename (ipairs ["main.fnl" "hud.fnl" "hud.fnl"])]
+    (local old-world-manager app.world-manager)
+    (assert (controller:reload-now! {:changes [{:path (fs.join-path watch-root filename)
+                                               :action "modified"}]})
+            "Expected default root hot reload to succeed")
+    (assert (not (= app.world-manager old-world-manager)) "Default reload must reconstruct root ownership")
+    (assert-root-reload-state! controller callback-id created-world.id DebugLog)))
+
 (fn full-app-root-reload-roundtrips-active-world []
   (with-temp-dir
     (fn [_dir]
@@ -119,53 +153,13 @@
               (apply-renderer-viewport! opts)
              app.renderers))
       (set app.hot-reload-controller nil)
-      (set app.hot-reload-config {:enabled true
-                                  :watch-paths [watch-root]
-                                  :preserve-modules ["app-bootstrap"
-                                                     "hot-reload"
-                                                     "tests.test-hot-reload-integration"
-                                                     "units"]})
+      (set app.hot-reload-config (test-hot-reload-config watch-root nil))
       (local (ok result)
         (pcall
           (fn []
             ((. Main :install-app-shell!))
             ((. Main :init))
-            (DebugLog.log "test" "root reload marker")
-            (local before-debug-log (fs.read-file DebugLog.log-path))
-            (assert (string.find before-debug-log "root reload marker" 1 true)
-                    "Expected debug log marker before root reload")
-            (assert package.__space_fennel_cache_searcher
-                    "Expected installed fennel cache searcher before root reload")
-            (assert (= (count-searcher-occurrences package.__space_fennel_cache_searcher) 1)
-                    "Expected exactly one installed fennel cache searcher before root reload")
-            (local created-world
-              (app.world-manager:create-home-world {:activate? false}))
-            (local before-id created-world.id)
-            (assert (app.world-manager:activate-world-id before-id)
-                    "Expected to activate created world before reload")
-            (local controller
-              (or app.hot-reload-controller
-                  (HotReload.AppRootController {:watch-paths [watch-root]
-                                                :preserve-modules ["app-bootstrap"
-                                                                   "hot-reload"
-                                                                   "tests.test-hot-reload-integration"
-                                                                   "units"]})))
-            (assert (controller:reload-now! {:changes [{:path (fs.join-path runtime.assets-path "lua" "main.fnl")
-                                                        :action "modified"}]})
-                    "Expected root hot reload to succeed")
-            (assert app.world-manager "Expected app.world-manager after reload")
-            (assert (= (app.world-manager:active-world-id) before-id)
-                    "Expected active world id to roundtrip through full-app reload")
-            (local after-debug-log (fs.read-file DebugLog.log-path))
-            (assert (string.find after-debug-log "root reload marker" 1 true)
-                    "Expected root reload to preserve debug.log history")
-            (assert package.__space_fennel_cache_searcher
-                    "Expected installed fennel cache searcher after root reload")
-            (assert (= (count-searcher-occurrences package.__space_fennel_cache_searcher) 1)
-                    "Expected exactly one installed fennel cache searcher after root reload")
-            (when (and controller controller.drop)
-              (controller:drop))
-            (set app.hot-reload-controller nil)
+            (assert-default-root-roundtrips! watch-root DebugLog)
             true)))
       (local (cleanup-ok cleanup-result)
         (pcall cleanup-app-hot-reload-controller-and-main!))
@@ -318,81 +312,58 @@
       (set AppBootstrap.init-renderers original-init-renderers)
       (finish-protected-result ok result cleanup-ok cleanup-result))))
 
+(fn assert-experimental-hud-opt-in! [watch-root]
+  (assert app.hud-unit "Expected app.hud-unit after app init")
+  (local controller (assert app.hot-reload-controller "Main must construct the opted-in controller"))
+  (local old-hud app.hud)
+  (local old-scope app.hud-focus-scope)
+  (local old-world-manager app.world-manager)
+  (LauncherLaunchable.open-panel
+    {:hud app.hud
+     :panel {:layer "float" :position [4 5 0] :rotation [1 0 0 0] :size [14 9 0]}})
+  (app.hud:update)
+  (local before-state (app.hud:capture-state))
+  (assert (controller:reload-now! {:changes [{:path (fs.join-path watch-root "hud.fnl")
+                                             :action "modified"}]})
+          "Expected opted-in HUD file change to reload successfully")
+  (assert (= (. (controller:debug-state) :last-target-unit-id) "hud")
+          "Main config must forward explicit HUD eligibility through both config tables and wrapper")
+  (assert app.hud "Expected app.hud after routed reload")
+  (assert (not (= app.hud old-hud)) "Expected routed HUD reload to replace app.hud")
+  (assert (not (= app.hud-focus-scope old-scope)) "Expected routed HUD reload to replace HUD focus scope")
+  (assert (= app.world-manager old-world-manager) "Expected opted-in HUD reload to avoid app root")
+  (app.hud:update)
+  (local after-state (app.hud:capture-state))
+  (assert (= (length (or after-state.panels [])) (length (or before-state.panels [])))
+          "Expected routed HUD reload to preserve panel count"))
+
+;; Built-in child routing below is experimental explicit opt-in evidence, not freshness certification.
 (fn hot-reload-routes-hud-file-changes-to-hud-unit []
   (with-temp-dir
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
       (local original-renderers app.renderers)
+      (local original-config app.hot-reload-config)
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
            (fn [opts]
              (set app.renderers (make-renderer-stub))
               (apply-renderer-viewport! opts)
              app.renderers))
-      (var controller nil)
+      (set app.hot-reload-config (test-hot-reload-config watch-root ["hud"]))
       (local (ok result)
         (pcall
           (fn []
             ((. Main :install-app-shell!))
             ((. Main :init))
-            (assert app.hud-unit "Expected app.hud-unit after app init")
-            (local root-unit
-              (Units.ModuleUnit
-                {:id "app-root"
-                 :owned-paths [watch-root]
-                 :module-name "main"
-                 :suppress-run-main? true
-                 :load-export "init"
-                 :unload-export "drop"
-                 :snapshot-export "snapshot"
-                 :restore-export "restore"}))
-            (set controller
-              (HotReload.HotReloadController
-                {:unit root-unit
-                 :units-fn (fn [_root-unit]
-                             [app.hud-unit])
-                 :root-unit-id "app-root"
-                 :watch-paths [watch-root]
-                 :preserve-modules ["app-bootstrap"
-                                    "hot-reload"
-                                    "tests.test-hot-reload-integration"
-                                    "units"]}))
-            (local old-hud app.hud)
-            (local old-scope app.hud-focus-scope)
-            (local old-world-manager app.world-manager)
-            (LauncherLaunchable.open-panel
-              {:hud app.hud
-               :panel {:layer "float"
-                       :position [4 5 0]
-                       :rotation [1 0 0 0]
-                       :size [14 9 0]}})
-            (app.hud:update)
-            (local before-state (app.hud:capture-state))
-            (assert (controller:reload-now!
-                      {:changes [{:path (fs.join-path watch-root "hud.fnl")
-                                  :action "modified"}]})
-                    "Expected HUD file change to reload successfully")
-            (local debug-state (controller:debug-state))
-            (assert (= debug-state.last-target-unit-id "hud")
-                    "Expected HUD file change to target hud unit")
-            (assert app.hud "Expected app.hud after routed reload")
-            (assert (not (= app.hud old-hud))
-                    "Expected routed HUD reload to replace app.hud")
-            (assert (not (= app.hud-focus-scope old-scope))
-                    "Expected routed HUD reload to replace HUD focus scope")
-            (assert (= app.world-manager old-world-manager)
-                    "Expected routed HUD reload to avoid reloading app root")
-            (app.hud:update)
-            (local after-state (app.hud:capture-state))
-            (assert (= (length (or after-state.panels []))
-                       (length (or before-state.panels [])))
-                    "Expected routed HUD reload to preserve panel count")
+            (assert-experimental-hud-opt-in! watch-root)
             true)))
       (local (cleanup-ok cleanup-result)
-        (pcall cleanup-controller-and-main-if-engine! controller))
+        (pcall cleanup-app-hot-reload-controller-and-main!))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
+      (set app.hot-reload-config original-config)
       (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn canvas-unit-reload-roundtrips-surface-state []
@@ -515,10 +486,11 @@
             (set controller
               (HotReload.HotReloadController
                 {:unit root-unit
-                 :units-fn (fn [_root-unit]
-                             [app.canvas-unit app.hud-unit])
-                 :root-unit-id "app-root"
-                 :watch-paths [watch-root]
+                  :units-fn (fn [_root-unit]
+                              [app.canvas-unit app.hud-unit])
+                  :root-unit-id "app-root"
+                  :narrow-reload-unit-ids ["canvas"]
+                  :watch-paths [watch-root]
                  :preserve-modules ["app-bootstrap"
                                     "hot-reload"
                                     "tests.test-hot-reload-integration"
@@ -661,11 +633,12 @@
               (HotReload.HotReloadController
                 {:unit root-unit
                  :units-fn (fn [_root-unit]
-                             [app.canvas-unit
-                              app.hud-unit
-                              (activity-unit "graph")
-                              (activity-unit "board")])
-                 :root-unit-id "app-root"
+                              [app.canvas-unit
+                               app.hud-unit
+                               (activity-unit "graph")
+                               (activity-unit "board")])
+                  :root-unit-id "app-root"
+                  :narrow-reload-unit-ids ["canvas"]
                  :watch-paths [watch-root]
                  :preserve-modules ["app-bootstrap"
                                     "hot-reload"
@@ -728,10 +701,11 @@
               (HotReload.HotReloadController
                 {:unit root-unit
                  :units-fn (fn [_root-unit]
-                             [app.canvas-unit
-                              app.hud-unit
-                              (activity-unit "drawing")])
-                 :root-unit-id "app-root"
+                              [app.canvas-unit
+                               app.hud-unit
+                               (activity-unit "drawing")])
+                  :root-unit-id "app-root"
+                  :narrow-reload-unit-ids ["drawing-activity"]
                  :watch-paths [watch-root]
                  :preserve-modules ["app-bootstrap"
                                     "hot-reload"
@@ -795,10 +769,11 @@
               (HotReload.HotReloadController
                 {:unit root-unit
                  :units-fn (fn [_root-unit]
-                             [app.canvas-unit
-                              app.hud-unit
-                              (activity-unit "graph")])
-                 :root-unit-id "app-root"
+                              [app.canvas-unit
+                               app.hud-unit
+                               (activity-unit "graph")])
+                  :root-unit-id "app-root"
+                  :narrow-reload-unit-ids ["graph-activity"]
                  :watch-paths [watch-root]
                  :preserve-modules ["app-bootstrap"
                                     "hot-reload"
@@ -895,10 +870,11 @@
               (HotReload.HotReloadController
                 {:unit root-unit
                  :units-fn (fn [_root-unit]
-                             [app.canvas-unit
-                              app.hud-unit
-                              (activity-unit "board")])
-                 :root-unit-id "app-root"
+                              [app.canvas-unit
+                               app.hud-unit
+                               (activity-unit "board")])
+                  :root-unit-id "app-root"
+                  :narrow-reload-unit-ids ["board-activity"]
                  :watch-paths [watch-root]
                  :preserve-modules ["app-bootstrap"
                                     "hot-reload"
@@ -996,10 +972,11 @@
               (HotReload.HotReloadController
                 {:unit root-unit
                  :units-fn (fn [_root-unit]
-                             [app.canvas-unit
-                              app.hud-unit
-                              (activity-unit "drawing")])
-                 :root-unit-id "app-root"
+                              [app.canvas-unit
+                               app.hud-unit
+                               (activity-unit "drawing")])
+                  :root-unit-id "app-root"
+                  :narrow-reload-unit-ids ["drawing-activity"]
                  :watch-paths [watch-root]
                  :preserve-modules ["app-bootstrap"
                                     "hot-reload"
@@ -1028,27 +1005,27 @@
                      :fn app-init-refreshes-agent-preset-context-after-drop})
 (table.insert tests {:name "HUD unit reload roundtrips panel state"
                      :fn hud-unit-reload-roundtrips-panel-state})
-(table.insert tests {:name "hot reload routes hud file changes to hud unit"
+(table.insert tests {:name "experimental opt-in hot reload routes hud file changes to hud unit"
                      :fn hot-reload-routes-hud-file-changes-to-hud-unit})
 (table.insert tests {:name "canvas unit reload roundtrips surface state"
                      :fn canvas-unit-reload-roundtrips-surface-state})
-(table.insert tests {:name "hot reload routes canvas file changes to canvas unit"
+(table.insert tests {:name "experimental opt-in hot reload routes canvas file changes to canvas unit"
                      :fn hot-reload-routes-canvas-file-changes-to-canvas-unit})
 (table.insert tests {:name "hot reload routes workspace shell state file changes to app root"
                       :fn hot-reload-routes-workspace-shell-state-file-changes-to-app-root})
-(table.insert tests {:name "hot reload routes shared triangle-line to canvas unit"
+(table.insert tests {:name "experimental opt-in hot reload routes shared triangle-line to canvas unit"
                      :fn hot-reload-routes-shared-triangle-line-to-canvas-unit})
-(table.insert tests {:name "hot reload routes drawing render file changes to drawing activity unit"
+(table.insert tests {:name "experimental opt-in hot reload routes drawing render file changes to drawing activity unit"
                      :fn hot-reload-routes-drawing-render-file-changes-to-drawing-activity-unit})
-(table.insert tests {:name "hot reload routes graph view file changes to graph activity unit"
+(table.insert tests {:name "experimental opt-in hot reload routes graph view file changes to graph activity unit"
                      :fn hot-reload-routes-graph-view-file-changes-to-graph-activity-unit})
 (table.insert tests {:name "graph activity registers active activity snapshot hooks"
                      :fn graph-activity-registers-active-activity-snapshot-hooks})
-(table.insert tests {:name "hot reload routes board file changes to board activity unit"
+(table.insert tests {:name "experimental opt-in hot reload routes board file changes to board activity unit"
                      :fn hot-reload-routes-board-file-changes-to-board-activity-unit})
 (table.insert tests {:name "unloading active drawing activity updates shell state"
                      :fn unloading-active-drawing-activity-updates-shell-state})
-(table.insert tests {:name "hot reload routes drawing activity actions file changes to drawing activity unit"
+(table.insert tests {:name "experimental opt-in hot reload routes drawing activity actions file changes to drawing activity unit"
                      :fn hot-reload-routes-drawing-activity-actions-file-changes-to-drawing-activity-unit})
 
 (local main
