@@ -92,7 +92,8 @@
       :tests.test-graph-activity-input
      :tests.test-drawing-hit-test
      :tests.test-drawing-activity-slots
-     :tests.test-board
+      :tests.test-board
+      :tests.test-reference-lifecycle-board
      :tests.test-board-activity-string-entities
     :tests.test-first-person-controls
     :tests.test-screen-pos-ray
@@ -146,6 +147,7 @@
     :tests.test-sql-builder
     :tests.test-string-utils
     :tests.test-entity-type-catalog
+    :tests.test-reference-lifecycle-worlds
     :tests.test-string-entities
     :tests.test-string-entity-search
     :tests.test-string-entity-create-child

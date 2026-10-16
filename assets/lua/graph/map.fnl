@@ -6,9 +6,58 @@
 (local IdentityStore (require :entities/identity))
 (local KeyLoaderUtils (require :graph/key-loader-utils))
 (local glm (require :glm))
+(local R (require :reference-lifecycle/record-utils))
+(local ReferenceState (require :graph/reference-state))
+(local J (require :json-utils))
 
 (local GraphEdge Edge.GraphEdge)
 (local node-id NodeBase.node-id)
+
+(fn install-reference-membership! [map state derived-keys native-edge-key explicit-rows]
+    (R.require-array state.nodes) (R.require-array state.edges)
+    (local wanted (collect [_ key (ipairs state.nodes)] key true))
+    (local removed (icollect [key node (pairs map.nodes)] (when (not (. wanted key)) node)))
+    (map:remove-nodes removed {:cause "reference-lifecycle"})
+    (local unresolved-nodes []) (local unresolved-edges [])
+    (each [_ key (ipairs state.nodes)]
+        (when (not (map:load-by-key key)) (table.insert unresolved-nodes key)))
+    (local wanted-edges {})
+    (each [_ row (ipairs state.edges)]
+        (when (and (. wanted row.source) (. wanted row.target))
+            (tset wanted-edges (ReferenceState.edge-address row.source row.target) row)))
+    ;; This is a projection, not an authoring/removal action in the owning stores.
+    ;; In particular do not call remove-domain-edge or pass opaque rows as _opts.
+    (for [i (# map.edges) 1 -1]
+        (local edge (. map.edges i))
+        (local key (native-edge-key edge))
+        (when (and (not (. derived-keys key)) (not (. wanted-edges key)))
+            (table.remove map.edges i)
+            (tset map.edge-map key nil)
+            (map.edge-removed:emit {:edge edge})))
+    (each [key _ (pairs explicit-rows)] (tset explicit-rows key nil))
+    (each [key row (pairs wanted-edges)]
+        (tset explicit-rows key (R.clone row))
+        (local source (map:lookup row.source)) (local target (map:lookup row.target))
+        (if (not (and source target))
+            (table.insert unresolved-edges (R.clone row))
+            (not (. map.edge-map key))
+            (do
+                (local edge (GraphEdge {:source source :target target :label row.label :color row.color}))
+                (tset map.edge-map key edge)
+                (table.insert map.edges edge)
+                (map.edge-added:emit {:edge edge}))))
+    (values unresolved-nodes unresolved-edges))
+
+(fn install-reference-islands! [map state]
+    (local records (R.field state :islands :table []))
+    (R.require-array records)
+    (local wanted {})
+    (each [_ island (ipairs records)]
+        (tset wanted island.id true)
+        (when (not (= (J.stable-json (map:get-island island.id)) (J.stable-json island)))
+            (map:upsert-island island)))
+    (each [_ island (ipairs (map:list-islands))]
+        (when (not (. wanted island.id)) (map:remove-island island.id {:cause "reference-lifecycle"}))))
 
 (fn refresh-adapters-by-scheme [graph-map shared-graph nodes lookup replace-node scheme]
     (assert scheme "GraphMap.refresh-adapters-by-scheme requires scheme")
@@ -50,6 +99,7 @@
     (local edge-map {})
     (local islands {})
     (local derived-edge-keys {})
+    (local explicit-edge-rows {})
     (local island-added (Signal))
     (local island-updated (Signal))
     (local island-removed (Signal))
@@ -431,6 +481,7 @@
                         (table.remove edges i)))
                 (set (. edge-map key) nil)
                 (set (. derived-edge-keys key) nil)
+                (tset explicit-edge-rows key nil)
                 (edge-removed:emit {:edge edge :opts opts})
                 (when (and edge.source edge.source.remove-domain-edge)
                     (edge.source:remove-domain-edge edge identity-options))
@@ -557,69 +608,25 @@
             (when (not exists?)
                 (table.insert unresolved-restored-node-keys key))))
 
-    (fn record-unresolved-restored-edge [source-key target-key]
-        (when (and (= (type source-key) :string)
-                   (= (type target-key) :string))
-            (var exists? false)
-            (each [_ edge (ipairs unresolved-restored-edge-list)]
-                (when (and (= edge.source source-key)
-                           (= edge.target target-key))
-                    (set exists? true)))
-            (when (not exists?)
-                (table.insert unresolved-restored-edge-list {:source source-key
-                                                             :target target-key}))))
-
     (set self.capture-state
         (fn [_self]
-            (local node-keys
-                (icollect [key _ (pairs nodes)]
-                    key))
-            (table.sort node-keys)
-            (local edge-keys {})
-            (local edge-list [])
-            (each [_ edge (ipairs edges)]
-                (local source-key (and edge.source edge.source.key))
-                (local target-key (and edge.target edge.target.key))
-                (when (and source-key target-key)
-                    (local composite (edge-key edge))
-                    (when (and (not (. edge-keys composite))
-                               (not (. derived-edge-keys composite)))
-                        (set (. edge-keys composite) true)
-                        (table.insert edge-list {:source source-key
-                                                  :target target-key}))))
-            (table.sort edge-list
-                        (fn [a b]
-                            (local a-key (.. (or a.source "") "->" (or a.target "")))
-                            (local b-key (.. (or b.source "") "->" (or b.target "")))
-                            (< a-key b-key)))
-            ;; Preserve unresolved restored keys/edges so they survive through
-            ;; capture/restore cycles until hydration explicitly prunes them.
-            (each [_ key (ipairs unresolved-restored-node-keys)]
-                (when (and (= (type key) :string)
-                           (not (lookup self key)))
-                    (table.insert node-keys key)))
-            (each [_ edge (ipairs unresolved-restored-edge-list)]
-                (local source-key edge.source)
-                (local target-key edge.target)
-                (local composite (.. (or source-key "") "->" (or target-key "")))
-                (when (and (= (type source-key) :string)
-                           (= (type target-key) :string)
-                           (not (. edge-keys composite)))
-                    (set (. edge-keys composite) true)
-                    (table.insert edge-list {:source source-key
-                                              :target target-key})))
-            (table.sort node-keys)
-            (local captured-selected-keys
-                (icollect [_ key (ipairs (or self.selected_node_keys []))]
-                    key))
-            {:nodes node-keys
-             :edges edge-list
-              :islands (list-islands self)
-              :next_island_id next-island-id
-              :selected_node_keys captured-selected-keys
-              :focused_node_key self.focused_node_key
-              :view_mode self.view_mode
-              :outline_root_keys (get-outline-root-keys self)}))
+            (ReferenceState.capture-map-state self derived-edge-keys edge-key explicit-edge-rows
+                unresolved-restored-node-keys unresolved-restored-edge-list next-island-id)))
+
+    (set self.install-reference-state!
+        (fn [_self state]
+            (assert (= (type state) :table) "GraphMap reference install requires state")
+            (local (unresolved-nodes unresolved-edges)
+                (install-reference-membership! self state derived-edge-keys edge-key explicit-edge-rows))
+            (set unresolved-restored-node-keys unresolved-nodes)
+            (set unresolved-restored-edge-list unresolved-edges)
+            (install-reference-islands! self state)
+            (set next-island-id (or state.next_island_id (next-island-number-after-records)))
+            (set-selected-node-keys self (R.field state :selected_node_keys :table []))
+            (set self.focused_node_key state.focused_node_key)
+            (set-view-mode! self (R.field state :view_mode :string "spatial"))
+            (set-outline-root-keys! self (R.field state :outline_root_keys :table []))
+            true))
 
     (set self.restore-state
         (fn [_self state]
@@ -661,6 +668,7 @@
                 (remove-island self island-id {:cause "restore-state"}))
             (set unresolved-restored-node-keys [])
             (set unresolved-restored-edge-list [])
+            (each [key _ (pairs explicit-edge-rows)] (tset explicit-edge-rows key nil))
             (set next-island-id 1)
             (each [_ key (ipairs node-keys)]
                 (assert (= (type key) :string) "GraphMap.restore-state node keys must be strings")
@@ -677,12 +685,13 @@
                         "GraphMap.restore-state edge.target must be a string")
                 (when (and (. restored-node-key-set source-key)
                            (. restored-node-key-set target-key))
+                    (tset explicit-edge-rows (ReferenceState.edge-address source-key target-key) (R.clone edge))
                     (local source-node (lookup self source-key))
                     (local target-node (lookup self target-key))
                     (if (not (and source-node target-node))
-                        (record-unresolved-restored-edge source-key target-key)
+                        (table.insert unresolved-restored-edge-list (R.clone edge))
                         (self:add-edge (GraphEdge {:source source-node
-                                                    :target target-node})))))
+                                                    :target target-node :label edge.label :color edge.color})))))
             (each [key _ (pairs nodes)]
                 (recompute-link-edges-for-node self key))
             (each [_ island (ipairs island-list)]

@@ -1,6 +1,7 @@
 (local Registry (require :board/registry))
 (local StringEntityStore (require :entities/string))
 (local StringEntityBoardWidget (require :board/string-entity-widget))
+(local Code (require :board/builtin-code-entity))
 
 (local ITEM_TYPE "string-entity")
 
@@ -13,13 +14,11 @@
     (when (= (string.sub key 1 (# prefix)) prefix)
       (string.sub key (+ (# prefix) 1)))))
 
-(fn build-string-entity [item _view]
-  (local store (StringEntityStore.get-default))
-  (local entity-id (assert (entity-id-from-subject item.subject-key)
-                           "String entity board item requires string-entity subject key"))
-  (StringEntityBoardWidget {:item item
-                            :store store
-                            :entity-id entity-id}))
+(fn build-string-entity [item view]
+  (local (_ kind id) (Code.resolve-subject item view))
+  (if (= kind Code.item-type) (Code.build item view)
+      (StringEntityBoardWidget {:item item :entity-id id
+                                :store (Code.owning-store view :string-store StringEntityStore.get-default)})))
 
 (fn create-string-entity [board opts]
   (local options (or opts {}))
@@ -79,6 +78,7 @@
   (Registry.unregister-item-type ITEM_TYPE owner))
 
 {:item-type ITEM_TYPE
+ :build build-string-entity
  :subject-key subject-key
  :entity-id-from-subject entity-id-from-subject
  :create-string-entity create-string-entity

@@ -5,13 +5,103 @@
 (local FloatLayer (require :float-layer))
 (local Registry (require :board/registry))
 (local LinkEntityStore (require :entities/link))
+(local fs (require :fs))
+
+(fn validate-store [store identity-store label]
+  (assert (and store store.base-dir) (.. "BoardView requires " label " base-dir"))
+  (assert (= (fs.absolute store.base-dir) (fs.absolute identity-store.base-dir))
+          (.. "BoardView " label " root mismatch"))
+  (when store.identity-store
+    (assert (= store.identity-store identity-store) (.. "BoardView " label " identity-store mismatch")))
+  store)
+
+(fn resolved-item-key [item identity-store]
+  (assert (and item identity-store) "Board subject binding requires item and identity-store")
+  (if (or (= item.type "string-entity") (= item.type "code-entity"))
+      (identity-store:resolve-key item.subject-key)
+      item.subject-key))
+
+(fn build-item-body [item view]
+  (local item-type (assert (Registry.item-type item.type)
+                          (.. "Unknown board item type: " (tostring item.type))))
+  (local builder ((assert item-type.builder "Board item type missing builder") item view))
+  (local element (builder view.ctx))
+  (assert (and element element.layout) "Board item builder must return widget with layout")
+  element)
+
+(fn replace-item-body [view record build unregister register-movable register-resizable]
+  ;; Construct before detaching: unsupported/missing data cannot erase a held body.
+  (local element (build record.item))
+  (local old record.element)
+  (unregister record)
+  (set record.element element)
+  (set record.metadata.element element)
+  (set record.metadata.target nil)
+  (view.layer.layout:set-children (icollect [_ entry (ipairs view.layer.children)] entry.element.layout))
+  (register-movable record.item record.metadata)
+  (register-resizable record.item record.metadata)
+  (old:drop)
+  (set record.subject-key record.item.subject-key)
+  (set record.item-type record.item.type)
+  (set record.resolved-key (resolved-item-key record.item view.identity-store)))
+
+(fn acquire-item-provider! [item view providers]
+  (assert item "Board provider acquisition requires item")
+  (local key (resolved-item-key item providers.identity-store))
+  (local kind (and (or (= item.type "string-entity") (= item.type "code-entity")) key (string.match key "^([^:]+):")))
+  (local field (if (= kind "string-entity") :string-store (= kind "code-entity") :code-store))
+  (when field
+    (local store (or (. providers field)
+                     (if (= field :string-store) ((. (require :entities/string) :get-default))
+                         ((. (require :entities/code) :get-default)))))
+    (validate-store store providers.identity-store field)
+    (tset providers field store)
+    (tset view field store)))
+
+(fn ensure-board-transform-target [board layer item metadata]
+  (when metadata
+    (local target (layer:ensure-transform-target metadata))
+    (when (and target (not target.__board_transform_target))
+      (local original-set-position target.set-position)
+      (local original-set-size target.set-size)
+      (set target.__board_transform_target true)
+      (set target.set-position
+           (fn [self position]
+             (board:update-item-transform item.id {:position position})
+             (original-set-position self position)
+             self))
+      (set target.set-size
+           (fn [self size]
+             (board:update-item-transform item.id {:size size})
+             (original-set-size self size)
+             self))
+      (set target.set-transform
+           (fn [self transform]
+             (board:update-item-transform item.id transform)
+             (when transform.position (original-set-position self transform.position))
+             (when transform.size (original-set-size self transform.size))
+             self)))
+    target))
 
 (fn item-center [item]
   (local position (or item.position (glm.vec3 0 0 0)))
   (local size (or item.size (glm.vec3 0 0 0)))
   (+ position (glm.vec3 (* size.x 0.5)
                        (* size.y 0.5)
-                       0)))
+                        0)))
+
+(fn sync-record-transform [layer record item]
+  (assert item "Board transform requires item")
+  (when (and record record.metadata)
+    (set record.metadata.world-position item.position)
+    (set record.metadata.world-rotation item.rotation)
+    (set record.metadata.size item.size)
+    (layer.layout:mark-layout-dirty)
+    (when record.element.layout
+      (set record.element.layout.size item.size)
+      (record.element.layout:mark-layout-dirty)))
+  (when (and record record.selectable)
+    (set record.selectable.position (item-center item))))
 
   (fn subject-key [item]
   (and item item.subject-key))
@@ -24,6 +114,13 @@
                      "BoardView requires build context"))
   (local link-store (or options.link-store (LinkEntityStore.get-default)))
   (local identity-store (assert link-store.identity-store "BoardView link-store requires identity-store"))
+  (when options.identity-store
+    (assert (= options.identity-store identity-store) "BoardView identity-store conflicts with link-store"))
+  (validate-store link-store identity-store "link-store")
+  (each [_ key (ipairs [:string-store :code-store])]
+    (when (. options key) (validate-store (. options key) identity-store key)))
+  (local providers {:identity-store identity-store :link-store link-store
+                    :string-store options.string-store :code-store options.code-store})
   (fn same-key? [left right]
     (and left right (not (= left "")) (not (= right ""))
          (= (identity-store:resolve-key left) (identity-store:resolve-key right))))
@@ -44,6 +141,15 @@
 
   (fn assert-not-dropped [context]
     (assert (not dropped?) (.. "BoardView " context " called after drop")))
+
+  (fn build-body [item]
+    (acquire-item-provider! item self providers)
+    (build-item-body item self))
+
+  (fn reference-providers [_self]
+    (assert (not dropped?) "BoardView reference-providers called after drop")
+    {:board board :identity-store identity-store :link-store link-store
+     :string-store (or providers.string-store false) :code-store (or providers.code-store false)})
 
   (fn create-selectable [item]
     {:item item
@@ -96,36 +202,9 @@
                 (set connector.target-item-id next-target.id))
               (board:remove-connector connector.id))))))
 
-  (fn ensure-board-transform-target [item metadata]
-    (when metadata
-      (local target (layer:ensure-transform-target metadata))
-      (when (and target (not target.__board_transform_target))
-        (local original-set-position target.set-position)
-        (local original-set-size target.set-size)
-        (set target.__board_transform_target true)
-        (set target.set-position
-             (fn [self position]
-               (board:update-item-transform item.id {:position position})
-               (original-set-position self position)
-               self))
-        (set target.set-size
-             (fn [self size]
-               (board:update-item-transform item.id {:size size})
-               (original-set-size self size)
-               self))
-        (set target.set-transform
-             (fn [self transform]
-               (board:update-item-transform item.id transform)
-               (when transform.position
-                 (original-set-position self transform.position))
-               (when transform.size
-                 (original-set-size self transform.size))
-               self)))
-      target))
-
   (fn register-movable [item metadata]
     (when (and app.movables metadata)
-      (local target (ensure-board-transform-target item metadata))
+      (local target (ensure-board-transform-target board layer item metadata))
       (app.movables:register metadata.element {:target target
                                                 :handle metadata.element.layout
                                                 :key metadata.element
@@ -137,7 +216,7 @@
 
   (fn register-resizable [item metadata]
     (when (and app.resizables metadata)
-      (local target (ensure-board-transform-target item metadata))
+      (local target (ensure-board-transform-target board layer item metadata))
       (app.resizables:register metadata.element {:target target
                                                   :handle metadata.element.layout
                                                   :key metadata.element
@@ -159,21 +238,15 @@
     (local (ok result)
       (pcall
         (fn []
-          (local item-type (assert (Registry.item-type item.type)
-                                   (.. "Unknown board item type: " (tostring item.type))))
-          (local builder ((assert item-type.builder
-                                  (.. "Board item type missing builder: " item.type))
-                         item
-                         self))
-          (set element (builder ctx))
-          (assert (and element element.layout)
-                  "Board item builder must return widget with layout")
+          (set element (build-body item))
           (set metadata (layer:attach-child element {:position item.position
                                                      :rotation item.rotation
                                                      :size item.size}))
           (register-movable item metadata)
           (register-resizable item metadata)
           (set (. item-records item.id) {:item item
+                                          :subject-key item.subject-key :item-type item.type
+                                          :resolved-key (resolved-item-key item identity-store)
                                           :element element
                                           :metadata metadata})
           (when selector
@@ -202,18 +275,17 @@
       (set (. item-records item.id) nil)))
 
   (fn sync-item-transform [item]
+    (assert item "Board item update requires item")
     (local record (and item (. item-records item.id)))
-    (when (and record record.metadata)
-      (set record.metadata.world-position item.position)
-      (set record.metadata.world-rotation item.rotation)
-      (set record.metadata.size item.size)
-      (layer.layout:mark-layout-dirty)
-      (when record.element.layout
-        (set record.element.layout.size item.size)
-        (record.element.layout:mark-layout-dirty)))
-    (when (and selector record record.selectable)
-      (set record.selectable.position (item-center item)))
+    (when (and record (or (not (= record.subject-key item.subject-key))
+                          (not (= record.item-type item.type))
+                          (not (= record.resolved-key (resolved-item-key item identity-store)))))
+      (replace-item-body self record build-body unregister-interactions register-movable register-resizable))
+    (sync-record-transform layer record item)
     (update-connectors-for-item item))
+
+  (fn refresh-identities [_entity]
+    (each [_ item (ipairs board.items-in-order)] (sync-item-transform item)))
 
   (fn add-connector-view [connector]
     (assert-not-dropped "add-connector-view")
@@ -250,6 +322,7 @@
   (var link-updated-handler nil)
   (var link-deleted-handler nil)
   (var selection-handler nil)
+  (var identity-handler nil)
 
   (fn connectors-for-link [link-id]
     (local out [])
@@ -399,6 +472,7 @@
     (board.item-updated:disconnect item-updated-handler true)
     (board.connector-added:disconnect connector-added-handler true)
     (board.connector-removed:disconnect connector-removed-handler true)
+    (identity-store.identity-updated:disconnect identity-handler true)
     (when link-updated-handler
       (link-store.link-entity-updated:disconnect link-updated-handler true)
       (set link-updated-handler nil))
@@ -421,6 +495,9 @@
     (layer:drop))
 
   (set self {:board board
+              :string-store options.string-store
+              :code-store options.code-store
+              :identity-store identity-store
               :canvas canvas
               :ctx ctx
               :layer layer
@@ -434,6 +511,7 @@
               :remove-item remove-item
               :remove-selected-items remove-selected-items
               :capture-state capture-state
+              :reference-providers reference-providers
               :update update
               :drop drop})
   (when selector
@@ -456,6 +534,7 @@
   (set connector-removed-handler (board.connector-removed:connect remove-connector-view))
   (set link-updated-handler (link-store.link-entity-updated:connect handle-link-updated))
   (set link-deleted-handler (link-store.link-entity-deleted:connect handle-link-deleted))
+  (set identity-handler (identity-store.identity-updated:connect refresh-identities))
   (local (hydrate-ok hydrate-err)
     (pcall
       (fn []

@@ -69,8 +69,8 @@ export SPACE_DISABLE_AUDIO=1 SKIP_KEYRING_TESTS=1
 export XDG_DATA_HOME=/tmp/space/tests/xdg-data
 
 run_focused() {
-    local filter="$1" expected_count="${2:-}"
-    TEST_FILTER="$filter" TEST_VERBOSE=1 python3 - "$filter" "$expected_count" <<'PY'
+    local filter="$1" expected_count="${2:-}" module="${3:-tests.fast:main}"
+    TEST_FILTER="$filter" TEST_VERBOSE=1 python3 - "$filter" "$expected_count" "$module" <<'PY'
 import os
 from pathlib import Path
 import re
@@ -78,12 +78,12 @@ import subprocess
 import sys
 import tempfile
 
-literal_filter, expected = sys.argv[1:]
+literal_filter, expected, module = sys.argv[1:]
 # Runtime freshness already established that the ignored build/ parent exists.
 with tempfile.NamedTemporaryFile(mode="w", prefix="reference-lifecycle-focused-",
                                  suffix=".log", dir="build", delete=False) as log:
     log_path = Path(log.name)
-    result = subprocess.run(["./build/space", "-m", "tests.fast:main"],
+    result = subprocess.run(["./build/space", "-m", module],
                             env=os.environ, stdout=log, stderr=subprocess.STDOUT)
 text = log_path.read_text(encoding="utf-8", errors="replace")
 sys.stdout.write(text)
@@ -121,7 +121,7 @@ check_stage() {
 
 `check_stage` accepts a test filter followed by paths relative to `assets/lua/`; it builds explicit `--target files --file <repo-relative-path>` arguments for compilation, then runs the canonical baseline-aware repository constraints gate. The constraints runner intentionally omits repository baselines for explicit-file targets, which expose accepted pre-existing debt in unchanged Graph factories. Repository validation still blocks new, stale, or worsened findings; it is not a filter or bypass. Fix new-code findings rather than baseline them. Any maintenance of existing line-sensitive baseline fingerprints requires independent review of actual data, unchanged or reduced measures, and no new exceptions. The first check is native compilation, constraints are second, audited focused Fennel tests third. `run_focused(filter, expected_count?)` preserves native exit status and rejects missing/zero execution, mismatched `[RUN]`/summary counts and names outside the literal filter. Logs stay under ignored `build/`; this is a plan-local Bash/Python snippet, not a new CLI/tool or production API. Each task’s command below enumerates its compile targets explicitly. Run it for RED after adding tests and again for GREEN; RED must be the intended behavioral failure, not a parse or unrelated bootstrap failure. Register new test modules in `assets/lua/tests/fast.fnl`, with the literal test-name prefixes given below.
 
-Before each new-prefix RED run, declare its planned **named test roster** and count in the implementation report. Record actual `[RUN]` names and count from the retained log for RED/GREEN, and reject discrepancies at the reviewed stage rather than choosing arbitrary future counts. Set `FOCUSED_EXPECTED_COUNT` to that roster's reviewed count when invoking `check_stage`, or pass it as `run_focused`'s second argument. The one source-reviewed existing baseline guard is `run_focused 'workflow-store' 9`; `workflow store` instead selects temporal tests and is not that guard. Nine is supplied source-count evidence, not a claimed execution in this documentation task.
+Before each new-prefix RED run, declare its planned **named test roster** and count in the implementation report. Record actual `[RUN]` names and count from the retained log for RED/GREEN, and reject discrepancies at the reviewed stage rather than choosing arbitrary future counts. Set `FOCUSED_EXPECTED_COUNT` to that roster's reviewed count when invoking `check_stage`, or pass it as `run_focused`'s second argument. Its optional third argument selects an existing native module entry point; the default is `tests.fast:main`. The exact workflow-store baseline guard is `run_focused 'workflow-store' 9 tests.test-workflow-store:main`. Task 5 empirically confirmed that the same filter in the fast aggregator also selects two descriptor/start-node tests (eleven total); do not force that broader selection to nine. `workflow store` instead selects temporal tests and is not this guard. Preserve the module and actual roster in validation evidence.
 
 For GREEN validation blocks, use a fresh root Bash shell with `set -e` so a failed compile, constraint, focused check or later command cannot be masked by a subsequent success. The guard loops below also explicitly propagate each failing test’s status with `|| exit $?`. Capture expected RED separately with its nonzero result; never reinterpret a parser/constraint failure as behavioral RED.
 
@@ -330,7 +330,7 @@ check_stage 'reference lifecycle owners' entities/string.fnl entities/code.fnl e
   reference-lifecycle/identities-owner.fnl reference-lifecycle/workflows-owner.fnl \
   reference-lifecycle/migration.fnl tests/test-reference-lifecycle-owners.fnl \
   tests/test-reference-lifecycle-helpers.fnl tests/fast.fnl
-run_focused 'workflow-store' 9
+run_focused 'workflow-store' 9 tests.test-workflow-store:main
 ```
 
 Acceptance: strict enumeration is verified through the binding; preparation is read-only; applying migration twice yields zero second-pass changes. Main still uses the old application paths. Suggested checkpoint: `feat(lua): prepare explicit reference owner changes`.
@@ -418,7 +418,7 @@ Acceptance: both directions of links, alias chains, K1/K2 relationship cycles, c
 **Files:**
 - Create: `assets/lua/reference-lifecycle/world-owner.fnl`, `assets/lua/graph/reference-state.fnl`, `assets/lua/board/reference-state.fnl`, `assets/lua/board/builtin-code-entity.fnl`
 - Modify: `assets/lua/world-manager.fnl`, `assets/lua/home-world.fnl`, `assets/lua/board/core.fnl`, `assets/lua/board/view.fnl`, `assets/lua/board/builtin-string-entity.fnl`, `assets/lua/board-activity-unit.fnl`
-- Modify: `assets/lua/graph/map-manager.fnl`, `assets/lua/graph/view/persistence.fnl`, `assets/lua/graph/view/runtime.fnl`, `assets/lua/graph/view/init.fnl`
+- Modify: `assets/lua/graph/map-manager.fnl`, `assets/lua/graph/map.fnl`, `assets/lua/graph/view/persistence.fnl`, `assets/lua/graph/view/runtime.fnl`, `assets/lua/graph/view/init.fnl`
 - Create: `assets/lua/tests/test-reference-lifecycle-worlds.fnl`
 - Modify: `assets/lua/tests/test-reference-lifecycle-helpers.fnl`, `assets/lua/tests/fast.fnl`
 
@@ -429,6 +429,7 @@ Acceptance: both directions of links, alias chains, K1/K2 relationship cycles, c
 - Produces: `WorldManager:list-reference-worlds()->[{id,dir,world:HomeWorld|nil}]`, enumerating persisted world directories plus loaded entries without activating worlds.
 - Produces: `HomeWorld:snapshot-reference-state()->table` and `:install-reference-state!(state)->true`; both are nonpersisting and include native board/map/view/session mirrors. WorldOwner consumes the snapshot for durable preparation; RuntimeOwner uses installation for frozen transient reconciliation only.
 - Produces: `GraphMapManager:snapshot-reference-state()->graph-state`, `:install-reference-state!(graph-state)->true`; both are nonpersisting, do not activate worlds/maps, and do not hydrate inactive maps during snapshot.
+- Produces early for Task 6 reuse: `GraphMap:install-reference-state!(state)->true`, a lifecycle-specific nonpersisting delta that preserves surviving native adapters/explicit edge rows and avoids ordinary full-restore pruning against an installed metadata after-image. Task 5 active-view regressions established this prerequisite for coherent WorldOwner publication; it cannot safely wait until the next stage.
 - Produces pure functions: `GraphReferenceState.rewrite-map(state,operation)->state`, `rewrite-metadata(metadata,operation)->metadata`, `rewrite-view(state,operation)->state`; `BoardReferenceState.rewrite(state,operation,identity-store)->state`.
 - Produces: GraphView `snapshot-reference-state()->view-state`; persistence `snapshot-state()->metadata`, `install-state!(metadata)->true`; all are nonpersisting snapshot/cache operations. A future ordinary save must see installed after-state, but lifecycle reconciliation itself must not save.
 - Produces: Board `update-item-subject(item-id,subject-key,item-type)->item`; `BuiltinCodeEntity.register(owner)`, `unregister(owner)`, `item-type="code-entity"`.
@@ -461,7 +462,7 @@ Acceptance: both directions of links, alias chains, K1/K2 relationship cycles, c
 check_stage 'reference lifecycle worlds' reference-lifecycle/world-owner.fnl graph/reference-state.fnl \
   board/reference-state.fnl board/builtin-code-entity.fnl world-manager.fnl home-world.fnl \
   board/core.fnl board/view.fnl board/builtin-string-entity.fnl board-activity-unit.fnl \
-  graph/map-manager.fnl graph/view/persistence.fnl graph/view/runtime.fnl graph/view/init.fnl \
+  graph/map-manager.fnl graph/map.fnl graph/view/persistence.fnl graph/view/runtime.fnl graph/view/init.fnl \
   tests/test-reference-lifecycle-worlds.fnl tests/test-reference-lifecycle-helpers.fnl tests/fast.fnl
 for filter in Board HomeWorld GraphMapManager; do
   run_focused "$filter" || exit $?
@@ -484,7 +485,7 @@ Acceptance: first RED and final GREEN evidence covers durable native board reten
 - Consumes: Task 5 nonpersisting snapshots/installers/rewriters, Task 4 frozen intent, Task 1 terminal/chain resolution, and shared Preparation/RuntimeCapture/frozen-byte Change contracts. WorldOwner is the **only** durable world/metadata writer.
 - Produces: `RuntimeOwner({stores,world-manager})->Owner` with ID `"runtime"`; it inventories native loaded runtimes without creating worlds/maps. `prepare(inventory,operation)->{changes:[],runtime-state:[RuntimeCapture]}` captures JSON-safe native `board/maps/views/metadata` before/after records keyed by stable world/map IDs and owner namespace. It emits **no** durable Changes and cannot apply a world/metadata write.
 - Produces: `RuntimeOwner:reconcile!(intent)->nil`, consuming only the frozen `intent.runtime-state` captures for its owner namespace; it never recaptures or saves, and installs only into still-loaded matching IDs. Missing runtime IDs are skipped without activation; a startup with no maps loaded relies on durable WorldOwner after-images when those maps are later activated. A genuine installation/reconciliation error propagates and leaves the durable pending intent.
-- Produces: Graph/GraphMap `reconcile-link-projections!()->true`; GraphMap `install-reference-state!(state)->true` applies prepared local participation nonpersistingly while preserving native adapter ownership. Metadata/presentation cache installation uses Task 5's nonpersisting methods.
+- Produces: Graph/GraphMap `reconcile-link-projections!()->true`; consumes and strengthens Task 5's existing GraphMap `install-reference-state!(state)->true` for prepared participation while preserving native adapter ownership. Do not reintroduce full restore or a second competing installation path. Metadata/presentation cache installation uses Task 5's nonpersisting methods.
 - Preserves: Existing node/front-end APIs, explicit map removal, link IDs, unrelated authored edges and the existing default durable-cleanup callbacks until Task 7's same-commit routing cutover.
 
 - [ ] **Step 1: Add native RED tests with prefix `"reference lifecycle projections"`.** Capture a participating map, a second participating inactive map, and an unrelated map before retiring the string. Use incoming and outgoing links, two direct aliases, an upstream alias, duplicate endpoint pairs with different link IDs, and an unrelated explicit edge.

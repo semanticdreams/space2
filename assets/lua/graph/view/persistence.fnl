@@ -3,6 +3,8 @@
 (local json (require :json))
 (local JsonUtils (require :json-utils))
 (local fs (require :fs))
+(local R (require :reference-lifecycle/record-utils))
+(local ReferenceState (require :graph/reference-state))
 
 (local ensure-glm-vec3 Utils.ensure-glm-vec3)
 (local position-magnitude-threshold 1e6)
@@ -36,11 +38,58 @@
                 (string.format "GraphViewPersistence view_modes for %s must be keyed by mode string" map-id))
         (assert (= (type entry) :table)
                 (string.format "GraphViewPersistence view_modes.%s for %s must be a table" mode map-id))
-        (local mode-entry {})
+        (local mode-entry (R.clone entry))
         (when (not (= entry.camera nil))
             (set mode-entry.camera (clone-camera-state map-id entry.camera)))
         (set (. cloned mode) mode-entry))
     cloned)
+
+(fn reference-metadata [map-id metadata]
+    (assert (= (type metadata) :table) "GraphViewPersistence install-state! requires metadata")
+    (local out (R.clone metadata))
+    (each [key value (pairs (or out.positions {}))]
+        (assert-valid-position key value "GraphViewPersistence install-state!"))
+    (each [key value (pairs (or out.sizes {}))]
+        (assert-valid-size key value "GraphViewPersistence install-state!"))
+    (each [_ value (pairs (or out.presentations {}))]
+        (assert (= value :expanded) "GraphViewPersistence install-state! invalid presentation"))
+    (R.require-array (or out.panels []))
+    (R.require-array (or out.extra_panels []))
+    (assert-valid-camera-state map-id out.camera "install-state!")
+    (clone-view-modes map-id (R.field out :view_modes :table {}))
+    out)
+
+(fn compact-reference-panels [map-id panels extras?]
+    (assert (= (type map-id) :string) "metadata panels require native map id")
+    (R.require-array panels)
+    (local kept [])
+    (var compacted? false)
+    (each [_ panel (ipairs panels)]
+        (when (and (if extras? panel.kind (= panel.kind "graph-node-view")) (not panel.graph-map-id))
+            (set panel.graph-map-id map-id)
+            (set compacted? true))
+        (if (or (not panel.graph-map-id) (= panel.graph-map-id map-id))
+            (table.insert kept panel)
+            (set compacted? true)))
+    (values kept compacted?))
+
+(fn loaded-reference-metadata [map-id decoded]
+    (assert (= (type decoded) :table) "GraphViewPersistence load requires metadata object")
+    (local out (reference-metadata map-id decoded))
+    (local (panels panels-compacted?) (compact-reference-panels map-id (or out.panels []) false))
+    (local (extra-panels extras-compacted?) (compact-reference-panels map-id (or out.extra_panels []) true))
+    (local mode-states (clone-view-modes map-id out.view_modes))
+    (when (and out.camera (not (and mode-states.spatial mode-states.spatial.camera)))
+        (when (not mode-states.spatial) (set mode-states.spatial {}))
+        (set mode-states.spatial.camera (clone-camera-state map-id out.camera)))
+    (set out.positions (or out.positions {}))
+    (set out.presentations (or out.presentations {}))
+    (set out.sizes (or out.sizes {}))
+    (set out.panels panels)
+    (set out.extra_panels extra-panels)
+    (set out.camera (clone-camera-state map-id (and mode-states.spatial mode-states.spatial.camera)))
+    (set out.view_modes mode-states)
+    (values out (or panels-compacted? extras-compacted?)))
 
 (fn GraphViewPersistence [opts]
     (local options (or opts {}))
@@ -103,73 +152,18 @@
                 (error (string.format "GraphView failed to parse %s: %s"
                                       source-path
                                       decoded)))
-            (local positions (or decoded.positions {}))
-             (local presentations (or decoded.presentations {}))
-             (local sizes (or decoded.sizes {}))
-              (local panels (or decoded.panels []))
-              (local extra-panels (or decoded.extra_panels []))
-               (local camera (rawget decoded "camera"))
-               (local view-modes (or (rawget decoded "view_modes") {}))
-              (each [key value (pairs positions)]
-                  (assert-valid-position key value "GraphViewPersistence load"))
-             (each [key value (pairs presentations)]
-                 (assert (= value :expanded)
-                         (string.format "GraphViewPersistence load presentation for %s must be :expanded" key)))
-             (each [key value (pairs sizes)]
-                 (assert-valid-size key value "GraphViewPersistence load"))
-            (assert (= (type panels) :table)
-                    "GraphViewPersistence load panels must be a table")
-             (assert (= (type extra-panels) :table)
-                     "GraphViewPersistence load extra_panels must be a table")
-              (assert-valid-camera-state map-id camera "load")
-              (assert (= (type view-modes) :table)
-                      (string.format "GraphViewPersistence load view_modes for %s must be a table" map-id))
-               (local kept-panels [])
-              (local kept-extra-panels [])
-              (var compacted? false)
-              (each [_ panel (ipairs panels)]
-                  (when (and (= panel.kind "graph-node-view")
-                             (not panel.graph-map-id))
-                      (set panel.graph-map-id map-id)
-                      (set compacted? true))
-                  (if (or (not panel.graph-map-id)
-                          (= panel.graph-map-id map-id))
-                      (table.insert kept-panels panel)
-                      (set compacted? true)))
-              (each [_ panel (ipairs extra-panels)]
-                  (when (and panel.kind
-                             (not panel.graph-map-id))
-                      (set panel.graph-map-id map-id)
-                      (set compacted? true))
-                  (if (or (not panel.graph-map-id)
-                          (= panel.graph-map-id map-id))
-                      (table.insert kept-extra-panels panel)
-                      (set compacted? true)))
-               (local mode-states (clone-view-modes map-id view-modes))
-               (when (and camera
-                          (or (= (. mode-states :spatial) nil)
-                              (= (. mode-states :spatial :camera) nil)))
-                   (when (= (. mode-states :spatial) nil)
-                       (set (. mode-states :spatial) {}))
-                   (set (. mode-states :spatial :camera) (clone-camera-state map-id camera)))
-               (set persisted {:positions positions
-                                :presentations presentations
-                                :sizes sizes
-                                :panels kept-panels
-                                :extra_panels kept-extra-panels
-                                :camera (clone-camera-state map-id (and (. mode-states :spatial)
-                                                                        (. mode-states :spatial :camera)))
-                                :view_modes mode-states})
-             (set persisted-positions positions)
-             (set persisted-presentations presentations)
-             (set persisted-sizes sizes)
-               (set persisted-panels kept-panels)
-               (set persisted-extra-panels kept-extra-panels)
-                (set persisted-camera persisted.camera)
-                (set persisted-view-modes mode-states)
-               (when compacted?
-                   (ensure-graph-data-dir)
-                  (JsonUtils.write-json! metadata-path persisted))))
+            (local (candidate compacted?) (loaded-reference-metadata map-id decoded))
+            (set persisted candidate)
+            (set persisted-positions candidate.positions)
+            (set persisted-presentations candidate.presentations)
+            (set persisted-sizes candidate.sizes)
+            (set persisted-panels candidate.panels)
+            (set persisted-extra-panels candidate.extra_panels)
+            (set persisted-camera candidate.camera)
+            (set persisted-view-modes candidate.view_modes)
+            (when compacted?
+                (ensure-graph-data-dir)
+                (JsonUtils.write-json! metadata-path persisted))))
 
     (fn saved-position [_self node]
         (when (and node node.key)
@@ -324,8 +318,8 @@
 
     (fn set-panels [_self panels]
         (assert (= (type panels) :table) "GraphViewPersistence set-panels requires a table")
-        (set persisted-panels panels)
-        (set persisted.panels panels)
+        (set persisted-panels (ReferenceState.merge-view-panels persisted-panels panels))
+        (set persisted.panels persisted-panels)
         (set pending-save? true))
 
     (fn saved-extra-panels [_self]
@@ -336,6 +330,23 @@
         (set persisted-extra-panels extra-panels)
         (set persisted.extra_panels extra-panels)
         (set pending-save? true))
+
+    (fn snapshot-state [_self]
+        (R.clone persisted))
+
+    (fn install-state! [_self metadata]
+        (assert (= (type metadata) :table) "GraphViewPersistence install-state! requires metadata")
+        (local candidate (reference-metadata map-id metadata))
+        (set persisted candidate)
+        (set persisted-positions (or candidate.positions {}))
+        (set persisted-presentations (or candidate.presentations {}))
+        (set persisted-sizes (or candidate.sizes {}))
+        (set persisted-panels (or candidate.panels []))
+        (set persisted-extra-panels (or candidate.extra_panels []))
+        (set persisted-camera candidate.camera)
+        (set persisted-view-modes (or candidate.view_modes {}))
+        (set pending-save? false)
+        true)
 
     (local self {:load load
                  :persist persist
@@ -355,6 +366,8 @@
                   :set-panels set-panels
                  :set-extra-panels set-extra-panels
                  :capture-positions capture-positions
+                 :snapshot-state snapshot-state
+                 :install-state! install-state!
                  :metadata-path metadata-path})
 
     (self:load)

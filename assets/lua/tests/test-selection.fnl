@@ -5,7 +5,7 @@
 (local BuildContext (require :build-context))
 (local Graph (require :graph/init))
 (local GraphMap (require :graph/map))
-(local GraphView (require :graph/view))
+(local GraphView ((. (require :tests/test-reference-lifecycle-helpers) :metadata-scoped-factory) (require :graph/view)))
 (local State (require :state))
 (local Routes (require :state-routes))
 (local HoverHandlers (require :state-handlers/hover))
@@ -51,9 +51,9 @@
     (fs.create-dirs dir)
     (assert appdirs "appdirs module must be available")
     (local original appdirs.user-data-dir)
-    (set appdirs.user-data-dir (fn [_appname] dir))
-    (local (ok result) (pcall f dir))
-    (set appdirs.user-data-dir original)
+    (assert (= (type f) :function) "selection metadata fixture requires callback")
+    (local (ok result) (pcall GraphView.with-data-dir dir #(f dir)))
+    (assert (= appdirs.user-data-dir original) "selection metadata fixture must retain appdirs getter")
     (fs.remove-all dir)
     (if ok
         result
