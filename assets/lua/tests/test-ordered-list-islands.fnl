@@ -287,10 +287,14 @@
       (fixture.identity-store:create-entity {:id "alias-a" :target-key key-a})
       (local entity (create-list fixture "list" ["identity:alias-a"]))
       (local list-node (fixture.map:load-by-key (.. "list-entity:" entity.id)))
-      (list-node:expand-items-as-island)
-      (assert-members (fixture.map:get-island "ordered-list:list") [key-a])
-      (fixture.identity-store:update-entity "alias-a" {:target-key key-b})
-      (assert-members (fixture.map:get-island "ordered-list:list") [key-b]))))
+       (list-node:expand-items-as-island)
+       (assert-members (fixture.map:get-island "ordered-list:list") [key-a])
+       (assert (not (fixture.map:lookup key-b)))
+       (fixture.identity-store:update-entity "alias-a" {:target-key key-b})
+       (assert (not (fixture.map:lookup key-b)) "passive identity refresh must not expand an unexposed target")
+       ;; Expanding is a deliberate user operation, unlike passive reconciliation.
+       (list-node:expand-items-as-island)
+       (assert-members (fixture.map:get-island "ordered-list:list") [key-b]))))
 
 (fn list-entity-node-removes-existing-island-when-last-item-is-removed []
   (with-fixture

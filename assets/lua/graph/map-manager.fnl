@@ -892,27 +892,20 @@
         (self:switch-map! id)
         (self:get-active-map))
 
-    (local self {:graph shared-graph
-                 :data-dir data-dir
-                 :maps-changed maps-changed
-                 :maps-will-change maps-will-change})
-
-    (set self.active-map-id active-id)
     (local active-entry (. entries active-id))
-    (set self.active-map-name (and active-entry active-entry.name))
-    (set self.next-map-id next-id)
-    (set self.get-active-map get-active-map)
-    (set self.active-map-status active-map-status)
-    (set self.list-maps list-maps)
-    (set self.switch-map! switch-map!)
-    (set self.create-map! create-map!)
-    (set self.create-and-switch-map! create-and-switch-map!)
-    (set self.rename-map! rename-map!)
-    (set self.delete-map! delete-map!)
-    (set self.capture-state capture-state)
-    (set self.snapshot-reference-state (fn [_self] (snapshot-reference-maps entries active-id next-id)))
-    (set self.install-reference-state! (fn [_self state] (install-reference-maps! entries state)))
-    (set self.drop drop)
+    (local self {:graph shared-graph :data-dir data-dir
+                 :maps-changed maps-changed :maps-will-change maps-will-change
+                 :active-map-id active-id :active-map-name (and active-entry active-entry.name)
+                 :next-map-id next-id :get-active-map get-active-map
+                 ;; Read-only lookup; never constructs or hydrates an adapter.
+                 :get-instantiated-map (fn [_self id] (and (. entries id) (. entries id :map)))
+                 :active-map-status active-map-status :list-maps list-maps
+                 :switch-map! switch-map! :create-map! create-map!
+                 :create-and-switch-map! create-and-switch-map! :rename-map! rename-map!
+                 :delete-map! delete-map! :capture-state capture-state
+                 :snapshot-reference-state (fn [_self] (snapshot-reference-maps entries active-id next-id))
+                 :install-reference-state! (fn [_self state] (install-reference-maps! entries state))
+                 :drop drop})
 
     self)
 

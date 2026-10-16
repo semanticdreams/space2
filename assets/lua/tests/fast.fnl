@@ -148,6 +148,7 @@
     :tests.test-string-utils
     :tests.test-entity-type-catalog
     :tests.test-reference-lifecycle-worlds
+    :tests.test-reference-lifecycle-projections
     :tests.test-string-entities
     :tests.test-string-entity-search
     :tests.test-string-entity-create-child

@@ -89,6 +89,33 @@
      :refreshed refreshed
      :failed failed})
 
+(fn matching-derived-link-edge [edges entity source-key target-key label]
+    (assert entity.id "derived link projection requires link ID")
+    (local entity-id (tostring entity.id))
+    (var matched nil)
+    (var count 0)
+    (each [_ edge (ipairs edges)]
+        (when (and (= (and edge._opts edge._opts.from-link-entity) entity-id)
+                   (= edge.source.key source-key) (= edge.target.key target-key)
+                   (= (or edge.label "") (or label "")))
+            (set matched edge))
+        (when (= (and edge._opts edge._opts.from-link-entity) entity-id)
+            (set count (+ count 1))))
+    (and matched (= count 1)))
+
+(fn reconcile-link-projections! [graph-map link-store upsert! remove!]
+    (assert link-store "GraphMap link projections require canonical link store")
+    (local live {})
+    (each [_ entity (ipairs (link-store:list-entities))]
+        (tset live (tostring entity.id) true)
+        (upsert! entity))
+    (local retired {})
+    (each [_ edge (ipairs graph-map.edges)]
+        (local id (and edge._opts edge._opts.from-link-entity))
+        (when (and id (not (. live id))) (tset retired id true)))
+    (each [id _ (pairs retired)] (remove! id))
+    true)
+
 (fn create-graph-map [opts]
     (local options (or opts {}))
     (local shared-graph (assert options.graph "GraphMap requires :graph (shared Graph)"))
@@ -856,20 +883,6 @@
             (edge-removed:emit {:edge edge}))
         (length to-remove))
 
-    (fn matching-derived-link-edge [entity source-key target-key label]
-        (local entity-id (tostring entity.id))
-        (var matched nil)
-        (var count 0)
-        (each [_ edge (ipairs edges)]
-            (when (and (= (and edge._opts edge._opts.from-link-entity) entity-id)
-                       (= (and edge.source edge.source.key) source-key)
-                       (= (and edge.target edge.target.key) target-key)
-                       (= (or edge.label "") (or label "")))
-                (set matched edge))
-            (when (= (and edge._opts edge._opts.from-link-entity) entity-id)
-                (set count (+ count 1))))
-        (and matched (= count 1)))
-
     (fn upsert-link-entity-edge [entity]
         (when (and entity entity.id)
             (local entity-id (tostring entity.id))
@@ -881,7 +894,7 @@
             (if (and source-key target-key
                      (not (= source-key target-key))
                      source-node target-node
-                     (matching-derived-link-edge entity source-key target-key label))
+                      (matching-derived-link-edge edges entity source-key target-key label))
                 true
                 (do
                     (remove-derived-link-edges-by-id entity-id)
@@ -915,6 +928,8 @@
                           (LinkEntityStore.get-default)))
     (local identity-store (or (and shared-graph shared-graph.identity-store)
                                (IdentityStore.get-default)))
+    (set self.reconcile-link-projections!
+         (fn [_self] (reconcile-link-projections! self link-store upsert-link-entity-edge remove-derived-link-edges-by-id)))
     (set link-created-handler
          (link-store.link-entity-created:connect handle-link-entity-created))
     (set link-updated-handler

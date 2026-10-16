@@ -118,6 +118,17 @@
       (assert (= (. providers field) (. self.stores field)) (.. context field " instance mismatch"))))
   true)
 
+(fn validate-graph! [stores graph]
+  (assert (= (type graph) :table) "reference composition requires native graph")
+  (each [_ field (ipairs [:identity-store :string-store :link-store :code-store :list-store :dict-store :notebook-store :workflow-store])]
+    (local provider (. graph field))
+    (when (or provider (= field :identity-store) (= field :string-store) (= field :link-store))
+      (assert (= provider (. stores field)) "reference composition canonical store mismatch")
+      (assert (= (fs.absolute provider.base-dir) stores.base-dir) "reference composition graph store root mismatch")
+      (when provider.identity-store
+        (assert (= provider.identity-store stores.identity-store) "reference composition graph identity dependency mismatch"))))
+  true)
+
 (fn validate-loaded! [self entry]
   (local world entry.world)
   (assert (and (= world.id entry.id) (= (fs.absolute world.dir) entry.dir))
@@ -125,13 +136,14 @@
   (local runtime world.runtime)
   (when runtime
     (when runtime.board-view (validate-board-view! self entry runtime))
+    (when runtime.graph (validate-graph! self.stores runtime.graph))
     (local manager runtime.graph-map-manager)
     (when manager
       (assert (and (= (type manager.data-dir) :string) (= (fs.absolute manager.data-dir) entry.dir))
               "reference composition map manager directory mismatch")
-      (each [_ field (ipairs [:identity-store :string-store :code-store :list-store :dict-store :link-store])]
-        (when (. manager.graph field)
-          (assert (= (. manager.graph field) (. self.stores field)) "reference composition canonical store mismatch"))))
+      (validate-graph! self.stores manager.graph)
+      (when runtime.graph
+        (assert (= runtime.graph manager.graph) "reference composition runtime/manager graph instance mismatch")))
     (when runtime.graph-view
       (local map (assert runtime.graph-map "reference composition requires current native map"))
       (local view runtime.graph-view)
@@ -241,7 +253,9 @@
   (local candidate (verified-candidate change))
   (local snapshot (R.snapshot path "json" json.loads))
   (assert (or (= snapshot.check change.before-check) (= snapshot.check change.after-check)) "worlds pending conflict")
-  (when (not (= snapshot.check change.after-check)) (J.write-json! path candidate))
+  (when (not (= snapshot.check change.after-check))
+    (fs.create-dirs (fs.parent path))
+    (J.write-json! path candidate))
   (publish-owned-data! self change candidate)
   nil)
 (fn reconcile! [self intent]
@@ -257,9 +271,12 @@
   (local root (fs.absolute stores.base-dir))
   (assert (= root stores.base-dir) "worlds owner requires canonical root")
   (local self {:id "worlds" :base-dir root :stores stores
-               :manager (assert options.world-manager "worlds owner requires world-manager")
+                :manager (assert options.world-manager "worlds owner requires world-manager")
                :preflight! preflight! :inventory inventory :expand expand :prepare prepare
                :apply! apply! :reconcile! reconcile!})
   (preflight! self)
   self)
-WorldOwner
+;; Shared readonly composition inspection; does not construct another owner or
+;; inventory/capture any runtime. The module remains a single callable factory.
+(setmetatable {:validate-loaded! (fn [stores entry] (validate-loaded! {:stores stores} entry))}
+              {:__call (fn [_ options] (WorldOwner options))})

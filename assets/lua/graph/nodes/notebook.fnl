@@ -90,6 +90,44 @@
       (when (= (self.identity-store:resolve-key item-key) removed-key)
         (self:remove-item item-key)))))
 
+(fn load-item-target [self item-key]
+  (local graph (assert self.graph "notebook expansion requires mounted graph"))
+  (local resolved (if graph.resolve-node (graph:resolve-node item-key)
+                      (or (graph:lookup item-key) (graph:load-by-key item-key))))
+  (if resolved resolved
+      (do
+        (local identity-id (identity-id-from-key item-key))
+        (when (and identity-id self.identity-store self.identity-store.get-entity)
+          (local entity (self.identity-store:get-entity identity-id))
+          (local target-key (and entity entity.target-key))
+          (when (and target-key (> (string.len (tostring target-key)) 0))
+            (if graph.resolve-node (graph:resolve-node target-key)
+                (or (graph:lookup target-key) (graph:load-by-key target-key))))))))
+
+(fn refresh-items [self resolve-target]
+  (assert self.store "notebook projection requires owning store")
+  (local graph self.graph)
+  (when (and graph graph.load-by-key graph.add-edge)
+    (local current (self:get-notebook))
+    (local items (or (and current current.items) []))
+    (local desired {})
+    (each [_ item-key (ipairs items)]
+      (local target (resolve-target self item-key))
+      (when target
+        (local key (edge-key self target))
+        (local existing (. graph.edge-map key))
+        (local edge (or existing (graph:add-edge (GraphEdge {:source self :target target}) {:from-notebook self.notebook-id})))
+        (when (or (not existing) (= existing (. self.notebook-item-edge-keys key))) (tset desired key edge))))
+    (each [key owned (pairs self.notebook-item-edge-keys)]
+      (when (and (not (. desired key)) (= (. graph.edge-map key) owned)) (remove-edge-by-key graph key)))
+    (set self.notebook-item-edge-keys desired)))
+
+(fn refresh-reference-projection! [self]
+  (assert self.graph "notebook projection refresh requires mounted graph")
+  (fn participating-target [owner key]
+    (owner.graph:lookup (owner.identity-store:resolve-key key)))
+  (refresh-items self participating-target))
+
 (fn NotebookNode [opts]
   (local options (or opts {}))
   (local notebook-id (assert options.notebook-id "NotebookNode requires notebook-id"))
@@ -132,43 +170,8 @@
        (fn [self]
          (self.store:get-notebook self.notebook-id)))
 
-  (set node.add-item-nodes
-       (fn [self]
-         (local graph self.graph)
-         (when (and graph graph.load-by-key graph.add-edge)
-           (local current (self:get-notebook))
-           (local items (or (and current current.items) []))
-           (local desired {})
-           (fn resolve-item-target [item-key]
-             (local resolved
-               (if graph.resolve-node
-                   (graph:resolve-node item-key)
-                   (or (graph:lookup item-key)
-                       (graph:load-by-key item-key))))
-             (if resolved
-                 resolved
-                 (do
-                   (local identity-id (identity-id-from-key item-key))
-                   (if (and identity-id self.identity-store self.identity-store.get-entity)
-                       (do
-                         (local identity-entity (self.identity-store:get-entity identity-id))
-                         (local target-key (and identity-entity identity-entity.target-key))
-                         (when (and target-key (> (string.len (tostring target-key)) 0))
-                           (if graph.resolve-node
-                               (graph:resolve-node target-key)
-                               (or (graph:lookup target-key)
-                                   (graph:load-by-key target-key)))))
-                       nil))))
-           (each [_ item-key (ipairs items)]
-             (local target (resolve-item-target item-key))
-             (when target
-               (graph:add-edge (GraphEdge {:source self :target target})
-                               {:from-notebook self.notebook-id})
-               (set (. desired (edge-key self target)) true)))
-           (each [k _ (pairs (or self.notebook-item-edge-keys {}))]
-             (when (not (. desired k))
-               (remove-edge-by-key graph k)))
-           (set self.notebook-item-edge-keys desired))))
+  (set node.add-item-nodes (fn [self] (refresh-items self load-item-target)))
+  (set node.refresh-reference-projection! refresh-reference-projection!)
 
   (set node.update-name
        (fn [self new-name]
@@ -203,9 +206,9 @@
          (when (and graph (not (graph:lookup entity-key)))
            (local entity-node (StringEntityNode {:entity-id entity.id
                                                  :store self.string-store}))
-           (graph:add-edge (GraphEdge {:source self :target entity-node})
-                           {:from-notebook self.notebook-id})
-           (set (. self.notebook-item-edge-keys (edge-key self entity-node)) true))
+           (local edge (graph:add-edge (GraphEdge {:source self :target entity-node})
+                                      {:from-notebook self.notebook-id}))
+           (set (. self.notebook-item-edge-keys (edge-key self entity-node)) edge))
          entity))
 
   (set node.actions
@@ -278,11 +281,11 @@
                     (when (and added (not (= (tostring added.key) (tostring self.key))))
                       (local notebook (self:get-notebook))
                       (when notebook
-                        (if (notebook-contains-node-key? notebook added.key)
-                            (self:add-item-nodes)
+                         (if (notebook-contains-node-key? notebook added.key)
+                             (self:refresh-reference-projection!)
                             (when (contains-identity-item? notebook.items)
                               ;; Identity targets can appear after identity store updates.
-                              (self:add-item-nodes)))))))))
+                               (self:refresh-reference-projection!)))))))))
           (local removed-signal (and graph graph.node-removed))
           (when (and removed-signal (not graph-node-removed-handler))
             (set graph-node-removed-signal removed-signal)
@@ -307,16 +310,16 @@
                       ;; Morph can transiently resolve old type during identity update.
                       ;; Refresh once more after graph finishes node replacement.
                       (self.items-changed:emit {:id self.notebook-id :items notebook.items})
-                      (self:add-item-nodes))))))
+                       (self:add-item-nodes))))))
          (when (and self.identity-store self.identity-store.identity-updated (not identity-updated-handler))
            (set identity-updated-handler
                 (self.identity-store.identity-updated:connect
                   (fn [entity]
                     (local identity-key (.. IDENTITY_KEY_PREFIX (tostring entity.id)))
                     (local notebook (self:get-notebook))
-                    (when (and notebook (notebook-contains-node-key? notebook identity-key))
-                      (self.items-changed:emit {:id self.notebook-id :items notebook.items})
-                      (self:add-item-nodes))))))
+                      (when (and notebook (notebook-contains-node-key? notebook identity-key))
+                       (self.items-changed:emit {:id self.notebook-id :items notebook.items}))
+                     (self:refresh-reference-projection!)))))
          (when (and self.identity-store self.identity-store.identity-deleted (not identity-deleted-handler))
            (set identity-deleted-handler
                 (self.identity-store.identity-deleted:connect

@@ -135,21 +135,30 @@
   (set self.compact-label (make-compact-label current))
   (self.changed:emit self))
 
-(fn add-item-nodes [self]
+(fn refresh-items [self resolve-target]
+  (assert self.dict-item-edge-keys "dictionary projection requires native edge ownership bookkeeping")
   (local graph self.graph)
   (when (and graph graph.add-edge)
     (local current (self:get-entity))
     (local desired {})
     (each [item-key item-value (pairs (entity-items current))]
-      (local target (resolve-item-target self item-value))
+      (local target (resolve-target self item-value))
       (when target
-        (graph:add-edge (GraphEdge {:source self :target target})
-                        {:from-dict-entity self.entity-id :item-key item-key})
-        (set (. desired (edge-key self target)) true)))
-    (each [k _ (pairs (if self.dict-item-edge-keys self.dict-item-edge-keys {}))]
-      (when (not (. desired k))
+        (local key (edge-key self target))
+        (local existing (. graph.edge-map key))
+        (local edge (or existing (graph:add-edge (GraphEdge {:source self :target target})
+                                               {:from-dict-entity self.entity-id :item-key item-key})))
+        (when (or (not existing) (= existing (. self.dict-item-edge-keys key))) (tset desired key edge))))
+    (each [k owned (pairs (if self.dict-item-edge-keys self.dict-item-edge-keys {}))]
+      (when (and (not (. desired k)) (= (. graph.edge-map k) owned))
         (remove-edge-by-key graph k)))
     (set self.dict-item-edge-keys desired)))
+
+(fn add-item-nodes [self] (refresh-items self resolve-item-target))
+(fn refresh-reference-projection! [self]
+  (fn participating-target [owner key]
+    (owner.graph:lookup (owner.identity-store:resolve-key key)))
+  (refresh-items self participating-target))
 
 (fn added [self _graph]
   (self:add-item-nodes)
@@ -190,15 +199,15 @@
   (fn [payload]
     (local added (and payload payload.node))
     (when (should-refresh-for-added? self added)
-      (self:add-item-nodes))))
+      (self:refresh-reference-projection!))))
 
 (fn make-identity-updated-handler [self]
   (fn [identity]
     (local identity-key (.. IDENTITY_KEY_PREFIX (tostring identity.id)))
     (local current (self:get-entity))
     (when (and current (entity-contains-value? current identity-key))
-      (self.items-changed:emit {:id self.entity-id :items current.items})
-      (self:add-item-nodes))))
+      (self.items-changed:emit {:id self.entity-id :items current.items}))
+    (self:refresh-reference-projection!)))
 
 (fn install-store-handlers [node store entity-id]
   {:deleted (store.dict-entity-deleted:connect (make-deleted-handler node entity-id))
@@ -231,6 +240,7 @@
          (self:add-item-nodes)))
   (set node.delete-entity (fn [self] (self.store:delete-entity self.entity-id)))
   (set node.add-item-nodes add-item-nodes)
+  (set node.refresh-reference-projection! refresh-reference-projection!)
   (set node.added added)
   node)
 

@@ -402,8 +402,6 @@
   (ReferenceRecords.decode-json (JsonUtils.stable-json result))
   result)
 
-(local install-board-model! BoardReferenceState.install-model!)
-
 (fn install-reference-metadata! [world map-id metadata]
   (local runtime world.runtime)
   (local view (and runtime runtime.graph-view))
@@ -417,7 +415,7 @@
   (local candidate (clone-table record))
   (local runtime world.runtime)
   (when runtime
-    (when (and runtime.board record.board) (install-board-model! runtime.board record.board))
+    (when (and runtime.board record.board) (BoardReferenceState.install-model! runtime.board record.board))
     (when runtime.board-state (set runtime.board-state (clone-table record.board)))
     (when (and runtime.graph-map-manager record.graph)
       (runtime.graph-map-manager:install-reference-state! record.graph))
@@ -439,20 +437,19 @@
   (each [key value (pairs candidate)] (tset world.state key value))
   true)
 
-(fn install-reference-state! [world snapshot]
-  (assert snapshot.record "HomeWorld reference install requires snapshot record")
-  (install-reference-record! world snapshot.record)
+(fn install-reference-roles! [world snapshot]
+  (assert (= (type snapshot) :table) "HomeWorld reference roles require table")
   (local runtime world.runtime)
   (local board snapshot.board)
   (when (and runtime board)
-    (when (and runtime.board board.model) (install-board-model! runtime.board board.model))
+    (when (and runtime.board board.model) (BoardReferenceState.install-model! runtime.board board.model))
     (when board.retained (set runtime.board-state (clone-table board.retained)))
     (when (and board.runtime-session runtime.activity-session-state runtime.activity-session-state.board)
       (set runtime.activity-session-state.board.board-state (clone-table board.runtime-session))))
   (when (and runtime runtime.graph-map-manager snapshot.maps)
     (runtime.graph-map-manager:install-reference-state! snapshot.maps))
-  (each [id metadata (pairs snapshot.metadata)] (install-reference-metadata! world id metadata))
-  (when runtime
+  (each [id metadata (pairs (or snapshot.metadata {}))] (install-reference-metadata! world id metadata))
+  (when (and runtime snapshot.views)
     (local views snapshot.views)
     (each [role field (pairs {:retained :graph-view-states :retained-single :graph-view-state
                               :pending-canvas :pending-canvas-state :pending-hud :pending-hud-state})]
@@ -462,6 +459,9 @@
     (when (and views.current runtime.graph-view runtime.graph-map (= views.map-id runtime.graph-map.id))
       (runtime.graph-view:install-reference-state! views.current)))
   true)
+(fn install-reference-state! [world snapshot]
+  (install-reference-record! world (assert snapshot.record "HomeWorld reference install requires snapshot record"))
+  (install-reference-roles! world snapshot))
 
 (fn ensure-world-directory [dir]
   (local (ok err) (pcall fs.create-dirs dir))
@@ -488,7 +488,7 @@
                :initialized? false
                 :runtime nil
                 :snapshot-reference-state snapshot-reference-state
-                :install-reference-state! install-reference-state!
+                 :install-reference-state! install-reference-state! :install-reference-roles! install-reference-roles!
                 :install-reference-record! install-reference-record!
                 :install-reference-metadata! install-reference-metadata!})
 
