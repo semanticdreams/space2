@@ -863,4 +863,34 @@
   (map.island-updated:disconnect handler true)
   (when (not ok) (error err))))
 
+(fn ordinary-remove-member [fixture kind]
+  (fixture.stores.string-store:create-entity {:id "keep" :value "Surviving member"})
+  (local holder (create-container! fixture kind [source-key "string-entity:keep"]))
+  (local map (fixture.maps:get-active-map))
+  (map:load-by-key holder)
+  (local member (assert (map:lookup source-key)))
+  (fn inspect [view]
+    (local tree (H.snapshot-tree fixture.stores.base-dir))
+    (local actions (icollect [_ action (ipairs (view:node-actions member))]
+      (when (= action.name "Remove from Map") action)))
+    (assert (= (# actions) 1) "must exercise the native presentation Remove action")
+    ((. actions 1 :fn))
+    (assert (not (map:lookup source-key)))
+    (assert (> (# map.edges) 0) "endpoint checks must include a surviving container edge")
+    (each [_ edge (ipairs map.edges)]
+      (assert (and (not (= edge.source member)) (not (= edge.target member)))
+              "native Remove must leave no incident edges to the dropped member")
+      (assert (= (map:lookup edge.source.key) edge.source) "edge source must be the same live adapter")
+      (assert (= (map:lookup edge.target.key) edge.target) "edge target must be the same live adapter"))
+    (same (H.snapshot-tree fixture.stores.base-dir) tree)
+    (view:update 0)
+    ;; GraphView may persist presentation metadata during update, never domain data.
+    (local after (H.snapshot-tree fixture.stores.base-dir))
+    (each [path bytes (pairs tree)]
+      (when (not (string.find path "/metadata.json" 1 true)) (assert (= (. after path) bytes)))))
+  (with-view fixture inspect))
+
+(add "final review list native Remove leaves only live endpoints" #(ordinary-remove-member $1 "list"))
+(add "final review notebook native Remove leaves only live endpoints" #(ordinary-remove-member $1 "notebook"))
+
 tests

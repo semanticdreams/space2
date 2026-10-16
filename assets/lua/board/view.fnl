@@ -6,6 +6,7 @@
 (local Registry (require :board/registry))
 (local LinkEntityStore (require :entities/link))
 (local fs (require :fs))
+(local Uuid (require :uuid))
 
 (fn validate-store [store identity-store label]
   (assert (and store store.base-dir) (.. "BoardView requires " label " base-dir"))
@@ -122,13 +123,47 @@
   (set options.string-store store) (set options.identity-store providers.identity-store)
   options)
 
-(fn delete-subject! [view providers item]
-  (local key (assert (providers.identity-store:resolve-key item.subject-key) "Board subject cannot resolve"))
-  (local scheme (string.match key "^([^:]+):"))
-  (local store (if (= scheme "string-entity") providers.string-store
-                  (= scheme "code-entity") providers.code-store))
-  (local service (require-lifecycle! view providers scheme store))
-  (service:delete! key))
+(fn checked-removal-request [view providers item]
+  (if (not (or (= item.type "string-entity") (= item.type "code-entity")))
+      {:item item :complete true}
+      (do
+        (local key (assert (providers.identity-store:resolve-key item.subject-key) "Board subject cannot resolve"))
+        (local scheme (string.match key "^([^:]+):"))
+        (local store (if (= scheme "string-entity") providers.string-store
+                        (= scheme "code-entity") providers.code-store))
+        (local service (require-lifecycle! view providers scheme store))
+        {:item item :key key :service service :complete false})))
+
+(fn reserve-link-id [store]
+  (local id (Uuid.v4))
+  (assert (= (. (store:snapshot-entity id) :value) false) "Board semantic link id collision")
+  id)
+
+(fn create-semantic-connector! [board link-store same-key? source target source-key target-key options]
+  (var created-link-id nil)
+  (fn create []
+    (var link options.link)
+    (when (= link nil)
+      (set created-link-id (reserve-link-id link-store))
+      (set link (link-store:create-entity {:id created-link-id :source-key source-key
+                                          :target-key target-key :metadata (or options.metadata {})})))
+    (assert (and link link.id) "BoardView.connect-items requires link entity with id")
+    (local persisted-link (link-store:get-entity link.id))
+    (assert persisted-link "BoardView.connect-items link entity missing from store")
+    (assert (same-key? persisted-link.source-key source-key)
+            "BoardView.connect-items link source-key does not match source item")
+    (assert (same-key? persisted-link.target-key target-key)
+            "BoardView.connect-items link target-key does not match target item")
+    (board:add-connector {:source-item-id source.id :target-item-id target.id
+                          :kind "semantic-link" :semantic-link-id link.id}))
+  (local (ok connector-or-err) (pcall create))
+  (when (not ok)
+    (when created-link-id
+      (local (cleanup-ok cleanup-error) (pcall link-store.retire-entity! link-store created-link-id))
+      (when (not cleanup-ok)
+        (error (.. (tostring connector-or-err) "; Board semantic link rollback failed: " (tostring cleanup-error)))))
+    (error connector-or-err))
+  connector-or-err)
 
 (fn BoardView [opts]
   (local options (or opts {}))
@@ -155,6 +190,9 @@
   (local pointer-target (or (and ctx ctx.pointer-target) canvas))
   (local item-records {})
   (local connector-records {})
+  ;; Retain checked concrete intent before lifecycle can remove the model row or
+  ;; its identity. Only successful service completion AND local cleanup release it.
+  (local removal-requests {})
   (local selector (or options.selector (and ctx ctx.object-selector)))
   (local selected-items [])
   (local selected-items-changed (Signal))
@@ -410,45 +448,26 @@
     (assert (same-subject? target target-key)
             "BoardView.connect-items target item subject-key does not match board item")
     (local existing (find-existing-semantic-connector source target))
-    (when (and existing (not options.link))
-      (lua "return existing"))
-    (local created? (= options.link nil))
-    (var link nil)
-    (local (ok connector-or-err)
-      (pcall
-        (fn []
-          (when created?
-            (set link (link-store:create-entity {:source-key source-key
-                                                 :target-key target-key
-                                                 :metadata (or options.metadata {})})))
-          (set link (or options.link link))
-          (assert (and link link.id) "BoardView.connect-items requires link entity with id")
-          (local persisted-link (link-store:get-entity link.id))
-          (assert persisted-link "BoardView.connect-items link entity missing from store")
-          (assert (same-key? persisted-link.source-key source-key)
-                  "BoardView.connect-items link source-key does not match source item")
-          (assert (same-key? persisted-link.target-key target-key)
-                  "BoardView.connect-items link target-key does not match target item")
-          (board:add-connector {:source-item-id source.id
-                                :target-item-id target.id
-                                :kind "semantic-link"
-                                :semantic-link-id link.id}))))
-    (when (not ok)
-      (when (and created? link link.id)
-        (link-store:retire-entity! link.id))
-      (error connector-or-err))
-    connector-or-err)
+    (if (and existing (not options.link)) existing
+        (create-semantic-connector! board link-store same-key? source target source-key target-key options)))
 
   (fn remove-item [self item-or-id]
     (assert-not-dropped "remove-item")
     (local id (if (= (type item-or-id) :table) item-or-id.id item-or-id))
     (local item (and id (. board.items id)))
-    (when item
-      (when (or (= item.type "string-entity") (= item.type "code-entity"))
-        (delete-subject! self providers item))
+    (local request (or (and id (. removal-requests id))
+                       (and item (checked-removal-request self providers item))))
+    (when request
+      (tset removal-requests id request)
+      (when (not request.complete)
+        (request.service:delete! request.key)
+        (set request.complete true))
       (when (. board.items id)
-        (assert (board:remove-item item) "BoardView.remove-item failed to remove native item"))
-      item))
+        (assert (= (. board.items id) request.item) "BoardView.remove-item item replaced during removal")
+        (assert (board:remove-item request.item) "BoardView.remove-item failed to remove native item"))
+      (remove-item-view request.item)
+      (tset removal-requests id nil)
+      request.item))
 
   (fn remove-selected-items [self]
     (local items-to-remove [])

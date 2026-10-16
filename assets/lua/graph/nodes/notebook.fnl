@@ -104,7 +104,7 @@
             (if graph.resolve-node (graph:resolve-node target-key)
                 (or (graph:lookup target-key) (graph:load-by-key target-key))))))))
 
-(fn refresh-items [self resolve-target]
+(fn refresh-items [self resolve-target removal-set]
   (assert self.store "notebook projection requires owning store")
   (local graph self.graph)
   (when (and graph graph.load-by-key graph.add-edge)
@@ -113,7 +113,7 @@
     (local desired {})
     (each [_ item-key (ipairs items)]
       (local target (resolve-target self item-key))
-      (when target
+      (when (and target (not (and removal-set (. removal-set target))))
         (local key (edge-key self target))
         (local existing (. graph.edge-map key))
         (local edge (or existing (graph:add-edge (GraphEdge {:source self :target target}) {:from-notebook self.notebook-id})))
@@ -122,11 +122,12 @@
       (when (and (not (. desired key)) (= (. graph.edge-map key) owned)) (remove-edge-by-key graph key)))
     (set self.notebook-item-edge-keys desired)))
 
-(fn refresh-reference-projection! [self]
+;; Removal notifications precede GraphMap lookup clearing; exclude their adapters.
+(fn refresh-reference-projection! [self removal-set]
   (assert self.graph "notebook projection refresh requires mounted graph")
   (fn participating-target [owner key]
     (owner.graph:lookup (owner.identity-store:resolve-key key)))
-  (refresh-items self participating-target))
+  (refresh-items self participating-target removal-set))
 
 (fn resolve-reference-lifecycle! [self]
   (local mounted (and self.graph self.graph.reference-lifecycle))
@@ -301,8 +302,8 @@
             (set graph-node-removed-signal removed-signal)
             (set graph-node-removed-handler
                  (removed-signal:connect
-                   (fn [_payload]
-                     (self:refresh-reference-projection!)))))
+                    (fn [payload]
+                      (refresh-reference-projection! self payload.removal-set)))))
          (local morphed-signal (and graph graph.node-morphed))
          (when (and morphed-signal (not graph-node-morphed-handler))
            (set graph-node-morphed-signal morphed-signal)

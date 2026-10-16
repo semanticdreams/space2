@@ -145,7 +145,7 @@
       (when (= (self.identity-store:resolve-key item-key) removed-key)
         (self:remove-item item-key)))))
 
-(fn refresh-items [self resolve-target]
+(fn refresh-items [self resolve-target removal-set]
   (assert self.store "list projection requires owning store")
   (local graph self.graph)
   (when (and graph graph.load-by-key graph.add-edge)
@@ -154,7 +154,7 @@
     (local desired {})
     (each [_ item-key (ipairs items)]
       (local target (resolve-target self item-key))
-      (when target
+      (when (and target (not (and removal-set (. removal-set target))))
         (local key (edge-key self target))
         (local existing (. graph.edge-map key))
         (local edge (or existing (graph:add-edge (GraphEdge {:source self :target target}) {:from-list-entity self.entity-id})))
@@ -163,21 +163,23 @@
       (when (and (not (. desired key)) (= (. graph.edge-map key) owned)) (remove-edge-by-key graph key)))
     (set self.list-item-edge-keys desired)))
 
-(fn participating-target [owner key]
-  (owner.graph:lookup (owner.identity-store:resolve-key key)))
+(fn participating-target [owner key removal-set]
+  (local target (owner.graph:lookup (owner.identity-store:resolve-key key)))
+  (when (and target (not (and removal-set (. removal-set target)))) target))
 
-(fn refresh-reference-edges! [self]
+(fn refresh-reference-edges! [self removal-set]
   (assert self.graph "list projection refresh requires mounted graph")
-  (refresh-items self participating-target))
+  (refresh-items self participating-target removal-set))
 
-(fn refresh-reference-projection! [self]
-  (refresh-reference-edges! self)
+;; Removal notifications precede GraphMap lookup clearing; exclude their adapters.
+(fn refresh-reference-projection! [self removal-set]
+  (refresh-reference-edges! self removal-set)
   (local graph self.graph)
   (local island (and graph.get-island (graph:get-island (ordered-list-island-id self.entity-id))))
   (when island
     (local current (assert (self:get-entity) "mounted list island requires committed record"))
     (set island.members (icollect [_ key (ipairs current.items)]
-      (do (local target (participating-target self key)) (when target target.key))))
+      (do (local target (participating-target self key removal-set)) (when target target.key))))
     (if (> (# island.members) 0) (graph:upsert-island island)
         (graph:remove-island island.id))))
 
@@ -376,8 +378,8 @@
             (set graph-node-removed-signal removed-signal)
             (set graph-node-removed-handler
                  (removed-signal:connect
-                   (fn [_payload]
-                     (self:refresh-reference-projection!)))))
+                    (fn [payload]
+                      (refresh-reference-projection! self payload.removal-set)))))
          (local morphed-signal (and graph graph.node-morphed))
          (when (and morphed-signal (not graph-node-morphed-handler))
            (set graph-node-morphed-signal morphed-signal)

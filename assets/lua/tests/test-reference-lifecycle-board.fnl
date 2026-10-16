@@ -119,7 +119,7 @@
   (assert (= (next.input:get-text) "next source"))
   (assert (= (. view.item-records "a" :element) a) "unrelated native widget must be held")))
 
-(fn start-world [fixture]
+(fn start-world [fixture native-runtime?]
   (local s fixture.stores)
   (local root (fs.join-path s.base-dir "worlds"))
   (local dir (fs.join-path root "loaded"))
@@ -134,7 +134,9 @@
     {:root-dir root :context-fn (fn context [] {}) :create-world (fn create [_opts] world)}))
   (manager:get-world-entry "loaded")
   (local owner ((require :reference-lifecycle/world-owner) {:stores s :world-manager manager}))
-  (local service (H.lifecycle s owner))
+  (local runtime-owner (when native-runtime?
+    ((require :reference-lifecycle/runtime-owner) {:stores s :world-manager manager})))
+  (local service (H.lifecycle s owner runtime-owner))
   (local raw {:board (fixture.board:capture-state) :tree (H.snapshot-tree s.base-dir)
               :strings (icollect [_ id (ipairs ["s" "a" "b"])] (s.string-store:snapshot-entity id))})
   (service:start!)
@@ -634,5 +636,111 @@
   (local after (rollback-state s board))
   (same before.board after.board)
   (each [path bytes (pairs before.tree)] (assert (= (. after.tree path) bytes)))))
+
+(fn public-pending [s] ((require :reference-lifecycle/pending) s.base-dir))
+
+(fn fail-board-removal [fixture view service boundary]
+  (fn action [] (view:remove-item "source"))
+  (if (= boundary "source retirement")
+      (H.with-fs-failure :remove (. (fixture.stores.string-store:snapshot-entity "s") :path)
+        #(H.assert-error "permission denied" action))
+      (= boundary "pending clear")
+      (H.with-fs-failure :remove (fs.join-path fixture.stores.base-dir "reference-lifecycle" "pending.json")
+        #(H.assert-error "permission denied" action))
+      (rejected-signal service.committed #(H.assert-error "creation listener failed" action))))
+
+(fn retry-loaded-removal [fixture boundary]
+  (local s fixture.stores)
+  (local service (start-world fixture true))
+  (local view (fixture.mount nil service))
+  (set fixture.world.runtime.board-view view)
+  (local survivor fixture.board.items.a)
+  (local body (. view.item-records "a" :element))
+  (local bytes (s.string-store:snapshot-entity "a"))
+  (fail-board-removal fixture view service boundary)
+  (assert (not fixture.board.items.source) "failure must follow actual loaded WorldOwner item removal")
+  (local intent (assert (: (public-pending s) :read)))
+  (local frozen (J.stable-json intent))
+  (assert (> (# intent.runtime-state) 0) "WorldOwner must freeze the native loaded Board capture")
+  (fn forbidden [...] (error "Board retry attempted recapture or identity resolution"))
+  (fn retry []
+    (H.with-fields (require :reference-lifecycle/plan) {:prepare forbidden}
+      #(H.with-fields s.identity-store {:resolve-key forbidden} (fn action [] (view:remove-item "source")))))
+  (local removed (retry))
+  (assert (and removed (= removed.id "source")) "same item-ID action must resume the original removal")
+  (assert (not (: (public-pending s) :read)) "retry must clear the original pending intent")
+  (assert (= frozen (J.stable-json intent)))
+  (assert (not fixture.board.items.source))
+  (assert (not (. view.item-records "source")))
+  (assert (not (s.string-store:get-entity "s")))
+  (assert (= fixture.board.items.a survivor))
+  (assert (= (. view.item-records "a" :element) body))
+  (same (s.string-store:snapshot-entity "a") bytes)
+  (assert (= (view:remove-item "source") nil)))
+
+(each [_ boundary (ipairs ["source retirement" "committed" "pending clear"])]
+  (add (.. "final review loaded removal retries " boundary) false #(retry-loaded-removal $1 boundary)))
+
+(add "final review standalone removal retries local cleanup" true (fn local-retry [fixture]
+  (local s fixture.stores)
+  (local service (H.ready s))
+  (local view (fixture.mount nil service))
+  (local survivor fixture.board.items.a)
+  (fn remove [] (view:remove-item "source"))
+  (rejected-signal fixture.board.item-removed #(H.assert-error "creation listener failed" remove))
+  (assert fixture.board.items.source "native failed removal restores its model row")
+  (assert (not (s.string-store:get-entity "s")))
+  (assert (not (s.identity-store:get-entity (string.sub fixture.subject 10))))
+  (assert (not (: (public-pending s) :read)) "service completed before local failure")
+  (fn forbidden [...] (error "local Board retry reread or recreated retired subject"))
+  (local removed (H.with-fields s.identity-store {:resolve-key forbidden}
+    #(H.with-fields s.string-store {:get-entity forbidden :create-entity forbidden} remove)))
+  (assert (= removed.id "source"))
+  (assert (not fixture.board.items.source))
+  (assert (not (. view.item-records "source")))
+  (assert (= fixture.board.items.a survivor))
+  (assert (not (: (public-pending s) :read)))))
+
+(add "final review link publication rollback and retry" true (fn link-publication [fixture]
+  (local s fixture.stores)
+  (local view (fixture.mount))
+  (local before (s.link-store:snapshot-entity "k"))
+  (fn connect [] (view:connect-items fixture.board.items.source fixture.board.items.a))
+  (rejected-signal s.link-store.link-entity-created #(H.assert-error "creation listener failed" connect))
+  (assert (= (# (s.link-store:list-entities)) 1) "failed publication must retire the attempt-owned semantic link")
+  (assert (= (# fixture.board.connectors-in-order) 2))
+  (local connector (connect))
+  (assert (= (# (s.link-store:list-entities)) 2) "retry must create exactly one new semantic link")
+  (assert (= (# fixture.board.connectors-in-order) 3))
+  (assert (= (connect) connector) "ordinary retry must reuse its semantic connector")
+  (same (s.link-store:snapshot-entity "k") before)))
+
+(add "final review supplied link survives connector failure" true (fn supplied-link [fixture]
+  (local s fixture.stores)
+  (local view (fixture.mount))
+  (local supplied (s.link-store:create-entity {:id "supplied" :source-key fixture.subject :target-key "string-entity:a"}))
+  (local before (H.snapshot-tree s.base-dir))
+  (fn connect [] (view:connect-items fixture.board.items.source fixture.board.items.a {:link supplied}))
+  (rejected-signal fixture.board.connector-added #(H.assert-error "creation listener failed" connect))
+  (same (H.snapshot-tree s.base-dir) before)
+  (assert (= (s.link-store:get-entity supplied.id) supplied))
+  (assert (= (# fixture.board.connectors-in-order) 2))
+  (connect)
+  (assert (= (# (s.link-store:list-entities)) 2))
+  (assert (= (# fixture.board.connectors-in-order) 3))))
+
+(add "final review link rollback failure retains both errors" true (fn rollback-error [fixture]
+  (local s fixture.stores)
+  (local view (fixture.mount))
+  (local remove fs.remove)
+  (fn reject [path]
+    (if (= (fs.parent path) s.link-store.entities-dir) (error "semantic rollback denied") (remove path)))
+  (fn connect [] (view:connect-items fixture.board.items.source fixture.board.items.a))
+  (fn attempt []
+    (local message (H.assert-error "creation listener failed" connect))
+    (assert (string.find message "semantic rollback denied" 1 true) "original and cleanup errors must both propagate"))
+  (H.with-fields fs {:remove reject} #(rejected-signal s.link-store.link-entity-created attempt))
+  (assert (= (# fixture.board.connectors-in-order) 2))
+  (assert (s.link-store:get-entity "k"))))
 
 {:tests tests :main (fn [] ((. (require :tests/runner) :run) tests))}
