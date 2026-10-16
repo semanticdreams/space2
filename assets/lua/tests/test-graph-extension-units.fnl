@@ -237,15 +237,29 @@
   (assert-reload-refresh-results graph graph-map node-a node-b app.__graph_extension_unit_root_reload_count)
   (assert-v2-morph-and-unload-cleanup ctx graph))
 
+(fn assert-single-demo-registration [ctx controller]
+  (local extensions (. (ctx.registry:debug-state) :extensions))
+  (assert (= (length extensions) 1) "Repeated reload must leave exactly one descriptor")
+  (assert (= (. (. extensions 1) :id) "demo-extension"))
+  (assert (= (. (. extensions 1) :unit-id) "user-demo-extension"))
+  (local graph ctx.runtime.graph)
+  (local targets (graph.morphs:target-items {:key "demo-node:a"}))
+  (assert (= (length targets) 1) "Repeated reload must leave exactly one expected morph")
+  (assert (= (. (. (. targets 1) 1) :to-scheme) "demo-node"))
+  (assert (= (. (controller:debug-state) :last-target-unit-id) "user-demo-extension"))
+  (assert (= app.__graph_extension_unit_root_reload_count 0) "Opted-in extension must not reload root"))
+
 (fn perform-hot-controller-reload-and-assert [state]
   (fs.write-file state.ctx.init-path (demo-unit-source "v2"))
-  (assert (state.controller:reload-now! {:changes [{:path state.ctx.init-path :action "modified"}]})
-          "hot reload should succeed")
-  (local refreshed-a (state.graph-map:lookup "demo-node:a"))
-  (assert (not (= refreshed-a state.node-a)) "hot reload should replace visible adapter")
-  (assert-demo-node-version refreshed-a "v2" "a" "node after hot reload")
-  (assert (= app.__graph_extension_unit_root_reload_count 0)
-          "hot reload should not reconstruct root graph runtime")
+  (for [_ 1 2]
+    (local before (state.graph-map:lookup "demo-node:a"))
+    (assert (state.controller:reload-now! {:changes [{:path state.ctx.init-path :action "modified"}]})
+            "hot reload should succeed repeatedly")
+    (local refreshed-a (state.graph-map:lookup "demo-node:a"))
+    (assert (not (= refreshed-a before)) "hot reload should replace visible adapter each time")
+    (assert-demo-node-version refreshed-a "v2" "a" "node after hot reload")
+    (assert-single-demo-registration state.ctx state.controller))
+  (assert-v2-morph-and-unload-cleanup state.ctx state.ctx.runtime.graph)
   true)
 
 (fn make-demo-hot-reload-controller [root ctx]
@@ -257,6 +271,7 @@
     {:unit root-unit
      :units [ctx.unit]
      :root-unit-id "app-root"
+     :narrow-reload-unit-ids ["user-demo-extension"]
      :watch-paths [root]
      :preserve-modules ["hot-reload" "units" "tests.test-graph-extension-units"]
      :debounce-ms 0
@@ -305,9 +320,11 @@
   (assert (= (state.controller:reload-now! {:changes [{:path state.ctx.init-path :action "modified"}]}) false)
           "refresh failure should return false after rollback")
   (assert-v1-runtime-after-failed-reload state.ctx state.graph state.graph-map state.node-a)
+  (assert-single-demo-registration state.ctx state.controller)
   (assert (state.controller:reload-now! {:changes [{:path state.ctx.init-path :action "modified"}]})
           "subsequent valid reload should not hit duplicate registration")
   (assert-v2-runtime-after-subsequent-reload state.graph state.graph-map)
+  (assert-single-demo-registration state.ctx state.controller)
   true)
 
 (fn run-hot-reload-refresh-failure-rollback-assertions [root ctx]

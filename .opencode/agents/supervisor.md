@@ -282,16 +282,16 @@ blocking check, and available evidence.
 | **pr-recovery-operator** | Guarded stale merged PR recovery wrapper that creates/pushes a deterministic follow-up branch and opens a fresh PR | gpt-6.1-sol (medium) |
 | **config-auditor** | Guarded OpenCode home config verification for project-supplied non-secret support links | gpt-6.1-sol (medium) |
 | **windows-ci-reproducer** | Guarded local Windows CI preflight, setup-host, and Linux cross-build + Wine reproduction | gpt-6.1-sol (medium) |
-| **fast-dev** | Primary peer selected by users for interactive small work; the strict supervisor does not dispatch it as an implementation worker | gpt-6.1-sol (medium) |
+| **fast-dev** | Independent primary peer selected by users for direct interactive development and explicit-only wrap-up; not an implementation worker | gpt-6.1-sol (medium) |
 
 Faster-model swaps for deterministic/search/wrapper agents require exact approved provider/model-id values. Do not use shorthand model names or infer availability from comments.
 
 For subagents, dispatch with the `task` tool and the appropriate
 `subagent_type`. Provide each subagent exactly what it needs — never paste your
 full session history.
-`fast-dev` is a primary peer rather than a subagent: users select `fast-dev` for
-interactive small work, while the strict supervisor remains the default for
-high-risk work and final integration.
+`fast-dev` is a primary peer rather than a subagent: users select it for direct
+interactive development and its independent explicit-only wrap-up lifecycle.
+The strict supervisor remains the default and retains its own workflow.
 
 ## Tool Mapping
 

@@ -1,10 +1,27 @@
 # Reloadable Graph Extension Units
 
 Reloadable graph extension units let user-code `ModuleUnit`s add graph-exposed node
-types without reloading the app root or tearing down world graph runtimes. The seam
-is the app-owned graph extension registry (`app.graph-extension-registry`), which
+types through a specific contracted replacement seam, without requiring app-root
+replacement or world graph runtime teardown. This is not certification of every
+user unit or graph-related module. The seam is the app-owned graph extension
+registry (`app.graph-extension-registry`), which
 installs descriptors into every live HomeWorld graph runtime and into future
 runtimes when worlds are opened, resumed, or recreated.
+
+## Controller opt-in versus direct reload
+
+Controller-driven development reloads default to app-root. After auditing the
+[canonical boundary checklist](/dev/reloadable-units#author-reviewer-boundary-checklist),
+include the extension's unit ID in `:narrow-reload-unit-ids`, for example
+`["user-demo-extension"]`, when constructing the controller through
+`app.hot-reload-config`. See the [complete configuration examples](/dev/reloadable-units#controller-configuration-and-execution)
+for defined watch roots and construction timing. Discovery, owned paths and
+descriptor registration do not imply narrow eligibility.
+
+Direct `Unit:reload`, `UnitManager:reload-unit`, internal agent and external MCP
+reloads still operate on the named unit: they do not inherit controller
+eligibility, deferred execution or module-backup recovery. A direct extension
+reload can exercise this seam, but its caller owns execution timing and recovery.
 
 ## Runtime lifecycle
 
@@ -72,9 +89,13 @@ descriptor's `:refresh-schemes` (or `:schemes`).
 
 Refresh rebuilds visible map-local node adapter instances by key, replaces edges
 to point at the fresh adapters, and preserves map selection/focus keys. It fails
-loudly if a visible node for the refreshed scheme cannot be rebuilt; hot reload
-rolls the unit back and refreshes again so the runtime returns to the previous
-working adapter version.
+loudly if a visible node for the refreshed scheme cannot be rebuilt. The controller
+then attempts same-target module/snapshot recovery and refreshes again; successful
+recovery is covered by the demo fixture, not guaranteed for arbitrary effects.
+Direct manager/unit refresh errors throw without that controller recovery wrapper.
+Refresh targets active maps and declared schemes, not every retained adapter or
+factory closure. Domain stores remain responsible for their data; graph topology
+and map-local presentation are not a domain-state backup.
 
 ## Built-in graph extensions
 
@@ -173,10 +194,27 @@ related topology only through explicit graph-map operations such as
 {:init init :drop drop}
 ```
 
-During development, run the graph extension unit tests and the runtime plumbing
-test before broader validation:
+## Validation evidence
+
+`test-graph-extension-units.fnl` covers direct manager replacement, explicitly
+opted-in controller replacement, changed adapter/morph behavior without root
+reload, repeated success leaving one descriptor and one expected morph, cleanup,
+failed refresh recovery followed by valid success, and cleanup after failed init.
+The runtime plumbing suite checks installation into live/future world runtimes.
+These fixtures support this seam, not universal freshness or arbitrary mutation
+rollback.
+
+During development, establish runtime freshness with `make build` if needed, then
+run project compile checks **before** constraints and focused tests. From the
+repository root (narrow explicit-file checks may replace the broad first gates):
 
 ```bash
-SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets FENNEL_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" FENNEL_MACRO_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" ./build/space -m tests.test-graph-extension-runtime-plumbing:main
-SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets FENNEL_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" FENNEL_MACRO_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl" ./build/space -m tests.test-graph-extension-units:main
+export SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH="$(pwd)/assets"
+export FENNEL_PATH="$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl"
+export FENNEL_MACRO_PATH="$FENNEL_PATH"
+export SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data
+make fennel-check
+make constraints
+./build/space -m tests.test-graph-extension-runtime-plumbing:main
+./build/space -m tests.test-graph-extension-units:main
 ```

@@ -111,9 +111,35 @@ External unit development follows this high-level workflow:
 8. **Read log** — `space_unit_read_log` reads recent lines from the application
    log with optional filtering and pagination.
 9. **Snapshot** — `space_unit_snapshot` captures a unit's current state for
-   later restoration.
+   inspection. Capture alone does not establish a supported migration or recovery
+   contract.
 
 ## Safety Model
+
+### Editing safety is not reload isolation
+
+The checks below protect source editing and tool access, not arbitrary runtime
+replacement. External `space_unit_reload`, and the automatic reload after patch
+or create, call `UnitManager:reload-unit` directly. **They do not pass through the
+hot-reload controller** and do not inherit root-only routing,
+`narrow-reload-unit-ids`, callback deferral or controller module/snapshot backup.
+Internal agent tools are also direct operations, but have different edit helpers
+and parameters (`id` internally versus `unit_id` externally).
+
+Direct manager reload uses the unit's loader-specific invalidation: a ModuleUnit
+clears remembered owned modules/caches, while a SourceUnit discards its evaluated
+module table. Neither replaces every consumer retaining old functions or factories.
+Outside a specific tested boundary contract, direct replacement is caller-managed
+and experimental. See the [canonical entry-point and recovery comparison](/dev/reloadable-units#recovery-and-distinct-entry-points).
+
+External patch failure paths attempt to restore the original file and then try
+a recovery reload; create failure attempts to remove the new file, without an
+equivalent recovery reload. Some recovery errors are suppressed by the service,
+so an error saying source was restored is not proof of a healthy runtime. Explicit
+reload has no edit backup. These are operation-specific best-effort actions, not
+atomic runtime restoration: globals, external effects and in-flight work may
+remain changed. Inspect evidence/logs and use an enclosing reload or restart when
+needed; a later watcher event cannot retroactively protect a direct operation.
 
 ### Loopback-Only Binding
 
@@ -215,9 +241,10 @@ Apply an edit to a unit source file. Accepts:
 - `expected_hash` (string, optional): reject patch if file hash differs
 
 Exactly one of `patch` or `old`+`new` must be provided. The unit is
-automatically reloaded after a successful patch. On reload failure, the
-original source is restored. On patch-apply failure in diff mode, the
-source is also restored.
+automatically reloaded after a successful patch. On reload failure, the service
+attempts original-source restoration and a recovery reload. On patch-apply failure
+in diff mode it also attempts source restoration. See the recovery limits above;
+these attempts do not establish a transaction over runtime state.
 
 ### space_unit_create_source
 
@@ -228,7 +255,8 @@ Create a new source file inside a directory-based unit. Accepts:
 
 Rejects overwriting existing files. Creates parent directories as needed.
 Validates Fennel source before writing. The unit is reloaded after creation.
-On reload failure, the new file is removed.
+On reload failure, removal of the new file is attempted; this path does not also
+attempt a recovery reload.
 
 ### space_unit_run_tests
 
@@ -268,8 +296,9 @@ The response never exposes the raw native log-path through the external API.
 
 ### space_unit_snapshot
 
-Capture a unit's current state for later restoration. Accepts `unit_id` (string,
-required). Returns `unit-id`, `supported` (bool), and `state` if supported.
+Capture a unit's current state. Accepts `unit_id` (string, required). Returns
+`unit-id`, `supported` (bool), and `state` if supported. This external surface does
+not expose a corresponding restore tool or promise versioned state migration.
 
 ## Architecture
 

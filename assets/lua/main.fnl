@@ -439,6 +439,7 @@
                         [(fs.join-path runtime.assets-path "lua")])
        :debounce-ms (or (and override override.debounce-ms) 150)
        :module-name (or (and override override.module-name) "main")
+       :narrow-reload-unit-ids (and override override.narrow-reload-unit-ids)
        :preserve-modules (or (and override override.preserve-modules)
                              ["hot-reload" "units"])
        :generic? (and override override.generic?)}))
@@ -450,33 +451,32 @@
 
 (fn ensure-hot-reload-controller []
   (local config (resolve-hot-reload-config))
-  (if (not config)
-      nil
-      (do
-        (when (not app.hot-reload-callback-id)
-          (set app.hot-reload-callback-id
-               (callbacks.register
-                 (fn [_payload]
-                   (when (and app.hot-reload-controller
-                              app.hot-reload-controller.reload-now!)
-                     (app.hot-reload-controller:reload-now!))))))
-        (when (not app.hot-reload-controller)
-          (local HotReload (require :hot-reload))
-          (local controller-config
-            {:watch-paths config.watch-paths
-             :debounce-ms config.debounce-ms
-             :module-name config.module-name
-             :preserve-modules config.preserve-modules
-             :generic? config.generic?
-             :on-reload-requested (fn [_controller]
-                                    (assert app.hot-reload-callback-id
-                                            "hot reload callback id missing")
-                                    (callbacks.enqueue app.hot-reload-callback-id true))
-             :units-fn (fn [_root-unit]
-                          (app.unit-manager:list))})
-          (set app.hot-reload-controller
-               (HotReload.AppRootController controller-config)))
-        app.hot-reload-controller)))
+  (when config
+    (when (not app.hot-reload-callback-id)
+      (set app.hot-reload-callback-id
+           (callbacks.register
+             (fn [_payload]
+               (when (and app.hot-reload-controller
+                          app.hot-reload-controller.reload-now!)
+                 (app.hot-reload-controller:reload-now!))))))
+    (when (not app.hot-reload-controller)
+      (local HotReload (require :hot-reload))
+      (local controller-config
+        {:watch-paths config.watch-paths
+         :debounce-ms config.debounce-ms
+         :module-name config.module-name
+         :narrow-reload-unit-ids config.narrow-reload-unit-ids
+         :preserve-modules config.preserve-modules
+         :generic? config.generic?
+         :on-reload-requested (fn [_controller]
+                                (assert app.hot-reload-callback-id
+                                        "hot reload callback id missing")
+                                (callbacks.enqueue app.hot-reload-callback-id true))
+         :units-fn (fn [_root-unit]
+                      (app.unit-manager:list))})
+      (set app.hot-reload-controller
+           (HotReload.AppRootController controller-config)))
+    app.hot-reload-controller))
 
 (fn app.activate-runtime-performance-gameplay-lease [id]
   (assert (and (= (type id) :string) (> (# id) 0))
@@ -793,7 +793,7 @@
 (set app.global-shortcuts-handler nil)
 (set app.remote-control nil)
 (set app.remote-control-endpoint nil)
-(set app.hot-reload-callback-id nil)
+(when (not (app-root-reload-in-progress?)) (set app.hot-reload-callback-id nil))
 (set app.browser-cube-surface nil)
 (set app.next-frame-queue [])
 (set app.next-frame-pending [])
