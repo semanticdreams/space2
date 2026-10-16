@@ -155,7 +155,7 @@
   (assert (= explicit.label "explicit"))
   (assert (= explicit.opaque.flag false))
   (assert (= explicit.opaque.text source-key))
-  (fixture.stores.link-store:delete-entity "incoming")
+  (fixture.stores.link-store:retire-entity! "incoming")
   (H.no-writes #(native.main:reconcile-link-projections!))
   (local remaining (link-ids native.main))
   (assert (not (. remaining "incoming")))
@@ -304,7 +304,7 @@
   (assert (= (# graph.edges) 3))
   (assert (= (. graph.edge-map (.. source-key "->string-entity:a")) explicit))
   (same (. (graph:snapshot-reference-state) :edges 1 :label) "authored")
-  (s.link-store:delete-entity "one")
+  (s.link-store:retire-entity! "one")
   (H.no-writes #(graph:reconcile-link-projections!))
   (assert (= (# graph.edges) 2))
   (assert (. (link-ids graph) :two))
@@ -422,10 +422,14 @@
   (each [path bytes (pairs tree)]
     (when (not (= path "entities/identity/direct.json"))
       (assert (= (. after path) bytes) (.. "projection refresh authored owning bytes: " path))))
-  ;; Existing genuine explicit identity-delete cleanup remains enabled until Task7.
-  (fixture.stores.identity-store:delete-entity "upstream")
+  ;; Genuine identity deletion is coordinated, never a projection listener write.
+  (: (service fixture) :delete! "identity:upstream")
   (assert (= (# (. (fixture.stores.list-store:get-entity "mounted") :items)) 0))
-  (assert (= (# (. (fixture.stores.notebook-store:get-notebook "mounted") :items)) 0))))
+  (assert (= (# (. (fixture.stores.notebook-store:get-notebook "mounted") :items)) 0))
+  (assert (= (# (. (fixture.stores.list-store:get-entity "unopened") :items)) 0))
+  (assert (= (# (. (fixture.stores.notebook-store:get-notebook "unopened") :items)) 0))
+  (assert (fixture.stores.code-store:get-entity "c"))
+  (assert (fixture.stores.identity-store:get-entity "direct"))))
 
 (add "projection removal and clear keep complete owning bytes identical" (fn projection-only [fixture]
   (containers! fixture)

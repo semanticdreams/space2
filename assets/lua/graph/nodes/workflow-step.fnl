@@ -56,19 +56,12 @@
   (assert self.graph.load-by-key (.. action " requires graph:load-by-key"))
   (assert self.graph.add-edge (.. action " requires graph:add-edge")))
 
-(fn delete-step-options [opts]
-  (local options {})
-  (local source (if opts opts {}))
-  (each [k v (pairs source)]
-    (set (. options k) v))
-  (set options.delete-dependent-edges? true)
-  options)
-
-(fn assert-delete-step-graph-dependencies [self]
-  (local action "WorkflowStepNode.delete-step-from-graph")
-  (GraphMapContext.assert-graph-map self.graph action)
-  (assert self.graph.remove-nodes (.. action " requires graph:remove-nodes"))
-  (assert self.workflow-store.delete-step (.. action " requires workflow store:delete-step")))
+(fn resolve-reference-lifecycle! [self]
+  (local mounted (and self.graph self.graph.reference-lifecycle))
+  (assert (or (not self.lifecycle) (not mounted) (= self.lifecycle mounted)) "reference lifecycle node/graph conflict")
+  (local service (assert (or self.lifecycle mounted) "node requires reference lifecycle"))
+  (assert (service:owns-store? "workflow-step" self.workflow-store) "reference lifecycle store ownership mismatch")
+  service)
 
 (fn step-label [step step-id]
   (if (and step (> (string.len (if step.name step.name "")) 0))
@@ -92,6 +85,8 @@
   (set node.workflow-definition-id definition-id)
   (set node.workflow-step-id step-id)
   (set node.workflow-store store)
+  (set node.lifecycle options.lifecycle)
+  (set node.resolve-reference-lifecycle! resolve-reference-lifecycle!)
   (set node.author-domain-edge
        (fn [self edge edge-opts]
          (GraphAuthoring.author-edge self (and edge edge.target) edge-opts)))
@@ -115,15 +110,11 @@
           (add-visible-edge self.graph self code-node "code")
           code-node))
   (set node.delete-step-from-graph
-       (fn [self opts]
-         (assert-delete-step-graph-dependencies self)
-         (assert (self:get-step)
-                 "WorkflowStepNode.delete-step-from-graph requires an existing workflow step")
-         (local deleted (self.workflow-store:delete-step self.workflow-definition-id
-                                                         self.workflow-step-id
-                                                         (delete-step-options opts)))
-         (self.graph:remove-nodes [self] {:cause "workflow-step-delete"})
-         deleted))
+       (fn [self _opts]
+         (local service (self:resolve-reference-lifecycle!))
+         (local result (service:delete! self.key))
+         (when self.graph (self.graph:remove-nodes [self] {:cause "workflow-step-delete"}))
+         result.source-record))
   (set node.actions [{:name "Show Code"
                        :icon "code"
                        :fn (fn [_button _event]
@@ -152,7 +143,7 @@
         (when (find-step definition step-id)
           (WorkflowStepNode {:definition-id definition-id
                              :step-id step-id
-                             :store store}))))))
+                             :store store :lifecycle options.lifecycle}))))))
 
 {:WorkflowStepNode WorkflowStepNode
  :parse-key parse-key

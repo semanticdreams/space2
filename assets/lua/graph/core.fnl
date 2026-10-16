@@ -189,6 +189,15 @@
         (unregister-key-loader-handle key-loaders handle-or-scheme)
         (unregister-key-loader-scheme key-loaders handle-or-scheme opts)))
 
+(fn graph-providers [options]
+    (local link-store (or options.link-store (LinkEntityStore.get-default)))
+    (local identity-store (or options.identity-store (IdentityStore.get-default)))
+    (local string-store (or options.string-store (StringEntityStore.get-default)))
+    (when options.lifecycle
+        (each [_ row (ipairs [["link-entity" link-store] ["identity" identity-store] ["string-entity" string-store]])]
+            (assert (options.lifecycle:owns-store? (. row 1) (. row 2)) "Graph reference lifecycle store ownership mismatch")))
+    (values link-store identity-store string-store (or options.morphs (Morphs.get-default))))
+
 (fn create-graph [opts]
     (local options (or opts {}))
     (local nodes {})
@@ -212,7 +221,7 @@
     (var reference-installing? false)
 
     (local entity-events? (if (= options.entity-events? nil) true options.entity-events?))
-    (local self {:nodes nodes
+    (local self {:nodes nodes :reference-lifecycle options.lifecycle
                  :edges edges
                  :edge-map edge-map
                  ;; Built-in start nodes are descriptor-loaded, not auto-created.
@@ -540,10 +549,7 @@
     (set Graph.GraphEdge GraphEdge)
 
     ;; Entity store integration
-    (local link-store (or options.link-store (LinkEntityStore.get-default)))
-    (local identity-store (or options.identity-store (IdentityStore.get-default)))
-    (local string-store (or options.string-store (StringEntityStore.get-default)))
-    (local morphs (or options.morphs (Morphs.get-default)))
+    (local (link-store identity-store string-store morphs) (graph-providers options))
     (set self.link-store link-store)
     (set self.identity-store identity-store)
     (set self.string-store string-store)
@@ -563,7 +569,7 @@
                 (when (not node)
                     (local {:IdentityNode IdentityNode} (require :graph/nodes/identity))
                     (set node (IdentityNode {:entity-id entity.id
-                                             :store identity-store}))
+                                             :store identity-store :lifecycle options.lifecycle}))
                     (self:add-node node create-opts)))
             (when (and create-opts.source-node node self.add-edge)
                 (self:add-edge (GraphEdge {:source create-opts.source-node

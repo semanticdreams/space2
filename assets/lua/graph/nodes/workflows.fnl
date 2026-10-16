@@ -63,7 +63,7 @@
     (when (not ok)
       (table.insert rollback-errors (tostring err))))
   (when (and result result.code-entity result.code-entity.id)
-    (local (ok err) (pcall self.code-store.delete-entity self.code-store result.code-entity.id))
+    (local (ok err) (pcall self.code-store.retire-entity! self.code-store result.code-entity.id))
     (when (not ok)
       (table.insert rollback-errors (tostring err))))
   (if (> (length rollback-errors) 0)

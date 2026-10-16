@@ -151,7 +151,7 @@
     (when changed? (commit-update! self notebook candidate items-changed?)))
   notebook)
 
-(fn delete-notebook [self id]
+(fn retire-notebook! [self id]
   (local notebook (load-notebook self id))
   (when notebook
     (local path (notebook-path self id))
@@ -235,7 +235,7 @@
    :notebook-created (Signal) :notebook-updated (Signal) :notebook-deleted (Signal)
    :notebook-items-changed (Signal)
    :get-notebook load-notebook :create-notebook create-notebook :update-notebook update-notebook
-   :delete-notebook delete-notebook :list-notebooks list-notebooks :add-item add-item
+   :retire-notebook! retire-notebook! :list-notebooks list-notebooks :add-item add-item
    :remove-item remove-item :reorder-items reorder-items :move-item move-item
    :snapshot-notebook snapshot-notebook :serialize-notebook serialize-notebook
    :decode-notebook decode-notebook :persist-notebook! persist-notebook! :reconcile-notebook! reconcile-notebook!})

@@ -42,7 +42,7 @@
         (when entity-id
           (local entity (store:get-entity entity-id))
           (when entity
-            (make-node entity-id store)))))))
+            (make-node entity-id store options)))))))
 
 {:key-prefix key-prefix
  :key-scheme key-scheme

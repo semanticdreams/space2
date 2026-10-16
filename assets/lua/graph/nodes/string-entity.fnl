@@ -42,9 +42,9 @@
 
 (fn rollback-created-child [string-store link-store child link]
   (when (and link link.id)
-    (link-store:delete-entity link.id))
+    (link-store:retire-entity! link.id))
   (when (and child child.id)
-    (string-store:delete-entity child.id)))
+    (string-store:retire-entity! child.id)))
 
 (fn load-created-child [graph-map string-store link-store child link child-key]
   (local (load-ok child-node) (pcall graph-map.load-by-key graph-map child-key))
@@ -54,6 +54,13 @@
         (error (.. "StringEntityNode.create-child failed to load child key into GraphMap: " child-key))
         (error child-node)))
   child-node)
+
+(fn resolve-reference-lifecycle! [self]
+  (local mounted (and self.graph self.graph.reference-lifecycle))
+  (assert (or (not self.lifecycle) (not mounted) (= self.lifecycle mounted)) "reference lifecycle node/graph conflict")
+  (local service (assert (or self.lifecycle mounted) "node requires reference lifecycle"))
+  (assert (service:owns-store? SCHEME self.store) "reference lifecycle store ownership mismatch")
+  service)
 
 (fn StringEntityNode [opts]
   (local options (or opts {}))
@@ -76,6 +83,8 @@
 
   (set node.entity-id entity-id)
   (set node.store store)
+  (set node.lifecycle options.lifecycle)
+  (set node.resolve-reference-lifecycle! resolve-reference-lifecycle!)
   (set node.entity-deleted (Signal))
   (set node.changed (Signal))
 
@@ -98,7 +107,8 @@
 
   (set node.delete-entity
        (fn [self]
-         (self.store:delete-entity self.entity-id)))
+         (local service (self:resolve-reference-lifecycle!))
+         (. (service:delete! self.key) :source-record)))
 
   (set node.create-child
        (fn [self]
@@ -162,8 +172,8 @@
 (local register-loader
   (KeyLoaderUtils.make-register-loader SCHEME
     StringEntityStore.get-default
-    (fn [entity-id store]
-      (StringEntityNode {:entity-id entity-id :store store}))))
+    (fn [entity-id store options]
+      (StringEntityNode {:entity-id entity-id :store store :lifecycle options.lifecycle}))))
 
 {:StringEntityNode StringEntityNode
  :register-loader register-loader}

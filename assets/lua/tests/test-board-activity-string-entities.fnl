@@ -106,8 +106,8 @@
                  :target-item-id "missing-string"}]})
 
 (fn cleanup-string-entities [store]
-  (pcall (fn [] (store:delete-entity valid-entity-id)))
-  (pcall (fn [] (store:delete-entity missing-entity-id))))
+  (pcall (fn [] (store:retire-entity! valid-entity-id)))
+  (pcall (fn [] (store:retire-entity! missing-entity-id))))
 
 (fn with-valid-string-entity [body]
   (local store (StringEntityStore.get-default))

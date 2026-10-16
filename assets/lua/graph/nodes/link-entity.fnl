@@ -20,6 +20,13 @@
           (Utils.truncate-with-ellipsis entity.target-key 20))
       (or (and entity entity.id) "link entity")))
 
+(fn resolve-reference-lifecycle! [self]
+  (local mounted (and self.graph self.graph.reference-lifecycle))
+  (assert (or (not self.lifecycle) (not mounted) (= self.lifecycle mounted)) "reference lifecycle node/graph conflict")
+  (local service (assert (or self.lifecycle mounted) "node requires reference lifecycle"))
+  (assert (service:owns-store? SCHEME self.store) "reference lifecycle store ownership mismatch")
+  service)
+
 (fn LinkEntityNode [opts]
   (local options (or opts {}))
   (local entity-id (assert options.entity-id "LinkEntityNode requires entity-id"))
@@ -39,6 +46,8 @@
 
   (set node.entity-id entity-id)
   (set node.store store)
+  (set node.lifecycle options.lifecycle)
+  (set node.resolve-reference-lifecycle! resolve-reference-lifecycle!)
   (set node.entity-deleted (Signal))
   (set node.changed (Signal))
 
@@ -70,7 +79,8 @@
 
   (set node.delete-entity
        (fn [self]
-         (self.store:delete-entity self.entity-id)))
+         (local service (self:resolve-reference-lifecycle!))
+         (. (service:delete! self.key) :source-record)))
 
   (set node.actions
        [{:name "Delete Entity"
@@ -112,8 +122,8 @@
 (local register-loader
   (KeyLoaderUtils.make-register-loader SCHEME
     LinkEntityStore.get-default
-    (fn [entity-id store]
-      (LinkEntityNode {:entity-id entity-id :store store}))))
+    (fn [entity-id store options]
+      (LinkEntityNode {:entity-id entity-id :store store :lifecycle options.lifecycle}))))
 
 {:LinkEntityNode LinkEntityNode
  :register-loader register-loader}

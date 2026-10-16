@@ -78,6 +78,7 @@
     (each [key value (pairs (capture view state))] (tset projection key (R.clone value)))
     (when state.camera (set projection.camera (ActivityCameraState.capture-camera state.camera)))
     (tset modes state.mode projection)
+    (when modes.outline (set modes.outline.selected_node_keys nil))
     {:mode_states modes
      :views (and state.node-views state.node-views.capture-state (R.clone (state.node-views:capture-state)))
      :selected_node_keys (R.clone state.graph-map.selected_node_keys)
@@ -138,7 +139,8 @@
                (each [key value (pairs (adapter.capture-projection-state! self state))] (tset mode-state key value))
               (when retained-camera
                   (set mode-state.camera (clone-camera-state retained-camera)))
-              (set (. mode-states state.mode) mode-state)
+               (set (. mode-states state.mode) mode-state)
+               (when mode-states.outline (set mode-states.outline.selected_node_keys nil))
               (local restored-selected-node-keys (if selected-node-keys selected-node-keys []))
               (if state.graph-map.set-selected-node-keys
                   (state.graph-map:set-selected-node-keys restored-selected-node-keys)

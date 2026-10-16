@@ -116,6 +116,17 @@
     (each [id _ (pairs retired)] (remove! id))
     true)
 
+(fn map-lifecycle [options graph]
+    (local inherited graph.reference-lifecycle)
+    (assert (or (not options.lifecycle) (not inherited) (= options.lifecycle inherited))
+            "GraphMap reference lifecycle conflicts with shared Graph")
+    (local service (or options.lifecycle inherited))
+    (when service
+        (each [_ row (ipairs [["link-entity" graph.link-store] ["identity" graph.identity-store]
+                              ["string-entity" graph.string-store]])]
+            (assert (service:owns-store? (. row 1) (. row 2)) "GraphMap reference lifecycle store ownership mismatch")))
+    service)
+
 (fn create-graph-map [opts]
     (local options (or opts {}))
     (local shared-graph (assert options.graph "GraphMap requires :graph (shared Graph)"))
@@ -147,7 +158,7 @@
 
     (local self {:id id
                  :name name
-                 :graph shared-graph
+                 :graph shared-graph :reference-lifecycle (map-lifecycle options shared-graph)
                   :nodes nodes
                   :edges edges
                   :edge-map edge-map

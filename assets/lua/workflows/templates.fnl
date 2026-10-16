@@ -50,8 +50,8 @@
       {:step step-or-err :code-entity code-entity}
       (do
         (when (not (definition-has-step-code? workflow-store definition-id code-entity.id))
-          (assert code-store.delete-entity "create-template-step rollback requires code-store:delete-entity")
-          (code-store:delete-entity code-entity.id))
+          (assert code-store.retire-entity! "create-template-step rollback requires code-store:retire-entity!")
+          (code-store:retire-entity! code-entity.id))
         (error step-or-err))))
 
 (fn create-template-workflow [workflow-store code-store opts]
@@ -76,9 +76,9 @@
         (workflow-store:delete-definition definition.id)
         (when (> (length code-entity-ids) 0)
           (assert code-store "create-template-workflow rollback requires code-store")
-          (assert code-store.delete-entity "create-template-workflow rollback requires code-store:delete-entity")
+          (assert code-store.retire-entity! "create-template-workflow rollback requires code-store:retire-entity!")
           (each [_ code-entity-id (ipairs code-entity-ids)]
-            (code-store:delete-entity code-entity-id)))
+            (code-store:retire-entity! code-entity-id)))
         (error step-result-or-err))))
 
 {:starter-source starter-source

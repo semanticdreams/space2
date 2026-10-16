@@ -32,7 +32,7 @@
 (fn exercise-identity-signals [store counts]
   (local entity (store:create-entity {:target-key "a"}))
   (store:update-entity entity.id {:target-key "b"})
-  (store:delete-entity entity.id)
+  (store:retire-entity! entity.id)
   (assert (= counts.created 1) "created signal should emit once")
   (assert (= counts.updated 1) "updated signal should emit once")
   (assert (= counts.deleted 1) "deleted signal should emit once"))

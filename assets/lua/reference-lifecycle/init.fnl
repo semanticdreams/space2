@@ -228,17 +228,32 @@
     (set self._state.ready? true)
     (migration-report self))
   (protected! self start))
-(fn command! [self request]
+(fn pending-request? [pending request payload-builder]
+  (if payload-builder
+      (and (= pending.request.kind "morph") (= request.kind "morph")
+           (= pending.request.source-key request.source-key))
+      (= (J.stable-json pending.request) (J.stable-json request))))
+(fn materialize-payload! [request payload-builder]
+  (when payload-builder
+    (local scheme (Plan.target request.source-key))
+    (assert (= scheme "string-entity") "unsupported morph source")
+    (local payload (payload-builder))
+    (assert (= (type payload) :table) "morph payload builder must return table")
+    (set request.payload (R.clone payload))))
+(fn command! [self request payload-builder]
   (assert self._state.ready? "reference lifecycle not ready")
   (fn execute []
     (Plan.validate-owners self.owners self.stores)
+    (when (= request.kind "morph")
+      (assert (or payload-builder (= (type request.payload) :table)) "morph requires payload table or builder"))
     (local pending (self._pending:read))
     (if pending
         (do
-          (assert (= (J.stable-json pending.request) (J.stable-json request))
+          (assert (pending-request? pending request payload-builder)
                   (.. "pending operation " pending.operation-id " for " (tostring pending.operation.source-key)))
           (replay! self pending))
         (do
+          (materialize-payload! request payload-builder)
           (local prepared (Plan.prepare self.owners self.stores request))
           (if prepared.status prepared
               (do
@@ -247,7 +262,10 @@
                 (replay! self prepared))))))
   (protected! self execute))
 (fn delete! [self key] (command! self {:kind "delete" :source-key key}))
-(fn replace! [self key payload] (command! self {:kind "morph" :source-key key :payload payload}))
+(fn replace! [self key payload-or-builder]
+  (local deferred? (= (type payload-or-builder) :function))
+  (command! self {:kind "morph" :source-key key :payload (when (not deferred?) payload-or-builder)}
+            (when deferred? payload-or-builder)))
 (fn owns-store? [self scheme store] (Plan.owns-store? self.stores scheme store))
 (fn Lifecycle [options]
   (local stores (assert options.stores "lifecycle requires canonical stores"))

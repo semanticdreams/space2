@@ -28,7 +28,7 @@
     (fs.remove-all dir))
   (fs.create-dirs dir)
   (local store (LinkEntityStore.LinkEntityStore {:base-dir dir}))
-  (local graph (allow-test-keys! (Graph {:with-start false :link-store store})))
+  (local graph (allow-test-keys! (Graph {:with-start false :link-store store :identity-store store.identity-store})))
   (local graph-map (GraphMap.GraphMap {:graph graph :id "link-entity-crash"}))
   ;; Use a real build context so vector buffers and handles are real usertypes.
   ;; We keep focus/clickables lightweight because the crash repro is about edge creation.

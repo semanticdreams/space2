@@ -147,7 +147,7 @@
     (when changed? (commit-update! self entity candidate items-changed?)))
   entity)
 
-(fn delete-entity [self id]
+(fn retire-entity! [self id]
   (local entity (load-entity self id))
   (when entity
     (local path (entity-path self id))
@@ -233,7 +233,7 @@
    :list-entity-created (Signal) :list-entity-updated (Signal)
    :list-entity-deleted (Signal) :list-entity-items-changed (Signal)
    :get-entity load-entity :create-entity create-entity :update-entity update-entity
-   :delete-entity delete-entity :list-entities list-entities :add-item add-item
+   :retire-entity! retire-entity! :list-entities list-entities :add-item add-item
    :remove-item remove-item :reorder-items reorder-items :move-item move-item
    :snapshot-entity snapshot-entity :serialize-entity serialize-entity
    :decode-entity decode-entity :persist-entity! persist-entity! :reconcile-entity! reconcile-entity!})

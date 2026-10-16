@@ -106,7 +106,7 @@
     (self.link-entity-updated:emit entity))
   entity)
 
-(fn delete-entity [self id]
+(fn retire-entity! [self id]
   (local entity (load-entity self id))
   (when entity
     (local path (entity-path self id))
@@ -174,7 +174,7 @@
   {:base-dir base-dir :root root :entities-dir entities-dir :identity-store identity-store :cache {}
    :link-entity-created (Signal) :link-entity-updated (Signal) :link-entity-deleted (Signal)
    :get-entity load-entity :create-entity create-entity :update-entity update-entity
-   :delete-entity delete-entity :list-entities list-entities
+   :retire-entity! retire-entity! :list-entities list-entities
    :find-edges-for-nodes find-edges-for-nodes :find-entities-for-key find-entities-for-key
    :snapshot-entity snapshot-entity :serialize-entity serialize-entity
    :decode-entity decode-entity :persist-entity! persist-entity! :reconcile-entity! reconcile-entity!})

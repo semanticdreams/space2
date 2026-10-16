@@ -46,11 +46,11 @@
   (local board (Board {:state (state subject)}))
   (local selector (ObjectSelector {:ctx canvas.build-context :pointer-target canvas}))
   (local owned [])
-  (fn mount [state]
+  (fn mount [state lifecycle]
     (assert board "native fixture requires board")
     (local model (or state board))
     (local view (BoardView {:board model :canvas canvas :ctx canvas.build-context
-                           :selector selector
+                           :selector selector :lifecycle lifecycle
                            :string-store s.string-store :code-store s.code-store
                            :identity-store s.identity-store :link-store s.link-store}))
     (table.insert owned view)
@@ -152,6 +152,39 @@
       {:raw raw :migration fixture.migration-baseline}))))
   (set fixture.world world)
   service)
+
+(fn add-composition [name identity? f]
+  (table.insert tests {:name (.. "reference lifecycle composition Board " name)
+                       :fn #(with-fixture identity? f)}))
+
+(add-composition "ordinary identity subject deletion cleans incoming" false (fn delete [fixture]
+  (local s fixture.stores)
+  (s.list-store:create-entity {:id "holder" :items [fixture.subject]})
+  (local lifecycle (start-world fixture))
+  (local view (fixture.mount nil lifecycle))
+  (set fixture.world.runtime.board-view view)
+  (local removed (view:remove-item "source"))
+  (assert (= (# (. (s.list-store:snapshot-entity "holder") :value :items)) 0)
+          "Board ordinary removal must coordinate incoming cleanup")
+  (assert (= removed.id "source"))
+  (assert (= (s.string-store:get-entity "s") nil))))
+
+(add-composition "authoring uses canonical stores and stable subjects" false (fn create [fixture]
+  (local lifecycle (start-world fixture))
+  (local view (fixture.mount nil lifecycle))
+  (local item (view:add-string-entity {:value "new canonical value"}))
+  (assert (= (string.sub item.subject-key 1 9) "identity:") "Board authoring must emit stable subject")
+  (local terminal (fixture.stores.identity-store:resolve-key item.subject-key))
+  (local id (string.match terminal "^string%-entity:(.+)$"))
+  (assert (= (. (fixture.stores.string-store:get-entity id) :value) "new canonical value"))))
+
+(add-composition "ownership conflict precedes removal effects" true (fn conflict [fixture]
+  (local lifecycle (H.ready (H.stores fixture.stores.base-dir)))
+  (local view (fixture.mount nil lifecycle))
+  (local before (J.stable-json (H.snapshot-tree fixture.stores.base-dir)))
+  (H.assert-error "reference lifecycle" #(view:remove-item "source"))
+  (assert (= before (J.stable-json (H.snapshot-tree fixture.stores.base-dir))))
+  (assert fixture.board.items.source)))
 
 (fn text-value [text]
   (assert text "native code body must own Text, not the retired editable Input")
@@ -510,5 +543,96 @@
   (set providers.string-store false)
   (assert (= (. (view:reference-providers) :string-store) fixture.stores.string-store))
   (same before (H.snapshot-tree fixture.stores.base-dir))))
+
+(fn add-rollback [name f]
+  (fn rooted [root]
+    (local s (H.stores root))
+    (s.string-store:create-entity {:id "keep" :value "preexisting"})
+    (s.identity-store:create-entity {:id "keep" :target-key "string-entity:keep"})
+    (local board (Board {}))
+    (board:add-item {:id "keep" :type "string-entity" :subject-key "identity:keep"})
+    (f s board))
+  (table.insert tests {:name (.. "reference lifecycle composition Board rollback " name)
+                       :fn #(H.with-root rooted)}))
+
+(fn rollback-state [s board]
+  {:tree (H.snapshot-tree s.base-dir) :board (board:capture-state)})
+(fn rollback-options [s entity]
+  {:string-store s.string-store :identity-store s.identity-store :value "attempt"
+   :entity entity :position [math.huge 0 0]})
+(fn rejected-signal [signal f]
+  (local handler (signal:connect (fn reject [_record] (error "creation listener failed"))))
+  (local (ok result) (pcall f))
+  (signal:disconnect handler true)
+  (if ok result (error result)))
+
+(add-rollback "invalid transform restores owning records" (fn invalid [s board]
+  (local before (rollback-state s board))
+  (H.assert-error "finite" #(BuiltinString.create-string-entity board (rollback-options s nil)))
+  (same before (rollback-state s board))))
+
+(add-rollback "item-added failure restores owning records" (fn listener [s board]
+  (local before (rollback-state s board))
+  (local options (rollback-options s nil))
+  (set options.position [0 0 0])
+  (fn create [] (H.assert-error "creation listener failed" #(BuiltinString.create-string-entity board options)))
+  (rejected-signal board.item-added create)
+  (same before (rollback-state s board))))
+
+(add-rollback "identity enumeration failure retires new string" (fn enumeration [s board]
+  (local before (rollback-state s board))
+  (fn create [] (H.assert-error "permission denied" #(BuiltinString.create-string-entity board (rollback-options s nil))))
+  (H.with-fs-failure :list-dir s.identity-store.entities-dir create)
+  (same before (rollback-state s board))))
+
+(add-rollback "identity write failure retires new string" (fn write-failure [s board]
+  (local before (rollback-state s board))
+  (local write fs.write-file)
+  (fn reject [path bytes]
+    (if (= (fs.parent path) s.identity-store.entities-dir) (error "identity write denied") (write path bytes)))
+  (fn create [] (H.assert-error "identity write denied" #(BuiltinString.create-string-entity board (rollback-options s nil))))
+  (H.with-fields fs {:write-file reject} create)
+  (same before (rollback-state s board))))
+
+(add-rollback "supplied string survives new identity rollback" (fn supplied [s board]
+  (local entity (s.string-store:create-entity {:id "supplied" :value "supplied"}))
+  (local before (rollback-state s board))
+  (H.assert-error "finite" #(BuiltinString.create-string-entity board (rollback-options s entity)))
+  (assert (= (s.string-store:get-entity "supplied") entity))
+  (same before (rollback-state s board))))
+
+(add-rollback "reused identity and supplied string survive" (fn reused [s board]
+  (local entity (s.string-store:get-entity "keep"))
+  (local identity (s.identity-store:get-entity "keep"))
+  (local before (rollback-state s board))
+  (H.assert-error "finite" #(BuiltinString.create-string-entity board (rollback-options s entity)))
+  (assert (= (s.string-store:get-entity "keep") entity))
+  (assert (= (s.identity-store:get-entity "keep") identity))
+  (same before (rollback-state s board))))
+
+(add-rollback "identity publication failure restores owning records" (fn publication [s board]
+  (local before (rollback-state s board))
+  (fn create [] (H.assert-error "creation listener failed" #(BuiltinString.create-string-entity board (rollback-options s nil))))
+  (rejected-signal s.identity-store.identity-created create)
+  (same before (rollback-state s board))))
+
+(add-rollback "cleanup failure is explicit and reference safe" (fn cleanup-failure [s board]
+  (local before (rollback-state s board))
+  (var created-string nil) (var created-identity nil)
+  (s.string-store.string-entity-created:connect (fn observe [record] (set created-string record)))
+  (s.identity-store.identity-created:connect (fn observe [record] (set created-identity record)))
+  (local remove fs.remove)
+  (fn reject [path]
+    (if (= (fs.parent path) s.identity-store.entities-dir) (error "identity rollback denied") (remove path)))
+  (fn create []
+    (local message (H.assert-error "rollback failed" #(BuiltinString.create-string-entity board (rollback-options s nil))))
+    (assert (string.find message "identity rollback denied" 1 true)))
+  (H.with-fields fs {:remove reject} create)
+  (assert (s.string-store:get-entity created-string.id) "failed identity cleanup must not dangle its target")
+  (assert (= (s.identity-store:get-entity created-identity.id) created-identity))
+  (assert (= created-identity.target-key (.. "string-entity:" created-string.id)))
+  (local after (rollback-state s board))
+  (same before.board after.board)
+  (each [path bytes (pairs before.tree)] (assert (= (. after.tree path) bytes)))))
 
 {:tests tests :main (fn [] ((. (require :tests/runner) :run) tests))}

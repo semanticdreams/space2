@@ -66,7 +66,7 @@
   (with-temp-store
     (fn [store _root]
       (local notebook (store:create-notebook {:name "Delete Me"}))
-      (local deleted (store:delete-notebook notebook.id))
+      (local deleted (store:retire-notebook! notebook.id))
       (assert deleted "notebook should be deleted")
       (local retrieved (store:get-notebook notebook.id))
       (assert (= retrieved nil) "notebook should no longer be retrievable"))))
@@ -104,7 +104,7 @@
       (var deleted-count 0)
       (store.notebook-deleted:connect (fn [_] (set deleted-count (+ deleted-count 1))))
       (local notebook (store:create-notebook {:name "x"}))
-      (store:delete-notebook notebook.id)
+      (store:retire-notebook! notebook.id)
       (assert (= deleted-count 1) "deleted signal should be emitted"))))
 
 (fn notebook-store-adds-items-and-prevents-duplicates []
@@ -292,7 +292,7 @@
               "notebook node should add one edge to nested notebook")
       (graph:drop))))
 
-(fn notebook-node-removes-direct-item-when-node-disappears []
+(fn notebook-node-preserves-item-when-node-disappears []
   (with-temp-store
     (fn [store root]
       (local Graph (require :graph/init))
@@ -314,12 +314,14 @@
                                           :store store
                                           :identity-store identity-store}))
       (graph:add-node notebook-node {})
-      (assert (= (length (or (. (store:get-notebook notebook.id) :items) [])) 1)
-              "notebook should start with direct key item")
+      (local initial (assert (store:get-notebook notebook.id)))
+      (assert (= (# initial.items) 1) "notebook should start with stable key item")
+      (local before (. (store:snapshot-notebook notebook.id) :bytes))
       (graph:remove-nodes [source-node])
       (local current (store:get-notebook notebook.id))
-      (assert (= (length (or current.items [])) 0)
-              "notebook should remove direct key item when node disappears")
+      (assert (= (# current.items) 1)
+              "exposure removal must preserve owning notebook membership")
+      (assert (= (. (store:snapshot-notebook notebook.id) :bytes) before))
       (graph:drop))))
 
 (fn notebook-node-refreshes-identity-item-edges-on-target-change []
@@ -505,8 +507,8 @@
                      :fn notebook-node-add-item-wraps-non-identity-key-and-dedupes})
 (table.insert tests {:name "notebook node loads nested notebook item via load-by-key"
                      :fn notebook-node-loads-nested-notebook-item-via-load-by-key})
-(table.insert tests {:name "notebook node removes direct item when node disappears"
-                     :fn notebook-node-removes-direct-item-when-node-disappears})
+(table.insert tests {:name "notebook node preserves item when node disappears"
+                      :fn notebook-node-preserves-item-when-node-disappears})
 (table.insert tests {:name "notebook node refreshes identity item edges on target change"
                      :fn notebook-node-refreshes-identity-item-edges-on-target-change})
 (table.insert tests {:name "notebook node refreshes identity item edges when target node added late"

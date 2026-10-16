@@ -7,7 +7,7 @@
   found)
 (fn preflight! [self]
   (assert (= self.store.base-dir self.base-dir) "identities owner base-dir mismatch")
-  (each [_ method (ipairs ["snapshot-entity" "serialize-entity" "decode-entity" "persist-entity!" "delete-entity" "reconcile-entity!"])]
+  (each [_ method (ipairs ["snapshot-entity" "serialize-entity" "decode-entity" "persist-entity!" "retire-entity!" "reconcile-entity!"])]
     (assert (= (type (. self.store method)) :function) (.. "missing identity capability: " method)))
   true)
 (fn inventory [self]
@@ -67,7 +67,7 @@
   (assert id "unsupported identity address")
   (local snapshot (self.store:snapshot-entity id))
   (assert (= snapshot.path change.path) "identity change path mismatch")
-  (if (= change.after-bytes false) (self.store:delete-entity id)
+  (if (= change.after-bytes false) (self.store:retire-entity! id)
       (self.store:persist-entity! id change.after-bytes change.after-check))
   nil)
 (fn reconcile! [self intent]

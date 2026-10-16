@@ -134,7 +134,7 @@
       (set observed-deleted-count 0)
       (store.dict-entity-deleted:connect count-deleted)
       (set fs.remove fail-remove)
-      (local (ok err) (pcall store.delete-entity store entity.id))
+      (local (ok err) (pcall store.retire-entity! store entity.id))
       (set fs.remove original-remove)
       (store.dict-entity-deleted:clear)
       (assert (not ok) "delete should error when persistent removal fails")

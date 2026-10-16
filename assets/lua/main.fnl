@@ -260,7 +260,7 @@
 
 (fn init-app-dirs []
 (when (and app.engine appdirs)
-    (local data-dir (appdirs.user-data-dir "space"))
+    (local data-dir (fs.absolute (assert (appdirs.user-data-dir "space") "app data directory missing")))
     (assert data-dir "appdirs.user-data-dir must return a directory")
     (set app.user-data-dir data-dir)
     (local apps-dir (fs.join-path data-dir "apps"))
@@ -631,6 +631,7 @@
 (local Notify (require :notify-manager))
 (local AppBootstrap (require :app-bootstrap))
 (local WorldManager (require :world-manager))
+(local ReferenceComposition (require :graph/extensions/builtins/composition))
 (local WorldTabsWidget (require :world-tabs-widget))
 (local InputState (require :input-state-router))
 (local Modifiers (require :input-modifiers))
@@ -854,7 +855,11 @@
    :focus-root (and app.focus (app.focus:get-root-scope))
    :icons app.icons
    :states app.states
-   :movables app.movables})
+   :movables app.movables
+   :lifecycle app.reference-lifecycle
+   :string-store app.string-store :code-store app.code-store :identity-store app.identity-store
+   :list-store app.list-store :dict-store app.dict-store :link-store app.link-store
+   :notebook-store app.notebook-store :workflow-store app.workflow-store})
 
 (fn resolve-active-world-hud-contrib []
   (local entry (and app.world-manager (app.world-manager:active-world)))
@@ -1535,14 +1540,9 @@
     (set app.kernels nil))
   (local Kernels (require :kernels))
   (set app.kernels (Kernels.get-default))
-  (local CodeEntityStore (require :entities/code))
-  (local WorkflowStore (require :workflows/store))
+  (local stores (ReferenceComposition.init-reference-stores! app))
   (local WorkflowCodeExecutor (require :workflows/code-executor))
   (local WorkflowRunner (require :workflows/runner))
-  (set app.code-store
-       (CodeEntityStore.CodeEntityStore {:base-dir app.user-data-dir}))
-  (set app.workflow-store
-       (WorkflowStore.get-default {:base-dir app.user-data-dir}))
   (set app.workflow-code-executor
        (WorkflowCodeExecutor.WorkflowCodeExecutor {:code-store app.code-store
                                                    :app app}))
@@ -1619,7 +1619,7 @@
   (local hud-unit (ensure-hud-unit))
   (hud-unit:load)
   (load-built-in-activity-units!) (app.ensure-graph-extension-registry!)
-  (init-world-manager) (app.ensure-built-in-graph-extensions!)
+  (init-world-manager) (ReferenceComposition.start-reference-lifecycle! app stores) (app.ensure-built-in-graph-extensions!)
   (ensure-user-code-units!)
   (when app.world-manager
     (app.world-manager:activate-first))
@@ -1970,6 +1970,7 @@
   )
 
 (fn drop-agent-runtime! []
+  (each [_ name (ipairs [:active-world :unit-context])] (PromptUtils.remove-enricher name))
   (when app.agent-runner
     (app.agent-runner:drop)
     (set app.agent-runner nil))
@@ -1987,18 +1988,14 @@
   (when (and app.agent-presets-workspace-handler app.workspace-shell-changed)
     (app.workspace-shell-changed:disconnect app.agent-presets-workspace-handler true)
     (set app.agent-presets-workspace-handler nil))
-  (set app.agent-tool-surface nil)
-  (set app.agent-approvals nil)
-  (set app.agent-registry nil)
-  (set app.agent-presets nil)
-  (set app.agent-tool-adapters nil)) (var drop-built-in-graph-extensions! nil)
+  (each [_ field (ipairs [:agent-tool-surface :agent-approvals :agent-registry :agent-presets :agent-tool-adapters])]
+    (tset app field nil)))
+(var drop-built-in-graph-extensions! nil)
 
 (fn app.drop []
   (set (. package.loaded "renderers") nil)
   (set app.workflow-runner nil)
   (set app.workflow-code-executor nil)
-  (set app.workflow-store nil)
-  (set app.code-store nil)
   (drop-agent-runtime!)
   (InputState.release-active-input)
   (AppBootstrap.drop-states)
@@ -2048,6 +2045,7 @@
   (when (and app.world-manager app.world-manager.drop)
     (app.world-manager:drop)
     (set app.world-manager nil))
+  (ReferenceComposition.clear-reference-composition! app)
   (Activities.clear-activity-runtime-hooks!) (drop-built-in-graph-extensions!)
   (when app.unit-manager
     (app.unit-manager:clear) (set app.graph-extension-registry nil))
@@ -2161,7 +2159,7 @@
   app.graph-extension-registry)
 
 (fn ensure-built-in-graph-extensions! [opts]
-  ((. (require :graph/extensions/builtins/composition) :ensure!)
+  (ReferenceComposition.ensure!
     app opts ensure-graph-extension-registry!))
 
 (set drop-built-in-graph-extensions!

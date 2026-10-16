@@ -103,7 +103,7 @@
     (self.string-entity-updated:emit entity))
   entity)
 
-(fn delete-entity [self id]
+(fn retire-entity! [self id]
   (local entity (get-entity self id))
   (when entity
     (local path (entity-path self id))
@@ -129,7 +129,7 @@
   {:base-dir base-dir :root root :entities-dir entities-dir :cache {}
    :string-entity-created (Signal) :string-entity-updated (Signal) :string-entity-deleted (Signal)
    :get-entity get-entity :create-entity create-entity :update-entity update-entity
-   :delete-entity delete-entity :list-entities list-entities
+   :retire-entity! retire-entity! :list-entities list-entities
    :snapshot-entity snapshot-entity :serialize-entity serialize-entity
    :decode-entity decode-entity :persist-entity! persist-entity! :reconcile-entity! reconcile-entity!})
 

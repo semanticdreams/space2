@@ -59,7 +59,7 @@
 
 (fn exercise-string-deleted-signal [store counts]
   (local entity (store:create-entity {:value "test"}))
-  (store:delete-entity entity.id)
+  (store:retire-entity! entity.id)
   (assert (= counts.deleted 1) "deleted signal should be emitted"))
 
 (fn string-entity-store-creates-entities []
@@ -95,7 +95,7 @@
   (with-temp-store
     (fn [store _root]
       (local entity (store:create-entity {:value "to delete"}))
-      (local deleted (store:delete-entity entity.id))
+      (local deleted (store:retire-entity! entity.id))
       (assert deleted "entity should be deleted")
       (local retrieved (store:get-entity entity.id))
       (assert (= retrieved nil) "entity should no longer be retrievable"))))

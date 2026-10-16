@@ -7,10 +7,9 @@
 (local Camera (require :camera))
 (local Scene (require :scene))
 (local {: FirstPersonControls} (require :first-person-controls))
-(local Graph (require :graph/init))
+(local HomeWorldGraphRuntime (require :home-world-graph-runtime))
 
 (local GraphMap (require :graph/map))
-(local GraphMapManager (require :graph/map-manager))
 (local DrawingDocument (require :drawing/document))
 (local DrawingController (require :drawing/controller))
 (local ActivityDockView (require :activity-dock-view))
@@ -1082,26 +1081,8 @@
     (local default-scene-camera (Camera {:position (glm.vec3 0 0 30)}))
     (local canvas-state (or (and world.state world.state.canvas) {}))
     (local activity-state (or (and world.state world.state.activity) {}))
-    (local graph (Graph {:with-start false :entity-events? false}))
-
-    (local restore-runtime {:graph graph})
-    (var restore-runtime-installed? false)
-    (local registry (assert app.graph-extension-registry "HomeWorld requires app.graph-extension-registry before graph map restore"))
-    (local (install-ok install-result) (pcall #(registry:install-runtime restore-runtime)))
-    (if install-ok
-        (set restore-runtime-installed? true)
-        (do (graph:drop) (error install-result)))
-    (local (map-manager-ok graph-map-manager)
-      (pcall #(GraphMapManager.GraphMapManager
-                {:graph graph
-                 :state (or world.state.graph {})
-                 :data-dir world.dir})))
-    (when restore-runtime-installed?
-      (registry:uninstall-runtime restore-runtime))
-    (when (not map-manager-ok)
-      (graph:drop)
-      (error graph-map-manager))
-    (local graph-map (graph-map-manager:get-active-map))
+    (local (graph graph-map-manager graph-map)
+      (HomeWorldGraphRuntime.create world ctx app.graph-extension-registry))
     (local scene-scope
       (do
         (local scope
@@ -1146,6 +1127,10 @@
     (set-runtime-containment-config! world containment-config)
     (local runtime
       {:world-dir world.dir
+       :reference-lifecycle ctx.lifecycle
+       :string-store ctx.string-store :code-store ctx.code-store :identity-store ctx.identity-store
+       :list-store ctx.list-store :dict-store ctx.dict-store :link-store ctx.link-store
+       :notebook-store ctx.notebook-store :workflow-store ctx.workflow-store
        :focus-manager ctx.focus-manager
        :focus-root ctx.focus-root
        :icons ctx.icons

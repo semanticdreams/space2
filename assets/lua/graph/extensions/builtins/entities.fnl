@@ -61,28 +61,28 @@
   (local handles [])
   (fn add! [handle] (table.insert handles handle))
   (fn make-string-entity [entity-id]
-    (StringEntityNodeModule.StringEntityNode {:entity-id entity-id :store string-store}))
+    (StringEntityNodeModule.StringEntityNode {:entity-id entity-id :store string-store :lifecycle options.lifecycle}))
   (fn make-code-entity [entity-id]
-    (CodeEntityNodeModule.CodeEntityNode {:entity-id entity-id :store code-store}))
+    (CodeEntityNodeModule.CodeEntityNode {:entity-id entity-id :store code-store :lifecycle options.lifecycle}))
   (fn make-list-entity [entity-id]
     (ListEntityNodeModule.ListEntityNode {:entity-id entity-id
-                                           :store list-store
+                                           :store list-store :lifecycle options.lifecycle
                                            :identity-store identity-store}))
   (fn make-dict-entity [entity-id]
     (DictEntityNodeModule.DictEntityNode {:entity-id entity-id
-                                          :store dict-store
+                                          :store dict-store :lifecycle options.lifecycle
                                           :identity-store identity-store}))
   (fn make-link-entity [entity-id]
-    (LinkEntityNodeModule.LinkEntityNode {:entity-id entity-id :store link-store}))
+    (LinkEntityNodeModule.LinkEntityNode {:entity-id entity-id :store link-store :lifecycle options.lifecycle}))
   (fn make-identity [entity-id]
-    (IdentityNodeModule.IdentityNode {:entity-id entity-id :store identity-store}))
+    (IdentityNodeModule.IdentityNode {:entity-id entity-id :store identity-store :lifecycle options.lifecycle}))
   (fn load-notebook [key]
     (local notebook-id (KeyLoaderUtils.extract-id "notebook" key))
     (when notebook-id
       (local notebook (notebook-store:get-notebook notebook-id))
       (when notebook
         (NotebookNodeModule.NotebookNode {:notebook-id notebook-id
-                                          :store notebook-store
+                                          :store notebook-store :lifecycle options.lifecycle
                                           :identity-store identity-store
                                           :string-store string-store}))))
   (fn make-string-entity-list [] (StringEntityListNode {:store string-store}))

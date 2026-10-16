@@ -238,14 +238,23 @@
        (fn [self old-key new-key]
          (self.store:rename-item self.entity-id old-key new-key)
          (self:add-item-nodes)))
-  (set node.delete-entity (fn [self] (self.store:delete-entity self.entity-id)))
+  (set node.delete-entity (fn [self]
+    (local service (self:resolve-reference-lifecycle!))
+    (. (service:delete! self.key) :source-record)))
   (set node.add-item-nodes add-item-nodes)
   (set node.refresh-reference-projection! refresh-reference-projection!)
   (set node.added added)
   node)
 
+(fn resolve-reference-lifecycle! [self]
+  (local mounted (and self.graph self.graph.reference-lifecycle))
+  (assert (or (not self.lifecycle) (not mounted) (= self.lifecycle mounted)) "reference lifecycle node/graph conflict")
+  (local service (assert (or self.lifecycle mounted) "node requires reference lifecycle"))
+  (assert (service:owns-store? SCHEME self.store) "reference lifecycle store ownership mismatch")
+  service)
+
 (fn DictEntityNode [opts]
-  (local (_options entity-id identity-store store) (node-options opts))
+  (local (options entity-id identity-store store) (node-options opts))
   (local DictEntityNodeView (require :graph/view/views/dict-entity))
   (local entity (store:get-entity entity-id))
   (local node
@@ -260,6 +269,8 @@
   (set node.compact-label (make-compact-label entity))
   (set node.identity-store identity-store)
   (set node.store store)
+  (set node.lifecycle options.lifecycle)
+  (set node.resolve-reference-lifecycle! resolve-reference-lifecycle!)
   (set node.entity-deleted (Signal))
   (set node.changed (Signal))
   (set node.items-changed (Signal))
@@ -324,7 +335,7 @@
           (when entity
             (DictEntityNode {:entity-id entity-id
                              :store store
-                             :identity-store identity-store})))))))
+                             :identity-store identity-store :lifecycle options.lifecycle})))))))
 
 {:DictEntityNode DictEntityNode
  :register-loader register-loader

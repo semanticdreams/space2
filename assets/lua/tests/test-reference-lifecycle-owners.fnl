@@ -79,7 +79,7 @@
               (fs.remove path)
               (fs.create-dirs path)
               (fs.write-file (fs.join-path path "occupied") "x")
-              (fails (fn remove-collision [] (store:delete-entity "held")))))
+              (fails (fn remove-collision [] (store:retire-entity! "held")))))
         (assert (= (store:get-entity "held") held))
         (assert (= before (J.stable-json held)) "failed mutation poisoned held cache")))
   (signal:clear)
@@ -222,7 +222,7 @@
   (fails (fn wrong-root [] (H.domain-owners wrong)))
   (local broken (collect [key value (pairs s)] key value))
   (set broken.code-store (collect [key value (pairs s.code-store)] key value))
-  (set broken.code-store.delete-entity nil)
+  (set broken.code-store.retire-entity! nil)
   (fails (fn missing-retirement [] (H.domain-owners broken)))))
 
 (add "migration read only and idempotent" (fn migration-idempotent [s]
@@ -274,8 +274,8 @@
   (local before (H.snapshot-tree s.base-dir))
   (H.assert-error "cycle" (fn cycle [] (migration s)))
   (same before (H.snapshot-tree s.base-dir))
-  (s.identity-store:delete-entity "a")
-  (s.identity-store:delete-entity "b")
+  (s.identity-store:retire-entity! "a")
+  (s.identity-store:retire-entity! "b")
   (fs.write-file (fs.join-path s.dict-store.entities-dir "bad.json") "{")
   (H.assert-error "bad.json" (fn malformed [] (migration s)))
   (fs.remove (fs.join-path s.dict-store.entities-dir "bad.json"))

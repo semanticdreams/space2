@@ -102,7 +102,7 @@
       (publish! self candidate)
       (self.code-entity-updated:emit held)))
   held)
-(fn delete-entity [self id]
+(fn retire-entity! [self id]
   (local held (get-entity self id))
   (when held
     (local path (entity-path self id))
@@ -126,7 +126,7 @@
   {:base-dir base-dir :root root :entities-dir entities-dir :cache {}
    :code-entity-created (Signal) :code-entity-updated (Signal) :code-entity-deleted (Signal)
    :get-entity get-entity :create-entity create-entity :update-entity update-entity
-   :delete-entity delete-entity :list-entities list-entities
+   :retire-entity! retire-entity! :list-entities list-entities
    :snapshot-entity snapshot-entity :serialize-entity serialize-entity
    :decode-entity decode-entity :persist-entity! persist-entity! :reconcile-entity! reconcile-entity!})
 (var default-store nil)

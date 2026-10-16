@@ -193,7 +193,7 @@
         (identity-updated:emit entity)))
     entity)
 
-  (fn delete-entity [_self id]
+  (fn retire-entity! [_self id]
     (local entity (load-entity id))
     (when entity
       (local path (entity-path id))
@@ -233,7 +233,7 @@
    :get-entity get-entity
    :create-entity create-entity
    :update-entity update-entity
-   :delete-entity delete-entity
+   :retire-entity! retire-entity!
    :list-entities list-entities
    :find-by-target-key find-by-target-key
    :ensure-key ensure-key

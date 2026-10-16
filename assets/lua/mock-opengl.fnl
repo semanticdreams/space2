@@ -38,7 +38,10 @@
        (fn [self uniform x y z]
          (record "setVector3f" {:shader self
                                 :uniform uniform
-                                :value [x y z]})))
+                                 :value [x y z]})))
+  (set shader.setVector2f
+       (fn [self uniform x y]
+         (record "setVector2f" {:shader self :uniform uniform :value [x y]})))
   (set shader.setInteger
        (fn [self uniform value]
          (record "setInteger" {:shader self
@@ -51,6 +54,30 @@
                              :value value})))
   shader)
 
+(fn install-fxaa-gl! [gl record-gl next-handle]
+  (each [constant value (pairs {:GL_RGB 0x1907 :GL_UNSIGNED_BYTE 0x1401
+                                :GL_TEXTURE_MIN_FILTER 0x2801 :GL_TEXTURE_MAG_FILTER 0x2800
+                                :GL_LINEAR 0x2601 :GL_TEXTURE_WRAP_S 0x2802 :GL_TEXTURE_WRAP_T 0x2803
+                                :GL_CLAMP_TO_EDGE 0x812F :GL_DEPTH_COMPONENT 0x1902})]
+    (tset gl constant value))
+  (set gl.glGenTextures (fn [count]
+    (local handle (next-handle))
+    (record-gl "glGenTextures" {:count count :handle handle})
+    handle))
+  (set gl.glDeleteTextures (fn [texture]
+    (record-gl "glDeleteTextures" {:texture texture})))
+  (set gl.glDeleteRenderbuffers (fn [renderbuffer]
+    (record-gl "glDeleteRenderbuffers" {:renderbuffer renderbuffer})))
+  (set gl.glTexImage2D (fn [target level internal-format width height border format type]
+    (record-gl "glTexImage2D" {:target target :level level :internal-format internal-format
+                              :width width :height height :border border :format format :type type})))
+  (set gl.glTexParameteri (fn [target pname param]
+    (record-gl "glTexParameteri" {:target target :pname pname :param param})))
+  (set gl.glFramebufferTexture2D (fn [target attachment textarget texture level]
+    (record-gl "glFramebufferTexture2D" {:target target :attachment attachment
+                                       :textarget textarget :texture texture :level level})))
+  (set gl.checkFramebuffer (fn [] (record-gl "checkFramebuffer" {}))))
+
 (fn MockOpenGL []
   (local state {:gl-calls []
                 :shader-loads []
@@ -62,6 +89,7 @@
     (record-call state.gl-calls name args))
 
   (local gl {})
+  (install-fxaa-gl! gl record-gl next-handle)
   (each [constant value (pairs
                           {:GL_ARRAY_BUFFER 0x8892
                            :GL_ELEMENT_ARRAY_BUFFER 0x8893
@@ -150,10 +178,6 @@
          (if (= pname gl.GL_QUERY_RESULT)
              1000000
              0)))
-
-  (set gl.glDeleteTextures
-       (fn [count textures]
-         (record-gl "glDeleteTextures" {:count count :textures textures})))
 
   (set gl.glBindVertexArray
        (fn [vao]

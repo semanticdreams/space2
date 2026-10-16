@@ -488,30 +488,26 @@
 (fn built-in-graph-extensions-register-and-load-nodes []
   (with-temp-dir
     (fn [dir]
-      (local StringEntityStore (require :entities/string))
-      (local ListEntityStore (require :entities/list))
-      (local LinkEntityStore (require :entities/link))
-      (local NotebookStore (require :notebooks/store))
+      (local H (require :tests/test-reference-lifecycle-helpers))
+      (local stores (H.stores (fs.absolute dir)))
       (local Kernels (require :kernels))
       (local LlmStore (require :llm/conversations/store))
-      (local string-store (StringEntityStore.StringEntityStore {:base-dir (fs.join-path dir "string")}))
-      (local list-store (ListEntityStore.ListEntityStore {:base-dir (fs.join-path dir "list")}))
-      (local link-store (LinkEntityStore.LinkEntityStore {:base-dir (fs.join-path dir "link")}))
-      (local notebook-store (NotebookStore.NotebookStore {:base-dir (fs.join-path dir "notebooks")}))
+      (local string-store stores.string-store)
+      (local list-store stores.list-store)
+      (local link-store stores.link-store)
+      (local notebook-store stores.notebook-store)
       (local kernels (Kernels.Kernels {:base-dir (fs.join-path dir "kernels")
                                        :defer-callbacks false}))
       (local llm-store (LlmStore.Store {:base-dir (fs.join-path dir "llm")}))
       (local Graph (require :graph/init))
-      (local graph (Graph {:with-start false :link-store link-store}))
+      (local graph (Graph stores))
 
+      (local options (collect [field store (pairs stores)] field store))
+      (set options.kernels kernels)
+      (set options.llm-store llm-store)
+      (set options.hackernews-ensure-client make-hackernews-client)
       (local builtins
-        (BuiltinGraphTestHelpers.install-builtins! graph {:string-store string-store
-                                                           :list-store list-store
-                                                           :link-store link-store
-                                                           :notebook-store notebook-store
-                                                           :kernels kernels
-                                                           :llm-store llm-store
-                                                           :hackernews-ensure-client make-hackernews-client}))
+        (BuiltinGraphTestHelpers.install-builtins! graph options))
 
       (local string-list (graph:load-by-key "string-entity-list"))
       (assert string-list "should load string-entity-list")

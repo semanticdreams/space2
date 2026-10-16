@@ -98,7 +98,7 @@
   (local selector (and world-runtime world-runtime.object-selector))
   (local view (or world-runtime.board-view
                   (BoardView {:board board
-                              :canvas canvas
+                               :canvas canvas :lifecycle world-runtime.reference-lifecycle
                                :ctx slot.ctx
                                :string-store (or world-runtime.string-store app.string-store)
                                :code-store (or world-runtime.code-store app.code-store)

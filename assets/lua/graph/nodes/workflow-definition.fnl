@@ -117,8 +117,8 @@
   (assert self.graph.add-edge "WorkflowDefinitionNode.create-step-from-graph requires graph:add-edge")
   (assert self.workflow-store.delete-step
           "WorkflowDefinitionNode.create-step-from-graph rollback requires workflow store:delete-step")
-  (assert self.code-store.delete-entity
-          "WorkflowDefinitionNode.create-step-from-graph rollback requires code store:delete-entity"))
+  (assert self.code-store.retire-entity!
+          "WorkflowDefinitionNode.create-step-from-graph rollback requires code store:retire-entity!"))
 
 (fn loader-graph [graph]
   (if (and graph graph.graph graph.graph.has-key-loader-for-key)
@@ -203,7 +203,7 @@
     (when (not ok)
       (table.insert rollback-errors (tostring err))))
   (when (and result result.code-entity result.code-entity.id)
-    (local (ok err) (pcall self.code-store.delete-entity self.code-store result.code-entity.id))
+    (local (ok err) (pcall self.code-store.retire-entity! self.code-store result.code-entity.id))
     (when (not ok)
       (table.insert rollback-errors (tostring err))))
   (if (> (length rollback-errors) 0)

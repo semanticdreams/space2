@@ -157,7 +157,7 @@
       (local browser (assert (map-a:load-by-key "code-entity-list")))
       (store:create-entity {:id "stale"})
       (local stale (. (browser:collect-items) 1))
-      (store:delete-entity "stale")
+      (store:retire-entity! "stale")
       (assert-error (fn stale-record [] (browser:add-entity-node (. stale 1))) "failed to load code-entity:stale")
       (assert (= (map-a:edge-count) 0)))))
 
@@ -212,7 +212,7 @@
       (browser-b.items-changed:connect (fn observe-b [items] (table.insert seen-b items)))
       (store:create-entity {:id "live" :name "Before"})
       (store:update-entity "live" {:name "After"})
-      (store:delete-entity "live")
+      (store:retire-entity! "live")
       (assert (= (length seen-a) 3))
       (assert (= (length seen-b) 3))
       (assert (= (. (. (. seen-a 1) 1) 2) "Before"))
@@ -230,7 +230,7 @@
       (browser-b:drop)
       (assert-subscriptions counts 0 2)
       (store:update-entity "still-live" {:name "Unobserved"})
-      (store:delete-entity "still-live")
+      (store:retire-entity! "still-live")
       (assert (= counts.reads 7)))))
 
 (fn two-views-route-and-drop-independently []
@@ -277,7 +277,7 @@
       (assert (= (length view-b.search.items) 3))
       (view-b.search.submitted:emit (. view-b.search.items 3))
       (assert (= opens 3))
-      (store:delete-entity "c")
+      (store:retire-entity! "c")
       (assert (= (length view-b.search.items) 2))
       (view-b:refresh-items)
       (view-b:drop)

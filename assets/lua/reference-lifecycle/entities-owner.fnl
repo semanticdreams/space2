@@ -26,8 +26,8 @@
     (local store (assert (. self.stores (. domain 2)) "missing canonical owning store"))
     (assert (= store.base-dir self.base-dir) "entities owner base-dir mismatch")
     (local notebook? (= (. domain 1) "notebook"))
-     (each [_ method (ipairs (if notebook? ["snapshot-notebook" "serialize-notebook" "decode-notebook" "persist-notebook!" "delete-notebook" "reconcile-notebook!"]
-                                 ["snapshot-entity" "serialize-entity" "decode-entity" "persist-entity!" "delete-entity" "reconcile-entity!"]))]
+     (each [_ method (ipairs (if notebook? ["snapshot-notebook" "serialize-notebook" "decode-notebook" "persist-notebook!" "retire-notebook!" "reconcile-notebook!"]
+                                 ["snapshot-entity" "serialize-entity" "decode-entity" "persist-entity!" "retire-entity!" "reconcile-entity!"]))]
       (assert (= (type (. store method)) :function) (.. "missing store capability: " method)))
     (when (contains? ["list-entity" "dict-entity" "link-entity" "notebook"] (. domain 1))
       (assert (= store.identity-store self.stores.identity-store) "entities owner identity-store mismatch")))
@@ -146,7 +146,7 @@
   (local snapshot (store-snapshot store (. domain 1) id))
   (assert (= change.path snapshot.path) "entity change path mismatch")
   (if (= change.after-bytes false)
-      (if (= (. domain 1) "notebook") (store:delete-notebook id) (store:delete-entity id))
+      (if (= (. domain 1) "notebook") (store:retire-notebook! id) (store:retire-entity! id))
       (= (. domain 1) "notebook") (store:persist-notebook! id change.after-bytes change.after-check)
       (store:persist-entity! id change.after-bytes change.after-check))
   nil)

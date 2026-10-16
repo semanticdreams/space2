@@ -95,6 +95,8 @@
      :tests.test-drawing-activity-slots
       :tests.test-board
       :tests.test-reference-lifecycle-board
+      :tests.test-reference-lifecycle-browsers
+      :tests.test-reference-lifecycle-composition
      :tests.test-board-activity-string-entities
     :tests.test-first-person-controls
     :tests.test-screen-pos-ray

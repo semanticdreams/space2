@@ -447,7 +447,7 @@
       (set LinkEntityStore.get-default (fn [_opts] store))
 
       (local graph (Graph {:with-start false
-                            :link-store store}))
+                            :link-store store :identity-store store.identity-store}))
       (local {:register-loader register-link-loader} (require :graph/nodes/link-entity))
       (register-link-loader graph {:store store})
       (local a (Graph.GraphNode {:key "node-a"}))

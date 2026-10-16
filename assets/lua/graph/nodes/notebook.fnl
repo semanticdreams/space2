@@ -128,6 +128,13 @@
     (owner.graph:lookup (owner.identity-store:resolve-key key)))
   (refresh-items self participating-target))
 
+(fn resolve-reference-lifecycle! [self]
+  (local mounted (and self.graph self.graph.reference-lifecycle))
+  (assert (or (not self.lifecycle) (not mounted) (= self.lifecycle mounted)) "reference lifecycle node/graph conflict")
+  (local service (assert (or self.lifecycle mounted) "node requires reference lifecycle"))
+  (assert (service:owns-store? SCHEME self.store) "reference lifecycle store ownership mismatch")
+  service)
+
 (fn NotebookNode [opts]
   (local options (or opts {}))
   (local notebook-id (assert options.notebook-id "NotebookNode requires notebook-id"))
@@ -151,6 +158,8 @@
 
   (set node.notebook-id notebook-id)
   (set node.store store)
+  (set node.lifecycle options.lifecycle)
+  (set node.resolve-reference-lifecycle! resolve-reference-lifecycle!)
   (set node.identity-store identity-store)
   (set node.string-store string-store)
   (set node.notebook-deleted (Signal))
@@ -195,7 +204,8 @@
 
   (set node.delete-notebook
        (fn [self]
-         (self.store:delete-notebook self.notebook-id)))
+         (local service (self:resolve-reference-lifecycle!))
+         (. (service:delete! self.key) :source-record)))
 
   (set node.add-string-entity
        (fn [self opts]
@@ -291,14 +301,8 @@
             (set graph-node-removed-signal removed-signal)
             (set graph-node-removed-handler
                  (removed-signal:connect
-                   (fn [payload]
-                     (when (not payload.map-only?)
-                       (each [_ removed-node (ipairs (or (and payload payload.nodes) []))]
-                         (local removed-key (and removed-node removed-node.key))
-                         (when (and removed-key (not (identity-key? removed-key)))
-                           (local notebook (self:get-notebook))
-                            (when notebook
-                              (remove-target-items! self removed-key)))))))))
+                   (fn [_payload]
+                     (self:refresh-reference-projection!)))))
          (local morphed-signal (and graph graph.node-morphed))
          (when (and morphed-signal (not graph-node-morphed-handler))
            (set graph-node-morphed-signal morphed-signal)
@@ -323,11 +327,8 @@
          (when (and self.identity-store self.identity-store.identity-deleted (not identity-deleted-handler))
            (set identity-deleted-handler
                 (self.identity-store.identity-deleted:connect
-                  (fn [entity]
-                    (local identity-key (.. IDENTITY_KEY_PREFIX (tostring entity.id)))
-                    (local notebook (self:get-notebook))
-                    (when (and notebook (notebook-contains-node-key? notebook identity-key))
-                      (self:remove-item identity-key))))))
+                  (fn [_entity]
+                    (self:refresh-reference-projection!)))))
          self))
 
   (set node.drop
@@ -378,7 +379,7 @@
             (NotebookNode {:notebook-id notebook-id
                            :store store
                            :identity-store identity-store
-                           :string-store string-store})))))))
+                           :string-store string-store :lifecycle options.lifecycle})))))))
 
 {:NotebookNode NotebookNode
  :register-loader register-loader}

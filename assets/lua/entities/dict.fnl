@@ -222,7 +222,7 @@
       (commit-update! self entity candidate items-changed?)))
   entity)
 
-(fn delete-entity [self id]
+(fn retire-entity! [self id]
   (local entity (load-entity self id))
   (when entity
     (local path (entity-path self id))
@@ -312,7 +312,7 @@
    :get-entity get-entity
    :create-entity create-entity
    :update-entity update-entity
-   :delete-entity delete-entity
+   :retire-entity! retire-entity!
    :list-entities list-entities
    :get-item get-item
    :set-item set-item

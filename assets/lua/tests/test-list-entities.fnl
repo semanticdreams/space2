@@ -66,7 +66,7 @@
   (with-temp-store
     (fn [store _root]
       (local entity (store:create-entity {:name "Delete Me"}))
-      (local deleted (store:delete-entity entity.id))
+      (local deleted (store:retire-entity! entity.id))
       (assert deleted "entity should be deleted")
       (local retrieved (store:get-entity entity.id))
       (assert (= retrieved nil) "entity should no longer be retrievable"))))
@@ -104,7 +104,7 @@
       (var deleted-count 0)
       (store.list-entity-deleted:connect (fn [_] (set deleted-count (+ deleted-count 1))))
       (local entity (store:create-entity {:name "x"}))
-      (store:delete-entity entity.id)
+      (store:retire-entity! entity.id)
       (assert (= deleted-count 1) "deleted signal should be emitted"))))
 
 (fn list-entity-store-adds-items-and-prevents-duplicates []
@@ -285,7 +285,7 @@
 
       (graph:drop))))
 
-(fn list-entity-node-removes-direct-item-when-node-disappears []
+(fn list-entity-node-preserves-item-when-node-disappears []
   (with-temp-store
     (fn [store root]
       (local Graph (require :graph/init))
@@ -307,12 +307,14 @@
                                         :store store
                                         :identity-store identity-store}))
       (graph:add-node list-node {})
-      (assert (= (length (or (. (store:get-entity entity.id) :items) [])) 1)
-              "list should start with direct key item")
+      (local initial (assert (store:get-entity entity.id)))
+      (assert (= (# initial.items) 1) "list should start with stable key item")
+      (local before (. (store:snapshot-entity entity.id) :bytes))
       (graph:remove-nodes [source-node])
       (local current (store:get-entity entity.id))
-      (assert (= (length (or current.items [])) 0)
-              "list should remove direct key item when node disappears")
+      (assert (= (# current.items) 1)
+              "exposure removal must preserve owning list membership")
+      (assert (= (. (store:snapshot-entity entity.id) :bytes) before))
       (graph:drop))))
 
 (fn list-entity-node-refreshes-identity-item-edges-on-target-change []
@@ -483,8 +485,8 @@
                       :fn list-entity-node-adds-item-edges-after-added})
 (table.insert tests {:name "list entity node add-item wraps non-identity key and dedupes"
                      :fn list-entity-node-add-item-wraps-non-identity-key-and-dedupes})
-(table.insert tests {:name "list entity node removes direct item when node disappears"
-                     :fn list-entity-node-removes-direct-item-when-node-disappears})
+(table.insert tests {:name "list entity node preserves item when node disappears"
+                      :fn list-entity-node-preserves-item-when-node-disappears})
 (table.insert tests {:name "list entity node refreshes identity item edges on target change"
                      :fn list-entity-node-refreshes-identity-item-edges-on-target-change})
 (table.insert tests {:name "list entity node refreshes identity item edges when target node added late"

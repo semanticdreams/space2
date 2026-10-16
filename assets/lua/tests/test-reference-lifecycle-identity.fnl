@@ -229,7 +229,7 @@
   (local held (s.identity-store:create-entity {:id "held" :target-key "external:old"}))
   (local before (H.snapshot-tree s.base-dir))
   (fn attempt-retire []
-    (H.assert-error "permission denied" (fn [] (s.identity-store:delete-entity "held"))))
+    (H.assert-error "permission denied" (fn [] (s.identity-store:retire-entity! "held"))))
   (with-publications s.identity-store (fn [counts]
     (H.with-fs-failure :remove (identity-path s "held") attempt-retire)
     (assert (= (s.identity-store:get-entity "held") held))
@@ -247,7 +247,7 @@
     (assert (= counts.updated 1))
     (local cold (. (H.stores s.base-dir) :identity-store))
     (assert (= (. (cold:get-entity "held") :target-key) "external:new"))
-    (assert (= (store:delete-entity "held") held))
+    (assert (= (store:retire-entity! "held") held))
     (assert (= counts.deleted 1))
     (assert (= (store:get-entity "held") nil)))))
 

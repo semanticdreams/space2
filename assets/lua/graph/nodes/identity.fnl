@@ -18,6 +18,13 @@
       (.. "identity -> " (Utils.truncate-with-ellipsis target-key 36))
       (or (and entity entity.id) "identity")))
 
+(fn resolve-reference-lifecycle! [self]
+  (local mounted (and self.graph self.graph.reference-lifecycle))
+  (assert (or (not self.lifecycle) (not mounted) (= self.lifecycle mounted)) "reference lifecycle node/graph conflict")
+  (local service (assert (or self.lifecycle mounted) "node requires reference lifecycle"))
+  (assert (service:owns-store? SCHEME self.store) "reference lifecycle store ownership mismatch")
+  service)
+
 (fn IdentityNode [opts]
   (local options (or opts {}))
   (local entity-id (assert options.entity-id "IdentityNode requires entity-id"))
@@ -37,6 +44,8 @@
 
   (set node.identity-id entity-id)
   (set node.store store)
+  (set node.lifecycle options.lifecycle)
+  (set node.resolve-reference-lifecycle! resolve-reference-lifecycle!)
   (set node.identity-deleted (Signal))
   (set node.changed (Signal))
   (set node.identity-target-key (or (and entity entity.target-key) ""))
@@ -70,7 +79,8 @@
 
   (set node.delete-entity
        (fn [self]
-         (self.store:delete-entity self.identity-id)))
+         (local service (self:resolve-reference-lifecycle!))
+         (. (service:delete! self.key) :source-record)))
 
   (set node.actions
        [{:name "Open Target"
@@ -116,8 +126,8 @@
 (local register-loader
   (KeyLoaderUtils.make-register-loader SCHEME
     IdentityStore.get-default
-    (fn [entity-id store]
-      (IdentityNode {:entity-id entity-id :store store}))))
+    (fn [entity-id store options]
+      (IdentityNode {:entity-id entity-id :store store :lifecycle options.lifecycle}))))
 
 {:IdentityNode IdentityNode
  :register-loader register-loader}

@@ -729,10 +729,10 @@
                 (local captured (map:capture-state))
                 (assert (= (length captured.edges) 0)
                         "Derived link-entity edges should still be omitted from capture")
-                (link-store:delete-entity "one")
+                (link-store:retire-entity! "one")
                 (assert (= (map:edge-count) 1)
                         "Deleting one link entity should leave the other visual edge")
-                (link-store:delete-entity "two")
+                (link-store:retire-entity! "two")
                 (assert (= (map:edge-count) 0)
                         "Deleting both link entities should remove both visual edges")
                 (map:drop)
@@ -867,16 +867,8 @@
     (if ok result (error result)))
 
 (fn graph-map-shared-delete-sync-removes-list-entity-item []
-    (var temp-counter 0)
-    (local dir (fs.join-path "/tmp/space/tests" "graph-map-shared-del"
-                             (.. "sd-list-" (os.time) "-" (do
-                                                               (set temp-counter (+ temp-counter 1))
-                                                               temp-counter))))
-    (when (fs.exists dir) (fs.remove-all dir))
-    (fs.create-dirs dir)
-    (local (ok result)
-        (pcall
-            (fn []
+    (H.with-root
+            (fn [dir]
                 (local StringEntityStore (require :entities/string))
                 (local ListEntityStore (require :entities/list))
                 (local IdentityStore (require :entities/identity))
@@ -906,35 +898,28 @@
                 (local list-node (map:load-by-key list-key))
                 (assert list-node "should load list node in map")
                 (local pre-items (. (list-store:get-entity entity.id) :items))
-                (assert (= (length (or pre-items [])) 2)
-                        "list should have 2 items before shared delete")
+                (assert (= (# pre-items) 2)
+                        "list should have 2 items before shared removal")
                 (H.assert-reference identity-store (. pre-items 1) key-a)
                 (H.assert-reference identity-store (. pre-items 2) key-b)
-                ;; Remove key-a from the shared graph -- sync must propagate
-                ;; to the map and be treated as a real deletion by the list node.
+                ;; Shared exposure removal propagates, but is not domain deletion.
                 (local shared-node-a (graph:lookup key-a))
                 (assert shared-node-a "should find key-a in shared graph")
+                (local before (. (list-store:snapshot-entity entity.id) :bytes))
                 (graph:remove-nodes [shared-node-a])
                 (local after-items (. (list-store:get-entity entity.id) :items))
-                (assert (= (length (or after-items [])) 1)
-                        "GraphMap shared-delete sync should drop item from list-entity backing store")
-                (H.assert-reference identity-store (. after-items 1) key-b)
+                (assert (= (# after-items) 2)
+                        "shared exposure removal must preserve list membership")
+                (assert (= (. (list-store:snapshot-entity entity.id) :bytes) before))
+                (assert (not (map:lookup key-a)))
+                (H.assert-reference identity-store (. after-items 1) key-a)
+                (H.assert-reference identity-store (. after-items 2) key-b)
                 (map:drop)
                 (graph:drop))))
-    (fs.remove-all dir)
-    (if ok result (error result)))
 
 (fn graph-map-store-delete-removes-list-entity-item []
-    (var temp-counter 0)
-    (local dir (fs.join-path "/tmp/space/tests" "graph-map-store-del"
-                             (.. "store-list-" (os.time) "-" (do
-                                                                  (set temp-counter (+ temp-counter 1))
-                                                                  temp-counter))))
-    (when (fs.exists dir) (fs.remove-all dir))
-    (fs.create-dirs dir)
-    (local (ok result)
-        (pcall
-            (fn []
+    (H.with-root
+            (fn [dir]
                 (local StringEntityStore (require :entities/string))
                 (local ListEntityStore (require :entities/list))
                 (local IdentityStore (require :entities/identity))
@@ -957,28 +942,21 @@
                 (map:load-by-key key-a)
                 (map:load-by-key key-b)
                 (map:load-by-key (.. "list-entity:" entity.id))
-                (string-store:delete-entity a.id)
+                (local before (. (list-store:snapshot-entity entity.id) :bytes))
+                (string-store:retire-entity! a.id)
                 (local after-items (. (list-store:get-entity entity.id) :items))
-                (assert (= (length (or after-items [])) 1)
-                        "Backing-store delete should drop item from list-entity backing store")
-                (H.assert-reference identity-store (. after-items 1)
-                                    key-b)
+                (assert (= (# after-items) 2)
+                        "internal physical retirement must not author another store")
+                (assert (= (. (list-store:snapshot-entity entity.id) :bytes) before))
+                (assert (= (string-store:get-entity a.id) nil))
+                (H.assert-reference identity-store (. after-items 1) key-a)
+                (H.assert-reference identity-store (. after-items 2) key-b)
                 (map:drop)
                 (graph:drop))))
-    (fs.remove-all dir)
-    (if ok result (error result)))
 
 (fn graph-map-shared-delete-sync-removes-notebook-item []
-    (var temp-counter 0)
-    (local dir (fs.join-path "/tmp/space/tests" "graph-map-shared-del"
-                             (.. "sd-nb-" (os.time) "-" (do
-                                                              (set temp-counter (+ temp-counter 1))
-                                                              temp-counter))))
-    (when (fs.exists dir) (fs.remove-all dir))
-    (fs.create-dirs dir)
-    (local (ok result)
-        (pcall
-            (fn []
+    (H.with-root
+            (fn [dir]
                 (local StringEntityStore (require :entities/string))
                 (local NotebookStore (require :notebooks/store))
                 (local IdentityStore (require :entities/identity))
@@ -1010,23 +988,24 @@
                 (local notebook-node (map:load-by-key notebook-key))
                 (assert notebook-node "should load notebook node in map")
                 (local pre-items (. (notebook-store:get-notebook notebook.id) :items))
-                (assert (= (length (or pre-items [])) 2)
-                        "notebook should have 2 items before shared delete")
+                (assert (= (# pre-items) 2)
+                        "notebook should have 2 items before shared removal")
                 (H.assert-reference identity-store (. pre-items 1) key-a)
                 (H.assert-reference identity-store (. pre-items 2) key-b)
-                ;; Remove key-a from the shared graph -- sync must propagate
-                ;; to the map and be treated as a real deletion by the notebook node.
+                ;; Shared exposure removal propagates, but is not domain deletion.
                 (local shared-node-a (graph:lookup key-a))
                 (assert shared-node-a "should find key-a in shared graph")
+                (local before (. (notebook-store:snapshot-notebook notebook.id) :bytes))
                 (graph:remove-nodes [shared-node-a])
                 (local after-items (. (notebook-store:get-notebook notebook.id) :items))
-                (assert (= (length (or after-items [])) 1)
-                        "GraphMap shared-delete sync should drop item from notebook backing store")
-                (H.assert-reference identity-store (. after-items 1) key-b)
+                (assert (= (# after-items) 2)
+                        "shared exposure removal must preserve notebook membership")
+                (assert (= (. (notebook-store:snapshot-notebook notebook.id) :bytes) before))
+                (assert (not (map:lookup key-a)))
+                (H.assert-reference identity-store (. after-items 1) key-a)
+                (H.assert-reference identity-store (. after-items 2) key-b)
                 (map:drop)
                 (graph:drop))))
-    (fs.remove-all dir)
-    (if ok result (error result)))
 
 (fn graph-map-direct-link-store-events-refresh-derived-edges-with-shared-events []
     (var temp-counter 0)
@@ -1057,7 +1036,7 @@
                 (map:load-by-key "test:C")
                 (assert (= (map:edge-count) 2)
                         "Pre-existing persisted links should hydrate as derived map edges")
-                (link-store:delete-entity "delete-only")
+                (link-store:retire-entity! "delete-only")
                 (assert (= (map:edge-count) 1)
                         "Direct link delete should remove derived map edge even when shared graph had no link-edge-map entry")
                 (link-store:update-entity "persisted" {:target-key "test:C"
@@ -1070,7 +1049,7 @@
                         "Derived map edge should follow updated link target")
                 (assert (= edge.label "updated")
                         "Derived map edge should refresh link metadata")
-                (link-store:delete-entity "persisted")
+                (link-store:retire-entity! "persisted")
                 (assert (= (map:edge-count) 0)
                         "Direct link delete should remove updated derived map edge")
                 (map:drop)
@@ -1114,7 +1093,7 @@
                 (assert (= (and edge edge.source edge.source.key) "test:C")
                         "Derived map edge should follow updated identity target")
                 (assert (= (and edge edge.target edge.target.key) "test:B"))
-                (identity-store:delete-entity "alias")
+                (identity-store:retire-entity! "alias")
                 (assert (= (map:edge-count) 0)
                         "Identity delete should remove derived link edges that no longer resolve into this map")
                 (map:drop)
@@ -1478,9 +1457,9 @@
 
 (table.insert tests {:name "GraphMap remove-nodes preserves list-entity backing store" :fn graph-map-remove-nodes-preserves-list-entity-backing-store})
 (table.insert tests {:name "GraphMap remove-nodes preserves notebook backing store" :fn graph-map-remove-nodes-preserves-notebook-backing-store})
-(table.insert tests {:name "GraphMap shared-delete sync removes list-entity item" :fn graph-map-shared-delete-sync-removes-list-entity-item})
-(table.insert tests {:name "GraphMap backing-store delete removes list-entity item" :fn graph-map-store-delete-removes-list-entity-item})
-(table.insert tests {:name "GraphMap shared-delete sync removes notebook item" :fn graph-map-shared-delete-sync-removes-notebook-item})
+(table.insert tests {:name "GraphMap shared removal preserves list-entity bytes" :fn graph-map-shared-delete-sync-removes-list-entity-item})
+(table.insert tests {:name "GraphMap physical retirement preserves list-entity bytes" :fn graph-map-store-delete-removes-list-entity-item})
+(table.insert tests {:name "GraphMap shared removal preserves notebook bytes" :fn graph-map-shared-delete-sync-removes-notebook-item})
 (table.insert tests {:name "GraphMap active restore preserves list-entity backing store" :fn graph-map-active-restore-preserves-list-entity-backing-store})
 (table.insert tests {:name "GraphMap active restore preserves notebook backing store" :fn graph-map-active-restore-preserves-notebook-backing-store})
 (table.insert tests {:name "GraphMap capture includes selection and focused_node_key" :fn graph-map-capture-includes-selection-state})

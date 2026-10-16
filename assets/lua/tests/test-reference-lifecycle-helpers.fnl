@@ -56,14 +56,15 @@
   (tset fs method original)
   (if ok result (error result)))
 
-(fn with-graph [s f]
+(fn with-graph [s f opts]
   (local Graph (require :graph/core))
   (local GraphMap (require :graph/map))
   (local Entities (require :graph/extensions/builtins/entities))
   (local Catalog (require :entities/type-catalog))
-  (local graph (Graph {:identity-store s.identity-store :link-store s.link-store
-                      :string-store s.string-store :morphs {} :entity-events? false}))
   (local options (collect [key value (pairs s)] key value))
+  (each [key value (pairs (or opts {:morphs {} :entity-events? false}))]
+    (tset options key value))
+  (local graph (Graph options))
   (set options.entity-type-catalog (Catalog.EntityTypeCatalog {:types (Entities.entity-types)}))
   (local descriptor (. (Entities.descriptors options) 1))
   (descriptor.install-loaders graph {:owner-id descriptor.unit-id :extension-id descriptor.id})

@@ -254,7 +254,7 @@
   (local before (H.snapshot-tree s.base-dir))
   (H.assert-error "depth" (fn too-deep [] (service:delete! "string-entity:s")))
   (same before (H.snapshot-tree s.base-dir))
-  (s.identity-store:delete-entity "too-deep")
+  (s.identity-store:retire-entity! "too-deep")
   (assert (= (s.identity-store:resolve-key "identity:depth1") "identity:missing"))
   (assert (= (. (service:delete! "string-entity:s") :status) "deleted"))))
 (fn invalid-capture [s capture]

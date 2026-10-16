@@ -106,6 +106,30 @@
   (fn subject-key [item]
   (and item item.subject-key))
 
+(fn require-lifecycle! [view providers scheme store]
+  (local service (assert view.lifecycle "BoardView requires reference lifecycle"))
+  (assert (and (service:owns-store? "identity" providers.identity-store)
+               (service:owns-store? "link-entity" providers.link-store)
+               (service:owns-store? scheme store)) "BoardView reference lifecycle store ownership mismatch")
+  service)
+
+(fn authoring-options [view providers opts]
+  (local store (assert (or providers.string-store ((. (require :entities/string) :get-default)))
+                       "Board authoring requires string-store"))
+  (validate-store store providers.identity-store "string-store")
+  (when view.lifecycle (require-lifecycle! view providers "string-entity" store))
+  (local options (collect [key value (pairs (or opts {}))] key value))
+  (set options.string-store store) (set options.identity-store providers.identity-store)
+  options)
+
+(fn delete-subject! [view providers item]
+  (local key (assert (providers.identity-store:resolve-key item.subject-key) "Board subject cannot resolve"))
+  (local scheme (string.match key "^([^:]+):"))
+  (local store (if (= scheme "string-entity") providers.string-store
+                  (= scheme "code-entity") providers.code-store))
+  (local service (require-lifecycle! view providers scheme store))
+  (service:delete! key))
+
 (fn BoardView [opts]
   (local options (or opts {}))
   (local board (assert options.board "BoardView requires :board"))
@@ -362,7 +386,7 @@
     (assert-not-dropped "add-string-entity")
     (local item-type (assert (Registry.item-type "string-entity")
                              "Board string-entity item type is not registered"))
-    ((assert item-type.create "Board string-entity item type requires :create") board (or opts {})))
+    ((assert item-type.create "Board string-entity item type requires :create") board (authoring-options self providers opts)))
 
   (fn connect-items [self source-item target-item opts]
     (assert-not-dropped "connect-items")
@@ -411,7 +435,7 @@
                                 :semantic-link-id link.id}))))
     (when (not ok)
       (when (and created? link link.id)
-        (link-store:delete-entity link.id))
+        (link-store:retire-entity! link.id))
       (error connector-or-err))
     connector-or-err)
 
@@ -420,29 +444,11 @@
     (local id (if (= (type item-or-id) :table) item-or-id.id item-or-id))
     (local item (and id (. board.items id)))
     (when item
-      (var entity-snapshot nil)
-      (var entity-deleted? false)
-      (when (= item.type "string-entity")
-        (local {: entity-id-from-subject} (require :board/builtin-string-entity))
-        (local entity-id (entity-id-from-subject item.subject-key))
-        (when entity-id
-          (local store ((. (require :entities/string) :get-default)))
-          (set entity-snapshot (store:get-entity entity-id))
-          (when entity-snapshot
-            (store:delete-entity entity-id)
-            (set entity-deleted? true))))
-      (local (ok err)
-        (pcall
-          (fn []
-            (board:remove-item item))))
-      (when (and (not ok) entity-deleted? entity-snapshot)
-        (local store ((. (require :entities/string) :get-default)))
-        (store:create-entity {:id entity-snapshot.id
-                              :created-at entity-snapshot.created-at
-                              :updated-at entity-snapshot.updated-at
-                              :value entity-snapshot.value})
-        (error err))
-      (and ok item)))
+      (when (or (= item.type "string-entity") (= item.type "code-entity"))
+        (delete-subject! self providers item))
+      (when (. board.items id)
+        (assert (board:remove-item item) "BoardView.remove-item failed to remove native item"))
+      item))
 
   (fn remove-selected-items [self]
     (local items-to-remove [])
@@ -497,7 +503,7 @@
   (set self {:board board
               :string-store options.string-store
               :code-store options.code-store
-              :identity-store identity-store
+              :identity-store identity-store :lifecycle options.lifecycle
               :canvas canvas
               :ctx ctx
               :layer layer
