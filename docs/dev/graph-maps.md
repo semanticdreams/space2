@@ -4,6 +4,10 @@ Graph Maps are the abstraction for multiple persistent graph interaction context
 
 Status: implemented through map manager, graph view attachment, map switching UI, and panel scoping. Board migration remains future work.
 
+[Reference lifecycle](features/reference-lifecycle.md) coordinates morph/logical
+deletion across persisted worlds and loaded presentation. This is coherence of
+existing boards/maps, not a general board-to-graph migration.
+
 ## Summary
 
 The graph is intended to provide one uniform interface to many kinds of things: files, code, entities, worlds, terrain tools, conversations, kernels, and future object types. A single current graph state becomes hard to use when different tasks require different expansions, layouts, selections, and open panels.
@@ -320,11 +324,22 @@ Avoid making backing-object deletion scale with the number of graph maps.
 Policy:
 
 - Active graph map: if a mounted node observes its backing object was deleted, remove that node from the active map immediately.
-- Inactive graph maps: do not scan or mutate all maps on delete.
-- On opening/hydrating a graph map: validate/load persisted node keys. Prune keys that no longer resolve, along with affected edges, selection, focused-node state, and panels.
-- On next save: persist the pruned state.
+- Supported lifecycle deletion: WorldOwner updates affected persisted maps and
+  keyed metadata across loaded, inactive and unopened worlds before requested
+  source retirement. It does not hydrate inactive maps. RuntimeOwner installs
+  frozen captures only into still-loaded native IDs, never activates missing maps
+  or persists. Ordinary later capture/switch/drop must not restore retired keys.
+- Supported morph: replace known participation while preserving explicit edge
+  attributes, selection/focus/outline/islands, keyed metadata and graph-owned
+  panels. Unrelated maps do not gain hidden endpoint participation.
+- On opening/hydrating a map, ordinary validation can still prune independently
+  invalid/unresolvable keys and associated edges/state/panels, then save that
+  pruned presentation. This is not the cleanup mechanism for supported logical
+  deletion and does not edit owning-domain records.
 
-This treats graph maps as reference sets. References can go stale, and stale references are cleaned when the map is used.
+Remove from Map/Clear Map/map deletion remain presentation-only. Projection
+listeners do not persist list/notebook/dictionary cleanup. Domain data bytes stay
+unchanged; genuine deletion uses checked explicit/mounted lifecycle capabilities.
 
 ## Persistence
 
@@ -392,6 +407,14 @@ first/start node once according to that projection's initial camera policy.
 Current graph map view metadata lives under `graph/maps/<graph-map-id>/metadata.json`.
 Legacy `graph-view/metadata.json` data is migration input only, not the current
 write location for graph map metadata.
+
+During lifecycle operations WorldOwner exclusively serializes durable world and
+map metadata after-images, merging loaded nonpersisting caches/snapshots first.
+RuntimeOwner's Preparation has no durable Changes; it reconciles only the supplied
+frozen namespaced board/map/view/session/cache captures, without recapture/save.
+On cold recovery with no loaded maps, durable after-images drive later activation.
+See the lifecycle page for separate mirror roles and serialized-byte conflict
+checks; normal GraphView persistence outside lifecycle remains view-owned.
 
 ### Activity-aware world scene key migration
 

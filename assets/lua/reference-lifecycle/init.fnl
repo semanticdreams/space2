@@ -6,6 +6,26 @@
 (local Pending (require :reference-lifecycle/pending))
 (local Migration (require :reference-lifecycle/migration))
 
+;; Diagnostic context is transient and never supplies IO authority. Malformed
+;; intent fields must not replace the original validation failure with a new one.
+(fn diagnostic-field [record key]
+  (local value (and (= (type record) :table) (rawget record key)))
+  (if (= (type value) :string) value
+      (= (type value) :number) (tostring value)
+      "unknown"))
+(fn diagnostic-call [intent owner change f]
+  (local (ok result) (pcall f))
+  (if ok result
+      (do
+        (local operation (and (= (type intent) :table) (rawget intent :operation)))
+        (local context (.. "reference lifecycle operation " (diagnostic-field intent :operation-id)
+                           " (" (diagnostic-field operation :kind) " "
+                           (diagnostic-field operation :source-key) ")"))
+        (local owner-context (if owner (.. " owner " (tostring owner)) ""))
+        (local record-context (if change (.. " at " (diagnostic-field change :address)
+                                             " (" (diagnostic-field change :path) ")") ""))
+        (error (.. context owner-context record-context ": " (tostring result))))))
+
 ;; The journal's path is diagnostic data, never an independent IO capability.
 ;; Re-derive each address through its canonical owner on every replay.
 (local entity-fields {:string-entity "string-store" :code-entity "code-store" :list-entity "list-store"
@@ -96,24 +116,27 @@
       (do
         (assert (= intent.operation.source-key intent.request.source-key) "pending source mismatch")
         (local source (requested-change intent))
-        (assert (if (workflow-source? intent source)
-                    (and (= intent.operation.kind "delete") (not (= source.phase "replacement")))
-                    (= source.phase "retire")) "pending source change phase mismatch")
-        (assert (and (= fingerprint.path source.path) (= fingerprint.format source.format)
-                     (= fingerprint.before-check source.before-check)) "pending source fingerprint mismatch")
-        (local record (decoded-source self intent.request.source-key source.before-check))
-        (assert (= (J.stable-json record) (J.stable-json fingerprint.record)) "pending source record mismatch")
-        (assert-source-after! self intent.request.source-key source.after-bytes source.after-check))))
+        (fn validate-source []
+          (assert (if (workflow-source? intent source)
+                      (and (= intent.operation.kind "delete") (not (= source.phase "replacement")))
+                      (= source.phase "retire")) "pending source change phase mismatch")
+          (assert (and (= fingerprint.path source.path) (= fingerprint.format source.format)
+                       (= fingerprint.before-check source.before-check)) "pending source fingerprint mismatch")
+          (local record (decoded-source self intent.request.source-key source.before-check))
+          (assert (= (J.stable-json record) (J.stable-json fingerprint.record)) "pending source record mismatch")
+          (assert-source-after! self intent.request.source-key source.after-bytes source.after-check))
+        (diagnostic-call intent source.owner source validate-source))))
 (fn validate-preparations! [self intent]
   (local out {:changes [] :runtime-state []})
   (local paths {}) (local captures {})
   (each [_ owner (ipairs self.owners)]
     (local changes (icollect [_ change (ipairs intent.changes)] (when (= change.owner owner.id) change)))
     (local runtime-state (icollect [_ capture (ipairs intent.runtime-state)] (when (= capture.owner owner.id) capture)))
-    (Plan.append! out paths captures owner {:changes changes :runtime-state runtime-state}))
+    (fn append [] (Plan.append! out paths captures owner {:changes changes :runtime-state runtime-state}))
+    (diagnostic-call intent owner.id nil append))
   (assert (= (# out.runtime-state) (# intent.runtime-state)) "unknown runtime capture owner namespace")
   (R.decode-json (J.stable-json out)))
-(fn validate-intent! [self intent]
+(fn validate-intent [self intent]
   (assert (= intent.version 1) "unsupported pending intent version")
   (assert (= (type intent.operation-id) :string) "pending operation requires id")
   (assert (= intent.request.kind intent.operation.kind) "pending request/operation mismatch")
@@ -122,35 +145,46 @@
   (R.require-array intent.operation.reference-plan.rewrites)
   (R.require-array intent.operation.reference-plan.identities)
   (validate-preparations! self intent)
-  (local worlds (self._owners.worlds:inventory))
+  (fn inventory [] (self._owners.worlds:inventory))
+  (local worlds (diagnostic-call intent "worlds" nil inventory))
   (local paths {})
   (validate-source! self intent)
   (each [_ change (ipairs intent.changes)]
-    (validate-retirement! intent change)
-    (validate-change! self change worlds paths))
+    (fn validate-record []
+      (validate-retirement! intent change)
+      (validate-change! self change worlds paths))
+    (diagnostic-call intent change.owner change validate-record))
   worlds)
+(fn validate-intent! [self intent]
+  (fn validate [] (validate-intent self intent))
+  (diagnostic-call intent nil nil validate))
 (fn subset [intent changes]
   (local out (R.clone intent)) (set out.changes changes) out)
 (fn apply-change! [self intent change worlds]
-  (local snapshot (verified-snapshot self change worlds))
-  (assert-state change snapshot)
-  (local owner (. self._owners change.owner))
-  (if (= snapshot.check change.after-check)
-      (owner:reconcile! (subset intent [change]))
-      (owner:apply! change))
-  (assert (= (. (verified-snapshot self change worlds) :check) change.after-check)
-          (.. "owner did not persist frozen after-image: " change.address)))
+  (fn apply []
+    (local snapshot (verified-snapshot self change worlds))
+    (assert-state change snapshot)
+    (local owner (. self._owners change.owner))
+    (if (= snapshot.check change.after-check)
+        (owner:reconcile! (subset intent [change]))
+        (owner:apply! change))
+    (assert (= (. (verified-snapshot self change worlds) :check) change.after-check)
+            (.. "owner did not persist frozen after-image: " change.address)))
+  (diagnostic-call intent change.owner change apply))
 (fn source-change? [intent change]
   (and (not (= intent.source-fingerprint false)) (= change.path intent.source-fingerprint.path)))
 (fn changes-before? [a b]
   (local rank {:replacement 1 :incoming 2 :retire 3})
   (if (= (. rank a.phase) (. rank b.phase)) (< a.address b.address)
       (< (. rank a.phase) (. rank b.phase))))
+(fn verify-after-change! [self intent worlds source? change]
+  (when (or source? (not (source-change? intent change)))
+    (assert (= (. (verified-snapshot self change worlds) :check) change.after-check)
+            (.. "pending conflict verifying after-image: " change.address))))
 (fn verify-after! [self intent worlds source?]
   (each [_ change (ipairs intent.changes)]
-    (when (or source? (not (source-change? intent change)))
-      (assert (= (. (verified-snapshot self change worlds) :check) change.after-check)
-              (.. "pending conflict verifying after-image: " change.address)))))
+    (fn verify [] (verify-after-change! self intent worlds source? change))
+    (diagnostic-call intent change.owner change verify)))
 (fn migration-path [self]
   (R.record-path self.stores.base-dir (fs.join-path self.stores.base-dir "reference-lifecycle") "migration" ".json"))
 (fn migration-report [self]
@@ -178,26 +212,32 @@
          :updated-identity-keys (R.clone operation.updated-identity-keys)
          :source-key operation.source-key :source-id intent.source-fingerprint.record.id})))
 (fn replay! [self intent]
-  (local worlds (validate-intent! self intent))
-  (local ordered (R.clone intent.changes))
-  (table.sort ordered changes-before?)
-  (each [_ change (ipairs ordered)]
-    (when (not (source-change? intent change)) (apply-change! self intent change worlds)))
-  (verify-after! self intent worlds false)
-  ;; Runtime reconciliation consumes only frozen captures, never inventories or IO.
-  (self._owners.runtime:reconcile! (subset intent []))
-  (verify-after! self intent worlds false)
-  (each [_ change (ipairs ordered)]
-    (when (source-change? intent change) (apply-change! self intent change worlds)))
-  (verify-after! self intent worlds true)
-  (when (not (= intent.operation.kind "migrate"))
-    (local actual (verified-snapshot self (requested-change intent) worlds))
-    (assert-source-after! self intent.request.source-key actual.bytes actual.check))
-  (mark-migration! self intent)
-  (local result (result-for self intent))
-  (self.committed:emit result)
-  (self._pending:clear!)
-  result)
+  (fn replay []
+    (local worlds (validate-intent! self intent))
+    (local ordered (R.clone intent.changes))
+    (table.sort ordered changes-before?)
+    (each [_ change (ipairs ordered)]
+      (when (not (source-change? intent change)) (apply-change! self intent change worlds)))
+    (verify-after! self intent worlds false)
+    ;; Runtime reconciliation consumes only frozen captures, never inventories or IO.
+    (fn reconcile-runtime [] (self._owners.runtime:reconcile! (subset intent [])))
+    (diagnostic-call intent "runtime" nil reconcile-runtime)
+    (verify-after! self intent worlds false)
+    (each [_ change (ipairs ordered)]
+      (when (source-change? intent change) (apply-change! self intent change worlds)))
+    (verify-after! self intent worlds true)
+    (when (not (= intent.operation.kind "migrate"))
+      (local source (requested-change intent))
+      (fn verify-source []
+        (local actual (verified-snapshot self source worlds))
+        (assert-source-after! self intent.request.source-key actual.bytes actual.check))
+      (diagnostic-call intent source.owner source verify-source))
+    (mark-migration! self intent)
+    (local result (result-for self intent))
+    (self.committed:emit result)
+    (self._pending:clear!)
+    result)
+  (diagnostic-call intent nil nil replay))
 (fn protected! [self f]
   (assert (not self._state.busy?) "reference lifecycle busy")
   (set self._state.busy? true)

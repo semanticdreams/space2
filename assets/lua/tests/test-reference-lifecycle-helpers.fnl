@@ -84,6 +84,60 @@
   (each [key _ (pairs fields)] (tset target key (. previous key)))
   (if ok result (error result)))
 
+(fn cold-lifecycle [s]
+  (local manager ((require :world-manager) {:root-dir (fs.join-path s.base-dir "worlds")}))
+  (local options {:stores s :world-manager manager})
+  (local world ((require :reference-lifecycle/world-owner) options))
+  (local runtime ((require :reference-lifecycle/runtime-owner) options))
+  (local owners [((require :reference-lifecycle/entities-owner) s)
+                ((require :reference-lifecycle/identities-owner) s)
+                ((require :reference-lifecycle/workflows-owner) s) world runtime])
+  {:service ((require :reference-lifecycle) {:stores s :owners owners})
+   :manager manager :world-owner world :runtime-owner runtime})
+
+(fn with-canonical-stores [root f]
+  (local cleared {})
+  (each [_ name (ipairs [:entities/identity :entities/string :entities/code :entities/list
+                         :entities/dict :entities/link :notebooks/store :workflows/store])]
+    (require name)
+    (tset cleared name false))
+  (fn scoped []
+    (local composition (require :graph/extensions/builtins/composition))
+    (local s (composition.init-reference-stores! {:user-data-dir root}))
+    (f s))
+  (with-fields package.loaded cleared scoped))
+
+;; Real native model/manager composition. init reads the durable world normally;
+;; no inactive-map hydration, fake owner, or alternate persistence directory.
+(fn with-native-world [s id f]
+  (local HomeWorld (require :home-world))
+  (local dir (fs.join-path s.base-dir "worlds" id))
+  (local world (HomeWorld {:id id :dir dir}))
+  (world:init {})
+  (local manager ((require :world-manager)
+    {:root-dir (fs.join-path s.base-dir "worlds") :context-fn (fn native-context [] {})
+     :create-world (fn native-world [opts] (assert (= opts.id id)) world)}))
+  (local options {:stores s :world-manager manager})
+  (local world-owner ((require :reference-lifecycle/world-owner) options))
+  (local runtime-owner ((require :reference-lifecycle/runtime-owner) options))
+  (local owners [((require :reference-lifecycle/entities-owner) s)
+                ((require :reference-lifecycle/identities-owner) s)
+                ((require :reference-lifecycle/workflows-owner) s) world-owner runtime-owner])
+  (local service ((require :reference-lifecycle) {:stores s :owners owners}))
+  (fn native [graph _unused]
+    (local maps ((. (require :graph/map-manager) :GraphMapManager)
+                 {:graph graph :data-dir dir :state world.state.graph}))
+    (local board ((. (require :board/core) :Board) {:state world.state.board}))
+    (set world.runtime {:graph graph :graph-map-manager maps :board board})
+    (manager:get-world-entry id)
+    (local fixture {:stores s :world world :manager manager :maps maps :board board :graph graph
+                    :service service :world-owner world-owner :runtime-owner runtime-owner})
+    (local (ok result) (pcall f fixture))
+    (set world.runtime nil)
+    (local (drop-ok drop-error) (pcall maps.drop maps))
+    (if (not ok) (error result) (not drop-ok) (error drop-error) result))
+  (with-graph s native {:lifecycle service :morphs {}}))
+
 (fn assert-reference [identity-store key terminal]
   (assert (= (string.sub key 1 9) "identity:") (.. "expected stable reference, got " key))
   (assert (= (identity-store:resolve-key key) terminal) "stable reference must preserve terminal meaning"))
@@ -343,6 +397,7 @@
  :with-fs-failure with-fs-failure
  :with-graph with-graph
  :with-fields with-fields
+ :cold-lifecycle cold-lifecycle :with-native-world with-native-world :with-canonical-stores with-canonical-stores
  :assert-reference assert-reference
  :domain-owners domain-owners :empty-owner empty-owner :apply-preparation! apply-preparation!
   :owners owners :lifecycle lifecycle :ready ready :no-writes no-writes :raw-list raw-list

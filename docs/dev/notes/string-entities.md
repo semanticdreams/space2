@@ -68,8 +68,16 @@ updated-at: <unix-timestamp>
 | `create-entity(opts)` | Creates a new entity with optional `value`, returns entity |
 | `get-entity(id)` | Retrieves entity by ID |
 | `update-entity(id, updates)` | Updates entity fields, auto-updates `updated-at` |
-| `delete-entity(id)` | Removes entity from cache and disk |
+| `retire-entity!(id)` | INTERNAL physical removal from disk/cache; not a logical-delete command |
 | `list-entities()` | Returns all entities, sorted by `updated-at` (newest first) |
+
+Application deletion uses the node's existing `delete-entity` or canonical
+`Lifecycle:delete!("string-entity:<id>")`, which removes live incoming references
+across unopened owners before retiring the source. The store has no old
+`delete-entity` alias. Snapshot/serialize/decode/prepared persist/reconcile methods
+are internal lifecycle persistence tools, not alternative user deletion APIs.
+Required IO failures are explicit; caches/signals publish after successful writes.
+See [Reference lifecycle](../features/reference-lifecycle.md).
 
 #### Signals
 
@@ -85,6 +93,11 @@ The store emits signals for entity lifecycle events:
 (local StringEntityStore (require :entities/string))
 (local store (StringEntityStore.get-default))
 ```
+
+Main composes this canonical store and the canonical code default with one
+normalized root and shared IdentityStore, then recovers/migrates lifecycle before
+exposing worlds. Custom injection must preserve exact provider identity/root;
+an equal-root substitute is not the same cache/signal owner.
 
 ---
 
@@ -135,7 +148,7 @@ Automatically refreshes when the store emits create/update/delete signals.
 
 Represents a single string entity in the graph.
 
-- **Key:** Entity ID
+- **Key:** `string-entity:<id>`
 - **Label:** Truncated entity value (or ID if empty)
 - **Color:** Dark blue
 
@@ -143,12 +156,19 @@ Represents a single string entity in the graph.
 |--------|-------------|
 | `get-entity()` | Returns current entity data |
 | `update-value(new-value)` | Updates the entity's value |
-| `delete-entity()` | Deletes the entity (node auto-removes from graph) |
+| `delete-entity()` | Logical delete through explicit or checked mounted lifecycle; returns source record |
 | `refresh-label()` | Updates label from current value |
 
 Listens to store signals:
 - On delete: emits `entity-deleted` and removes self from graph
 - On update: refreshes label
+
+Browser submissions mount children into their GraphMap, where destructive actions
+acquire its lifecycle with ownership checks. Detached nodes require explicit
+`:lifecycle`; conflicting node/graph services fail before effects. Remove from Map
+and Clear Map are presentation-only and do not edit domain bytes. String→code
+morph preserves stable relationships and presentation, then retires the string
+last; it is not a direct call to the store's physical retirement primitive.
 
 ---
 

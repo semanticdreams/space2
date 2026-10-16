@@ -44,9 +44,12 @@ submitted handler.
 The default is composed by `Main.ensure-built-in-graph-extensions!`. To advertise
 a custom type, **precompose only metadata** in `app.entity-type-catalog` before
 `Main.init`. Do not call the built-in ensure function at this early phase:
-`Main.init` constructs `app.code-store`, then registers built-ins against that
-instance. An early ensure instead captures a default store that initialization
-will replace; repeated ensure reuses those loader handles, not the new store.
+Main composes canonical owning stores through their lazy default getters, including
+`app.code-store`, with one normalized root/shared IdentityStore. It constructs the
+five-owner reference lifecycle and completes pending recovery/migration before
+ensuring built-in loaders or exposing/activating worlds. An early ensure can
+capture providers before those ownership/lifecycle checks; repeated ensure reuses
+loader handles rather than rebinding them. There is no separate Main-only code cache.
 
 Separately register a graph extension providing the advertised browser loader.
 The following custom bootstrap owns engine startup and shutdown. It suppresses
@@ -80,7 +83,7 @@ runtime creation. The demo module/store belong to that extension, not to Main:
         {:owner-id ctx.owner-id :extension-id ctx.extension-id})])})
 
 (assert (app.engine:start) "engine failed to start")
-(Main.init) ; initializes app stores, then ensures built-ins using the precomposed catalog
+(Main.init) ; canonical stores, lifecycle recovery/migration, then built-ins/world exposure
 (app.engine:run)
 (Main.drop)
 (app.engine:shutdown)
@@ -93,8 +96,10 @@ already complete, an explicit
 `Main.ensure-built-in-graph-extensions! {:entity-type-catalog catalog}` is safe
 only as reuse of the same catalog/reference and already-initialized app stores.
 Do not reset `app` or its catalog in an already-running app. Callers that compose
-their own stores without `Main.init` must initialize all app-owned stores first,
-then ensure built-ins once.
+their own stores without `Main.init` must initialize canonical app-owned stores,
+compose/start all five real owners, then ensure built-ins once before activation.
+Equivalent directories alone do not satisfy provider identity or shared
+IdentityStore ownership. See [Reference lifecycle](reference-lifecycle.md).
 
 The descriptor does **not** install the loader. Registering a loader does **not**
 advertise a type. Graph extension descriptors remain the sole loader-installation
@@ -133,6 +138,15 @@ loaders, including an app-owned store. It lists bounded single-line metadata,
 never source payloads. Refresh and store create/update/delete events refresh the
 listing; opening a row resolves the existing record through the same map. It
 does not add a creation or execution surface.
+
+Destructive browser-child actions use explicit lifecycle injection or the checked
+mounted GraphMap lifecycle. Existing browser factory exports stay unchanged;
+children mounted by actual row submission deliberately acquire service there.
+Detached children without explicit injection, conflicting services, same-root
+substitute stores, or changed identity-store dependencies error before writes.
+The catalog does not register deletion capabilities or own cleanup. Public node
+delete actions call logical lifecycle coordination; store `retire-entity!` /
+`retire-notebook!` methods are internal physical primitives with no old aliases.
 
 Nodes own their store subscriptions. Views own their SearchView children and
 their own node/submitted callbacks. Dropping one view leaves sibling views and

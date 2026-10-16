@@ -28,6 +28,8 @@ This document describes the morph system used to transform one graph node/entity
 - Morph UI: `assets/lua/morph-view.fnl`
 - Morph launchable: `assets/lua/launchables/morphs.fnl`
 - Graph morph adapter: `assets/lua/graph/core.fnl`
+- Lifecycle coordinator/owners: `assets/lua/reference-lifecycle/`
+- [Operational contract and permanent matrix](../features/reference-lifecycle.md)
 
 Related entity/node modules:
 
@@ -64,30 +66,45 @@ Implemented in `assets/lua/morphs/string-entity-to-code-entity.fnl`.
 
 Given `string-entity:<id>`:
 
-1. Reads source string entity.
-2. Creates code entity with:
+1. Resolves explicit or checked mounted canonical lifecycle ownership. Detached
+   actions without explicit injection and conflicting providers fail before reads/writes.
+2. Supplies a deferred read-only builder of the source string's code payload:
    - `name = ""`
    - `language = "fnl"`
    - `source = <string value>`
-3. Updates all identities whose `target-key` matched old source key to new code key.
-4. Deletes the source string entity.
-5. Returns result payload fields including:
+   - `kernel = 0`
+3. Lifecycle freezes one replacement ID/payload/timestamps, stable-reference plan,
+   owner Changes and runtime captures in a durable pending intent. All direct
+   identities retarget; upstream chains and ordered membership retain meaning.
+4. WorldOwner writes durable world/map metadata after-images; RuntimeOwner installs
+   only frozen transient native captures, without persistence or inactive hydration.
+   Participating map keys/topology/metadata/panels and board subjects follow the
+   replacement; unrelated maps gain no hidden participation.
+5. Retires the source physically **last**, after incoming cleanup and runtime
+   reconciliation. Store retirement is INTERNAL, not the application command.
+6. Returns the compatible result payload:
    - `source-key`
    - `target-key`
    - `target-type`
    - `updated-identity-keys`
+   - `source-id`
+   - `code-key`
+   - `code-entity` (canonical store record)
 
 Note: this morph function does not mutate graph state directly.
 
 ## Graph Adapter (Event-Driven)
 
-`assets/lua/graph/core.fnl` subscribes to `morphs.morphed` and performs graph-side reconciliation:
+The lifecycle captures participation before store signals can remove adapters.
+Its frozen nonpersisting installation preserves native survivors and explicit
+edge attributes. The existing graph morph event path remains for adapter notifications:
 
 1. Remove old source node (if present).
-2. Load/add target node by key.
+2. Resolve replacement participation rather than populate unrelated maps.
 3. Emit `graph.node-morphed` with `source-key`, `target-key`, and original payload.
 
-This keeps graph updates outside morph functions.
+The conversion-specific morph does not repair each consumer or write graph state.
+Durable unopened/inactive cleanup is owned by lifecycle, not event listeners.
 
 ## Notebook/List View Refresh Behavior
 
@@ -123,6 +140,10 @@ Primary tests:
 - `assets/lua/tests/test-morphs.fnl`
 - `assets/lua/tests/test-notebooks.fnl`
 - `assets/lua/tests/test-list-entities.fnl`
+- `assets/lua/tests/test-reference-lifecycle-integration.fnl`
+- `assets/lua/tests/test-reference-lifecycle-board.fnl`
+- `assets/lua/tests/test-reference-lifecycle-projections.fnl`
+- `assets/lua/tests/test-reference-lifecycle-recovery.fnl`
 
 Coverage includes:
 
@@ -136,13 +157,32 @@ Coverage includes:
 ## Constraints and Decisions
 
 - Identity nodes are non-morphable by design.
-- Current language field is unconstrained string; default is `fnl`.
-- If source is not wrapped in identity, morph replaces source entity only (no identity auto-creation during morph).
+- The string→code payload uses `fnl`; the general CodeStore language field is not
+  a declaration of additional supported morph conversions.
+- Raw recoverable owning sites normalize through the reserved stable-reference
+  plan. Explicit aliases remain distinct; morph is not limited to prewrapped sources.
+- Code on boards renders with Text, not readonly Input. Item identity, transforms,
+  state and connectors survive; there is no new code-editing surface.
+
+## Deferred retry and failure contract
+
+`Lifecycle:replace!(key, payload-or-builder)` preserves strict complete matching
+for table payload retries. A builder is synchronous/read-only and runs once per
+fresh preparation attempt inside admission checks, never on matching pending
+morph-kind/source replay. Its function is never serialized. This lets the actual
+frontend resume after source retirement without reading or recreating that source.
+Other pending operations conflict; reentrancy is busy. Failures keep pending;
+startup recovers before exposing worlds, refusing conflicting third-state bytes.
+
+There is no multi-file atomicity or exactly-once notification guarantee. Committed
+callbacks occur before pending clear and may repeat after failure. Canonical
+single-writer ownership and frozen-byte checks, not caches or current callbacks,
+govern replay. See the lifecycle page for explicit schemas and diagnostics.
 
 ## Next Work
 
 1. Add additional morph targets.
-2. Define shared schema for `result` payloads across all morphs.
+2. Evaluate a shared result schema only when more conversions are approved.
 3. Optionally add dedicated metrics/logging around morph lifecycle events.
 4. Add e2e coverage for notebook/list visual update after morph.
 

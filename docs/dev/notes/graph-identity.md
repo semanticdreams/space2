@@ -8,6 +8,7 @@ tags:
 
 See also:
 - [morphs](./morphs)
+- [Reference lifecycle](../features/reference-lifecycle.md)
 
 ## Purpose
 
@@ -20,7 +21,7 @@ Example:
 
 ## Current Implementation
 
-### New identity entity store
+### Graph-independent identity entity store
 - File: `assets/lua/entities/identity.fnl`
 - Data model:
   - `id`
@@ -32,11 +33,18 @@ Example:
   - `create-entity`
   - `get-entity`
   - `update-entity`
-  - `delete-entity`
+  - `retire-entity!` (INTERNAL physical primitive, not application deletion)
   - `list-entities`
   - `find-by-target-key` (used for dedupe)
+  - `ensure-key` (raw key → stable key; supplied explicit identity unchanged)
+  - `resolve-key` (terminal key plus traversed chain; cycle/depth guards)
 
-### New identity graph node + view
+Use the canonical IdentityStore shared by list/dict/link/notebook stores. Equal
+paths do not substitute for exact store identity in composed lifecycle actions.
+The public identity node's `delete-entity` delegates to logical deletion, removing
+upstream live references without deleting the independent represented target.
+
+### Identity graph node + view
 - Node: `assets/lua/graph/nodes/identity.fnl`
 - View: `assets/lua/graph/view/views/identity.fnl`
 - Key format: `identity:<id>`
@@ -51,7 +59,7 @@ Example:
 
 ### Graph-level resolution
 - File: `assets/lua/graph/core.fnl`
-- New APIs:
+- APIs:
   - `graph:resolve-key(key)`:
     - follows identity chains
     - includes cycle detection and max-depth guard
@@ -82,14 +90,20 @@ Example:
   - dedupes by reusing existing identity for same target key.
   - File: `assets/lua/graph/nodes/list-entity.fnl`
 
-## Notebook Auto-Wrap Policy (Current)
+## Owning-store stable-reference policy
 
-When adding an item to a notebook:
+On list/notebook items, dictionary values and populated link endpoint writes:
 1. If key already starts with `identity:`, store it unchanged.
 2. Otherwise, wrap to an identity key.
-3. Reuse existing identity for same target-key if present.
+3. Reuse the lexicographically lowest existing direct identity for that raw target
+   if present; otherwise create one without adding a visible wrapper node.
 
-This gives notebooks stable references by default.
+List/notebook uniqueness runs after normalization and keeps first occurrence and
+order. Different supplied aliases remain distinct even with equal terminal
+meaning; dictionaries retain distinct slot names. Identity targets themselves
+are not recursively wrapped. Store create/update/add/set/reorder paths share this
+rule, not just graph buttons. Explicit identity removal is exact; raw membership
+removal is nonallocating. Default link drafts retain empty endpoints.
 
 ## Tests Added/Updated
 
@@ -113,33 +127,24 @@ This gives notebooks stable references by default.
 - Included in fast suite:
   - `assets/lua/tests/fast.fnl` includes `:tests.test-identity-entities`
 
-## What Is Still Left To Do
+## Migration, morph and deletion
 
-### 1. Add more morph targets
-- Current morph infra exists and includes `string-entity -> code-entity`.
-- Next work is adding additional type-to-type morphs using the same event contract.
+Main starts the five-owner lifecycle before exposing worlds. Startup replays any
+pending intent, then runs versioned raw-reference migration if needed. Recoverable
+raw sites become stable; IDs/order/named slots and explicit aliases/chains survive.
+Historical dangling known references are reported in migration.json, not guessed
+or silently removed. This is not a separate migration CLI or a lazy graph-loader
+cleanup. See the lifecycle page for exact files and single-writer recovery rules.
 
-### 2. Expand morph e2e coverage
-- Notebook/list now refresh on identity updates and post-morph graph events.
-- Add explicit end-to-end visual regression coverage for notebook/list preview/type-label updates after morph.
+String→code morph reserves one replacement, retargets every direct identity and
+leaves upstream chains intact. Deletion follows the incoming dependency closure
+across unopened owners as well as loaded ones. Identity cycles/depth exhaustion
+fail explicitly; relationship cycles are valid and terminate via a visited closure.
+Presentation listeners refresh projections only and never persist container edits.
 
-### 3. Decide list-entity write policy
-- List add-item now auto-wraps to identity keys.
-- Remaining decision: whether to migrate existing list rows that still contain raw keys.
-
-### 4. Migration strategy for persisted data
-- Existing notebook/list/link data may contain direct non-identity keys.
-- Decide whether to:
-  - migrate lazily on write, or
-  - run one-time migration script.
-
-### 5. UX entry points for creating identity
-- Add explicit UI actions (start/entities/context menu) for creating identity wrappers.
-- Currently identity creation is available via graph APIs and notebook auto-wrap behavior.
-
-### 6. Clarify identity graph semantics
-- Decide if identity nodes should always be visible graph nodes, or optionally hidden implementation references.
-- Current implementation treats identity as normal nodes.
+Permanent `test-reference-lifecycle-identity`, `-writes`, `-commands`, `-projections`
+and `-integration` modules cover these boundaries in addition to the tests above.
+Additional morph targets and dedicated visual snapshots remain outside this work.
 
 ## Notes
 
