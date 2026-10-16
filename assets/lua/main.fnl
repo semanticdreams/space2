@@ -25,7 +25,6 @@
 
 (local EngineModule (require :engine))
 (local AppConfig (require :app-config))
-(local CliArgs (require :cli-args))
 (local Activities (require :activities))
 (local Launcher (require :launcher))
 
@@ -36,7 +35,7 @@
 
 (local glm (require :glm))
 (global fennel (require :fennel))
-(local callbacks (require :callbacks))
+(local LiveDev (require :live-dev-runtime))
 (local runtime (require :runtime))
 (local logging (require :logging))
 (local error-reporting (require :error-reporting))
@@ -434,14 +433,13 @@
         (dev-flag-enabled? (os.getenv "SPACE_HOT_RELOAD"))))
   (if (not enabled?)
       nil
-      {:watch-paths (or (and override override.watch-paths)
+      {:enabled true :watch-paths (or (and override override.watch-paths)
                         (and env-watch-path [env-watch-path])
                         [(fs.join-path runtime.assets-path "lua")])
        :debounce-ms (or (and override override.debounce-ms) 150)
        :module-name (or (and override override.module-name) "main")
        :narrow-reload-unit-ids (and override override.narrow-reload-unit-ids)
-       :preserve-modules (or (and override override.preserve-modules)
-                             ["hot-reload" "units"])
+       :preserve-modules (and override override.preserve-modules)
        :generic? (and override override.generic?)}))
 
 (fn app-root-reload-in-progress? []
@@ -449,34 +447,9 @@
        app.__hot-reload-ctx.target-unit
        (= app.__hot-reload-ctx.target-unit.id "app-root")))
 
-(fn ensure-hot-reload-controller []
-  (local config (resolve-hot-reload-config))
-  (when config
-    (when (not app.hot-reload-callback-id)
-      (set app.hot-reload-callback-id
-           (callbacks.register
-             (fn [_payload]
-               (when (and app.hot-reload-controller
-                          app.hot-reload-controller.reload-now!)
-                 (app.hot-reload-controller:reload-now!))))))
-    (when (not app.hot-reload-controller)
-      (local HotReload (require :hot-reload))
-      (local controller-config
-        {:watch-paths config.watch-paths
-         :debounce-ms config.debounce-ms
-         :module-name config.module-name
-         :narrow-reload-unit-ids config.narrow-reload-unit-ids
-         :preserve-modules config.preserve-modules
-         :generic? config.generic?
-         :on-reload-requested (fn [_controller]
-                                (assert app.hot-reload-callback-id
-                                        "hot reload callback id missing")
-                                (callbacks.enqueue app.hot-reload-callback-id true))
-         :units-fn (fn [_root-unit]
-                      (app.unit-manager:list))})
-      (set app.hot-reload-controller
-           (HotReload.AppRootController controller-config)))
-    app.hot-reload-controller))
+(fn control-faulted? []
+  (local control (LiveDev.current))
+  (and control (control:faulted?)))
 
 (fn app.activate-runtime-performance-gameplay-lease [id]
   (assert (and (= (type id) :string) (> (# id) 0))
@@ -791,9 +764,6 @@
 (set app.update-handler nil)
 (set app.engine-tick-handler nil)
 (set app.global-shortcuts-handler nil)
-(set app.remote-control nil)
-(set app.remote-control-endpoint nil)
-(when (not (app-root-reload-in-progress?)) (set app.hot-reload-callback-id nil))
 (set app.browser-cube-surface nil)
 (set app.next-frame-queue [])
 (set app.next-frame-pending [])
@@ -861,31 +831,6 @@
                                        :previous previous
                                        :current current}))
   current)
-
-(fn collect-cli-args []
-  (local args [])
-  (when _G.arg
-    (var i 1)
-    (while (<= i (# _G.arg))
-      (table.insert args (. _G.arg i))
-      (set i (+ i 1))))
-  args)
-
-(fn parse-remote-control-endpoint []
-  (local spec {:name "space"
-               :allow-unknown? true
-               :add-help? false
-               :options [{:key "remote-control"
-                          :long "remote-control"
-                          :takes-value? true}]})
-  (local result (CliArgs.parse spec (collect-cli-args)))
-  (if result.ok
-      (. result.values "remote-control")
-      (do
-        (local message (or result.error "invalid remote control args"))
-        (error (.. "[space] " message "\n" result.usage)))))
-
-(set app.remote-control-endpoint (parse-remote-control-endpoint))
 
 (local SDLK_TAB 9)
 (local KEY_W_LOWER (string.byte "w"))
@@ -1573,12 +1518,8 @@
   (when (and app.engine.events app.engine.events.engine-tick)
     (set app.engine-tick-handler
          (app.engine.events.engine-tick:connect
-           (fn [_payload]
-             (when (and app.hot-reload-controller app.hot-reload-controller.update)
-               (when (app.hot-reload-controller:update 0)
-                 (lua "return nil")))
-             (when app.remote-control
-               (app.remote-control:tick))
+            (fn [_payload]
+              (when (control-faulted?) (lua "return nil"))
               (when (and app.kernels app.kernels.tick)
                 (app.kernels:tick))
               (tick-workflow-runner)))))
@@ -1588,13 +1529,6 @@
   (when (and app.engine.events app.engine.events.key-down)
     (set app.global-shortcuts-handler
          (app.engine.events.key-down:connect handle-global-world-shortcut)))
-
-  (when app.remote-control
-    (app.remote-control:drop)
-    (set app.remote-control nil))
-  (when app.remote-control-endpoint
-    (local RemoteControl (require :remote-control))
-    (set app.remote-control (RemoteControl {:endpoint app.remote-control-endpoint})))
 
   (when (and app.kernels app.kernels.drop)
     (app.kernels:drop)
@@ -1765,7 +1699,6 @@
     (set app.wallet nil))
   (set app.wallet (WalletManager {}))
   (app.wallet:load-active)
-  (ensure-hot-reload-controller)
 
   (when (not app.mcp-tools)
     (local ToolRegistry (require :mcp/tool-registry))
@@ -1991,6 +1924,7 @@
   true)
 
 (fn app.update [delta]
+  (when (control-faulted?) (lua "return nil"))
   (local profiler app.profiler)
   (fn run-section [label cb]
     (if profiler
@@ -2185,9 +2119,6 @@
   (when app.profiler
     (app.profiler.set_enabled false)
     (set app.profiler nil))
-  (when app.remote-control
-    (app.remote-control:drop)
-    (set app.remote-control nil))
   (when (and app.kernels app.kernels.drop)
     (app.kernels:drop)
     (set app.kernels nil))
@@ -2202,14 +2133,6 @@
           (app.tray-manager.drop)
           (set app.tray-manager nil))
         (set app.notify nil)))
-  (when (and (not (app-root-reload-in-progress?))
-             app.hot-reload-callback-id)
-    (callbacks.unregister app.hot-reload-callback-id)
-    (set app.hot-reload-callback-id nil))
-  (when (and (not (app-root-reload-in-progress?))
-             app.hot-reload-controller)
-    (app.hot-reload-controller:drop)
-    (set app.hot-reload-controller nil))
   (when (and app.volume-settings-handler VolumeControl.volume-settings-changed-debounced)
     (VolumeControl.volume-settings-changed-debounced:disconnect app.volume-settings-handler true)
     (set app.volume-settings-handler nil))
@@ -2255,28 +2178,66 @@
 (set app.ensure-graph-extension-registry! ensure-graph-extension-registry!)
 (set app.ensure-built-in-graph-extensions! ensure-built-in-graph-extensions!)
 
-(when (and app.engine AppConfig.run-main (not app.__suppress-main-run?))
-  (when app.engine-autocreated
-    (set app.engine (EngineModule.Engine (load-window-startup-options)))
-    (set app.engine-autocreated false))
-  (when (not (app.engine:start))
-    (error "[space] engine failed to start (window/GL init failed)"))
-  (app.init)
-  (app.engine:run)
-  (app.drop)
-  (when (and app.hot-reload-controller app.hot-reload-controller.drop)
-    (app.hot-reload-controller:drop)
-    (set app.hot-reload-controller nil))
-  (app.engine:shutdown))
+(fn app.check-runtime-health []
+  (assert (and app.engine (app.engine:is-started) (not (app.engine:is-shutdown)))
+          "runtime engine is not initialized")
+  (each [_ key (ipairs [:settings :themes :lights :focus :hud :renderers :world-manager
+                        :unit-manager :states :clickables :kernels
+                        :update-handler :engine-tick-handler :global-shortcuts-handler])]
+    (assert (. app key) (.. "runtime service/subscription missing: " key)))
+  true)
 
-{:init app.init
+;; One outer owner, independent of whichever main module is loaded after reload.
+;; Cleanup resolves the current root, and every applicable finalizer is attempted.
+(fn run-app! [options]
+  (local engine (assert options.engine "run-app! requires engine"))
+  (local errors [])
+  (var root-attempted? false)
+  (var control-attempted? false)
+  (fn attempt! [f owner]
+    (local (ok err) (pcall f owner))
+    (when (not ok) (table.insert errors (tostring err))))
+  (fn run-body []
+    (assert (engine:start) "[space] engine failed to start (window/GL init failed)")
+    (set control-attempted? true)
+    (local control (options.start-control))
+    (set root-attempted? true)
+    (options.init)
+    (control:mark-ready!)
+    (engine:run))
+  (attempt! run-body)
+  (when root-attempted? (attempt! options.drop))
+  (when control-attempted? (attempt! options.stop-control))
+  (attempt! engine.shutdown engine)
+  (assert (= (# errors) 0) (table.concat errors "\n"))
+  true)
+
+(fn start-process-control! []
+  (LiveDev.start! AppConfig.live-dev {:reload-config (resolve-hot-reload-config)}))
+(fn init-current-root! [] (app.init))
+(fn drop-current-root! [] (app.drop))
+;; Publish before entering the initial require's engine loop.
+(local root-exports
+  {:init app.init
+   :run-app! run-app!
+   :resolve-hot-reload-config resolve-hot-reload-config
   :build-hud-world-tabs-widget build-hud-world-tabs-widget
   :install-app-shell! install-app-shell!
    :bind-active-world-runtime installable-bind-active-world-runtime
    :ensure-graph-extension-registry! app.ensure-graph-extension-registry!
    :ensure-built-in-graph-extensions! app.ensure-built-in-graph-extensions!
    :ensure-user-code-units! ensure-user-code-units!
- :clear-fennel-module-cache! clear-fennel-module-cache!
- :drop app.drop
- :snapshot app.snapshot-app-state
- :restore app.restore-app-state}
+   :clear-fennel-module-cache! clear-fennel-module-cache!
+   :drop app.drop
+   :snapshot app.snapshot-app-state
+   :restore app.restore-app-state})
+(set package.loaded.main root-exports)
+
+(when (and app.engine AppConfig.run-main (not app.__suppress-main-run?))
+  (when app.engine-autocreated
+    (set app.engine (EngineModule.Engine (load-window-startup-options)))
+    (set app.engine-autocreated false))
+  (run-app! {:engine app.engine :start-control start-process-control!
+             :init init-current-root! :drop drop-current-root! :stop-control LiveDev.stop!}))
+
+package.loaded.main

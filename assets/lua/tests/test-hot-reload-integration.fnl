@@ -3,12 +3,25 @@
 (local fs (require :fs))
 (local tempfile (require :tempfile))
 (local HotReload (require :hot-reload))
+(local RootSupport (require :tests/hot-reload-root-support))
 (local LauncherLaunchable (require :launchables/launcher))
 (local runtime (require :runtime))
 (local Activities (require :activities))
 (local Units (require :units))
 
 (local tests [])
+
+(fn start-test-control! [endpoint]
+  (local LiveDev (require :live-dev-runtime))
+  (LiveDev.start! nil {:args [] :endpoint endpoint :reload-config app.hot-reload-config}))
+
+(fn stop-test-control! []
+  ((. (require :live-dev-runtime) :stop!)))
+
+(fn dispatch-control! [] ((. (require :callbacks) :dispatch)))
+(fn check-async-result! [id]
+  (_G.remote_control.resolve id "after-root-reload")
+  (assert (= (. (_G.remote_control.poll id) :value) "after-root-reload")))
 
 (fn restore-test-runner-app-services! []
   (AppBootstrap.init-themes)
@@ -65,11 +78,9 @@
       (error body-result)))
 
 (fn cleanup-app-hot-reload-controller-and-main! []
-  (when app.hot-reload-controller
-    (app.hot-reload-controller:drop)
-    (set app.hot-reload-controller nil))
-  (when (= (type (. (require :main) :drop)) :function)
-    (drop-main-and-restore-test-fixture!)))
+  (local (drop-ok drop-result) (pcall drop-main-and-restore-test-fixture!))
+  (local (stop-ok stop-result) (pcall stop-test-control!))
+  (finish-protected-result drop-ok drop-result stop-ok stop-result))
 
 (fn cleanup-main-if-engine! []
   (when (and (= (type (. (require :main) :drop)) :function) app.engine)
@@ -89,13 +100,6 @@
     (controller:drop))
   (cleanup-main-if-engine!))
 
-(fn count-searcher-occurrences [target]
-  (var count 0)
-  (each [_ searcher (ipairs package.searchers)]
-    (when (= searcher target)
-      (set count (+ count 1))))
-  count)
-
 (fn activity-unit [mode-id]
   (and app.activity-units
        (. app.activity-units mode-id)))
@@ -108,92 +112,24 @@
    :narrow-reload-unit-ids narrow-unit-ids
    :preserve-modules ["app-bootstrap" "hot-reload" "tests.test-hot-reload-integration" "units"]})
 
-(fn assert-root-reload-state! [controller callback-id world-id DebugLog]
-  (assert (= (. (controller:debug-state) :last-target-unit-id) "app-root")
-          "Default controller execution must target app root")
-  (assert app.world-manager "Expected app.world-manager after reload")
-  (assert (= (app.world-manager:active-world-id) world-id)
-          "Expected active world id to roundtrip through full-app reload")
-  (assert (string.find (fs.read-file DebugLog.log-path) "root reload marker" 1 true)
-          "Expected root reload to preserve debug.log history")
-  (assert (= app.hot-reload-controller controller) "Root reload must retain its controller")
-  (assert (= app.hot-reload-callback-id callback-id) "Root reload must retain its callback ID")
-  (assert package.__space_fennel_cache_searcher "Expected installed fennel cache searcher")
-  (assert (= (count-searcher-occurrences package.__space_fennel_cache_searcher) 1)
-          "Expected exactly one installed fennel cache searcher after repeated reloads"))
+(fn current-test-app [] app)
+(local root-support
+  (RootSupport.create
+    {:get-app current-test-app :require-main! require-main!
+     :start-test-control! start-test-control! :stop-test-control! stop-test-control!
+     :dispatch-control! dispatch-control! :check-async-result! check-async-result!
+     :test-hot-reload-config test-hot-reload-config :runner (require :tests/runner)}))
 
-(fn assert-default-root-roundtrips! [watch-root DebugLog]
-  (local controller (assert app.hot-reload-controller "Main must construct the reload controller"))
-  (local callback-id (assert app.hot-reload-callback-id "Main must register the reload callback"))
-  (DebugLog.log "test" "root reload marker")
-  (local created-world (app.world-manager:create-home-world {:activate? false}))
-  (assert (app.world-manager:activate-world-id created-world.id))
-  (each [_ filename (ipairs ["main.fnl" "hud.fnl" "hud.fnl"])]
-    (local old-world-manager app.world-manager)
-    (assert (controller:reload-now! {:changes [{:path (fs.join-path watch-root filename)
-                                               :action "modified"}]})
-            "Expected default root hot reload to succeed")
-    (assert (not (= app.world-manager old-world-manager)) "Default reload must reconstruct root ownership")
-    (assert-root-reload-state! controller callback-id created-world.id DebugLog)))
+(fn check-test-control! [control controller]
+  (local LiveDev (require :live-dev-runtime))
+  (assert (= app.hot-reload-controller controller)
+          "Root drop must preserve borrowed process control")
+  (assert (= (LiveDev.current) control)))
 
-(fn run-cleanup-stages! [stages]
-  (local errors [])
-  (each [_ stage (ipairs stages)]
-    (local (ok err) (pcall (. stage 2)))
-    (when (not ok) (table.insert errors (.. (. stage 1) ": " (tostring err)))))
-  (when (> (# errors) 0) (error (table.concat errors "\n") 0)))
-
-(fn field-restoration [target key]
-  (local value (. target key))
-  (fn restore [] (set (. target key) value))
-  [key restore])
-
-(fn drain-cleanup-slot! [slot]
-  (local cleanup slot.cleanup)
-  (set slot.cleanup nil) ; consume BEFORE any partial Main.drop
-  (when cleanup (cleanup)))
-
-(fn drop-owned-root-controller! [fixture-app owned]
-  (local controller fixture-app.hot-reload-controller)
-  (when (and controller (not (= controller owned.original-controller)))
-    (set fixture-app.hot-reload-controller nil) (controller:drop)))
-
-(fn drop-owned-root-main! [owned loaded]
-  (when owned.init-entered?
-    (local Main (if loaded loaded owned.main))
-    (assert (= (type Main.drop) :function) "owned Main cleanup handler missing")
-    (Main.drop)))
-
-(local root-cleanup-slot {})
-(fn teardown-root-fixture [] (drain-cleanup-slot! root-cleanup-slot))
-
-(fn full-app-root-reload-roundtrips-active-world []
-  (local owned {:original-controller app.hot-reload-controller :init-entered? false})
-  (local restorations [])
-  (fn drop-controller [] (drop-owned-root-controller! app owned))
-  (fn drop-main [] (drop-owned-root-main! owned (. package.loaded "main")))
-  (fn drop-temp [] (when owned.temp (owned.temp:drop)))
-  (fn cleanup []
-    (local stages [["controller" drop-controller] ["Main.drop" drop-main]
-                  ["themes" AppBootstrap.init-themes] ["lights" AppBootstrap.init-lights]
-                  ["input" AppBootstrap.init-input-systems]])
-    (each [_ restore (ipairs restorations)] (table.insert stages restore))
-    (table.insert stages ["temp" drop-temp])
-    (run-cleanup-stages! stages))
-  (set root-cleanup-slot.cleanup cleanup)
-  (set owned.temp (tempfile.TemporaryDirectory {:prefix "units-test-"}))
-  (set owned.main (require-main!))
-  (local DebugLog (require :debug-log))
-  (each [_ key (ipairs [:renderers :hot-reload-config :hot-reload-controller :worlds-dir])]
-    (table.insert restorations (field-restoration app key)))
-  (local watch-root (fs.join-path runtime.assets-path "lua"))
-  (set app.hot-reload-controller nil)
-  (set app.hot-reload-config (test-hot-reload-config watch-root nil))
-  ((. owned.main :install-app-shell!))
-  (set owned.init-entered? true)
-  ((. owned.main :init))
-  (assert-default-root-roundtrips! watch-root DebugLog)
-  true)
+(fn cleanup-test-control! [Main]
+  (local (ok result) (pcall cleanup-main-var-if-engine! Main))
+  (local (stop-ok stop-result) (pcall stop-test-control!))
+  (finish-protected-result ok result stop-ok stop-result))
 
 (fn drop-app-cleans-hot-reload-controller-and-callback []
   (with-temp-dir
@@ -217,19 +153,19 @@
         (pcall
           (fn []
             ((. Main :install-app-shell!))
+            (local control (start-test-control!))
+            (local controller app.hot-reload-controller)
             ((. Main :init))
             (assert app.hot-reload-controller
                     "Expected app.hot-reload-controller after init")
-            (assert app.hot-reload-callback-id
-                    "Expected app.hot-reload-callback-id after init")
-            ((. Main :drop))
-            (assert (= app.hot-reload-controller nil)
-                    "Expected drop to clear app.hot-reload-controller")
             (assert (= app.hot-reload-callback-id nil)
-                    "Expected drop to clear app.hot-reload-callback-id")
+                    "Root init must not create process-owned callbacks")
+            ((. Main :drop))
+            (check-test-control! control controller)
+            (stop-test-control!)
             true)))
       (local (cleanup-ok cleanup-result)
-        (pcall cleanup-main-var-if-engine! Main))
+        (pcall cleanup-test-control! Main))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (set app.hot-reload-config original-config)
@@ -381,6 +317,7 @@
         (pcall
           (fn []
             ((. Main :install-app-shell!))
+            (start-test-control!)
             ((. Main :init))
             (assert-experimental-hud-opt-in! watch-root)
             true)))
@@ -1022,128 +959,118 @@
       (set AppBootstrap.init-renderers original-init-renderers)
       (finish-protected-result ok result cleanup-ok cleanup-result))))
 
-(fn runner-timeout-metadata-precedence-and-validation []
-  (local select (. (require :tests/runner) :select-test-timeout-seconds))
-  (each [_ [raw budget expected] (ipairs [[false false 120] ["" false 120] [false 300 300]
-                        ["3" 300 3] ["0" 300 0] ["" 300 300]])]
-    (assert (= (select (if raw raw nil) (if budget budget nil)) expected)
-            "case metadata must select 300; explicit env including 0 must dominate"))
-  (each [_ budget (ipairs [0 -1 "300" true (/ 0 0) math.huge (- math.huge)])]
-    (assert (not (pcall select nil budget)) "invalid case budget must fail")
-    (assert (not (pcall select "0" budget)) "override must not hide invalid metadata"))
-  (each [_ raw (ipairs ["bogus" "-1"])]
-    (assert (not (pcall select raw nil)) "legacy invalid env must fail")))
+(table.insert tests {:name "test runner timeout metadata precedence and validation" :fn root-support.runner-timeout-metadata-precedence-and-validation})
+(table.insert tests {:name "test runner case teardown restores deadline hook and preserves errors" :fn root-support.runner-case-teardown-restores-hook-and-preserves-errors})
+(table.insert tests {:name "test runner saved engine scope attempts shutdown once" :fn root-support.runner-saved-engine-scope-attempts-shutdown-once})
+(fn normal-startup-first-reload []
+  (local AppConfig (require :app-config))
+  (local LiveDev (require :live-dev-runtime))
+  (local ErrorReporting (require :error-reporting))
+  (local before-reporting-init ErrorReporting.init)
+  (local before-renderers app.renderers)
+  (local before-main package.loaded.main)
+  (local engine app.engine)
+  (local updated engine.events.updated)
+  (local before {:run engine.run :shutdown engine.shutdown :connect updated.connect
+                 :disconnect updated.disconnect :run-main AppConfig.run-main
+                 :config app.hot-reload-config :renderers AppBootstrap.init-renderers
+                 :suppressed app.__suppress-main-run?})
+  (local state {:connections 0 :active 0 :snapshots 0 :unloads 0 :inside-run false :handlers {} :reporting-inits 0})
+  (fn connect [self handler]
+    (when (= handler app.update)
+      (set state.connections (+ state.connections 1))
+      (set state.active (+ state.active 1))
+      (tset state.handlers handler true))
+    (before.connect self handler))
+  (fn disconnect [self handler allow-missing?]
+    (when (. state.handlers handler)
+      (set state.active (- state.active 1))
+      (tset state.handlers handler nil))
+    (before.disconnect self handler allow-missing?))
+  (fn renderers [opts]
+    (local previous-renderer-factory package.loaded.renderers)
+    (set package.loaded.renderers make-renderer-stub)
+    (local (ok result) (pcall before.renderers opts))
+    (set package.loaded.renderers previous-renderer-factory)
+    (assert ok (tostring result))
+    result)
+  (fn shutdown [_self] (set state.shutdown true))
+  (fn init-reporting [_opts]
+    (set state.reporting-inits (+ state.reporting-inits 1))
+    true)
+  (fn run [_self]
+    (set state.inside-run true)
+    (local root (assert (. package.loaded :main) "normal startup must publish root exports before run"))
+    (each [_ key (ipairs [:init :drop :snapshot :restore])]
+      (assert (= (type (. root key)) :function) (.. "current root export missing: " key)))
+    (local world app.world-manager)
+    (local handler app.update-handler)
+    (local old-snapshot root.snapshot)
+    (local old-drop root.drop)
+    (fn snapshot []
+      (assert state.inside-run)
+      (assert (= app.world-manager world) "snapshot must inspect the existing root")
+      (assert (= app.update-handler handler) "snapshot must not reevaluate main")
+      (set state.snapshots (+ state.snapshots 1))
+      (old-snapshot))
+    (fn unload []
+      (assert (= app.world-manager world) "unload must drop the existing root")
+      (set state.unloads (+ state.unloads 1))
+      (old-drop))
+    (set root.snapshot snapshot)
+    (set root.drop unload)
+    (local control (assert (LiveDev.current)))
+    (control:request 1 "manual") (dispatch-control!)
+    (control:request 2 "reload") (dispatch-control!)
+    (local op (control:operation 2))
+    (assert (= op.status "succeeded") (tostring op.error))
+    (assert (= state.snapshots 1))
+    (assert (= state.unloads 1))
+    (assert (= state.connections 2) "root must initialize exactly once per generation")
+    (assert (= state.active 1) "first reload must not leave duplicate root subscriptions")
+    (assert (= (. (control:status) :generation) 2))
+    (set state.current (. package.loaded :main))
+    (assert (not= state.current root))
+    (set state.inside-run false))
+  (fn body []
+    (set ErrorReporting.init init-reporting)
+    (set engine.run run) (set engine.shutdown shutdown)
+    (set updated.connect connect) (set updated.disconnect disconnect)
+    (set AppBootstrap.init-renderers renderers)
+    (set app.hot-reload-config {:enabled true :generic? true
+                               :preserve-modules ["app-bootstrap" "tests.test-hot-reload-integration"]})
+    (set AppConfig.run-main true) (set app.__suppress-main-run? nil)
+    (local returned (require-main!))
+    (assert (= state.reporting-inits 1) "normal startup must call only the isolated reporting initializer")
+    (assert (= returned state.current) "initial require must return the latest root exports")
+    (assert (= state.active 0))
+    (assert state.shutdown)
+    (assert (= (LiveDev.current) nil)))
+  (local (ok err) (pcall body))
+  (set ErrorReporting.init before-reporting-init)
+  (set engine.run before.run) (set engine.shutdown before.shutdown)
+  (set updated.connect before.connect) (set updated.disconnect before.disconnect)
+  (set AppConfig.run-main before.run-main) (set app.__suppress-main-run? before.suppressed)
+  (set AppBootstrap.init-renderers before.renderers) (set app.hot-reload-config before.config)
+  (set app.renderers before-renderers)
+  (set package.loaded.main before-main)
+  (local (stop-ok stop-err) (pcall LiveDev.stop!))
+  (restore-test-runner-app-services!)
+  (assert stop-ok (tostring stop-err))
+  (assert ok (tostring err)))
 
-(fn assert-root-cleanup-ownership! []
-  (var outside-drops 0) (var root-drops 0) (var main-drops 0)
-  (fn outside-drop [_self] (set outside-drops (+ outside-drops 1)))
-  (fn root-drop [_self] (set root-drops (+ root-drops 1)) (error "partial controller drop" 0))
-  (fn main-drop [] (set main-drops (+ main-drops 1)))
-  (local original {:drop outside-drop})
-  (local fixture-app {:hot-reload-controller original})
-  (local owned {:original-controller original :main {:drop main-drop} :init-entered? false})
-  (drop-owned-root-controller! fixture-app owned) (drop-owned-root-main! owned nil)
-  (assert (and (= outside-drops 0) (= main-drops 0) (= fixture-app.hot-reload-controller original))
-          "failure before init must not consume outside controller or drop uninitialized Main")
-  (set fixture-app.hot-reload-controller {:drop root-drop}) (set owned.init-entered? true)
-  (fn cleanup []
-    (run-cleanup-stages! [["controller" (fn [] (drop-owned-root-controller! fixture-app owned))]
-                         ["Main" (fn [] (drop-owned-root-main! owned nil))]]))
-  (local slot {:cleanup cleanup})
-  (assert (not (pcall drain-cleanup-slot! slot))) (drain-cleanup-slot! slot)
-  (assert (and (= root-drops 1) (= main-drops 1) (= outside-drops 0) (= fixture-app.hot-reload-controller nil))
-          "consume slot/controller before throwing drop; still attempt Main once"))
+(fn full-app-root-reload-roundtrips-active-world [] (root-support.with-root-reload-fixture "manual"))
+(fn default-root-main-path-roundtrip [] (root-support.with-root-reload-fixture ["main.fnl"]))
+(fn repeated-default-root-hud-path-roundtrips [] (root-support.with-root-reload-fixture ["hud.fnl" "hud.fnl"]))
 
-(fn runner-case-teardown-restores-hook-and-preserves-errors []
-  (assert-root-cleanup-ownership!)
-  (local runner (require :tests/runner))
-  (var calls 0)
-  (fn cleanup [] (set calls (+ calls 1)))
-  (fn body-error [] (error "body-primary" 0))
-  (local (case-ok case-error)
-    (runner.run-case {:name "declared cleanup RED" :fn body-error :teardown cleanup} 0 nil))
-  (assert (= calls 1) "existing executor must call declared teardown after a failing body")
-  (assert (and (not case-ok) (= case-error "body-primary")))
-  (local (saved-hook saved-mask saved-count) (debug.gethook))
-  (fn parent-hook [] nil)
-  (fn success [] :body-result)
-  (fn cleanup-error [] (error "cleanup-secondary" 0))
-  (fn bounded-loop [] (var total 0) (for [i 1 100000] (set total (+ total i))) total)
-  (var tick 0)
-  (fn clock [] (set tick (+ tick 1000)) tick)
-  (fn observe []
-    (local (hook mask count) (debug.gethook))
-    (assert (and (= hook parent-hook) (= mask "cr") (= count 37)) "restore exact parent hook before teardown")
-    (cleanup))
-  (fn check-cases []
-    (debug.sethook parent-hook "cr" 37)
-    (each [_ body (ipairs [success body-error bounded-loop])]
-      (local before calls)
-      (local (ok result) (runner.run-case {:name "hook" :fn body :teardown observe} 1 nil clock))
-      (assert (= calls (+ before 1)) "teardown must run exactly once")
-      (assert (= ok (= body success)) "success/failure semantics must remain unchanged")
-      (when (= body success) (assert (= result :body-result)))
-      (when (= body body-error) (assert (= result "body-primary")))
-      (when (= body bounded-loop) (assert (string.find result "test timed out after 1s" 1 true))))
-    (each [_ body (ipairs [success body-error])]
-      (local (ok primary secondary) (runner.run-case {:name "errors" :fn body :teardown cleanup-error} 0 nil))
-      (assert (not ok))
-      (assert (= primary (if (= body success) "cleanup-secondary" "body-primary")))
-      (assert (= (. secondary 1) "cleanup-secondary")))
-    (assert (runner.run-case {:name "no cleanup" :fn success} 0 nil))
-    (assert (not (pcall runner.run-case {:name "invalid" :fn success :teardown true} 0 nil)))
-    (local restored {})
-    (local stages [["partial drop" cleanup-error]])
-    (each [_ key (ipairs [:renderers :config :controller :worlds-dir :temp])]
-      (table.insert stages (field-restoration restored key))
-      (set (. restored key) :mutated))
-    (assert (not (pcall run-cleanup-stages! stages)))
-    (assert (= (next restored) nil) "all independent restorations must run after drop fails"))
-  (local (ok err) (pcall check-cases))
-  (if saved-hook (debug.sethook saved-hook saved-mask saved-count) (debug.sethook nil "" 0))
-  (assert ok err))
-
-(fn runner-saved-engine-scope-attempts-shutdown-once []
-  (local runner (require :tests/runner))
-  (local primary {})
-  (each [_ mode (ipairs [:success :body-error :module-error :drop-error :shutdown-error :both-errors :already-attempted :unstarted])]
-    (local events [])
-    (var attempted (= mode :already-attempted))
-    (var shutdowns 0)
-    (fn shutdown [_self]
-      (set shutdowns (+ shutdowns 1))
-      (set attempted true)
-      (table.insert events :engine)
-      (when (or (= mode :shutdown-error) (= mode :both-errors)) (error "shutdown-secondary" 0)))
-    (fn is-started [_self] (not (= mode :unstarted)))
-    (fn is-shutdown [_self] attempted)
-    (local engine {:shutdown shutdown :is-started is-started :is-shutdown is-shutdown})
-    (local fake-app {:engine engine})
-    (fn app-drop [] (table.insert events :drop) (error primary 0))
-    (fn body []
-      (table.insert events :body)
-      (set fake-app.engine {:shutdown (fn [_self] (error "must not use mutable app engine"))})
-      (when (= mode :module-error) (set fake-app.engine nil))
-      (when (= mode :drop-error)
-        (local (ok err) (runner.run-case {:name "owned app drop" :fn (fn [] true) :teardown app-drop} 0 nil))
-        (assert (not ok)) (error err 0))
-      (when (or (= mode :body-error) (= mode :module-error) (= mode :both-errors)) (error primary 0))
-      :suite-result)
-    (local (ok result) (pcall runner.with-owned-engine engine body nil))
-    (assert (= shutdowns (if (or (= mode :already-attempted) (= mode :unstarted)) 0 1))
-            "saved owned engine must get one attempt on success and failure, never retry")
-    (assert (= (. events (# events)) (if (= shutdowns 1) :engine :body)))
-    (if (or (= mode :success) (= mode :already-attempted) (= mode :unstarted))
-        (assert (and ok (= result :suite-result)))
-        (do (assert (not ok))
-            (assert (= result (if (= mode :shutdown-error) "shutdown-secondary" primary)))))
-    (when (= mode :drop-error) (assert (= (# events) 3) "fixture drop failure must not cause generic app drop retry"))))
-
-(table.insert tests {:name "test runner timeout metadata precedence and validation" :fn runner-timeout-metadata-precedence-and-validation})
-(table.insert tests {:name "test runner case teardown restores deadline hook and preserves errors" :fn runner-case-teardown-restores-hook-and-preserves-errors})
-(table.insert tests {:name "test runner saved engine scope attempts shutdown once" :fn runner-saved-engine-scope-attempts-shutdown-once})
+(table.insert tests {:name "default root main path reload roundtrips active world"
+                     :timeout-seconds 300 :teardown root-support.teardown-root-fixture
+                     :fn default-root-main-path-roundtrip})
+(table.insert tests {:name "repeated default root HUD path reloads retain root ownership and active world"
+                     :timeout-seconds 300 :teardown root-support.teardown-root-fixture
+                     :fn repeated-default-root-hud-path-roundtrips})
 (table.insert tests {:name "full app root reload roundtrips active world"
-                     :timeout-seconds 300 :teardown teardown-root-fixture
+                     :timeout-seconds 300 :teardown root-support.teardown-root-fixture
                      :fn full-app-root-reload-roundtrips-active-world})
 (table.insert tests {:name "drop app cleans hot reload controller and callback"
                      :fn drop-app-cleans-hot-reload-controller-and-callback})
@@ -1172,7 +1099,9 @@
 (table.insert tests {:name "unloading active drawing activity updates shell state"
                      :fn unloading-active-drawing-activity-updates-shell-state})
 (table.insert tests {:name "experimental opt-in hot reload routes drawing activity actions file changes to drawing activity unit"
-                     :fn hot-reload-routes-drawing-activity-actions-file-changes-to-drawing-activity-unit})
+                      :fn hot-reload-routes-drawing-activity-actions-file-changes-to-drawing-activity-unit})
+(table.insert tests {:name "normal startup first reload snapshots the still-running existing root"
+                     :fn normal-startup-first-reload})
 
 (local main
   (fn []

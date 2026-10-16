@@ -33,7 +33,7 @@ debug:
 	cd build/debug && gdb ./space
 
 run:
-	cd build && SPACE_FENNEL_PROFILE=1 SPACE_ASSETS_PATH=../assets ./space -m main --remote-control=ipc:///tmp/space-rc.sock
+	cd build && SPACE_FENNEL_PROFILE=1 SPACE_ASSETS_PATH=../assets ./space -m main --remote-control=auto
 
 docs:
 	cd docs && npm run docs:dev
@@ -142,7 +142,7 @@ release:
 
 opencode-check:
 	python3 scripts/check_opencode_permissions.py --repo-root .
-	python3 -m pytest scripts/tests/test_check_opencode_permissions.py scripts/tests/test_opencode_capabilities.py scripts/tests/test_opencode_git_integrate.py scripts/tests/test_opencode_pr_operator.py scripts/tests/test_opencode_windows_ci_repro.py scripts/tests/test_opencode_windows_ci_policy_docs.py
+	python3 -m pytest scripts/tests/test_check_opencode_permissions.py scripts/tests/test_opencode_capabilities.py scripts/tests/test_opencode_git_integrate.py scripts/tests/test_opencode_pr_operator.py scripts/tests/test_opencode_windows_ci_repro.py scripts/tests/test_opencode_windows_ci_policy_docs.py scripts/tests/test_live_dev.py
 
 download-models-data:
 	wget -O assets/data/models-dot-dev.json https://models.dev/api.json

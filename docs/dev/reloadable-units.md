@@ -69,10 +69,11 @@ initialization/discovery pass or explicit registration.
 
 ## Controller configuration and execution
 
-Set configuration **before the controller is constructed** during app
-initialization. Main retains the controller and callback ID across app-root
-reloads; assigning a new config table does not reconfigure an existing watcher.
-These examples run in a bootstrap context with `app.code-dir` initialized:
+Set configuration **before process control starts**, before root initialization.
+The `live-dev-runtime` coordinator retains the controller and deferred callbacks
+across app-root reloads; assigning a new config table does not reconfigure an
+existing watcher. These examples run in a bootstrap context with `app.code-dir`
+initialized:
 
 ```fennel
 (local fs (require :fs))
@@ -119,27 +120,93 @@ Mixed sibling changes cannot be reduced to just one eligible sibling.
 `controller:debug-state().last-target-unit-id` and `[hot-reload]` target logs
 identify the actual execution target, not merely the ownership candidate.
 
-Main's watcher flow debounces events and requests one deferred callback per
-pending batch via `on-reload-requested`. The callback calls `reload-now!` after
-the detecting update stack unwinds; `AppRootController` forwards this callback.
+The coordinator's watcher flow debounces events and requests one deferred
+operation per pending batch via `on-reload-requested`. Its operation callback
+calls structured `reload-pending!` after the detecting poll/update stack unwinds;
+`AppRootController` forwards this callback. Explicit live-dev requests instead
+call `reload-root!`, ignoring narrow eligibility. Main neither owns a second
+controller/RC transport nor registers duplicate reload callbacks.
 By contrast, `controller:reload-now!({:changes changes})` executes synchronously
 and still applies eligibility. A generic controller without a callback executes
 from its update method. Direct synchronous callers must choose a safe execution
-point themselves.
+point themselves. Disabling watching does not make inline root teardown safe.
+
+### Watcherless manual mode and structured results
+
+`HotReloadController` and `AppRootController` accept `:watch?`, a boolean that
+defaults to `true`. With `:watch? false`, construction does not acquire a native
+watcher or capture startup file stamps, and `update` does not poll files. Editing
+files alone does not request or execute a reload. `:watch-paths` remains required:
+these roots still provide module ownership when a unit has no explicit
+`:owned-paths`; disabling watching does not disable module invalidation.
+
+```fennel
+(local HotReload (require :hot-reload))
+(local controller
+  (HotReload.AppRootController {:watch-paths ["/checkout/assets/lua"]
+                                :watch? false}))
+(local result (controller:reload-root!))
+(assert result.ok result.error)
+```
+
+An existing watched controller can be permanently converted with
+`controller:use-manual!() -> true`. Conversion drops its watcher once and clears
+pending filesystem events, debounce deadline, and reload scheduling state.
+Repeated conversion is safe; conversion after `drop` is an error. Root
+initialization reuses the surviving controller rather than reenabling watching.
+Any callback already queued by an external scheduler is still owned by that
+scheduler; conversion does not cancel external callback queues.
+
+`controller:reload-root!()` executes the existing transaction synchronously,
+selecting the configured root regardless of paths or eligibility.
+`controller:reload-pending!()` applies candidate/eligibility routing to pending
+events with the same structured result:
+
+```fennel
+{:ok true
+ :target-unit-id "app-root"
+ :phase "complete"
+ :rollback "not-needed"}
+```
+
+On failure, `:ok` is `false`, `:error` contains the error text, and `:phase`
+identifies the failed forward phase: `"target-selection"`, `"collect-modules"`,
+`"snapshot"`, `"unload"`, `"clear-modules"`, `"load"`, `"restore"`, or
+`"refresh-extensions"`. If selection fails before a target is known,
+`:target-unit-id` identifies the configured root fallback.
+
+`:rollback` is `"not-needed"` for success or a pre-unload failure, `"restored"`
+when rollback rebuilt the prior runtime, and `"failed"` when rollback itself
+failed. The last case also includes `:rollback-error`. Snapshot/selection errors
+do not unload or attempt rollback. The prior `app.__hot-reload-ctx` is restored
+after success, pre-unload failure, and either rollback outcome; rollback retains
+the transaction context while it runs so root infrastructure stays preserved.
+Use after `drop` remains a lifecycle error, not a reload result.
+
+`reload-now!` keeps path routing (including eligibility) and its boolean/throw
+interface: `true` on success, `false` on failure unless rollback failed, in which
+case it throws with both errors. All entry points share one transaction and
+module/cache handling. `debug-state` reports `:watch?` and an empty
+`:watch-directories` list when there is no watcher; `drop` remains idempotent.
+`AppRootController` forwards `:startup-ignore-ms`, `:on-reload-requested`,
+`:watch?` and `:narrow-reload-unit-ids` to the underlying controller.
 
 ### Recovery and distinct entry points
 
-Controller recovery is in-place best effort: on a protected reload failure it
-tries to unload a successfully loaded failed replacement, clear tracked modules,
-restore backed-up module entries, load/restore the **same** target and refresh
-its extensions. It returns `false` if recovery succeeds and throws if recovery
-fails. Snapshot capture precedes that protected reload block. This is not a staged
+Controller recovery is in-place best effort: after mutation begins, on a
+protected reload failure it tries to unload a successfully loaded failed
+replacement, clear tracked modules, restore backed-up module entries,
+load/restore the **same** target and refresh its extensions. Structured APIs
+return failure evidence; `reload-now!` returns `false` if recovery succeeds and
+throws if recovery fails. Selection, module collection and snapshot errors are
+also captured without attempting rollback before mutation. This is not a staged
 swap: globals, newly introduced/untracked modules, external writes, native effects
 and in-flight work are not universally reversed.
 
 | Entry point | Routing / invalidation | Recovery responsibility |
 | --- | --- | --- |
-| Watcher/controller and controller `reload-now!` | Candidate → eligibility → target-owned loaded-module and Fennel-cache clearing | Same-target tracked-module/snapshot recovery above; no failure escalation |
+| Watcher/controller and controller `reload-now!` / `reload-pending!` | Candidate → eligibility → target-owned loaded-module and Fennel-cache clearing | Same-target tracked-module/snapshot recovery above; no failure escalation |
+| Explicit live-dev / controller `reload-root!` | Configured root regardless of narrow eligibility; same module/cache handling | Structured result; coordinator health/fault checks, CLI may perform one verified recovery restart |
 | `Unit:reload` | Exactly that unit; snapshot → unload → load → restore → graph refresh; base Unit has no module invalidation | No controller backup/recovery wrapper |
 | `ModuleUnit:reload` | Direct Unit protocol; unload clears remembered owned modules/caches. Configured `module-paths` tracks owned requires during lifecycle calls | Loader-specific clearing, not consumer/dependency invalidation or controller recovery |
 | `SourceUnit:reload` | Direct Unit protocol; unload discards its evaluated module table, load evaluates its captured source | Does not invalidate imported dependencies or gain a controller backup |
@@ -153,6 +220,18 @@ experimental replacement operations with weaker guarantees. A later watcher
 event is not a protection for an earlier direct edit/reload. Internal reload uses
 `id`; the external tool uses `unit_id` (and source tools use `source_id`).
 See [External Unit MCP](./notes/external-unit-mcp) for its separate editing API.
+
+### Persistent control owner
+
+`live-dev-runtime` owns one controller, RC transport and native poll/operation
+callbacks above root lifetime. `app.hot-reload-controller`, `app.remote-control`
+and the endpoint are borrowed inspection references; root init/drop must not
+reset, poll or destroy them. Root reload retains async RC results and manual mode.
+Only health-checked successful root initialization advances generation; opted-in
+watcher child success is checked without advancing root generation. Failed
+rollback or health faults suppress damaged root updates but keep status/quit
+available. Preserved infrastructure changes require restart. See
+[Live Development](./features/live-dev) for the protocol and restart boundary.
 
 ## Existing mechanisms, not a universal effect system
 
@@ -279,11 +358,18 @@ fresh catalogs imply automatic rollback of arbitrary mutations or external effec
 ## Evidence and further reading
 
 - `assets/lua/tests/test-units.fnl`: deterministic eligibility matrix, wrapper
-  callback deferral, edited ModuleUnit behavior and deleted-module clearing.
-- `assets/lua/tests/test-hot-reload-integration.fnl`: real main configuration,
+  callback deferral, edited ModuleUnit behavior and deleted-module clearing;
+  watcherless construction/conversion, structured failures and context restoration.
+- `assets/lua/tests/test-hot-reload-integration.fnl`: real root configuration,
   repeated default root reloads of main/HUD paths, active world/log preservation,
-  stable controller/callback IDs and singular cache searcher; also experimental
+  stable coordinator/controller and singular cache searcher; manual mode,
+  persistent RC/async results and normal-entry first reload; also experimental
   direct HUD/canvas and explicit opt-in child fixtures, not general freshness proof.
+- `assets/lua/tests/test-live-dev-runtime.fnl`: config forwarding, deferred
+  operations, fault/health/generation accounting and process ownership.
+- `tests/test_live_dev_integration.py`: offline, isolated actual-main default-root
+  watcher and explicit HUD opt-in, explicit root reload under either policy,
+  manual reload, restart and identity-safe cleanup.
 - `assets/lua/tests/test-graph-extension-units.fnl` and
   `test-graph-extension-runtime-plumbing.fnl`: the contracted extension seam,
   repeated registration/refresh cleanup, recovery and subsequent success.

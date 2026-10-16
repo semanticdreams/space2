@@ -20,6 +20,7 @@ class PolicyViolation:
 
 REQUIRED_AGENT_KEYS = {"description", "mode", "model", "permission"}
 REQUIRED_SKILL_KEYS = {"name", "description"}
+DIRECT_DEVELOPMENT_PRIMARIES = {"fast-dev", "live-dev"}
 CAPABILITY_AGENTS = {"git-integrator", "github-operator", "config-auditor", "pr-recovery-operator", "windows-ci-reproducer"}
 GIT_INTEGRATOR_ALLOWED_WRAPPER_COMMANDS = {
     "python3 scripts/opencode_git_integrate.py status --repo-root .",
@@ -301,13 +302,13 @@ def _check_role_boundaries(path: Path, repo_root: Path, name: str, raw: str) -> 
 
 
 def _check_permission_profile(path: Path, repo_root: Path, keys: dict[str, str]) -> list[PolicyViolation]:
-    """Only the canonical fast-dev primary may grant all tools at once."""
+    """Only exact direct-development primaries may grant all tools at once."""
     permission = keys.get("permission", "")
-    if path.stem == "fast-dev":
+    if path.stem in DIRECT_DEVELOPMENT_PRIMARIES:
         if keys.get("mode") != "primary" or permission != "allow":
-            return [_violation(path, repo_root, "permission-profile", "fast-dev must use mode: primary and scalar permission: allow")]
+            return [_violation(path, repo_root, "permission-profile", f"{path.stem} must use mode: primary and scalar permission: allow")]
     elif permission and permission != "deny":
-        return [_violation(path, repo_root, "permission-profile", "scalar permission grants are reserved for the fast-dev primary")]
+        return [_violation(path, repo_root, "permission-profile", "scalar permission grants are reserved for the fast-dev and live-dev primaries")]
     if path.stem == "fast-dev-reviewer" and keys.get("mode") != "subagent":
         return [_violation(path, repo_root, "role-boundary", "fast-dev-reviewer must keep mode: subagent")]
     return []

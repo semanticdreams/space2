@@ -28,6 +28,7 @@
 #include "lua_runtime.h"
 #include "lua_http_server.h"
 #include "lua_engine.h"
+#include "live_dev_bootstrap.h"
 #include "log.h"
 #include "resource_manager.h"
 #include "space_log_path.h"
@@ -130,6 +131,8 @@ void report_top_level_error(const std::string& message)
 
 int main(int argc, char *argv[])
 {
+    const std::filesystem::path executablePath = executable_path::resolve(argc > 0 ? argv[0] : nullptr);
+    const auto launch = live_dev::capture_launch(argc, argv, executablePath);
     // Pre-scan CLI for dotenv flags so SPACE_LOG_DIR from dotenv files
     // is available to the native log path resolver at startup.
     bool no_dotenv = false;
@@ -182,7 +185,6 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    const std::filesystem::path executablePath = executable_path::resolve(argc > 0 ? argv[0] : nullptr);
     AssetManager::setExecutablePath(executablePath);
 
 #if defined(SPACE_ENABLE_CEF)
@@ -378,6 +380,8 @@ int main(int argc, char *argv[])
     lua["arg"] = arg;
 
     sol::table app_config = lua.create_table();
+    app_config["live-dev"] = live_dev::make_bootstrap(lua, launch,
+        {SPACE_NATIVE_SOURCE_ROOT, SPACE_NATIVE_BUILD_ROOT, SPACE_NATIVE_BUILD_PROFILE, SPACE_NATIVE_CEF_ENABLED != 0});
     app_config["run-main"] = (entry_mode == EntryMode::Module && module_name_target == "main" && module_function.empty());
     lua["package"]["preload"]["app-config"] = [app_config](sol::this_state ts) -> sol::object {
         sol::state_view lua_view(ts);

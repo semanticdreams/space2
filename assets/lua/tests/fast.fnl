@@ -4,6 +4,7 @@
    [:tests.test-pre-engine-start
     :tests.test-layout
     :tests.test-cli-args
+    :tests.test-live-dev-runtime
     :tests.test-ray-box
     :tests.test-signal
     :tests.test-touch-session

@@ -98,6 +98,42 @@
 (table.insert tests {:name "remote control executes code" :fn remote-control-ok})
 (table.insert tests {:name "remote control reports errors" :fn remote-control-error})
 
+(fn check-bounded-tick [endpoint _path]
+  (local rc (RemoteControl {:endpoint endpoint}))
+  (assert (= (rc:tick 1) 0) "idle tick must return handled count")
+  (local ctx (zmq.Context 1))
+  (local clients [])
+  (for [_ 1 2]
+    (local client (ctx:socket (. zmq.socket-types :REQ)))
+    (client:set-option-int "linger" 0)
+    (client:connect endpoint)
+    (client:send "(remote_control.create)")
+    (table.insert clients client))
+  (local sysinfo (require :sysinfo))
+  (local deadline (+ (sysinfo.now-ms) 2000))
+  (var handled 0)
+  (while (and (< handled 2) (< (sysinfo.now-ms) deadline))
+    (local count (rc:tick 1))
+    (assert (and (>= count 0) (<= count 1)) "bounded tick handled more than one request")
+    (set handled (+ handled count)))
+  (assert (= handled 2))
+  (each [_ client (ipairs clients)]
+    (local reply (read-reply client rc 2000))
+    (assert reply)
+    (local text (reply:to-string))
+    (assert (= (string.sub text 1 3) "ok "))
+    (local id (string.sub text 4))
+    (assert (= (. (_G.remote_control.poll id true) :status) "pending"))
+    (_G.remote_control.resolve id "survives")
+    (assert (= (. (_G.remote_control.poll id) :value) "survives"))
+    (client:close))
+  (ctx:close)
+  (rc:drop)
+  (assert (= (rc:tick 1) 0)))
+
+(fn bounded-tick [] (with-endpoint check-bounded-tick))
+(table.insert tests {:name "remote control bounded tick counts requests and preserves async API" :fn bounded-tick})
+
 (local main
   (fn []
     (local runner (require :tests/runner))

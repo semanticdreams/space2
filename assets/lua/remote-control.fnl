@@ -83,12 +83,19 @@
       (logging.error (.. "[remote-control] unexpected handler error: " (tostring err)))
       (send-error err)))
 
-  (fn tick []
+  (fn tick [_self limit]
+    (assert (or (= limit nil) (and (= (type limit) :number)
+                                  (= limit (math.floor limit)) (> limit 0)))
+            "RemoteControl.tick limit must be a positive integer")
+    (var handled 0)
     (when (not closed)
       (var msg (socket:recv recv-flags.DONTWAIT))
       (while msg
         (handle-message msg)
-        (set msg (socket:recv recv-flags.DONTWAIT)))))
+        (set handled (+ handled 1))
+        (set msg (if (and limit (>= handled limit)) nil
+                     (socket:recv recv-flags.DONTWAIT)))))
+    handled)
 
   (fn drop []
     (when (not closed)
