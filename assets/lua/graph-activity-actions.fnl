@@ -28,17 +28,19 @@
   (when (= (next selected-keys) nil)
     (lua "return nil"))
 
-  (local LinkEntityStore (require :entities/link))
-  (local store (LinkEntityStore.get-default))
+  (local owner (or graph.graph graph))
+  (local store (assert owner.link-store "Show link entities requires graph link-store"))
+  (local identity-store (assert owner.identity-store "Show link entities requires graph identity-store"))
+  (assert (= store.identity-store identity-store) "Show link entities identity-store mismatch")
   (local {:LinkEntityNode LinkEntityNode} (require :graph/nodes/link-entity))
   (local entities (store:list-entities))
   (each [_ entity (ipairs (or entities []))]
-    (local source-key (tostring (or (and entity entity.source-key) "")))
-    (local target-key (tostring (or (and entity entity.target-key) "")))
+    (local source-key (identity-store:resolve-key entity.source-key))
+    (local target-key (identity-store:resolve-key entity.target-key))
     (local entity-keys {source-key true target-key true})
     (var all-match true)
     (each [k _ (pairs selected-keys) &until (not all-match)]
-      (when (not (. entity-keys k))
+      (when (not (. entity-keys (identity-store:resolve-key k)))
         (set all-match false)))
     (when all-match
       (local id (tostring (or (and entity entity.id) "")))

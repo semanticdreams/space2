@@ -1921,16 +1921,6 @@
                  true)
              false)))
 
-(fn spatial-projection-state [legacy-state]
-    (local projection-state {})
-    (local source-state (if legacy-state legacy-state {}))
-    (each [key value (pairs source-state)]
-        (when (and (not= key :selected_node_keys)
-                   (not= key :focused_node_key)
-                   (not= key :views))
-            (set (. projection-state key) value)))
-    projection-state)
-
 (set install-spatial-focused-actions!
      (fn [view deps]
          (FocusedActions.install!
@@ -1997,22 +1987,13 @@
          (set view._spatial-restore-views-state view.restore-views-state)
          (set view._spatial-apply-initial-camera-policy view.apply-initial-camera-policy!)
          (set view._spatial-projection
-              {:mode "spatial"
+               {:mode "spatial"
+                :snapshot-projection-state (fn [runtime-view _runtime]
+                                             {:extra_panels (Runtime.snapshot-spatial-panels runtime-view)})
                :capture-projection-state! (fn [runtime-view _runtime]
-                                            (spatial-projection-state
+                                             (Runtime.spatial-projection-state
                                                 (runtime-view._spatial-capture-state runtime-view)))
-               :restore-projection-state! (fn [runtime-view runtime projection-state]
-                                            (local state (or projection-state {}))
-                                            (local legacy-state {})
-                                            (each [key value (pairs state)]
-                                                (set (. legacy-state key) value))
-                                            (when runtime-view._spatial-runtime-selected-keys-present?
-                                                (set legacy-state.selected_node_keys runtime.graph-map.selected_node_keys))
-                                            (when (and (= runtime.graph-map.focused_node_key nil)
-                                                       state.focused_node_key)
-                                                (set runtime.graph-map.focused_node_key state.focused_node_key))
-                                            (runtime-view._spatial-restore-state runtime-view legacy-state)
-                                            (runtime-view:_spatial-apply-focused-key! runtime.graph-map.focused_node_key))
+                :restore-projection-state! Runtime.restore-spatial-projection!
                :drop-projection! (fn [runtime-view _runtime]
                                    (runtime-view._spatial-drop runtime-view))
                :apply-initial-camera-policy! (fn [runtime-view _runtime]
@@ -2027,16 +2008,11 @@
                                            :mode-states deps.mode-states
                                            :view-target deps.view-target
                                            :view-context deps.view-context
-                                           :node-views {:capture-state (fn [_self]
-                                                                         (and deps.node-views.capture-state
-                                                                              (deps.node-views:capture-state)))
-                                                        :restore-state (fn [_self state]
-                                                                         (when deps.node-views.restore-state
-                                                                             (deps.node-views:restore-state state)))
-                                                        :drop-all (fn [_self] true)}}
+                                            :node-views (Runtime.spatial-node-view-adapter deps.node-views)}
                                           view._spatial-projection)
                            view._spatial-projection)
-         (set view._runtime-capture-state view.capture-state)
+          (set view._runtime-capture-state view.capture-state)
+          (set view.snapshot-reference-metadata Runtime.snapshot-spatial-metadata)
          (set view._runtime-restore-state view.restore-state)
          (set view._runtime-drop view.drop)
          (set view.drop
@@ -2071,23 +2047,11 @@
                    (when (and spatial-state spatial-state.extra_panels)
                        (set state.extra_panels spatial-state.extra_panels))
                    state))
-         (set view.restore-state
-               (fn [runtime-view state]
-                   (when runtime-view.runtime.dropped?
-                       (error "GraphView restore-state called after drop"))
-                   (local payload (or state {}))
-                   (set runtime-view._spatial-runtime-selected-keys-present? (not (= payload.selected_node_keys nil)))
-                   (if (and payload.extra_panels
-                            (not (and payload.mode_states (. payload.mode_states :spatial))))
-                       (do
-                           (local mode-states (or payload.mode_states {}))
-                           (set (. mode-states :spatial) {:extra_panels payload.extra_panels})
-                           (local merged {})
-                           (each [key value (pairs payload)]
-                               (set (. merged key) value))
-                           (set merged.mode_states mode-states)
-                           (runtime-view._runtime-restore-state runtime-view merged))
-                       (runtime-view._runtime-restore-state runtime-view payload))))
+           (set view.restore-state
+                (fn [runtime-view state]
+                    (when runtime-view.runtime.dropped?
+                        (error "GraphView restore-state called after drop"))
+                    (Runtime.restore-spatial-state runtime-view state)))
          view))
 
 (set update-islands-after-member-drag-end!

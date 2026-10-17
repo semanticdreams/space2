@@ -5,6 +5,7 @@
 (local Signal (require :signal))
 (local JsonUtils (require :json-utils))
 (local Temporal (require :temporal))
+(local R (require :reference-lifecycle/record-utils))
 
 (local Migrations Temporal.migrations)
 
@@ -314,10 +315,10 @@
   base)
 
 (fn definition-path [self definition-id]
-  (fs.join-path self.definitions-dir (.. (tostring definition-id) ".json")))
+  (R.record-path self.base-dir self.definitions-dir definition-id ".json"))
 
 (fn run-path [self run-id]
-  (fs.join-path self.runs-dir (.. (tostring run-id) ".json")))
+  (R.record-path self.base-dir self.runs-dir run-id ".json"))
 
 (fn read-json-record [path]
   (when (fs.exists path)
@@ -325,14 +326,106 @@
     (assert (= (type parsed) "table") (.. "workflow JSON record must be an object: " path))
     parsed))
 
-(fn write-definition! [self definition]
-  (ensure-dir self.definitions-dir)
-  (local path (definition-path self definition.id))
+(fn serialize-definition [self definition]
+  (local path (fs.join-path self.definitions-dir (.. (R.require-id definition.id) ".json")))
   (local payload (shallow-copy-table definition))
   (set payload.created-at (timestamp->string definition.created-at Migrations.schemas.workflow-definition "created-at" path false))
   (set payload.updated-at (timestamp->string definition.updated-at Migrations.schemas.workflow-definition "updated-at" path false))
-  (JsonUtils.write-json! path payload)
+  (json.dumps payload))
+
+(fn validate-persisted-step [step]
+  (R.require-id step.id)
+  (R.require-id (R.field step :code-entity-id :string nil))
+  (R.field step :name :string nil)
+  (each [_ key (ipairs [:config :input-schema :output-schema :retry])]
+    (R.field step key :table nil))
+  (R.field step :timeout-ms :number nil))
+
+(fn validate-persisted-definition [data]
+  (assert (= (type data) :table) "workflow definition must be an object")
+  (each [_ key (ipairs [:name :description :status])] (R.field data key :string nil))
+  (R.field data :version :number nil)
+  (R.field data :parameters :table nil)
+  (R.require-array (R.field data :steps :table []))
+  (R.require-array (R.field data :edges :table [])))
+
+(fn validate-persisted-edge [edge ids]
+  (R.require-id edge.id)
+  (R.require-id (R.field edge :source-step-id :string nil))
+  (R.require-id (R.field edge :target-step-id :string nil))
+  (each [_ key (ipairs [:kind :source-port :target-port])] (R.field edge key :string nil))
+  ;; condition is an owning user payload, not a reference/string field.
+  (assert (and (. ids edge.source-step-id) (. ids edge.target-step-id)) "workflow edge requires existing steps"))
+
+(fn decode-definition [self bytes]
+  (local data (R.decode-json bytes))
+  (validate-persisted-definition data)
+  (R.require-id data.id)
+  (local path (fs.join-path self.definitions-dir (.. data.id ".json")))
+  (local definition (normalize-definition data path))
+  (assert (array-shaped? definition.steps) "workflow steps must be an array")
+  (assert (array-shaped? definition.edges) "workflow edges must be an array")
+  (local ids {})
+  (each [_ step (ipairs definition.steps)]
+    (validate-persisted-step step)
+    (assert (not (. ids step.id)) "duplicate workflow step id")
+    (tset ids step.id true))
+  (each [_ edge (ipairs definition.edges)]
+    (validate-persisted-edge edge ids))
   definition)
+
+(fn snapshot-definition [self id]
+  (fn decode [bytes] (decode-definition self bytes))
+  (local snapshot (R.snapshot (definition-path self id) "json" decode))
+  (when snapshot.value (assert (= snapshot.value.id id) (.. "workflow record id mismatch at " snapshot.path)))
+  snapshot)
+
+(fn publish-children [held candidates]
+  (local out [])
+  (each [_ candidate (ipairs candidates)]
+    (assert (= (type candidate.id) :string) "workflow child requires id")
+    (local record (or (find-by-id held candidate.id) {}))
+    (each [key _ (pairs record)] (tset record key nil))
+    (each [key value (pairs candidate)] (tset record key value))
+    (table.insert out record))
+  out)
+
+(fn publish-definition! [self candidate]
+  (local held (. self._definitions candidate.id))
+  (if held
+      (do
+        (set candidate.steps (publish-children held.steps candidate.steps))
+        (set candidate.edges (publish-children held.edges candidate.edges))
+        (each [key value (pairs candidate)] (tset held key value))
+        held)
+      (do (tset self._definitions candidate.id candidate) candidate)))
+
+(fn write-definition! [self definition]
+  (local payload (json.loads (serialize-definition self definition)))
+  (ensure-dir self.definitions-dir)
+  (JsonUtils.write-json! (definition-path self definition.id) payload)
+  definition)
+
+(fn persist-definition! [self id bytes check]
+  (local candidate (decode-definition self bytes))
+  (R.verify-candidate id candidate (serialize-definition self candidate) check "json")
+  (local before (snapshot-definition self id))
+  (write-definition! self candidate)
+  (local published (publish-definition! self candidate))
+  (local signal (if before.value self.definition-updated self.definition-created))
+  (signal:emit published)
+  published)
+
+(fn reconcile-definition! [self id bytes before-check after-check]
+  (assert (not (= bytes false)) "cannot retire workflow definition during reconciliation")
+  (assert (= (. (snapshot-definition self id) :check) after-check) "workflow reconciliation after-image mismatch")
+  (assert (= (R.check-bytes bytes "json") after-check) "workflow frozen after-check mismatch")
+  (local candidate (decode-definition self bytes))
+  (R.verify-candidate id candidate (serialize-definition self candidate) after-check "json")
+  (local published (publish-definition! self candidate))
+  (local signal (if (= before-check false) self.definition-created self.definition-updated))
+  (signal:emit published)
+  published)
 
 (fn write-run! [self run]
   (ensure-dir self.runs-dir)
@@ -376,12 +469,9 @@
   (if cached
       cached
       (do
-        (local path (definition-path self id))
-        (local record (read-json-record path))
+        (local record (. (snapshot-definition self id) :value))
         (when record
-          (local normalized (normalize-definition record path))
-          (set (. self._definitions id) normalized)
-          normalized))))
+          (publish-definition! self record)))))
 
 (fn require-definition [self definition-id]
   (local definition (load-definition self definition-id))
@@ -422,7 +512,10 @@
 
 (fn touch-definition! [self definition]
   (set definition.updated-at (now))
-  (write-definition! self definition))
+  (write-definition! self definition)
+  (local published (publish-definition! self definition))
+  (self.definition-updated:emit published)
+  published)
 
 (fn get-definition [self definition-id]
   (if definition-id (load-definition self definition-id) nil))
@@ -430,13 +523,13 @@
 (fn list-definitions [self]
   (local items [])
   (when (fs.exists self.definitions-dir)
-    (each [_ entry (ipairs (fs.list-dir self.definitions-dir false))]
+    (each [_ entry (ipairs (R.record-entries self.definitions-dir ".json"))]
       (when (and entry.is-file (string.match entry.name "%.json$"))
-        (local definition (normalize-definition (read-json-record entry.path) entry.path))
-        (set (. self._definitions definition.id) definition)
+        (local definition (. (snapshot-definition self (string.sub entry.name 1 -6)) :value))
         (table.insert items definition))))
-  (table.sort items (fn [a b] (< a.id b.id)))
-  items)
+  (local published (icollect [_ candidate (ipairs items)] (publish-definition! self candidate)))
+  (table.sort published (fn by-id [a b] (< a.id b.id)))
+  published)
 
 (fn create-definition [self create-opts]
   (local data (table-or-empty create-opts))
@@ -454,19 +547,17 @@
   (each [_ edge (ipairs definition.edges)]
     (require-step definition edge.source-step-id)
     (require-step definition edge.target-step-id))
-  (set (. self._definitions definition.id) definition)
   (write-definition! self definition)
-  (self.definition-created:emit definition)
-  definition)
+  (local published (publish-definition! self definition))
+  (self.definition-created:emit published)
+  published)
 
 (fn update-definition [self definition-id updates]
-  (local definition (require-definition self definition-id))
+  (local definition (R.clone (require-definition self definition-id)))
   (validate-definition-updates updates)
   (local normalized-updates (normalize-definition-update-timestamps updates (definition-path self definition.id)))
   (apply-updates! definition normalized-updates)
-  (touch-definition! self definition)
-  (self.definition-updated:emit definition)
-  definition)
+  (touch-definition! self definition))
 
 (fn delete-definition [self definition-id _opts]
   (local definition (require-definition self definition-id))
@@ -478,22 +569,18 @@
   definition)
 
 (fn add-step [self definition-id step]
-  (local definition (require-definition self definition-id))
+  (local definition (R.clone (require-definition self definition-id)))
   (local normalized (normalize-step step))
   (table.insert definition.steps normalized)
-  (touch-definition! self definition)
-  (self.definition-updated:emit definition)
-  normalized)
+  (require-step (touch-definition! self definition) normalized.id))
 
 (fn update-step [self definition-id step-id updates]
-  (local definition (require-definition self definition-id))
+  (local definition (R.clone (require-definition self definition-id)))
   (local step (require-step definition step-id))
   (validate-step-updates updates)
   (apply-updates! step updates)
   (assert step.code-entity-id "workflow step requires :code-entity-id")
-  (touch-definition! self definition)
-  (self.definition-updated:emit definition)
-  step)
+  (require-step (touch-definition! self definition) step-id))
 
 (fn delete-dependent-edges! [definition step-id]
   (var idx (length definition.edges))
@@ -509,46 +596,45 @@
       (set count (+ count 1))))
   count)
 
+(fn prepare-step-removal [_self definition step-ids opts]
+  (local candidate (R.clone definition))
+  (each [_ id (ipairs step-ids)]
+    (require-step candidate id)
+    (when (and (> (dependent-edge-count candidate id) 0)
+               (not (and opts opts.delete-dependent-edges?)))
+      (error (.. "workflow step has dependent edges: " id)))
+    (when (and opts opts.delete-dependent-edges?) (delete-dependent-edges! candidate id))
+    (remove-by-id! candidate.steps id))
+  candidate)
+
 (fn delete-step [self definition-id step-id opts]
   (local definition (require-definition self definition-id))
-  (local id (tostring step-id))
-  (require-step definition id)
-  (when (and (> (dependent-edge-count definition id) 0)
-             (not (and opts opts.delete-dependent-edges?)))
-    (error (.. "workflow step has dependent edges: " id)))
-  (when (and opts opts.delete-dependent-edges?)
-    (delete-dependent-edges! definition id))
-  (local deleted (remove-by-id! definition.steps id))
-  (touch-definition! self definition)
-  (self.definition-updated:emit definition)
+  (local deleted (require-step definition (tostring step-id)))
+  (local candidate (prepare-step-removal self definition [(tostring step-id)] opts))
+  (touch-definition! self candidate)
   deleted)
 
 (fn add-edge [self definition-id edge]
-  (local definition (require-definition self definition-id))
+  (local definition (R.clone (require-definition self definition-id)))
   (local normalized (normalize-edge edge))
   (require-step definition normalized.source-step-id)
   (require-step definition normalized.target-step-id)
   (table.insert definition.edges normalized)
-  (touch-definition! self definition)
-  (self.definition-updated:emit definition)
-  normalized)
+  (require-edge (touch-definition! self definition) normalized.id))
 
 (fn update-edge [self definition-id edge-id updates]
-  (local definition (require-definition self definition-id))
+  (local definition (R.clone (require-definition self definition-id)))
   (local edge (require-edge definition edge-id))
   (apply-updates! edge updates)
   (require-step definition edge.source-step-id)
   (require-step definition edge.target-step-id)
-  (touch-definition! self definition)
-  (self.definition-updated:emit definition)
-  edge)
+  (require-edge (touch-definition! self definition) edge-id))
 
 (fn delete-edge [self definition-id edge-id]
-  (local definition (require-definition self definition-id))
+  (local definition (R.clone (require-definition self definition-id)))
   (require-edge definition edge-id)
   (local deleted (remove-by-id! definition.edges (tostring edge-id)))
   (touch-definition! self definition)
-  (self.definition-updated:emit definition)
   deleted)
 
 (fn create-run [self definition-id input context]
@@ -655,12 +741,13 @@
 (fn WorkflowStore [opts]
   (local options (table-or-empty opts))
   (assert options.base-dir "WorkflowStore requires :base-dir")
-  (local root-dir (fs.join-path options.base-dir "workflows"))
+  (local base-dir (fs.absolute options.base-dir))
+  (local root-dir (fs.join-path base-dir "workflows"))
   (local definitions-dir (fs.join-path root-dir "definitions"))
   (local runs-dir (fs.join-path root-dir "runs"))
   (ensure-dir definitions-dir)
   (ensure-dir runs-dir)
-  (local self {:base-dir options.base-dir
+  (local self {:base-dir base-dir
                :root-dir root-dir
                :definitions-dir definitions-dir
                :runs-dir runs-dir
@@ -685,7 +772,10 @@
                :delete-step delete-step
                :add-edge add-edge
                :update-edge update-edge
-               :delete-edge delete-edge
+                :delete-edge delete-edge
+                :prepare-step-removal prepare-step-removal
+                :snapshot-definition snapshot-definition :serialize-definition serialize-definition
+                 :decode-definition decode-definition :persist-definition! persist-definition! :reconcile-definition! reconcile-definition!
                :create-run create-run
                :get-run get-run
                :list-runs list-runs

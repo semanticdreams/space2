@@ -39,31 +39,30 @@
   (with-temp-dir
     (fn [root]
       (local morphs (make-morphs))
-      (local StringEntityStore (require :entities/string))
-      (local CodeEntityStore (require :entities/code))
-      (local IdentityStore (require :entities/identity))
-      (local string-store (StringEntityStore.StringEntityStore {:base-dir (fs.join-path root "string")}))
-      (local code-store (CodeEntityStore.CodeEntityStore {:base-dir (fs.join-path root "code")}))
-      (local identity-store (IdentityStore.IdentityStore {:base-dir (fs.join-path root "identity")}))
+      (local H (require :tests/test-reference-lifecycle-helpers))
+      (local stores (H.stores root))
+      (local string-store stores.string-store)
+      (local code-store stores.code-store)
+      (local identity-store stores.identity-store)
       (local source-entity (string-store:create-entity {:id "s1"
                                                         :value "(+ 1 2)"}))
       (local source-key (.. "string-entity:" source-entity.id))
       (local identity (identity-store:create-entity {:id "id-s1"
                                                      :target-key source-key}))
-      (local graph (Graph {:with-start false
+      (local lifecycle (H.ready stores))
+      (local graph (Graph {:with-start false :lifecycle lifecycle
+                            :string-store string-store :link-store stores.link-store
                            :identity-store identity-store
                            :morphs morphs}))
       (local {:register-loader register-string-loader} (require :graph/nodes/string-entity))
       (local {:register-loader register-code-loader} (require :graph/nodes/code-entity))
-      (register-string-loader graph {:store string-store})
-      (register-code-loader graph {:store code-store})
+      (register-string-loader graph {:store string-store :lifecycle lifecycle})
+      (register-code-loader graph {:store code-store :lifecycle lifecycle})
       (local source-node (graph:load-by-key source-key))
       (assert source-node "source node should load before morph")
 
       (local result
-        (morphs:apply source-node "code-entity" {:string-store string-store
-                                                 :code-store code-store
-                                                 :identity-store identity-store}))
+        (morphs:apply source-node "code-entity" {:lifecycle lifecycle}))
 
       (local code-key (and result result.code-key))
       (assert code-key "morph should return code key")

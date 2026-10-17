@@ -17,15 +17,17 @@
 (fn env-enabled? [name]
   (= (os.getenv name) "1"))
 
-(fn configured-test-timeout-seconds []
-  (local raw (os.getenv "SPACE_TEST_CASE_TIMEOUT_SECONDS"))
+(fn select-test-timeout-seconds [raw case-budget]
+  (when (not (= case-budget nil))
+    (assert (and (= (type case-budget) :number) (> case-budget 0) (< case-budget math.huge))
+            "test timeout-seconds must be a positive finite number"))
   (if (and raw (> (# raw) 0))
       (do
         (local parsed (tonumber raw))
         (assert parsed "SPACE_TEST_CASE_TIMEOUT_SECONDS must be numeric")
         (assert (>= parsed 0) "SPACE_TEST_CASE_TIMEOUT_SECONDS must be non-negative")
         parsed)
-      120))
+      (if (= case-budget nil) 120 case-budget)))
 
 (fn restore-debug-hook! [debug-lib old-hook old-mask old-count]
   (if old-hook
@@ -39,7 +41,7 @@
       sysinfo.now-ms
       (fn [] (* (os.clock) 1000))))
 
-(fn protected-call-with-timeout [traceback test timeout-seconds]
+(fn protected-call-with-timeout [traceback test timeout-seconds clock]
   (local debug-lib _G.debug)
   (if (or (= timeout-seconds 0)
           (not debug-lib)
@@ -47,7 +49,7 @@
           (not debug-lib.gethook))
       (protected-call traceback test.fn)
       (do
-        (local now-ms (make-now-ms))
+        (local now-ms (if clock clock (make-now-ms)))
         (local started-at (now-ms))
         (local timeout-ms (* timeout-seconds 1000))
         (var timed-out? false)
@@ -62,8 +64,51 @@
         (local (ok err) (protected-call traceback test.fn))
         (restore-debug-hook! debug-lib old-hook old-mask old-count)
         (if timed-out?
-            (values false timeout-message)
-            (values ok err)))))
+             (values false timeout-message)
+             (values ok err)))))
+
+(fn verbose-stage [stage outcome]
+  (when (os.getenv "TEST_VERBOSE")
+    (log-line (.. stage " " outcome))))
+
+(fn run-case [test timeout-seconds traceback now-ms]
+  (select-test-timeout-seconds nil test.timeout-seconds)
+  (assert (or (= test.teardown nil) (= (type test.teardown) :function))
+          "test teardown must be a function")
+  (local (ok result) (protected-call-with-timeout traceback test timeout-seconds now-ms))
+  (local teardown-errors [])
+  (var cleanup-ok true)
+  (var cleanup-result nil)
+  (when test.teardown
+    (local stage (.. "[TEARDOWN] " test.name))
+    (verbose-stage stage "attempt")
+    (set (cleanup-ok cleanup-result) (protected-call traceback test.teardown))
+    (verbose-stage stage (if cleanup-ok "returned" "failed"))
+    (when (not cleanup-ok)
+      (table.insert teardown-errors cleanup-result)))
+  (values (and ok cleanup-ok) (if ok (if cleanup-ok result cleanup-result) result) teardown-errors))
+
+(fn with-owned-engine [owned-engine body traceback]
+  (local (ok result) (protected-call traceback body))
+  (var shutdown-attempted? false)
+  (fn shutdown-owned []
+    (assert owned-engine "test runner requires its captured owned engine")
+    (if (or shutdown-attempted? (owned-engine:is-shutdown))
+        (verbose-stage "[SUITE-ENGINE]" "skip-already-attempted")
+        (not (owned-engine:is-started))
+        (verbose-stage "[SUITE-ENGINE]" "skip-unstarted")
+        (do
+          ;; Native is-shutdown is an ATTEMPT flag, not a completion receipt.
+          (set shutdown-attempted? true)
+          (verbose-stage "[SUITE-ENGINE]" "shutdown attempt")
+          (owned-engine:shutdown)
+          (verbose-stage "[SUITE-ENGINE]" "shutdown returned"))))
+  (local (cleanup-ok cleanup-result) (protected-call traceback shutdown-owned))
+  (when (not cleanup-ok)
+    (log-line (.. "[SUITE-ENGINE] shutdown failed: " (tostring cleanup-result))))
+  (if (not ok) (error result 0)
+      (not cleanup-ok) (error cleanup-result 0)
+      result))
 
 (local windows-default-skip-modules
   {:tests.test-terminal true
@@ -276,7 +321,7 @@
     (set app.lights (LightSystem {})))
   )
 
-(fn execute-test-list [suite tests test-verbose traceback timeout-seconds]
+(fn execute-test-list [suite tests test-verbose traceback raw-timeout]
   (local registered-tests [])
   (each [_ test (ipairs tests)]
     (when (not (= (type test.name) "string"))
@@ -289,7 +334,10 @@
   (each [_ test (ipairs registered-tests)]
     (when test-verbose
       (log-line (.. "[RUN] " test.name)))
-    (local (ok err) (protected-call-with-timeout traceback test timeout-seconds))
+    (local timeout-seconds (select-test-timeout-seconds raw-timeout test.timeout-seconds))
+    (local (ok err teardown-errors) (run-case test timeout-seconds traceback))
+    (each [_ cleanup-error (ipairs teardown-errors)]
+      (log-line (.. "[TEARDOWN-ERROR] " test.name ": " (tostring cleanup-error))))
     (if ok
         (when test-verbose
           (log-line (.. "[PASS] " test.name)))
@@ -300,7 +348,7 @@
 
   (values failures (# registered-tests)))
 
-(fn execute-tests [suite test-verbose test-filter traceback timeout-seconds]
+(fn execute-tests [suite test-verbose test-filter traceback raw-timeout]
   (local registered-tests [])
   (each [_ test (ipairs suite.tests)]
     (when (or (not test-filter)
@@ -308,7 +356,7 @@
       (table.insert registered-tests test)))
 
   (local (initial-failures initial-executed)
-    (execute-test-list suite registered-tests test-verbose traceback timeout-seconds))
+    (execute-test-list suite registered-tests test-verbose traceback raw-timeout))
   (var failures initial-failures)
   (local executed initial-executed)
 
@@ -323,7 +371,6 @@
 
   (log-line (.. "Executed " executed " Lua tests"))
 
-  (app.engine:shutdown)
   suite)
 
 (fn run-tests [suite]
@@ -331,21 +378,16 @@
   (local test-verbose (os.getenv "TEST_VERBOSE"))
   (local test-filter (os.getenv "TEST_FILTER"))
   (local traceback (and _G.debug _G.debug.traceback))
-  (local timeout-seconds (configured-test-timeout-seconds))
+  (local raw-timeout (os.getenv "SPACE_TEST_CASE_TIMEOUT_SECONDS"))
+  (select-test-timeout-seconds raw-timeout nil)
   (setup-test-env test-verbose)
+  (local owned-engine app.engine)
+  (fn body [] (execute-tests suite test-verbose test-filter traceback raw-timeout))
+  (with-owned-engine owned-engine body traceback))
 
-  (execute-tests suite test-verbose test-filter traceback timeout-seconds))
-
-(fn run-modules [suite]
-  (assert (and suite suite.modules) "tests.runner: suite missing modules")
-  (local test-verbose (os.getenv "TEST_VERBOSE"))
-  (local test-filter (os.getenv "TEST_FILTER"))
-  (local traceback (and _G.debug _G.debug.traceback))
-  (local timeout-seconds (configured-test-timeout-seconds))
+(fn execute-modules [suite test-verbose test-filter traceback raw-timeout]
   (local print-timings (or (os.getenv "SPACE_TEST_TIMINGS")
                            (os.getenv "TEST_VERBOSE")))
-  (setup-test-env test-verbose)
-
   (local modules (apply-module-overrides suite.modules))
   (local now-ms (make-now-ms))
   (var failures 0)
@@ -374,7 +416,7 @@
                   (string.find test.name test-filter 1 true))
           (table.insert registered-tests test)))
       (local (module-failures module-executed)
-        (execute-test-list {:name module-name} registered-tests test-verbose traceback timeout-seconds))
+        (execute-test-list {:name module-name} registered-tests test-verbose traceback raw-timeout))
       (set failures (+ failures module-failures))
       (set executed (+ executed module-executed))))
 
@@ -398,8 +440,19 @@
 
   (log-line (.. "Executed " executed " Lua tests"))
 
-  (app.engine:shutdown)
   suite)
+
+(fn run-modules [suite]
+  (assert (and suite suite.modules) "tests.runner: suite missing modules")
+  (local test-verbose (os.getenv "TEST_VERBOSE"))
+  (local test-filter (os.getenv "TEST_FILTER"))
+  (local traceback (and _G.debug _G.debug.traceback))
+  (local raw-timeout (os.getenv "SPACE_TEST_CASE_TIMEOUT_SECONDS"))
+  (select-test-timeout-seconds raw-timeout nil)
+  (setup-test-env test-verbose)
+  (local owned-engine app.engine)
+  (fn body [] (execute-modules suite test-verbose test-filter traceback raw-timeout))
+  (with-owned-engine owned-engine body traceback))
 
 (fn shutdown-test-env []
   "Shut down the test environment: drop the app and reset it to an empty table."
@@ -408,6 +461,9 @@
   (set app {}))
 
 {:run-modules run-modules
+ :select-test-timeout-seconds select-test-timeout-seconds
+ :run-case run-case
+ :with-owned-engine with-owned-engine
  :run-tests run-tests
  :setup-test-env setup-test-env
  :shutdown-test-env shutdown-test-env}

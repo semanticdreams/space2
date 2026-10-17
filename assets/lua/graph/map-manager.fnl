@@ -3,6 +3,38 @@
 (local fs (require :fs))
 (local json (require :json))
 (local JsonUtils (require :json-utils))
+(local R (require :reference-lifecycle/record-utils))
+
+(local reference-map-fields [:nodes :edges :islands :next_island_id :selected_node_keys
+                             :focused_node_key :view_mode :outline_root_keys])
+
+(fn snapshot-reference-maps [entries active-id next-id]
+    (local maps [])
+    (each [_ entry (pairs entries)]
+        ;; GraphMap.capture-state itself is read-only. Never construct/hydrate an
+        ;; inactive map here: its retained keys may not have live adapters yet.
+        (local state (if entry.map (entry.map:capture-state) entry))
+        (local record {:id entry.id :name entry.name})
+        (each [_ field (ipairs reference-map-fields)]
+            (tset record field (R.clone (. state field))))
+        (table.insert maps record))
+    (table.sort maps (fn by-id [a b] (< a.id b.id)))
+    {:active_map_id active-id :next_map_id next-id :maps maps})
+
+(fn install-reference-maps! [entries state]
+    (R.require-array state.maps)
+    (each [_ record (ipairs state.maps)]
+        (local entry (. entries record.id))
+        ;; Reconciliation installs only still-loaded matching ids, never tabs.
+        (when entry
+            (when (and entry.map
+                       (not (= (JsonUtils.stable-json (entry.map:capture-state))
+                               (JsonUtils.stable-json (collect [_ field (ipairs reference-map-fields)]
+                                                        field (. record field))))))
+                (entry.map:install-reference-state! record))
+            (each [_ field (ipairs reference-map-fields)]
+                (tset entry field (R.clone (. record field))))))
+    true)
 
 (fn ensure-int [v default]
     (if (and (= (type v) :number)
@@ -380,19 +412,6 @@
             (map:drop)
             (error result))
         map)
-
-    (fn capture-active-map-state []
-        (local entry (. entries active-id))
-        (when (and entry entry.map)
-            (local state (entry.map:capture-state))
-            {:nodes (or state.nodes [])
-             :edges (or state.edges [])
-             :islands (or state.islands [])
-              :next_island_id state.next_island_id
-              :selected_node_keys (or state.selected_node_keys [])
-              :focused_node_key state.focused_node_key
-              :view_mode (default-view-mode state.view_mode)
-              :outline_root_keys (default-outline-root-keys state.outline_root_keys)}))
 
     (fn build-active-map [target-id]
         (local entry (. entries target-id))
@@ -823,35 +842,10 @@
         true)
 
     (fn capture-state [_self]
-        (local maps-list [])
         (each [_ entry (pairs entries)]
             (when (not (= entry.id active-id))
-                (hydrate-inactive-entry-for-capture! entry))
-            (local state
-                (if (= entry.id active-id)
-                    (capture-active-map-state)
-                    {:nodes (or entry.nodes [])
-                     :edges (or entry.edges [])
-                     :islands (or entry.islands [])
-                      :next_island_id entry.next_island_id
-                      :selected_node_keys (or entry.selected_node_keys [])
-                      :focused_node_key entry.focused_node_key
-                      :view_mode (default-view-mode entry.view_mode)
-                      :outline_root_keys (default-outline-root-keys entry.outline_root_keys)}))
-             (table.insert maps-list {:id entry.id
-                                       :name entry.name
-                                       :nodes (or state.nodes [])
-                                       :edges (or state.edges [])
-                                       :islands (or state.islands [])
-                                       :next_island_id state.next_island_id
-                                       :selected_node_keys (or state.selected_node_keys [])
-                                      :focused_node_key state.focused_node_key
-                                      :view_mode (default-view-mode state.view_mode)
-                                      :outline_root_keys (default-outline-root-keys state.outline_root_keys)}))
-        (table.sort maps-list (fn [a b] (< a.id b.id)))
-        {:active_map_id active-id
-         :next_map_id next-id
-         :maps maps-list})
+                (hydrate-inactive-entry-for-capture! entry)))
+        (snapshot-reference-maps entries active-id next-id))
 
     (fn drop [_self]
         (each [_ entry (pairs entries)]
@@ -898,25 +892,20 @@
         (self:switch-map! id)
         (self:get-active-map))
 
-    (local self {:graph shared-graph
-                 :data-dir data-dir
-                 :maps-changed maps-changed
-                 :maps-will-change maps-will-change})
-
-    (set self.active-map-id active-id)
     (local active-entry (. entries active-id))
-    (set self.active-map-name (and active-entry active-entry.name))
-    (set self.next-map-id next-id)
-    (set self.get-active-map get-active-map)
-    (set self.active-map-status active-map-status)
-    (set self.list-maps list-maps)
-    (set self.switch-map! switch-map!)
-    (set self.create-map! create-map!)
-    (set self.create-and-switch-map! create-and-switch-map!)
-    (set self.rename-map! rename-map!)
-    (set self.delete-map! delete-map!)
-    (set self.capture-state capture-state)
-    (set self.drop drop)
+    (local self {:graph shared-graph :data-dir data-dir
+                 :maps-changed maps-changed :maps-will-change maps-will-change
+                 :active-map-id active-id :active-map-name (and active-entry active-entry.name)
+                 :next-map-id next-id :get-active-map get-active-map
+                 ;; Read-only lookup; never constructs or hydrates an adapter.
+                 :get-instantiated-map (fn [_self id] (and (. entries id) (. entries id :map)))
+                 :active-map-status active-map-status :list-maps list-maps
+                 :switch-map! switch-map! :create-map! create-map!
+                 :create-and-switch-map! create-and-switch-map! :rename-map! rename-map!
+                 :delete-map! delete-map! :capture-state capture-state
+                 :snapshot-reference-state (fn [_self] (snapshot-reference-maps entries active-id next-id))
+                 :install-reference-state! (fn [_self state] (install-reference-maps! entries state))
+                 :drop drop})
 
     self)
 

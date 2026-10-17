@@ -3,7 +3,7 @@
 (local fs (require :fs))
 (local tempfile (require :tempfile))
 (local HotReload (require :hot-reload))
-(local FileWatch (require :file-watch))
+(local RootSupport (require :tests/hot-reload-root-support))
 (local LauncherLaunchable (require :launchables/launcher))
 (local runtime (require :runtime))
 (local Activities (require :activities))
@@ -100,13 +100,6 @@
     (controller:drop))
   (cleanup-main-if-engine!))
 
-(fn count-searcher-occurrences [target]
-  (var count 0)
-  (each [_ searcher (ipairs package.searchers)]
-    (when (= searcher target)
-      (set count (+ count 1))))
-  count)
-
 (fn activity-unit [mode-id]
   (and app.activity-units
        (. app.activity-units mode-id)))
@@ -119,96 +112,13 @@
    :narrow-reload-unit-ids narrow-unit-ids
    :preserve-modules ["app-bootstrap" "hot-reload" "tests.test-hot-reload-integration" "units"]})
 
-(fn assert-root-reload-state! [controller control world-id DebugLog]
-  (assert (= (. (controller:debug-state) :last-target-unit-id) "app-root")
-          "Default controller execution must target app root")
-  (assert app.world-manager "Expected app.world-manager after reload")
-  (assert (= (app.world-manager:active-world-id) world-id)
-          "Expected active world id to roundtrip through full-app reload")
-  (assert (string.find (fs.read-file DebugLog.log-path) "root reload marker" 1 true)
-          "Expected root reload to preserve debug.log history")
-  (assert (= app.hot-reload-controller controller) "Root reload must retain its controller")
-  (assert (= ((. (require :live-dev-runtime) :current)) control) "Root reload must retain its coordinator")
-  (assert (= app.hot-reload-callback-id nil) "Main must not acquire a duplicate reload callback")
-  (assert package.__space_fennel_cache_searcher "Expected installed fennel cache searcher")
-  (assert (= (count-searcher-occurrences package.__space_fennel_cache_searcher) 1)
-          "Expected exactly one installed fennel cache searcher after repeated reloads"))
-
-(fn assert-default-root-roundtrips! [watch-root DebugLog control filenames]
-  (local controller (assert app.hot-reload-controller "Outer owner must construct the reload controller"))
-  (DebugLog.log "test" "root reload marker")
-  (local created-world (app.world-manager:create-home-world {:activate? false}))
-  (assert (app.world-manager:activate-world-id created-world.id))
-  (each [_ filename (ipairs filenames)]
-    (local old-world-manager app.world-manager)
-    (assert (controller:reload-now! {:changes [{:path (fs.join-path watch-root filename)
-                                               :action "modified"}]})
-            "Expected default root hot reload to succeed")
-    (assert (not (= app.world-manager old-world-manager)) "Default reload must reconstruct root ownership")
-    (assert-root-reload-state! controller control created-world.id DebugLog)))
-
-(fn assert-manual-root-roundtrip! [control transport async-id DebugLog]
-  (DebugLog.log "test" "root reload marker")
-  (local created-world (app.world-manager:create-home-world {:activate? false}))
-  (assert (app.world-manager:activate-world-id created-world.id))
-  (local controller (assert app.hot-reload-controller "outer controller missing"))
-  (control:request 1 "manual")
-  (dispatch-control!)
-  (set FileWatch.FileWatcher (fn [_opts] (error "root init reacquired watcher")))
-  (control:request 2 "reload")
-  (dispatch-control!)
-  (local result (control:operation 2))
-  (assert (= result.status "succeeded") "Expected root hot reload to succeed")
-  (assert (= result.action "reload"))
-  (assert (= result.rollback "not-needed"))
-  (assert (= (. (control:status) :generation) 2))
-  (assert (= app.remote-control transport) "root reload must retain the RC object")
-  (check-async-result! async-id)
-  (assert (= (. (controller:debug-state) :watch?) false))
-  (assert-root-reload-state! controller control created-world.id DebugLog))
-
-(fn with-root-reload-fixture [scenario]
-  (with-temp-dir
-    (fn [dir]
-      (local Main (require-main!))
-      (local DebugLog (require :debug-log))
-      (local original-init-renderers AppBootstrap.init-renderers)
-      (local original-renderers app.renderers)
-      (local original-config app.hot-reload-config)
-      (local original-controller app.hot-reload-controller)
-      (local original-watcher FileWatch.FileWatcher)
-      (local original-worlds-dir app.worlds-dir)
-      (local watch-root (fs.join-path runtime.assets-path "lua"))
-      (local endpoint (.. "ipc://" (fs.join-path dir "control.sock")))
-      (set AppBootstrap.init-renderers
-           (fn [opts]
-             (set app.renderers (make-renderer-stub))
-              (apply-renderer-viewport! opts)
-             app.renderers))
-      (set app.hot-reload-controller nil)
-      (set app.hot-reload-config (test-hot-reload-config watch-root nil))
-      (local (ok result)
-        (pcall
-          (fn []
-            ((. Main :install-app-shell!))
-            (local control (start-test-control! endpoint))
-            (local transport app.remote-control)
-            (local async-id (_G.remote_control.create))
-            ((. Main :init))
-            (control:mark-ready!)
-            (if (= scenario "manual")
-                (assert-manual-root-roundtrip! control transport async-id DebugLog)
-                (assert-default-root-roundtrips! watch-root DebugLog control scenario))
-            true)))
-      (local (cleanup-ok cleanup-result)
-        (pcall cleanup-app-hot-reload-controller-and-main!))
-      (set FileWatch.FileWatcher original-watcher)
-      (set app.renderers original-renderers)
-      (set AppBootstrap.init-renderers original-init-renderers)
-      (set app.hot-reload-config original-config)
-      (set app.hot-reload-controller original-controller)
-      (set app.worlds-dir original-worlds-dir)
-      (finish-protected-result ok result cleanup-ok cleanup-result))))
+(fn current-test-app [] app)
+(local root-support
+  (RootSupport.create
+    {:get-app current-test-app :require-main! require-main!
+     :start-test-control! start-test-control! :stop-test-control! stop-test-control!
+     :dispatch-control! dispatch-control! :check-async-result! check-async-result!
+     :test-hot-reload-config test-hot-reload-config :runner (require :tests/runner)}))
 
 (fn check-test-control! [control controller]
   (local LiveDev (require :live-dev-runtime))
@@ -1049,6 +959,9 @@
       (set AppBootstrap.init-renderers original-init-renderers)
       (finish-protected-result ok result cleanup-ok cleanup-result))))
 
+(table.insert tests {:name "test runner timeout metadata precedence and validation" :fn root-support.runner-timeout-metadata-precedence-and-validation})
+(table.insert tests {:name "test runner case teardown restores deadline hook and preserves errors" :fn root-support.runner-case-teardown-restores-hook-and-preserves-errors})
+(table.insert tests {:name "test runner saved engine scope attempts shutdown once" :fn root-support.runner-saved-engine-scope-attempts-shutdown-once})
 (fn normal-startup-first-reload []
   (local AppConfig (require :app-config))
   (local LiveDev (require :live-dev-runtime))
@@ -1146,15 +1059,18 @@
   (assert stop-ok (tostring stop-err))
   (assert ok (tostring err)))
 
-(fn full-app-root-reload-roundtrips-active-world [] (with-root-reload-fixture "manual"))
-(fn default-root-main-path-roundtrip [] (with-root-reload-fixture ["main.fnl"]))
-(fn repeated-default-root-hud-path-roundtrips [] (with-root-reload-fixture ["hud.fnl" "hud.fnl"]))
+(fn full-app-root-reload-roundtrips-active-world [] (root-support.with-root-reload-fixture "manual"))
+(fn default-root-main-path-roundtrip [] (root-support.with-root-reload-fixture ["main.fnl"]))
+(fn repeated-default-root-hud-path-roundtrips [] (root-support.with-root-reload-fixture ["hud.fnl" "hud.fnl"]))
 
 (table.insert tests {:name "default root main path reload roundtrips active world"
+                     :timeout-seconds 300 :teardown root-support.teardown-root-fixture
                      :fn default-root-main-path-roundtrip})
 (table.insert tests {:name "repeated default root HUD path reloads retain root ownership and active world"
+                     :timeout-seconds 300 :teardown root-support.teardown-root-fixture
                      :fn repeated-default-root-hud-path-roundtrips})
 (table.insert tests {:name "full app root reload roundtrips active world"
+                     :timeout-seconds 300 :teardown root-support.teardown-root-fixture
                      :fn full-app-root-reload-roundtrips-active-world})
 (table.insert tests {:name "drop app cleans hot reload controller and callback"
                      :fn drop-app-cleans-hot-reload-controller-and-callback})
@@ -1193,6 +1109,11 @@
     (runner.run-tests {:name "hot-reload-integration"
                        :tests tests})))
 
+(fn probe-missing-module []
+  ((. (require :tests/runner) :run-modules)
+    {:modules ["tests.__intentional_missing_runner_module__"]}))
+
 {:name "hot-reload-integration"
  :tests tests
+ :probe-missing-module probe-missing-module
  :main main}

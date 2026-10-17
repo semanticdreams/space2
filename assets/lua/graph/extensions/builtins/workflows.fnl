@@ -39,7 +39,7 @@
   (when workflow-runner
     (add! (WorkflowDefinitionNode.register-loader safe-graph {:store workflow-store :runner workflow-runner :code-store code-store}))
     (add! (WorkflowRunNode.register-loader safe-graph {:store workflow-store :runner workflow-runner})))
-  (add! (WorkflowStepNode.register-loader safe-graph {:store workflow-store}))
+  (add! (WorkflowStepNode.register-loader safe-graph {:store workflow-store :lifecycle options.lifecycle}))
   (add! (WorkflowStepExplorerNode.register-loader safe-graph {:store workflow-store}))
   (add! (WorkflowRunExplorerNode.register-loader safe-graph {:store workflow-store}))
   (add! (WorkflowRunStepNode.register-loader safe-graph {:store workflow-store}))

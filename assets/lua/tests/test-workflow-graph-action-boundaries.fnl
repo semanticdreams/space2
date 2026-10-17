@@ -26,22 +26,22 @@
                                            (if context context {})))})
 
 (fn make-runtime [dir]
-  (local {:WorkflowStore WorkflowStore} (require :workflows/store))
-  (local CodeEntityStore (require :entities/code))
-  (local workflow-store (WorkflowStore {:base-dir (fs.join-path dir "workflow")}))
-  (local code-store (CodeEntityStore.CodeEntityStore {:base-dir (fs.join-path dir "code")}))
-  {:store workflow-store :code-store code-store :runner (make-runner workflow-store)})
+  (local H (require :tests/test-reference-lifecycle-helpers))
+  (local stores (H.stores dir))
+  {:store stores.workflow-store :code-store stores.code-store :stores stores
+   :lifecycle (H.ready stores) :runner (make-runner stores.workflow-store)})
 
 (fn with-runtime [f]
   (with-temp-dir (fn [dir] (f (make-runtime dir)))))
 
 (fn make-graph-with-workflow-loaders [runtime loader-names]
   (local Graph (require :graph/init))
-  (local graph (Graph {:with-start false}))
-  (local builtins (BuiltinGraphTestHelpers.install-builtins! graph {:workflow-store runtime.store
-                                                                    :workflow-runner runtime.runner
-                                                                    :code-store runtime.code-store
-                                                                    :only-schemes loader-names}))
+  (local opts (collect [key value (pairs runtime.stores)] key value))
+  (set opts.lifecycle runtime.lifecycle)
+  (set opts.workflow-runner runtime.runner)
+  (set opts.only-schemes loader-names)
+  (local graph (Graph opts))
+  (local builtins (BuiltinGraphTestHelpers.install-builtins! graph opts))
   (local original-drop graph.drop)
   (set graph.drop (fn [self]
                     (builtins:drop)
@@ -399,9 +399,9 @@
   (assert-requires-mounted-graph-map
     (fn [] (step-node:show-code-from-graph))
     "WorkflowStepNode.show-code-from-graph")
-  (assert-requires-mounted-graph-map
-    (fn [] (step-node:delete-step-from-graph))
-    "WorkflowStepNode.delete-step-from-graph")
+  ;; Domain deletion is no longer a GraphMap materializer: it resolves the
+  ;; explicitly composed lifecycle even on a shared adapter. Tested separately.
+  (assert (= (step-node:resolve-reference-lifecycle!) runtime.lifecycle))
   (assert-requires-mounted-graph-map
     (fn [] (explorer-node:load-step-from-graph "step-a"))
     "WorkflowStepExplorerNode.load-step-from-graph")

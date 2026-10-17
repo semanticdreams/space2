@@ -3,7 +3,6 @@
         :node-id node-id} (require :graph/node-base))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
 (local Signal (require :signal))
-(local IdentityStore (require :entities/identity))
 (local ListEntityStore (require :entities/list))
 (local Utils (require :graph/view/utils))
 (local KeyLoaderUtils (require :graph/key-loader-utils))
@@ -139,11 +138,65 @@
             (load-visible-node graph target-key)
             nil))))
 
+(fn remove-target-items! [self removed-key]
+  (local current (self:get-entity))
+  (when current
+    (each [_ item-key (ipairs current.items)]
+      (when (= (self.identity-store:resolve-key item-key) removed-key)
+        (self:remove-item item-key)))))
+
+(fn refresh-items [self resolve-target removal-set]
+  (assert self.store "list projection requires owning store")
+  (local graph self.graph)
+  (when (and graph graph.load-by-key graph.add-edge)
+    (local current (self:get-entity))
+    (local items (or (and current current.items) []))
+    (local desired {})
+    (each [_ item-key (ipairs items)]
+      (local target (resolve-target self item-key))
+      (when (and target (not (and removal-set (. removal-set target))))
+        (local key (edge-key self target))
+        (local existing (. graph.edge-map key))
+        (local edge (or existing (graph:add-edge (GraphEdge {:source self :target target}) {:from-list-entity self.entity-id})))
+        (when (or (not existing) (= existing (. self.list-item-edge-keys key))) (tset desired key edge))))
+    (each [key owned (pairs self.list-item-edge-keys)]
+      (when (and (not (. desired key)) (= (. graph.edge-map key) owned)) (remove-edge-by-key graph key)))
+    (set self.list-item-edge-keys desired)))
+
+(fn participating-target [owner key removal-set]
+  (local target (owner.graph:lookup (owner.identity-store:resolve-key key)))
+  (when (and target (not (and removal-set (. removal-set target)))) target))
+
+(fn refresh-reference-edges! [self removal-set]
+  (assert self.graph "list projection refresh requires mounted graph")
+  (refresh-items self participating-target removal-set))
+
+;; Removal notifications precede GraphMap lookup clearing; exclude their adapters.
+(fn refresh-reference-projection! [self removal-set]
+  (refresh-reference-edges! self removal-set)
+  (local graph self.graph)
+  (local island (and graph.get-island (graph:get-island (ordered-list-island-id self.entity-id))))
+  (when island
+    (local current (assert (self:get-entity) "mounted list island requires committed record"))
+    (set island.members (icollect [_ key (ipairs current.items)]
+      (do (local target (participating-target self key removal-set)) (when target target.key))))
+    (if (> (# island.members) 0) (graph:upsert-island island)
+        (graph:remove-island island.id))))
+
+(fn resolve-reference-lifecycle! [self]
+  (local mounted (and self.graph self.graph.reference-lifecycle))
+  (assert (or (not self.lifecycle) (not mounted) (= self.lifecycle mounted)) "reference lifecycle node/graph conflict")
+  (local service (assert (or self.lifecycle mounted) "node requires reference lifecycle"))
+  (assert (service:owns-store? SCHEME self.store) "reference lifecycle store ownership mismatch")
+  service)
+
 (fn ListEntityNode [opts]
   (local options (or opts {}))
   (local entity-id (assert options.entity-id "ListEntityNode requires entity-id"))
-  (local identity-store (or options.identity-store (IdentityStore.get-default)))
   (local store (or options.store (ListEntityStore.get-default)))
+  (local identity-store (assert store.identity-store "ListEntityNode store requires identity-store"))
+  (assert (or (not options.identity-store) (= options.identity-store identity-store))
+          "ListEntityNode identity-store mismatch with owning store")
   (local ListEntityNodeView (require :graph/view/views/list-entity))
 
   (local entity (store:get-entity entity-id))
@@ -162,6 +215,8 @@
   (set node.compact-label initial-compact-label)
   (set node.identity-store identity-store)
   (set node.store store)
+  (set node.lifecycle options.lifecycle)
+  (set node.resolve-reference-lifecycle! resolve-reference-lifecycle!)
   (set node.entity-deleted (Signal))
   (set node.changed (Signal))
   (set node.items-changed (Signal))
@@ -180,43 +235,8 @@
        (fn [self]
          (self.store:get-entity self.entity-id)))
 
-  (fn ensure-identity-key [self node-key]
-    (local key (tostring (or node-key "")))
-    (if (= (string.len key) 0)
-        key
-        (if (= (string.sub key 1 (string.len IDENTITY_KEY_PREFIX)) IDENTITY_KEY_PREFIX)
-            key
-            (do
-              (local graph self.graph)
-              (if (and graph graph.ensure-identity-key)
-                  (graph:ensure-identity-key key)
-                  (do
-                    (local existing
-                      (if self.identity-store.find-by-target-key
-                          (self.identity-store:find-by-target-key key)
-                          nil))
-                    (if existing
-                        (.. IDENTITY_KEY_PREFIX (tostring existing.id))
-                        (.. IDENTITY_KEY_PREFIX
-                            (tostring (. (self.identity-store:create-entity {:target-key key}) :id))))))))))
-
-  (set node.add-item-nodes
-       (fn [self]
-         (local graph self.graph)
-         (when (and graph graph.load-by-key graph.add-edge)
-            (local current (self:get-entity))
-            (local items (or (and current current.items) []))
-            (local desired {})
-            (each [_ item-key (ipairs items)]
-              (local target (resolve-item-target self item-key))
-              (when target
-                (graph:add-edge (GraphEdge {:source self :target target})
-                                {:from-list-entity self.entity-id})
-               (set (. desired (edge-key self target)) true)))
-           (each [k _ (pairs (or self.list-item-edge-keys {}))]
-             (when (not (. desired k))
-               (remove-edge-by-key graph k)))
-            (set self.list-item-edge-keys desired))))
+  (set node.add-item-nodes (fn [self] (refresh-items self resolve-item-target)))
+  (set node.refresh-reference-projection! refresh-reference-projection!)
 
   (set node.expand-items-as-island
        (fn [self _opts]
@@ -254,8 +274,7 @@
 
   (set node.add-item
        (fn [self node-key]
-         (local stable-key (ensure-identity-key self node-key))
-         (self.store:add-item self.entity-id stable-key)
+          (self.store:add-item self.entity-id node-key)
          (self:add-item-nodes)))
 
   (set node.remove-item
@@ -270,7 +289,8 @@
 
   (set node.delete-entity
        (fn [self]
-         (self.store:delete-entity self.entity-id)))
+         (local service (self:resolve-reference-lifecycle!))
+         (. (service:delete! self.key) :source-record)))
 
   (set node.actions
         [{:name "Refresh Items"
@@ -348,24 +368,18 @@
                     (when (and added (not (= (tostring added.key) (tostring self.key))))
                       (local entity (self:get-entity))
                       (when entity
-                        (if (entity-contains-node-key? entity added.key)
-                            (self:add-item-nodes)
+                          (if (entity-contains-node-key? entity added.key)
+                              (refresh-reference-edges! self)
                             (when (contains-identity-item? entity.items)
                               ;; Identity targets can appear after identity store updates.
-                              (self:add-item-nodes)))))))))
+                                (refresh-reference-edges! self)))))))))
           (local removed-signal (and graph graph.node-removed))
           (when (and removed-signal (not graph-node-removed-handler))
             (set graph-node-removed-signal removed-signal)
             (set graph-node-removed-handler
                  (removed-signal:connect
-                   (fn [payload]
-                     (when (not payload.map-only?)
-                       (each [_ removed-node (ipairs (or (and payload payload.nodes) []))]
-                         (local removed-key (and removed-node removed-node.key))
-                         (when (and removed-key (not (identity-key? removed-key)))
-                           (local entity (self:get-entity))
-                           (when (and entity (entity-contains-node-key? entity removed-key))
-                             (self:remove-item removed-key)))))))))
+                    (fn [payload]
+                      (refresh-reference-projection! self payload.removal-set)))))
          (local morphed-signal (and graph graph.node-morphed))
          (when (and morphed-signal (not graph-node-morphed-handler))
            (set graph-node-morphed-signal morphed-signal)
@@ -378,25 +392,21 @@
                        ;; Refresh once more after graph finishes node replacement.
                        (self.items-changed:emit {:id self.entity-id :items current.items})
                        (self:add-item-nodes)
-                       (refresh-existing-island self))))))
+                        (refresh-existing-island self))))))
          (when (and self.identity-store self.identity-store.identity-updated (not identity-updated-handler))
            (set identity-updated-handler
                 (self.identity-store.identity-updated:connect
                   (fn [entity]
                      (local identity-key (.. IDENTITY_KEY_PREFIX (tostring entity.id)))
                      (local current (self:get-entity))
-                     (when (and current (entity-contains-node-key? current identity-key))
-                       (self.items-changed:emit {:id self.entity-id :items current.items})
-                       (self:add-item-nodes)
-                       (refresh-existing-island self))))))
+                       (when (and current (entity-contains-node-key? current identity-key))
+                        (self.items-changed:emit {:id self.entity-id :items current.items}))
+                      (self:refresh-reference-projection!)))))
          (when (and self.identity-store self.identity-store.identity-deleted (not identity-deleted-handler))
            (set identity-deleted-handler
                 (self.identity-store.identity-deleted:connect
-                  (fn [entity]
-                    (local identity-key (.. IDENTITY_KEY_PREFIX (tostring entity.id)))
-                    (local current (self:get-entity))
-                    (when (and current (entity-contains-node-key? current identity-key))
-                      (self:remove-item identity-key))))))
+                  (fn [_entity]
+                    (self:refresh-reference-projection!)))))
          self))
 
   (set node.drop
@@ -436,7 +446,7 @@
   (fn [graph opts]
     (local options (or opts {}))
     (local store (or options.store (ListEntityStore.get-default)))
-    (local identity-store (or options.identity-store (IdentityStore.get-default)))
+    (local identity-store (or options.identity-store store.identity-store))
     (graph:register-key-loader SCHEME
       (fn [key]
         (local entity-id (KeyLoaderUtils.extract-id SCHEME key))
@@ -445,7 +455,7 @@
           (when entity
             (ListEntityNode {:entity-id entity-id
                              :store store
-                             :identity-store identity-store})))))))
+                             :identity-store identity-store :lifecycle options.lifecycle})))))))
 
 {:ListEntityNode ListEntityNode
  :register-loader register-loader}

@@ -16,7 +16,7 @@
 (local Canvas (require :canvas))
 (local Camera (require :camera))
 (local {: FocusManager} (require :focus))
-
+(local H (require :tests/test-reference-lifecycle-helpers))
 ;; Minimal Scene stub providing the activity-slot lifecycle needed by
 ;; board-activity-unit (ensure, activate, deactivate, capture, restore).
 ;; This avoids requiring a full Scene with BuildContext, layout roots,
@@ -156,10 +156,10 @@
               "Board should record connector")
       (local link (link-store:get-entity connector.semantic-link-id))
       (assert link "Board connector should reference persisted link entity")
-      (assert (= link.source-key "string-entity:source")
-              "Link entity should store source subject key")
-      (assert (= link.target-key "string-entity:target")
-              "Link entity should store target subject key")
+      (H.assert-reference link-store.identity-store link.source-key
+                          "string-entity:source")
+      (H.assert-reference link-store.identity-store link.target-key
+                          "string-entity:target")
       (assert (. view.connector-records connector.id)
               "BoardView should render connector record")
       (link-store:update-entity connector.semantic-link-id
@@ -168,7 +168,7 @@
               "Board connector should follow semantic link retargets")
       (assert (. view.connector-records connector.id)
               "BoardView should retain connector render record after retarget")
-      (link-store:delete-entity connector.semantic-link-id)
+      (link-store:retire-entity! connector.semantic-link-id)
       (assert (= (length board.connectors-in-order) 0)
               "Board should remove connector when semantic link is deleted")
       (assert (not (. view.connector-records connector.id))
@@ -753,9 +753,10 @@
   (assert item "String entity create should return the board item")
   (assert (= item.type BuiltinStringEntity.item-type)
           "String entity create should return the created string board item")
-  (local entity-id (BuiltinStringEntity.entity-id-from-subject item.subject-key))
+  (local identity-store ((. (require :entities/identity) :get-default) {:base-dir default-store.base-dir}))
+  (local entity-id (BuiltinStringEntity.entity-id-from-subject (identity-store:resolve-key item.subject-key)))
   (when entity-id
-    (default-store:delete-entity entity-id))
+    (default-store:retire-entity! entity-id))
   (board:remove-item item.id)
   true)
 
@@ -1568,6 +1569,9 @@
   (local runtime {:canvas canvas
                   :activity-cameras {:canvas {} :scene {}} :activity-controls {:canvas {} :scene {}} :scene (make-scene-stub)
                   :board-state (or options.board-state {:items [] :connectors []})})
+  (when options.stores
+    (each [field store (pairs options.stores)] (tset runtime field store))
+    (set runtime.reference-lifecycle ((. (require :tests/test-reference-lifecycle-helpers) :ready) options.stores)))
   (when options.object-selector
     (set runtime.object-selector options.object-selector))
   (set app.active-world-runtime runtime)
@@ -1813,10 +1817,10 @@
               "connect-items should use second item as target")
       (local link (link-store:get-entity connector.semantic-link-id))
       (assert link "connect-items should create a persisted link entity")
-      (assert (= link.source-key "sk:a")
-              "Link entity should store source subject key from first item")
-      (assert (= link.target-key "sk:b")
-              "Link entity should store target subject key from second item")
+      (H.assert-reference link-store.identity-store link.source-key
+                          "sk:a")
+      (H.assert-reference link-store.identity-store link.target-key
+                          "sk:b")
       (view:drop)
       (BoardRegistry.unregister-owner owner)
       true)))
@@ -1887,10 +1891,10 @@
                                     :position (glm.vec3 20 0 0)}))
       (local connector (view:connect-items source target))
       (local link (link-store:get-entity connector.semantic-link-id))
-      (assert (= link.source-key "sk:src")
-              "connect-items should set source-key from first argument")
-      (assert (= link.target-key "sk:tgt")
-              "connect-items should set target-key from second argument")
+      (H.assert-reference link-store.identity-store link.source-key
+                          "sk:src")
+      (H.assert-reference link-store.identity-store link.target-key
+                          "sk:tgt")
       (assert (= connector.source-item-id source.id)
               "Board connector source-item-id should match first argument")
       (assert (= connector.target-item-id target.id)
@@ -2042,34 +2046,28 @@
         {:dir dir :object-selector selector}))))
 
 (fn board-view-remove-item-deletes-string-entity []
-  (local owner {})
-  (var entity-id nil)
-  (with-board-activity-runtime
-    (fn [env]
+  (local H (require :tests/test-reference-lifecycle-helpers))
+  (fn rooted [root]
+    (local stores (H.stores root))
+    (fn action [env]
       (local item (env.board-view:add-string-entity {:value "hello"}))
-      (set entity-id (BuiltinStringEntity.entity-id-from-subject item.subject-key))
-      (assert entity-id "remove-item should have a string-entity id")
-      (local store (StringEntityStore.get-default))
-      (assert (store:get-entity entity-id) "Entity should exist before removal")
+      (local key (stores.identity-store:resolve-key item.subject-key))
+      (local entity-id (assert (BuiltinStringEntity.entity-id-from-subject key)))
+      (assert (stores.string-store:get-entity entity-id) "Entity should exist before removal")
       (assert (env.board-view:remove-item item) "remove-item should return truthy on success")
-      (assert (not (store:get-entity entity-id)) "Entity should be deleted from store after remove-item")
+      (assert (not (stores.string-store:get-entity entity-id)) "Entity should be deleted from store after remove-item")
       (assert (not (. app.board.items item.id)) "Board item should be removed after remove-item"))
-    {})
-  (when entity-id
-    (pcall (fn [] ((StringEntityStore.get-default):delete-entity entity-id))))
-  true)
+    (with-board-activity-runtime action {:stores stores}))
+  (H.with-root rooted))
 
-(fn board-view-remove-item-rolls-back-entity-on-board-failure []
-  (var entity-id nil)
-  (var original-value nil)
-  (with-board-activity-runtime
-    (fn [env]
+(fn board-view-remove-item-does-not-recreate-entity-on-board-failure []
+  (local H (require :tests/test-reference-lifecycle-helpers))
+  (fn rooted [root]
+    (local stores (H.stores root))
+    (fn action [env]
       (local item (env.board-view:add-string-entity {:value "keep-me"}))
-      (set entity-id (BuiltinStringEntity.entity-id-from-subject item.subject-key))
-      (assert entity-id)
-      (local store (StringEntityStore.get-default))
-      (local entity (store:get-entity entity-id))
-      (set original-value entity.value)
+      (local key (stores.identity-store:resolve-key item.subject-key))
+      (local entity-id (assert (BuiltinStringEntity.entity-id-from-subject key)))
       (local handler
         (app.board.item-removed:connect
           (fn [_it]
@@ -2081,13 +2079,12 @@
       (app.board.item-removed:disconnect handler true)
       (assert (not ok) "remove-item should fail when item-removed handler fails")
       (assert (. app.board.items item.id) "Board item should be rolled back after remove-item failure")
-      (local recovered (store:get-entity entity-id))
-      (assert recovered "Entity should be re-created after remove-item rollback")
-      (assert (= recovered.value original-value) "Re-created entity should have same value"))
-    {})
-  (when entity-id
-    (pcall (fn [] ((StringEntityStore.get-default):delete-entity entity-id))))
-  true)
+      ;; This standalone board is not a loaded WorldOwner runtime. Its local
+      ;; listener failure cannot undo an already completed domain operation.
+      (assert (= (stores.string-store:get-entity entity-id) nil)
+              "board listener failure must never recreate a retired representation"))
+    (with-board-activity-runtime action {:stores stores}))
+  (H.with-root rooted))
 
 (fn board-view-remove-selected-items-removes-all-selected []
   (with-board-activity-runtime
@@ -2188,8 +2185,8 @@
                        :fn board-selection-action-uses-selector-wiring-through-runtime})
 (table.insert tests {:name "BoardView remove-item deletes string entity from store"
                       :fn board-view-remove-item-deletes-string-entity})
-(table.insert tests {:name "BoardView remove-item rolls back entity on board failure"
-                      :fn board-view-remove-item-rolls-back-entity-on-board-failure})
+(table.insert tests {:name "BoardView remove-item never recreates entity on board failure"
+                       :fn board-view-remove-item-does-not-recreate-entity-on-board-failure})
 (table.insert tests {:name "BoardView remove-selected-items removes all selected"
                       :fn board-view-remove-selected-items-removes-all-selected})
 (table.insert tests {:name "Board delete-selection hook removes selected items"

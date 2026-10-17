@@ -7,6 +7,7 @@
 (local {:Board Board} (require :board/core))
 (local BoardView (require :board/view))
 (local BuiltinStringEntity (require :board/builtin-string-entity))
+(local BuiltinCodeEntity (require :board/builtin-code-entity))
 (local StringEntityStore (require :entities/string))
 (local HomeWorldCanvasRuntime (require :home-world-canvas-runtime))
 (local ActivityCameraState (require :activity-camera-state))
@@ -91,13 +92,18 @@
   (slot:set-canvas-target-kind! :board)
   (slot:expose-render-target! {:layers [:geometry :text]})
   (BuiltinStringEntity.register owner)
+  (BuiltinCodeEntity.register owner)
   (local retained-view? (not (= world-runtime.board-view nil)))
   (local board (or world-runtime.board (Board {})))
   (local selector (and world-runtime world-runtime.object-selector))
   (local view (or world-runtime.board-view
                   (BoardView {:board board
-                              :canvas canvas
-                              :ctx slot.ctx
+                               :canvas canvas :lifecycle world-runtime.reference-lifecycle
+                               :ctx slot.ctx
+                               :string-store (or world-runtime.string-store app.string-store)
+                               :code-store (or world-runtime.code-store app.code-store)
+                               :identity-store (or world-runtime.identity-store app.identity-store)
+                               :link-store (or world-runtime.link-store app.link-store)
                               :selector selector})))
   (set slot.root view)
   (set world-runtime.board board)
@@ -307,6 +313,7 @@
 
 (fn load-board-activity! []
   (BuiltinStringEntity.register owner)
+  (BuiltinCodeEntity.register owner)
   (when (not (activity-registered? "board"))
     (Activities.register-activity
       {:id "board"
@@ -331,6 +338,7 @@
   (when registered?
     (Activities.unregister-activity "board"))
   (BuiltinStringEntity.unregister owner)
+  (BuiltinCodeEntity.unregister owner)
   true)
 
 {:board-activity-owned-paths board-activity-owned-paths

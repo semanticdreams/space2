@@ -93,7 +93,10 @@
       :tests.test-graph-activity-input
      :tests.test-drawing-hit-test
      :tests.test-drawing-activity-slots
-     :tests.test-board
+      :tests.test-board
+      :tests.test-reference-lifecycle-board
+      :tests.test-reference-lifecycle-browsers
+      :tests.test-reference-lifecycle-composition
      :tests.test-board-activity-string-entities
     :tests.test-first-person-controls
     :tests.test-screen-pos-ray
@@ -147,6 +150,8 @@
     :tests.test-sql-builder
     :tests.test-string-utils
     :tests.test-entity-type-catalog
+    :tests.test-reference-lifecycle-worlds
+    :tests.test-reference-lifecycle-projections
     :tests.test-string-entities
     :tests.test-string-entity-search
     :tests.test-string-entity-create-child
@@ -154,6 +159,12 @@
     :tests.test-code-entity-list
     :tests.test-entities-browser
     :tests.test-identity-entities
+    :tests.test-reference-lifecycle-identity
+    :tests.test-reference-lifecycle-writes
+      :tests.test-reference-lifecycle-owners
+     :tests.test-reference-lifecycle-commands
+      :tests.test-reference-lifecycle-recovery
+      :tests.test-reference-lifecycle-integration
     :tests.test-link-entities
     :tests.test-list-entities
     :tests.test-dict-entities

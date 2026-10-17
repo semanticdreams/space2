@@ -11,7 +11,7 @@
     (local entity (and target target.get-entity (target:get-entity)))
 
     (local input
-      ((Input {:text ""
+      ((Input {:text (or (and entity entity.value) "")
                :placeholder "Value..."
                :multiline? true
                :min-lines 3
@@ -20,10 +20,6 @@
                             (when (and target target.update-value)
                               (target:update-value new-value)))})
        build-ctx))
-
-    (local initial-value (or (and entity entity.value) ""))
-    (when (and input input.set-text (> (string.len initial-value) 0))
-      (input:set-text initial-value {:reset-cursor? false}))
 
     (set view.layout input.layout)
     (set view.input input)

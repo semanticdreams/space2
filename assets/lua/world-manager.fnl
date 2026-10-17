@@ -3,6 +3,38 @@
 (local Signal (require :signal))
 (local JsonUtils (require :json-utils))
 (local HomeWorld (require :home-world))
+(local R (require :reference-lifecycle/record-utils))
+
+;; Lifecycle enumeration never calls get-world-entry (which instantiates worlds).
+(fn reference-worlds [root entries]
+  (local base (fs.parent root))
+  (local indexed {})
+  (fn include! [id world]
+    (R.require-id id)
+    (local path (R.record-path base root id ""))
+    (when world
+      (assert (and (= world.id id) (= (R.comparison-path world.dir) path))
+              "WorldManager loaded world id/root mismatch"))
+    (local previous (. indexed id))
+    (tset indexed id {:id id :dir path :world (if world world (and previous previous.world))}))
+  (local index-path (R.record-path base root "index" ".json"))
+  (local snapshot (R.snapshot index-path "json" json.loads))
+  (when snapshot.value
+    (R.require-array snapshot.value.worlds)
+    (local seen {})
+    (each [_ entry (ipairs snapshot.value.worlds)]
+      (assert (not (. seen entry.id)) "WorldManager duplicate indexed world id")
+      (include! entry.id nil)
+      (tset seen entry.id true)))
+  (when (fs.exists root)
+    (each [_ entry (ipairs (fs.list-dir root true true))]
+      (assert (not entry.error) (.. entry.path ": " (tostring entry.error)))
+      (assert (not entry.is-symlink) (.. "WorldManager world symlink unsupported: " entry.path))
+      (when entry.is-dir (include! entry.name nil))))
+  (each [_ entry (ipairs entries)] (include! entry.id entry.world))
+  (local result (icollect [_ entry (pairs indexed)] entry))
+  (table.sort result (fn by-id [a b] (< a.id b.id)))
+  result)
 
 (fn normalize-world-record [record]
   (local target (or record {}))
@@ -41,6 +73,23 @@
       "home"
       (.. "home-" idx)))
 
+(fn read-world-index [index-path]
+  (if (not (fs.exists index-path))
+      []
+      (do
+        (local (ok-read content) (pcall fs.read-file index-path))
+        (when (not ok-read)
+          (error (string.format "WorldManager failed to read %s: %s" index-path content)))
+        (local (ok-parse decoded) (pcall json.loads content))
+        (when (not ok-parse)
+          (error (string.format "WorldManager failed to parse %s: %s" index-path decoded)))
+        (when (not (= (type decoded) :table))
+          (error (string.format "WorldManager expected table in %s" index-path)))
+        (when (and (not (= decoded.worlds nil))
+                   (not (= (type decoded.worlds) :table)))
+          (error (string.format "WorldManager expected :worlds array in %s" index-path)))
+        (normalize-worlds decoded.worlds))))
+
 (fn WorldManager [opts]
   (local options (or opts {}))
   (local root-dir (assert options.root-dir "WorldManager requires :root-dir"))
@@ -77,24 +126,6 @@
       (error (string.format "WorldManager failed to write %s: %s" index-path err)))
     true)
 
-  (fn load-index []
-    (if (not (fs.exists index-path))
-        []
-        (do
-          (local (ok-read content) (pcall fs.read-file index-path))
-          (if (not ok-read)
-              (error (string.format "WorldManager failed to read %s: %s" index-path content))
-              (do
-                (local (ok-parse decoded) (pcall json.loads content))
-                (when (not ok-parse)
-                  (error (string.format "WorldManager failed to parse %s: %s" index-path decoded)))
-                (when (not (= (type decoded) :table))
-                  (error (string.format "WorldManager expected table in %s" index-path)))
-                (when (and (not (= decoded.worlds nil))
-                           (not (= (type decoded.worlds) :table)))
-                  (error (string.format "WorldManager expected :worlds array in %s" index-path)))
-                (normalize-worlds decoded.worlds))))))
-
   (fn next-world-id []
     (var id nil)
     (var taken true)
@@ -127,7 +158,7 @@
 
   (fn ensure-initial-worlds []
     (set worlds [])
-    (each [_ entry (ipairs (load-index))]
+    (each [_ entry (ipairs (read-world-index index-path))]
       (add-world-entry entry))
     (when (= (length worlds) 0)
       (create-default-home)))
@@ -336,7 +367,9 @@
   (ensure-initial-worlds)
 
   (set manager-api
-       {:activate-first (fn [_self] (activate-first))
+        {:root-dir (R.comparison-path root-dir)
+         :list-reference-worlds (fn [_self] (reference-worlds root-dir worlds))
+         :activate-first (fn [_self] (activate-first))
         :activate-index (fn [_self idx] (activate-index idx))
         :activate-next (fn [_self] (activate-next))
         :activate-previous (fn [_self] (activate-previous))

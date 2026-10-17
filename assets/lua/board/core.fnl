@@ -369,6 +369,23 @@
       (error result))
     result)
 
+  (fn update-item-subject [_self item-id subject-key item-type]
+    (local item (assert (. items item-id) (.. "Board.update-item-subject missing item: " (tostring item-id))))
+    (assert (= (type subject-key) :string) "Board.update-item-subject requires subject-key")
+    (assert (= (type item-type) :string) "Board.update-item-subject requires item-type")
+    (when (not (and (= item.subject-key subject-key) (= item.type item-type)))
+      (local previous-key item.subject-key)
+      (local previous-type item.type)
+      (set item.subject-key subject-key)
+      (set item.type item-type)
+      (local (ok err) (pcall item-updated.emit item-updated item))
+      (when (not ok)
+        (set item.subject-key previous-key)
+        (set item.type previous-type)
+        (pcall item-updated.emit item-updated item)
+        (error err)))
+    item)
+
   (local self {:items items
                :items-in-order items-in-order
                :connectors connectors
@@ -381,6 +398,7 @@
                :add-item add-item
                :remove-item remove-item
                :update-item-transform update-item-transform
+               :update-item-subject update-item-subject
                :add-connector add-connector
                :remove-connector remove-connector
                :capture-state capture-state

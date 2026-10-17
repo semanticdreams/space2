@@ -1,11 +1,11 @@
 (local fs (require :fs))
+(local H (require :tests/test-reference-lifecycle-helpers))
 (local Graph (require :graph/init))
 (local GraphMap (require :graph/map))
 (local StringEntityStore (require :entities/string))
 (local LinkEntityStore (require :entities/link))
 (local {:StringEntityNode StringEntityNode
-        :register-loader register-string-loader} (require :graph/nodes/string-entity))
-
+         :register-loader register-string-loader} (require :graph/nodes/string-entity))
 (local tests [])
 (var temp-counter 0)
 
@@ -25,8 +25,8 @@
   (if ok result (error result)))
 
 (fn make-stores [dir]
-  {:string-store (StringEntityStore.StringEntityStore {:base-dir (fs.join-path dir "string")})
-   :link-store (LinkEntityStore.LinkEntityStore {:base-dir (fs.join-path dir "link")})})
+  {:string-store (StringEntityStore.StringEntityStore {:base-dir dir})
+   :link-store (LinkEntityStore.LinkEntityStore {:base-dir dir})})
 
 (fn find-action [node name]
   (assert node "find-action requires node")
@@ -54,7 +54,7 @@
       (local stores (make-stores dir))
       (local graph (Graph {:with-start false
                            :string-store stores.string-store
-                           :link-store stores.link-store}))
+                            :link-store stores.link-store :identity-store stores.link-store.identity-store}))
       (register-string-loader graph {:store stores.string-store})
       (local graph-map (GraphMap.GraphMap {:graph graph :id "create-child-test"}))
       (local parent (stores.string-store:create-entity {:value "parent"}))
@@ -82,8 +82,8 @@
   (assert result.link "expected link entity in result")
   (local child-key (.. "string-entity:" result.child.id))
   (assert (= result.child-key child-key) "expected child-key to match id")
-  (assert (= result.link.source-key ctx.parent-key) "expected parent source-key")
-  (assert (= result.link.target-key child-key) "expected child target-key")
+  (H.assert-reference ctx.stores.link-store.identity-store result.link.source-key ctx.parent-key)
+  (H.assert-reference ctx.stores.link-store.identity-store result.link.target-key child-key)
   (assert (= (length (ctx.stores.string-store:list-entities)) 2) "expected parent plus child")
   (assert (= (length (ctx.stores.link-store:list-entities)) 1) "expected one link")
   (assert (ctx.graph-map:lookup child-key) "expected child in same graph map")
@@ -120,7 +120,7 @@
   (local stores (make-stores dir))
   (local graph (Graph {:with-start false
                        :string-store stores.string-store
-                       :link-store stores.link-store}))
+                        :link-store stores.link-store :identity-store stores.link-store.identity-store}))
   (register-string-loader graph {:store stores.string-store})
   (local parent (stores.string-store:create-entity {:value "parent"}))
   (local node (StringEntityNode {:entity-id parent.id

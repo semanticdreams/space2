@@ -3,7 +3,6 @@
         :node-id node-id} (require :graph/node-base))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
 (local Signal (require :signal))
-(local IdentityStore (require :entities/identity))
 (local DictEntityStore (require :entities/dict))
 (local Utils (require :graph/view/utils))
 (local KeyLoaderUtils (require :graph/key-loader-utils))
@@ -121,31 +120,13 @@
       (set found? true)))
   found?)
 
-(fn ensure-identity-key [self node-key]
-  (local key (tostring (if node-key node-key "")))
-  (if (= (string.len key) 0)
-      key
-      (if (identity-key? key)
-          key
-          (do
-            (local graph self.graph)
-            (if (and graph graph.ensure-identity-key)
-                (graph:ensure-identity-key key)
-                (do
-                  (local existing
-                    (if self.identity-store.find-by-target-key
-                        (self.identity-store:find-by-target-key key)
-                        nil))
-                  (if existing
-                      (.. IDENTITY_KEY_PREFIX (tostring existing.id))
-                      (.. IDENTITY_KEY_PREFIX
-                          (tostring (. (self.identity-store:create-entity {:target-key key}) :id))))))))))
-
 (fn node-options [opts]
   (local options (options-table opts))
   (local entity-id (assert options.entity-id "DictEntityNode requires entity-id"))
-  (local identity-store (if options.identity-store options.identity-store (IdentityStore.get-default)))
   (local store (if options.store options.store (DictEntityStore.get-default)))
+  (local identity-store (assert store.identity-store "DictEntityNode store requires identity-store"))
+  (assert (or (not options.identity-store) (= options.identity-store identity-store))
+          "DictEntityNode identity-store mismatch with owning store")
   (values options entity-id identity-store store))
 
 (fn refresh-label [self]
@@ -154,21 +135,30 @@
   (set self.compact-label (make-compact-label current))
   (self.changed:emit self))
 
-(fn add-item-nodes [self]
+(fn refresh-items [self resolve-target]
+  (assert self.dict-item-edge-keys "dictionary projection requires native edge ownership bookkeeping")
   (local graph self.graph)
   (when (and graph graph.add-edge)
     (local current (self:get-entity))
     (local desired {})
     (each [item-key item-value (pairs (entity-items current))]
-      (local target (resolve-item-target self item-value))
+      (local target (resolve-target self item-value))
       (when target
-        (graph:add-edge (GraphEdge {:source self :target target})
-                        {:from-dict-entity self.entity-id :item-key item-key})
-        (set (. desired (edge-key self target)) true)))
-    (each [k _ (pairs (if self.dict-item-edge-keys self.dict-item-edge-keys {}))]
-      (when (not (. desired k))
+        (local key (edge-key self target))
+        (local existing (. graph.edge-map key))
+        (local edge (or existing (graph:add-edge (GraphEdge {:source self :target target})
+                                               {:from-dict-entity self.entity-id :item-key item-key})))
+        (when (or (not existing) (= existing (. self.dict-item-edge-keys key))) (tset desired key edge))))
+    (each [k owned (pairs (if self.dict-item-edge-keys self.dict-item-edge-keys {}))]
+      (when (and (not (. desired k)) (= (. graph.edge-map k) owned))
         (remove-edge-by-key graph k)))
     (set self.dict-item-edge-keys desired)))
+
+(fn add-item-nodes [self] (refresh-items self resolve-item-target))
+(fn refresh-reference-projection! [self]
+  (fn participating-target [owner key]
+    (owner.graph:lookup (owner.identity-store:resolve-key key)))
+  (refresh-items self participating-target))
 
 (fn added [self _graph]
   (self:add-item-nodes)
@@ -209,15 +199,15 @@
   (fn [payload]
     (local added (and payload payload.node))
     (when (should-refresh-for-added? self added)
-      (self:add-item-nodes))))
+      (self:refresh-reference-projection!))))
 
 (fn make-identity-updated-handler [self]
   (fn [identity]
     (local identity-key (.. IDENTITY_KEY_PREFIX (tostring identity.id)))
     (local current (self:get-entity))
     (when (and current (entity-contains-value? current identity-key))
-      (self.items-changed:emit {:id self.entity-id :items current.items})
-      (self:add-item-nodes))))
+      (self.items-changed:emit {:id self.entity-id :items current.items}))
+    (self:refresh-reference-projection!)))
 
 (fn install-store-handlers [node store entity-id]
   {:deleted (store.dict-entity-deleted:connect (make-deleted-handler node entity-id))
@@ -238,8 +228,7 @@
          (self:refresh-label)))
   (set node.set-item
        (fn [self item-key node-key]
-         (local stable-key (ensure-identity-key self node-key))
-         (self.store:set-item self.entity-id item-key stable-key)
+          (self.store:set-item self.entity-id item-key node-key)
          (self:add-item-nodes)))
   (set node.remove-item
        (fn [self item-key]
@@ -249,13 +238,23 @@
        (fn [self old-key new-key]
          (self.store:rename-item self.entity-id old-key new-key)
          (self:add-item-nodes)))
-  (set node.delete-entity (fn [self] (self.store:delete-entity self.entity-id)))
+  (set node.delete-entity (fn [self]
+    (local service (self:resolve-reference-lifecycle!))
+    (. (service:delete! self.key) :source-record)))
   (set node.add-item-nodes add-item-nodes)
+  (set node.refresh-reference-projection! refresh-reference-projection!)
   (set node.added added)
   node)
 
+(fn resolve-reference-lifecycle! [self]
+  (local mounted (and self.graph self.graph.reference-lifecycle))
+  (assert (or (not self.lifecycle) (not mounted) (= self.lifecycle mounted)) "reference lifecycle node/graph conflict")
+  (local service (assert (or self.lifecycle mounted) "node requires reference lifecycle"))
+  (assert (service:owns-store? SCHEME self.store) "reference lifecycle store ownership mismatch")
+  service)
+
 (fn DictEntityNode [opts]
-  (local (_options entity-id identity-store store) (node-options opts))
+  (local (options entity-id identity-store store) (node-options opts))
   (local DictEntityNodeView (require :graph/view/views/dict-entity))
   (local entity (store:get-entity entity-id))
   (local node
@@ -270,6 +269,8 @@
   (set node.compact-label (make-compact-label entity))
   (set node.identity-store identity-store)
   (set node.store store)
+  (set node.lifecycle options.lifecycle)
+  (set node.resolve-reference-lifecycle! resolve-reference-lifecycle!)
   (set node.entity-deleted (Signal))
   (set node.changed (Signal))
   (set node.items-changed (Signal))
@@ -325,7 +326,7 @@
   (fn [graph opts]
     (local options (options-table opts))
     (local store (if options.store options.store (DictEntityStore.get-default)))
-    (local identity-store (if options.identity-store options.identity-store (IdentityStore.get-default)))
+    (local identity-store (if options.identity-store options.identity-store store.identity-store))
     (graph:register-key-loader SCHEME
       (fn [key]
         (local entity-id (KeyLoaderUtils.extract-id SCHEME key))
@@ -334,7 +335,7 @@
           (when entity
             (DictEntityNode {:entity-id entity-id
                              :store store
-                             :identity-store identity-store})))))))
+                             :identity-store identity-store :lifecycle options.lifecycle})))))))
 
 {:DictEntityNode DictEntityNode
  :register-loader register-loader

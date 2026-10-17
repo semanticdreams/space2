@@ -687,7 +687,8 @@ sol::table fs_file_token(sol::this_state ts, const std::string& path)
     return build_file_token_table(lua, fs::path(path));
 }
 
-sol::table fs_list_dir(sol::this_state ts, const std::string& path, sol::optional<bool> include_hidden_opt)
+sol::table fs_list_dir(sol::this_state ts, const std::string& path, sol::optional<bool> include_hidden_opt,
+                       sol::optional<bool> strict_opt)
 {
     sol::state_view lua(ts);
     sol::table items = lua.create_table();
@@ -695,7 +696,8 @@ sol::table fs_list_dir(sol::this_state ts, const std::string& path, sol::optiona
     bool include_hidden = include_hidden_opt.value_or(true);
 
     std::error_code ec;
-    fs::directory_options options = fs::directory_options::skip_permission_denied;
+    fs::directory_options options = strict_opt.value_or(false)
+        ? fs::directory_options::none : fs::directory_options::skip_permission_denied;
     fs::directory_iterator it(path.empty() ? fs::path(".") : fs::path(path), options, ec);
     throw_with_message("fs.list_dir", ec);
 
@@ -726,9 +728,15 @@ std::string fs_read_file(const std::string& path)
     if (!file) {
         throw sol::error("fs.read_file: unable to open " + path);
     }
-    std::ostringstream buffer;
-    buffer << file.rdbuf();
-    return buffer.str();
+    std::string contents;
+    char buffer[8192];
+    while (file.read(buffer, sizeof(buffer)) || file.gcount() > 0) {
+        contents.append(buffer, static_cast<std::size_t>(file.gcount()));
+    }
+    if (file.bad() || !file.eof()) {
+        throw sol::error("fs.read_file: unable to read " + path);
+    }
+    return contents;
 }
 
 sol::table fs_read_text_window(sol::this_state ts,
@@ -859,6 +867,14 @@ void fs_write_file(const std::string& path, const std::string& contents)
         throw sol::error("fs.write_file: unable to write " + path);
     }
     file << contents;
+    file.flush();
+    if (!file) {
+        throw sol::error("fs.write_file: unable to flush " + path);
+    }
+    file.close();
+    if (!file) {
+        throw sol::error("fs.write_file: unable to close " + path);
+    }
 }
 
 void fs_append_file(const std::string& path, const std::string& contents)

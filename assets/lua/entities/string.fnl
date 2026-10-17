@@ -2,162 +2,139 @@
 (local appdirs (require :appdirs))
 (local fs (require :fs))
 (local Uuid (require :uuid))
+(local R (require :reference-lifecycle/record-utils))
 
-(fn ensure-dir [path]
-  (when (and path fs fs.create-dirs)
-    (pcall (fn [] (fs.create-dirs path))))
-  path)
+(fn serialize-entity [_self entity]
+  (assert (= (type entity.value) :string) "string value must be text")
+  (R.require-id entity.id)
+  (table.concat ["---" (.. "id: " entity.id)
+                 (.. "created-at: " entity.created-at)
+                 (.. "updated-at: " entity.updated-at) "---" "" entity.value] "\n"))
 
-(fn strip-whitespace [text]
-  (if (not text)
-      ""
-      (string.match text "^%s*(.-)%s*$")))
+(fn decode-entity [_self bytes]
+  (local (frontmatter body) (string.match bytes "^%-%-%-\n(.-)\n%-%-%-\n(.*)$"))
+  (assert frontmatter "string record requires frontmatter")
+  (local fields {})
+  (each [line (string.gmatch frontmatter "[^\n]+")]
+    (local (key value) (string.match line "^([^:]+):%s*(.*)$"))
+    (assert key "malformed string frontmatter")
+    (tset fields key value))
+  ;; The existing serializer owns one separator blank line. Remove that one
+  ;; newline only, never whitespace belonging to the user's source.
+  (local source (if (= (string.sub body 1 1) "\n") (string.sub body 2) body))
+  {:id (R.require-id fields.id) :value source
+   :created-at (assert (tonumber fields.created-at) "invalid string created-at")
+   :updated-at (assert (tonumber fields.updated-at) "invalid string updated-at")})
 
-(fn parse-frontmatter [content]
-  (if (not content)
-      {:frontmatter {} :body ""}
-      (let [pattern "^%-%-%-\n(.-)\n%-%-%-\n?(.*)$"]
-        (local (fm body) (string.match content pattern))
-        (if fm
-            (do
-              (local frontmatter {})
-              (each [line (string.gmatch fm "[^\n]+")]
-                (local (key value) (string.match line "^([^:]+):%s*(.*)$"))
-                (when (and key value)
-                  (set (. frontmatter (strip-whitespace key)) (strip-whitespace value))))
-              {:frontmatter frontmatter
-               :body (strip-whitespace (or body ""))})
-            {:frontmatter {}
-             :body (strip-whitespace content)}))))
+(fn entity-path [store id] (R.record-path store.base-dir store.entities-dir id ".md"))
+(fn snapshot-entity [self id]
+  (fn decode [bytes] (decode-entity self bytes))
+  (local snapshot (R.snapshot (entity-path self id) "string" decode))
+  (when snapshot.value (assert (= snapshot.value.id id) (.. "string record id mismatch at " snapshot.path)))
+  snapshot)
 
-(fn serialize-frontmatter [entity]
-  (local lines ["---"])
-  (table.insert lines (.. "id: " (tostring entity.id)))
-  (table.insert lines (.. "created-at: " (tostring entity.created-at)))
-  (table.insert lines (.. "updated-at: " (tostring entity.updated-at)))
-  (table.insert lines "---")
-  (table.insert lines "")
-  (table.insert lines (or entity.value ""))
-  (table.concat lines "\n"))
+(fn publish! [store candidate]
+  (local held (. store.cache candidate.id))
+  (if held
+      (do (each [key value (pairs candidate)] (tset held key value)) held)
+      (do (tset store.cache candidate.id candidate) candidate)))
+
+(fn write-entity [store candidate]
+  (local path (entity-path store candidate.id))
+  (fs.create-dirs store.entities-dir)
+  (fs.write-file path (serialize-entity store candidate)))
+
+(fn persist-entity! [self id bytes check]
+  (local candidate (decode-entity self bytes))
+  (R.verify-candidate id candidate (serialize-entity self candidate) check "string")
+  (local existed? (not (= (. (snapshot-entity self id) :bytes) false)))
+  (write-entity self candidate)
+  (local published (publish! self candidate))
+  (local signal (if existed? self.string-entity-updated self.string-entity-created))
+  (signal:emit published)
+  published)
+
+(fn reconcile-entity! [self id bytes before-check after-check]
+  (assert (= (. (snapshot-entity self id) :check) after-check) "string reconciliation after-image mismatch")
+  (assert (= (R.check-bytes bytes "string") after-check) "string frozen after-check mismatch")
+  (local candidate (decode-entity self (if (= bytes false) before-check bytes)))
+  (local check (if (= bytes false) before-check after-check))
+  (R.verify-candidate id candidate (if (= bytes false) before-check (serialize-entity self candidate)) check "string")
+  (if (= bytes false)
+      (do
+        (local held (or (. self.cache id) candidate))
+        (tset self.cache id nil)
+        (self.string-entity-deleted:emit held)
+        held)
+      (do
+        (local published (publish! self candidate))
+        (local signal (if (= before-check false) self.string-entity-created self.string-entity-updated))
+        (signal:emit published)
+        published)))
+
+(fn get-entity [self id]
+  (when id
+    (entity-path self id)
+    (if (. self.cache id) (. self.cache id)
+        (do
+          (local candidate (. (snapshot-entity self id) :value))
+          (when candidate (publish! self candidate))))))
+
+(fn create-entity [self opts]
+  (assert (or (= opts nil) (= (type opts) :table)) "string create requires options table")
+  (local options (or opts {}))
+  (local timestamp (os.time))
+  (local candidate {:id (tostring (or options.id (Uuid.v4))) :value (or options.value "")
+                   :created-at (or options.created-at timestamp) :updated-at (or options.updated-at timestamp)})
+  (write-entity self candidate)
+  (local published (publish! self candidate))
+  (self.string-entity-created:emit published)
+  published)
+
+(fn update-entity [self id updates]
+  (local entity (get-entity self id))
+  (when entity
+    (local candidate (R.clone entity))
+    (each [key value (pairs (or updates {}))] (tset candidate key value))
+    (assert (= candidate.id id) "update-entity cannot change id")
+    (set candidate.updated-at (os.time))
+    (write-entity self candidate)
+    (publish! self candidate)
+    (self.string-entity-updated:emit entity))
+  entity)
+
+(fn retire-entity! [self id]
+  (local entity (get-entity self id))
+  (when entity
+    (local path (entity-path self id))
+    (when (fs.exists path) (fs.remove path))
+    (tset self.cache id nil)
+    (self.string-entity-deleted:emit entity))
+  entity)
+
+(fn list-entities [self]
+  (local candidates [])
+  (each [_ entry (ipairs (R.record-entries self.entities-dir ".md"))]
+    (table.insert candidates (. (snapshot-entity self (string.sub entry.name 1 -4)) :value)))
+  (local records (icollect [_ candidate (ipairs candidates)] (publish! self candidate)))
+  (table.sort records (fn newest-first [a b] (> a.updated-at b.updated-at)))
+  records)
 
 (fn StringEntityStore [opts]
   (local options (or opts {}))
-  (local base-dir (or options.base-dir
-                      (and appdirs (appdirs.user-data-dir "space"))))
-  (local root (and base-dir fs (fs.join-path base-dir "entities")))
-  (local entities-dir (and root fs (fs.join-path root "string")))
-  (ensure-dir entities-dir)
-
-  (local cache {})
-
-  (local string-entity-created (Signal))
-  (local string-entity-updated (Signal))
-  (local string-entity-deleted (Signal))
-
-  (fn entity-path [id]
-    (and entities-dir (fs.join-path entities-dir (.. (tostring id) ".md"))))
-
-  (fn read-entity [path]
-    (when (and path fs fs.exists (fs.exists path))
-      (local (ok content) (pcall fs.read-file path))
-      (when ok
-        (local parsed (parse-frontmatter content))
-        (local fm parsed.frontmatter)
-        {:id (or fm.id "")
-         :created-at (tonumber (or fm.created-at 0))
-         :updated-at (tonumber (or fm.updated-at 0))
-         :value parsed.body})))
-
-  (fn write-entity [entity]
-    (when entity
-      (local path (entity-path entity.id))
-      (when path
-        (ensure-dir entities-dir)
-        (local content (serialize-frontmatter entity))
-        (fs.write-file path content)))
-    entity)
-
-  (fn load-entity [id]
-    (local key (tostring id))
-    (if (. cache key)
-        (. cache key)
-        (let [data (read-entity (entity-path key))]
-          (when data
-            (set (. cache key) data))
-          data)))
-
-  (fn get-entity [_self id]
-    (if id (load-entity id) nil))
-
-  (fn create-entity [_self opts]
-    (local options (or opts {}))
-    (local id (tostring (or options.id (Uuid.v4))))
-    (local now (os.time))
-    (local entity {:id id
-                   :created-at (or options.created-at now)
-                   :updated-at (or options.updated-at now)
-                   :value (or options.value "")})
-    (set (. cache id) entity)
-    (write-entity entity)
-    (string-entity-created:emit entity)
-    entity)
-
-  (fn update-entity [_self id updates]
-    (local entity (load-entity id))
-    (when entity
-      (each [k v (pairs (or updates {}))]
-        (set (. entity k) v))
-      (set entity.updated-at (os.time))
-      (write-entity entity)
-      (string-entity-updated:emit entity))
-    entity)
-
-  (fn delete-entity [_self id]
-    (local entity (load-entity id))
-    (when entity
-      (local path (entity-path id))
-      (when (and path fs fs.remove (fs.exists path))
-        (pcall (fn [] (fs.remove path))))
-      (set (. cache (tostring id)) nil)
-      (string-entity-deleted:emit entity))
-    entity)
-
-  (fn list-entities [_self]
-    (local items [])
-    (when (and entities-dir fs fs.list-dir (fs.exists entities-dir))
-      (local (ok entries) (pcall fs.list-dir entities-dir false))
-      (when ok
-        (each [_ entry (ipairs (or entries []))]
-          (when (and entry entry.is-file entry.name (string.match entry.name "%.md$"))
-            (local data (read-entity entry.path))
-            (when data
-              (set (. cache (tostring data.id)) data)
-              (table.insert items data))))))
-    (table.sort items
-                (fn [a b]
-                  (> (or a.updated-at 0) (or b.updated-at 0))))
-    items)
-
-  {:base-dir base-dir
-   :root root
-   :entities-dir entities-dir
-   :string-entity-created string-entity-created
-   :string-entity-updated string-entity-updated
-   :string-entity-deleted string-entity-deleted
-   :get-entity get-entity
-   :create-entity create-entity
-   :update-entity update-entity
-   :delete-entity delete-entity
-   :list-entities list-entities})
+  (local base-dir (fs.absolute (or options.base-dir (appdirs.user-data-dir "space"))))
+  (local root (fs.join-path base-dir "entities"))
+  (local entities-dir (fs.join-path root "string"))
+  (fs.create-dirs entities-dir)
+  {:base-dir base-dir :root root :entities-dir entities-dir :cache {}
+   :string-entity-created (Signal) :string-entity-updated (Signal) :string-entity-deleted (Signal)
+   :get-entity get-entity :create-entity create-entity :update-entity update-entity
+   :retire-entity! retire-entity! :list-entities list-entities
+   :snapshot-entity snapshot-entity :serialize-entity serialize-entity
+   :decode-entity decode-entity :persist-entity! persist-entity! :reconcile-entity! reconcile-entity!})
 
 (var default-store nil)
-
 (fn get-default [opts]
-  (if default-store
-      default-store
-      (do
-        (set default-store (StringEntityStore (or opts {})))
-        default-store)))
-
-{:StringEntityStore StringEntityStore
- :get-default get-default}
+  (when (not default-store) (set default-store (StringEntityStore opts)))
+  default-store)
+{:StringEntityStore StringEntityStore :get-default get-default}

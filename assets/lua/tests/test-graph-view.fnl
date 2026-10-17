@@ -2,7 +2,7 @@
 (local Graph (require :graph/init))
 (local GraphMap (require :graph/map))
 (local BuiltinGraphTestHelpers (require :tests/graph-builtin-extension-helpers))
-(local GraphView (require :graph/view))
+(local GraphView ((. (require :tests/test-reference-lifecycle-helpers) :metadata-scoped-factory) (require :graph/view)))
 (local BuildContext (require :build-context))
 (local ObjectSelector (require :object-selector))
 (local GraphViewLayout (require :graph/view/layout))
@@ -184,11 +184,11 @@
         result
         (error result)))
 (fn with-data-dir [dir f]
-    (assert appdirs "appdirs module must be available")
-    (local original appdirs.user-data-dir)
-    (set appdirs.user-data-dir (fn [_appname] (fs.absolute dir)))
-    (local (ok result) (pcall f))
-    (set appdirs.user-data-dir original)
+    (assert (= (type dir) :string) "metadata fixture requires directory")
+    (assert (= (type f) :function) "metadata fixture requires callback")
+    (local getter appdirs.user-data-dir)
+    (local (ok result) (pcall GraphView.with-data-dir dir f))
+    (assert (= appdirs.user-data-dir getter) "metadata fixture must retain appdirs getter")
     (if ok
         result
         (error result)))
@@ -1144,16 +1144,16 @@
             (graph:drop))))
 
 (fn graph-expands-node-inline-on-double-click []
-    (with-temp-data-dir
-        (fn [_root]
+    (with-temp-dir
+        (fn [root]
             (local ctx (make-ctx))
             (local selector (ObjectSelector {:project (fn [position _opts] position)
                                              :ctx ctx
                                              :enabled? true}))
             (local graph (make-test-graph-map))
             (local start ((require :graph/nodes/start))) (graph:add-node start {:position (glm.vec3 0 0 0)})
-            (local view-controller (GraphView {:graph-map graph
-                                                 :ctx ctx
+            (local view-controller (GraphView {:graph-map graph :data-dir root
+                                                  :ctx ctx
                                                  :selector selector}))
             (local point (. view-controller.points start))
             (assert point.on-double-click "GraphView should attach double click handler to node point")
@@ -3525,7 +3525,7 @@
 
 (fn graph-saves-positions-after-stabilizing []
     (with-temp-data-dir
-        (fn [_root]
+        (fn [root]
             (local ctx (make-ctx))
             (local graph (make-test-graph-map))
             (local view (GraphView {:graph-map graph :ctx ctx}))
@@ -3534,7 +3534,7 @@
             (graph:add-node a {:position (glm.vec3 -60 0 0)})
             (graph:add-node b {:position (glm.vec3 60 0 0)})
             (graph:add-edge (Graph.GraphEdge {:source a :target b}))
-            (local graph-dir (fs.join-path (fs.join-path (appdirs.user-data-dir "space") "graph" "maps") "main"))
+            (local graph-dir (fs.join-path root "graph" "maps" "main"))
             (local metadata-path (fs.join-path graph-dir "metadata.json"))
             (for [i 1 200]
                 (view:update 0.016))
@@ -4965,7 +4965,7 @@
     (assert view.layout.active "GraphView start-layout should start the graph layout path")
     (view:drop)
     (graph-map:drop)
-    (graph:drop))}) ((. (require :tests.graph-view-runtime-tests) :append-tests) tests)
+            (graph:drop))}) ((. (require :tests.graph-view-runtime-tests) :append-tests) tests) ((. (require :tests/test-reference-lifecycle-helpers) :append-graph-view-metadata-test!) tests {:with-temp-dir with-temp-dir :with-data-dir with-data-dir :view GraphView :graph make-test-graph-map :ctx make-ctx})
 (local main
   (fn []
     (local runner (require :tests/runner))

@@ -13,6 +13,97 @@
 (local StringEntityStore (require :entities/string))
 (local Morphs (require :morphs/init))
 (local KeyLoaderUtils (require :graph/key-loader-utils))
+(local R (require :reference-lifecycle/record-utils))
+
+(fn reference-color [color original]
+    (local channels [color.x color.y color.z color.w])
+    (if (and original (= color (glm.vec4 (table.unpack original)))) (R.clone original) channels))
+
+(fn reference-edge-key [edge]
+    (local base (.. edge.source.key "->" edge.target.key))
+    (local id (and edge._opts edge._opts.from-link-entity))
+    (if id (.. base "#link:" id) base))
+
+(fn snapshot-reference-state [graph]
+    (assert graph.nodes "Core reference snapshot requires native graph")
+    (local keys (icollect [key _ (pairs graph.nodes)] key))
+    (table.sort keys)
+    (local rows [])
+    (each [_ edge (ipairs graph.edges)]
+        (when (not (and edge._opts edge._opts.from-link-entity))
+            (local row (R.clone (or edge._reference-row {})))
+            (set row.source edge.source.key) (set row.target edge.target.key)
+            (when (or row.label (not (= edge.label ""))) (set row.label edge.label))
+            (when edge.color (set row.color (reference-color edge.color row.color)))
+            (table.insert rows row)))
+    {:nodes keys :edges rows})
+
+(fn remove-reference-edge! [graph edge]
+    (for [i (# graph.edges) 1 -1]
+        (when (= (. graph.edges i) edge) (table.remove graph.edges i)))
+    (tset graph.edge-map (reference-edge-key edge) nil)
+    (graph.edge-removed:emit {:edge edge}))
+
+(fn install-reference-state! [graph state]
+    (R.require-array state.nodes) (R.require-array state.edges)
+    (local wanted (collect [_ key (ipairs state.nodes)] key true))
+    (graph:remove-nodes (icollect [key node (pairs graph.nodes)] (when (not (. wanted key)) node)))
+    (each [_ key (ipairs state.nodes)]
+        (when (not (graph:lookup key))
+            (local node (graph:create-node-by-key key))
+            (assert node (.. "Core reference install cannot adapt " key))
+            (graph:add-node node)))
+    (local rows (collect [_ row (ipairs state.edges)] (.. row.source "->" row.target) row))
+    (for [i (# graph.edges) 1 -1]
+        (local edge (. graph.edges i))
+        (when (and (not (and edge._opts edge._opts.from-link-entity))
+                   (not (. rows (reference-edge-key edge))))
+            (remove-reference-edge! graph edge)))
+    (each [key row (pairs rows)]
+        (local candidate (Edge.GraphEdge {:source (graph:lookup row.source) :target (graph:lookup row.target)
+                                          :label row.label :color row.color}))
+        (local existing (. graph.edge-map key))
+        (local edge (or existing candidate))
+        (set edge.label candidate.label) (set edge.color candidate.color)
+        (set edge._reference-row (R.clone row))
+        (when (not existing) (graph:add-edge edge)))
+    true)
+
+;; This explicit lifecycle path never resolves nodes or loads hidden endpoints.
+;; Legacy entity-event hydration stays unchanged until the atomic action cutover.
+(fn reconcile-link-projections! [graph link-edge-map]
+    (assert graph.link-store "Core link projections require canonical link store")
+    (local desired {})
+    (each [_ entity (ipairs (graph.link-store:list-entities))]
+        (local source (graph.identity-store:resolve-key entity.source-key))
+        (local target (graph.identity-store:resolve-key entity.target-key))
+        (when (and source target (not (= source target)) (graph:lookup source) (graph:lookup target))
+            (local edge (Edge.GraphEdge {:source (graph:lookup source) :target (graph:lookup target)
+                                         :label (or entity.metadata.name "") :color (glm.vec4 0.45 0.42 0.3 1)}))
+            (set edge._opts {:from-link-entity (tostring entity.id)})
+            (tset desired (reference-edge-key edge) edge)))
+    (for [i (# graph.edges) 1 -1]
+        (local edge (. graph.edges i))
+        (when (and edge._opts edge._opts.from-link-entity)
+            (local key (reference-edge-key edge))
+            (local candidate (. desired key))
+            (if (and candidate (= candidate.label edge.label)) (tset desired key nil)
+                (do (remove-reference-edge! graph edge) (tset link-edge-map edge._opts.from-link-entity nil)))))
+    (each [key edge (pairs desired)]
+        (tset link-edge-map edge._opts.from-link-entity key)
+        (tset graph.edge-map key edge)
+        (table.insert graph.edges edge)
+        (graph.edge-added:emit {:edge edge :opts edge._opts}))
+    true)
+
+(fn install-reference-api! [graph installing! link-edge-map]
+    (set graph.snapshot-reference-state snapshot-reference-state)
+    (set graph.reconcile-link-projections! (fn [_self] (reconcile-link-projections! graph link-edge-map)))
+    (set graph.install-reference-state! (fn install [_self state]
+        (installing! true)
+        (local (ok result) (pcall install-reference-state! graph state))
+        (installing! false)
+        (if ok result (error result)))))
 
 (local GraphNode NodeBase.GraphNode)
 (local GraphEdge Edge.GraphEdge)
@@ -98,6 +189,15 @@
         (unregister-key-loader-handle key-loaders handle-or-scheme)
         (unregister-key-loader-scheme key-loaders handle-or-scheme opts)))
 
+(fn graph-providers [options]
+    (local link-store (or options.link-store (LinkEntityStore.get-default)))
+    (local identity-store (or options.identity-store (IdentityStore.get-default)))
+    (local string-store (or options.string-store (StringEntityStore.get-default)))
+    (when options.lifecycle
+        (each [_ row (ipairs [["link-entity" link-store] ["identity" identity-store] ["string-entity" string-store]])]
+            (assert (options.lifecycle:owns-store? (. row 1) (. row 2)) "Graph reference lifecycle store ownership mismatch")))
+    (values link-store identity-store string-store (or options.morphs (Morphs.get-default))))
+
 (fn create-graph [opts]
     (local options (or opts {}))
     (local nodes {})
@@ -118,9 +218,10 @@
     (var unresolved-restored-edge-list [])
 
     (var check-link-edges-for-node nil) ;; Forward declaration
+    (var reference-installing? false)
 
     (local entity-events? (if (= options.entity-events? nil) true options.entity-events?))
-    (local self {:nodes nodes
+    (local self {:nodes nodes :reference-lifecycle options.lifecycle
                  :edges edges
                  :edge-map edge-map
                  ;; Built-in start nodes are descriptor-loaded, not auto-created.
@@ -143,7 +244,7 @@
         node)
 
     (fn edge-key [edge]
-        (.. (node-id edge.source) "->" (node-id edge.target)))
+        (reference-edge-key edge))
 
     (fn lookup [_self key]
         (and key (. nodes key)))
@@ -176,7 +277,7 @@
 	                    (canonical:mount self))
 	                (set (. nodes canonical.key) canonical)
 	                (node-added:emit {:node canonical :opts node-opts})
-	                (when check-link-edges-for-node
+                (when (and check-link-edges-for-node (not reference-installing?))
 	                    (check-link-edges-for-node canonical))
 	                (when canonical.added
 	                    (canonical:added self))
@@ -255,31 +356,7 @@
 
     (set self.resolve-key
         (fn [_self key opts]
-            (local options (or opts {}))
-            (if (or (not key) (not (= (type key) "string")))
-                key
-                (do
-                    (local visited (or options.visited {}))
-                    (local max-depth (or options.max-depth 32))
-                    (var current key)
-                    (var depth 0)
-                    (while true
-                        (when (>= depth max-depth)
-                            (lua "return current"))
-                        (when (. visited current)
-                            (error (.. "resolve-key identity cycle detected at " current)))
-                        (set (. visited current) true)
-                        (local node (or (. nodes current)
-                                        (self:load-by-key current)))
-                        (if (not (and node node.identity-target-key))
-                            (lua "return current")
-                            (do
-                                (local next-key (tostring (or node.identity-target-key "")))
-                                (if (> (string.len next-key) 0)
-                                    (do
-                                        (set current next-key)
-                                        (set depth (+ depth 1)))
-                                    (lua "return current")))))))))
+            (self.identity-store:resolve-key key opts)))
 
     (set self.resolve-node
         (fn [_self key-or-node opts]
@@ -472,10 +549,7 @@
     (set Graph.GraphEdge GraphEdge)
 
     ;; Entity store integration
-    (local link-store (or options.link-store (LinkEntityStore.get-default)))
-    (local identity-store (or options.identity-store (IdentityStore.get-default)))
-    (local string-store (or options.string-store (StringEntityStore.get-default)))
-    (local morphs (or options.morphs (Morphs.get-default)))
+    (local (link-store identity-store string-store morphs) (graph-providers options))
     (set self.link-store link-store)
     (set self.identity-store identity-store)
     (set self.string-store string-store)
@@ -495,7 +569,7 @@
                 (when (not node)
                     (local {:IdentityNode IdentityNode} (require :graph/nodes/identity))
                     (set node (IdentityNode {:entity-id entity.id
-                                             :store identity-store}))
+                                             :store identity-store :lifecycle options.lifecycle}))
                     (self:add-node node create-opts)))
             (when (and create-opts.source-node node self.add-edge)
                 (self:add-edge (GraphEdge {:source create-opts.source-node
@@ -504,23 +578,7 @@
 
     (set self.ensure-identity-key
         (fn [_self target-key opts]
-            (local options (or opts {}))
-            (local key (tostring (or target-key "")))
-            (if (or (= (string.len key) 0)
-                    (= (string.sub key 1 9) "identity:"))
-                key
-                (do
-                    (local existing
-                        (if identity-store.find-by-target-key
-                            (identity-store:find-by-target-key key)
-                            nil))
-                    (if existing
-                        (.. "identity:" (tostring existing.id))
-                        (do
-                            (local node (self:create-identity key options))
-                            (if (and node node.key)
-                                node.key
-                                key)))))))
+            (identity-store:ensure-key (tostring (or target-key "")) opts)))
 
     (fn add-link-edge-for-entity [entity entity-id]
         (local source-key (self:resolve-key entity.source-key))
@@ -537,6 +595,7 @@
                                     :target target-node
                                     :color (glm.vec4 0.45 0.42 0.3 1)
                                     :label label}))
+            (set edge._opts {:from-link-entity entity-id})
             (self:add-edge edge {:from-link-entity entity.id})
             (set (. link-edge-map entity-id) (edge-key edge))))
 
@@ -694,11 +753,7 @@
             (edge-removed:clear)
             (disconnect-entity-handlers)))
 
-    ;; Built-in start node creation moved to graph extension descriptors.
-    ;; Graph core intentionally returns an empty generic graph by default.
-    ;; Descriptors may install key loaders and load nodes through graph APIs.
-    ;; Keep this spacing stable for existing reviewed constraint baselines.
-    ;; No compatibility auto-start path remains here.
+    (install-reference-api! self (fn installing! [value] (set reference-installing? value)) link-edge-map)
     self)
 
 (set Graph.GraphNode GraphNode)

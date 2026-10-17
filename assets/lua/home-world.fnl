@@ -7,10 +7,9 @@
 (local Camera (require :camera))
 (local Scene (require :scene))
 (local {: FirstPersonControls} (require :first-person-controls))
-(local Graph (require :graph/init))
+(local HomeWorldGraphRuntime (require :home-world-graph-runtime))
 
 (local GraphMap (require :graph/map))
-(local GraphMapManager (require :graph/map-manager))
 (local DrawingDocument (require :drawing/document))
 (local DrawingController (require :drawing/controller))
 (local ActivityDockView (require :activity-dock-view))
@@ -25,6 +24,9 @@
 (local BackgroundState (require :background-state))
 (local ActivitySceneState (require :activity-scene-state))
 (local Presentation (require :activity-presentation))
+(local ReferenceRecords (require :reference-lifecycle/record-utils))
+(local GraphReferenceState (require :graph/reference-state))
+(local BoardReferenceState (require :board/reference-state))
 
 (local vec3->array (. MathUtils :vec3->array))
 (local quat->array (. MathUtils :quat->array))
@@ -37,14 +39,7 @@
 (local default-containment-config
   (PhysicsContainment.serialize-config (PhysicsContainment.default-config)))
 
-(fn clone-table [value]
-  (if (= (type value) :table)
-      (do
-        (local out {})
-        (each [k v (pairs value)]
-          (set (. out k) (clone-table v)))
-        out)
-      value))
+(local clone-table ReferenceRecords.clone)
 
 (fn resolve-sandbox-scene-state [world]
   "Return the canonical sandbox scene session state, or nil."
@@ -259,105 +254,8 @@
 (fn default-state []
   (base-default-state))
 
-(fn resolve-graph-core-state [state]
-  (local payload (or state {}))
-  (if (and (= (type payload.graph) :table))
-      payload.graph
-      (and (= (type payload.maps) :table)
-           (= (type payload.active_map_id) :string))
-      (do
-        (var entry nil)
-        (each [_ m (ipairs payload.maps) &until entry]
-          (when (= m.id payload.active_map_id)
-            (set entry m)))
-        {:nodes (or (and entry entry.nodes) [])
-         :edges (or (and entry entry.edges) [])})
-      {:nodes (or payload.nodes [])
-       :edges (or payload.edges [])}))
-
-(fn merge-preserved-graph-map-state [graph existing-state captured-map-state]
-  (local merged (clone-table captured-map-state))
-  (local active-map-id merged.active_map_id)
-  (local supports-key?
-    (fn [key]
-      (and graph graph.has-key-loader-for-key (graph:has-key-loader-for-key key))))
-  (when (= (type merged.maps) :table)
-    ;; Build lookup from existing persisted map entries by id (including legacy
-    ;; graph.graph which maps to "main").
-    (local existing-by-id {})
-    (if (= (type existing-state.maps) :table)
-        ;; Maps format - authoritative when present
-        (each [_ m (ipairs existing-state.maps)]
-          (set (. existing-by-id m.id)
-               {:nodes (or m.nodes [])
-                :edges (or m.edges [])}))
-        (= (type existing-state.graph) :table)
-        ;; Legacy format (.graph directly has nodes/edges)
-        (set (. existing-by-id "main")
-             {:nodes (or existing-state.graph.nodes [])
-              :edges (or existing-state.graph.edges [])}))
-    (each [_ map-entry (ipairs merged.maps)]
-      (local existing (. existing-by-id map-entry.id))
-      (when (and existing (not (= map-entry.id active-map-id)))
-        (local captured-nodes {})
-        (local captured-edges {})
-        (each [_ key (ipairs (or map-entry.nodes []))]
-          (set (. captured-nodes key) true))
-        (each [_ edge (ipairs (or map-entry.edges []))]
-          (local composite (.. (or edge.source "") "->" (or edge.target "")))
-          (set (. captured-edges composite) true))
-        (each [_ key (ipairs (or existing.nodes []))]
-          (when (and (not (. captured-nodes key))
-                     (not (supports-key? key)))
-            (table.insert map-entry.nodes key)))
-        (each [_ edge (ipairs (or existing.edges []))]
-          (local source-key edge.source)
-          (local target-key edge.target)
-          (local composite (.. (or source-key "") "->" (or target-key "")))
-          (local preserve?
-            (and (not (. captured-edges composite))
-                 (or (and source-key (not (supports-key? source-key)))
-                     (and target-key (not (supports-key? target-key))))))
-          (when preserve?
-            (table.insert map-entry.edges edge))))))
-  merged)
-
-(fn merge-preserved-graph-state [graph existing-state captured-state]
-  (if (= (type captured-state.maps) :table)
-      (merge-preserved-graph-map-state graph existing-state captured-state)
-      (do
-        (local existing-core (resolve-graph-core-state existing-state))
-        (local captured-core (resolve-graph-core-state captured-state))
-        (local supports-key?
-          (fn [key]
-            (and graph graph.has-key-loader-for-key (graph:has-key-loader-for-key key))))
-        (local captured-nodes {})
-        (local captured-edges {})
-        (var merged-nodes [])
-        (var merged-edges [])
-        (each [_ key (ipairs (or captured-core.nodes []))]
-          (set (. captured-nodes key) true)
-          (table.insert merged-nodes key))
-        (each [_ edge (ipairs (or captured-core.edges []))]
-          (local composite (.. (or edge.source "") "->" (or edge.target "")))
-          (set (. captured-edges composite) true)
-          (table.insert merged-edges edge))
-        (each [_ key (ipairs (or existing-core.nodes []))]
-          (when (and (not (. captured-nodes key))
-                     (not (supports-key? key)))
-            (table.insert merged-nodes key)))
-        (each [_ edge (ipairs (or existing-core.edges []))]
-          (local source-key edge.source)
-          (local target-key edge.target)
-          (local composite (.. (or source-key "") "->" (or target-key "")))
-          (local preserve?
-            (and (not (. captured-edges composite))
-                 (or (and source-key (not (supports-key? source-key)))
-                     (and target-key (not (supports-key? target-key))))))
-          (when preserve?
-            (table.insert merged-edges edge)))
-        {:graph {:nodes merged-nodes
-                 :edges merged-edges}})))
+(local resolve-graph-core-state GraphReferenceState.resolve-core)
+(local merge-preserved-graph-state GraphReferenceState.merge-preserved-state)
 
 (fn parse-terrain-persistence-key [key]
   (if (= (type key) :string)
@@ -471,6 +369,104 @@
                 (error (string.format "HomeWorld expected table in %s" path)))
               decoded)))))
 
+(fn snapshot-reference-state [world]
+  (local record (clone-table world.state))
+  (local runtime world.runtime)
+  (local sessions (and record.activity record.activity.sessions))
+  (local board (BoardReferenceState.snapshot-roles record runtime))
+  (local views {:activity (clone-table (and sessions sessions.graph))})
+  (local metadata {})
+  (var maps (clone-table record.graph))
+  (when runtime
+    (set views.retained (clone-table runtime.graph-view-states))
+    (set views.retained-single (clone-table runtime.graph-view-state))
+    (set views.runtime-session (clone-table (and runtime.activity-session-state runtime.activity-session-state.graph)))
+    (set views.pending-canvas (clone-table runtime.pending-canvas-state))
+    (set views.pending-hud (clone-table runtime.pending-hud-state))
+    (when runtime.graph-map-manager (set maps (GraphReferenceState.merge-reference-maps record.graph (runtime.graph-map-manager:snapshot-reference-state))))
+    (when runtime.graph-view
+      (set views.current (runtime.graph-view:snapshot-reference-state))
+      (set views.map-id (assert (and runtime.graph-map runtime.graph-map.id) "reference snapshot requires native map id"))
+      (local view-runtime (assert runtime.graph-view.runtime "reference snapshot requires GraphView runtime"))
+      (tset metadata views.map-id (if runtime.graph-view.snapshot-reference-metadata
+                                    (runtime.graph-view:snapshot-reference-metadata)
+                                    (view-runtime.persistence:snapshot-state)))))
+  (when runtime
+    (set record.runtime (clone-table (or record.runtime {})))
+    (each [_ field (ipairs [:board-state :graph-view-states :graph-view-state :activity-session-state
+                            :pending-canvas-state :pending-hud-state])]
+      (tset record.runtime field (clone-table (. runtime field)))))
+  (local result {:record record :board board :maps maps :views views :metadata metadata})
+  ;; Reject lossy producer data (e.g. unconverted GLM userdata), never journal null.
+  (ReferenceRecords.decode-json (JsonUtils.stable-json result))
+  result)
+
+(fn install-reference-metadata! [world map-id metadata]
+  (local runtime world.runtime)
+  (local view (and runtime runtime.graph-view))
+  (when (and view runtime.graph-map (= runtime.graph-map.id map-id))
+    (view.runtime.persistence:install-state! metadata))
+  true)
+
+;; Owning-data publication after persistence, distinct from transient view restore.
+(fn install-reference-record! [world record]
+  (assert (= (type record) :table) "HomeWorld reference install requires record")
+  (local candidate (clone-table record))
+  (local runtime world.runtime)
+  (when runtime
+    (when (and runtime.board record.board) (BoardReferenceState.install-model! runtime.board record.board))
+    (when runtime.board-state (set runtime.board-state (clone-table record.board)))
+    (when (and runtime.graph-map-manager record.graph)
+      (runtime.graph-map-manager:install-reference-state! record.graph))
+    (local sessions (and record.activity record.activity.sessions))
+    (local current (and sessions sessions.graph sessions.graph.graph-view-states runtime.graph-map
+                        (. sessions.graph.graph-view-states runtime.graph-map.id)))
+    (when (and runtime.graph-view current) (runtime.graph-view:install-reference-state! current))
+    (when (and runtime.activity-session-state sessions)
+      (each [_ id (ipairs [:board :graph])]
+        (when (. runtime.activity-session-state id)
+          (tset runtime.activity-session-state id (clone-table (. sessions id))))))
+    (when record.runtime
+      (each [_ field (ipairs [:board-state :graph-view-states :graph-view-state :activity-session-state
+                              :pending-canvas-state :pending-hud-state])]
+        (when (not (= (. record.runtime field) nil))
+          (tset runtime field (clone-table (. record.runtime field)))))))
+  ;; Preserve the held owning record, just as owning stores preserve cache identity.
+  (each [key _ (pairs world.state)] (tset world.state key nil))
+  (each [key value (pairs candidate)] (tset world.state key value))
+  true)
+
+(fn install-reference-roles! [world snapshot]
+  (assert (= (type snapshot) :table) "HomeWorld reference roles require table")
+  (local runtime world.runtime)
+  (local board snapshot.board)
+  (when (and runtime board)
+    (when (and runtime.board board.model) (BoardReferenceState.install-model! runtime.board board.model))
+    (when board.retained (set runtime.board-state (clone-table board.retained)))
+    (when (and board.runtime-session runtime.activity-session-state runtime.activity-session-state.board)
+      (set runtime.activity-session-state.board.board-state (clone-table board.runtime-session))))
+  (when (and runtime runtime.graph-map-manager snapshot.maps)
+    (runtime.graph-map-manager:install-reference-state! snapshot.maps))
+  (each [id metadata (pairs (or snapshot.metadata {}))] (install-reference-metadata! world id metadata))
+  (when (and runtime snapshot.views)
+    (local views snapshot.views)
+    (each [role field (pairs {:retained :graph-view-states :retained-single :graph-view-state
+                              :pending-canvas :pending-canvas-state :pending-hud :pending-hud-state})]
+      (when (. views role) (tset runtime field (clone-table (. views role)))))
+    (when (and views.runtime-session runtime.activity-session-state)
+      (set runtime.activity-session-state.graph (clone-table views.runtime-session)))
+    (when (and views.current runtime.graph-view runtime.graph-map (= views.map-id runtime.graph-map.id))
+      (runtime.graph-view:install-reference-state! views.current)))
+  true)
+(fn install-reference-state! [world snapshot]
+  (install-reference-record! world (assert snapshot.record "HomeWorld reference install requires snapshot record"))
+  (install-reference-roles! world snapshot))
+
+(fn ensure-world-directory [dir]
+  (local (ok err) (pcall fs.create-dirs dir))
+  (when (not ok)
+    (error (string.format "HomeWorld failed to create %s: %s" dir err))))
+
 (fn HomeWorld [opts]
   (local options (or opts {}))
   (local id (assert options.id "HomeWorld requires :id"))
@@ -489,15 +485,14 @@
                :state (default-state)
                :active? false
                :initialized? false
-               :runtime nil})
-
-  (fn ensure-world-dir []
-    (local (ok err) (pcall fs.create-dirs dir))
-    (when (not ok)
-      (error (string.format "HomeWorld failed to create %s: %s" dir err))))
+                :runtime nil
+                :snapshot-reference-state snapshot-reference-state
+                 :install-reference-state! install-reference-state! :install-reference-roles! install-reference-roles!
+                :install-reference-record! install-reference-record!
+                :install-reference-metadata! install-reference-metadata!})
 
   (fn persist-loaded-state! [world]
-    (ensure-world-dir)
+    (ensure-world-directory dir)
     (local (ok err) (pcall (fn [] (JsonUtils.write-json! world.state-path world.state))))
     (when (not ok)
       (error (string.format "HomeWorld failed to write %s during load: %s" world.state-path err))))
@@ -696,7 +691,7 @@
       (persist-loaded-state! world)))
 
   (fn save-state [world]
-    (ensure-world-dir)
+    (ensure-world-directory dir)
     (local (ok err) (pcall (fn [] (JsonUtils.write-json! world.state-path world.state))))
     (when (not ok)
       (error (string.format "HomeWorld failed to write %s: %s" world.state-path err)))
@@ -908,9 +903,9 @@
                (graph:capture-state))))
     (when runtime
       (if (and runtime.board-view runtime.board-view.capture-state)
-          (set next-state.board (runtime.board-view:capture-state))
+          (set next-state.board (BoardReferenceState.merge-model next-state.board (runtime.board-view:capture-state)))
           (when runtime.board-state
-            (set next-state.board (clone-table runtime.board-state)))))
+            (set next-state.board (BoardReferenceState.merge-model next-state.board runtime.board-state)))))
     (when (and scene scene.capture-state)
       (local captured-scene (scene:capture-state))
       ;; Ensure the sandbox session exists in next-state
@@ -1086,26 +1081,8 @@
     (local default-scene-camera (Camera {:position (glm.vec3 0 0 30)}))
     (local canvas-state (or (and world.state world.state.canvas) {}))
     (local activity-state (or (and world.state world.state.activity) {}))
-    (local graph (Graph {:with-start false :entity-events? false}))
-
-    (local restore-runtime {:graph graph})
-    (var restore-runtime-installed? false)
-    (local registry (assert app.graph-extension-registry "HomeWorld requires app.graph-extension-registry before graph map restore"))
-    (local (install-ok install-result) (pcall #(registry:install-runtime restore-runtime)))
-    (if install-ok
-        (set restore-runtime-installed? true)
-        (do (graph:drop) (error install-result)))
-    (local (map-manager-ok graph-map-manager)
-      (pcall #(GraphMapManager.GraphMapManager
-                {:graph graph
-                 :state (or world.state.graph {})
-                 :data-dir world.dir})))
-    (when restore-runtime-installed?
-      (registry:uninstall-runtime restore-runtime))
-    (when (not map-manager-ok)
-      (graph:drop)
-      (error graph-map-manager))
-    (local graph-map (graph-map-manager:get-active-map))
+    (local (graph graph-map-manager graph-map)
+      (HomeWorldGraphRuntime.create world ctx app.graph-extension-registry))
     (local scene-scope
       (do
         (local scope
@@ -1150,6 +1127,10 @@
     (set-runtime-containment-config! world containment-config)
     (local runtime
       {:world-dir world.dir
+       :reference-lifecycle ctx.lifecycle
+       :string-store ctx.string-store :code-store ctx.code-store :identity-store ctx.identity-store
+       :list-store ctx.list-store :dict-store ctx.dict-store :link-store ctx.link-store
+       :notebook-store ctx.notebook-store :workflow-store ctx.workflow-store
        :focus-manager ctx.focus-manager
        :focus-root ctx.focus-root
        :icons ctx.icons
@@ -1209,7 +1190,7 @@
 
   (fn init [world _ctx]
     (when (not world.initialized?)
-      (ensure-world-dir)
+      (ensure-world-directory dir)
       (load-state world)
       (set world.initialized? true)))
 

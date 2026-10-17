@@ -1,7 +1,7 @@
 (local fs (require :fs))
 (local BuildContext (require :build-context))
 (local Signal (require :signal))
-
+(local H (require :tests/test-reference-lifecycle-helpers))
 (local tests [])
 (var temp-counter 0)
 (var observed-updated-count 0)
@@ -61,7 +61,7 @@
       (assert entity "entity should be created")
       (assert entity.id "entity should have id")
       (assert (= entity.name "Alice profile") "entity should keep name")
-      (assert (= (. entity.items "name") "string-entity:name") "items should be keyed table")
+      (H.assert-reference store.identity-store (. entity.items "name") "string-entity:name")
       (assert (= (. entity.items "manager") "identity:bob") "items should store graph keys")
       (assert (= (length entity.items) 0) "dict items must not be stored as an array")
       (assert entity.created-at "entity should have created-at")
@@ -79,17 +79,17 @@
       (assert reloaded "reloaded entity should exist")
       (assert (= reloaded.id "profile") "id should persist")
       (assert (= reloaded.name "Profile") "name should persist")
-      (assert (= (. reloaded.items "role") "string-entity:role") "dict item should persist"))))
+      (H.assert-reference reloaded-store.identity-store (. reloaded.items "role") "string-entity:role"))))
 
 (fn dict-entity-store-set-get-remove-rename-items []
   (with-temp-store
     (fn [store _root]
       (local entity (store:create-entity {:name "x"}))
       (store:set-item entity.id "name" "string-entity:a")
-      (assert (= (store:get-item entity.id "name") "string-entity:a") "set-item should store value")
+      (H.assert-reference store.identity-store (store:get-item entity.id "name") "string-entity:a")
       (store:rename-item entity.id "name" "display-name")
       (assert (= (store:get-item entity.id "name") nil) "rename should remove old key")
-      (assert (= (store:get-item entity.id "display-name") "string-entity:a") "rename should keep value")
+      (H.assert-reference store.identity-store (store:get-item entity.id "display-name") "string-entity:a")
       (store:remove-item entity.id "display-name")
       (assert (= (store:get-item entity.id "display-name") nil) "remove should delete item"))))
 
@@ -134,7 +134,7 @@
       (set observed-deleted-count 0)
       (store.dict-entity-deleted:connect count-deleted)
       (set fs.remove fail-remove)
-      (local (ok err) (pcall store.delete-entity store entity.id))
+      (local (ok err) (pcall store.retire-entity! store entity.id))
       (set fs.remove original-remove)
       (store.dict-entity-deleted:clear)
       (assert (not ok) "delete should error when persistent removal fails")
@@ -170,7 +170,7 @@
   (with-temp-store
     (fn [store _root]
       (local Graph (require :graph/init))
-      (local graph (Graph {:with-start false}))
+      (local graph (Graph {:with-start false :identity-store store.identity-store}))
       (local a (Graph.GraphNode {:key "node-a"}))
       (local b (Graph.GraphNode {:key "node-b"}))
       (graph:add-node a {})
@@ -182,8 +182,8 @@
       (local node (DictEntityNode {:entity-id entity.id :store store}))
       (graph:add-node node {})
       (assert (= (graph:edge-count) 2) "dict entity node should edge only resolved values")
-      (assert (= (. (store:get-entity entity.id) :items "missing") "node-missing")
-              "unresolved reference should remain stored")
+      (H.assert-reference store.identity-store (. (store:get-entity entity.id) :items "missing")
+                          "node-missing")
       (graph:drop))))
 
 (fn dict-entity-node-set-item-wraps-non-identity-key []
@@ -191,7 +191,7 @@
     (fn [store root]
       (local Graph (require :graph/init))
       (local IdentityStore (require :entities/identity))
-      (local identity-store (IdentityStore.IdentityStore {:base-dir (fs.join-path root "identity")}))
+      (local identity-store store.identity-store)
       (local entity (store:create-entity {:name "x"}))
       (local {:DictEntityNode DictEntityNode} (require :graph/nodes/dict-entity))
       (local graph (Graph {:with-start false :identity-store identity-store}))
@@ -238,9 +238,9 @@
   (with-temp-store
     (fn [dict-store root]
       (local Graph (require :graph/init))
-      (local graph (Graph {:with-start false}))
+      (local graph (Graph {:with-start false :identity-store dict-store.identity-store}))
       (local IdentityStore (require :entities/identity))
-      (local identity-store (IdentityStore.IdentityStore {:base-dir (fs.join-path root "identity")}))
+      (local identity-store dict-store.identity-store)
       (local entity (dict-store:create-entity {:name "x"}))
       (local DictNodeModule (require :graph/nodes/dict-entity))
       (DictNodeModule.register-loader graph {:store dict-store :identity-store identity-store})

@@ -34,7 +34,7 @@
 (fn exercise-code-entity-signals [store counts]
   (local entity (store:create-entity {:source ""}))
   (store:update-entity entity.id {:source "x"})
-  (store:delete-entity entity.id)
+  (store:retire-entity! entity.id)
   (assert (= counts.created 1) "created signal should emit once")
   (assert (= counts.updated 1) "updated signal should emit once")
   (assert (= counts.deleted 1) "deleted signal should emit once"))
