@@ -53,6 +53,21 @@ Identity target pointers, workflow code IDs and board semantic-link IDs keep
 their native formats. Generic external graph keys can be relationship values;
 this does not authorize deleting files, sessions or other external objects.
 
+### Presentation and concrete preview providers
+
+List labels and notebook previews resolve meaning through the containing store's
+own IdentityStore, without normalizing or rewriting stored membership. Canonical
+keys still identify ordered members and remove/move actions; distinct aliases
+remain distinct even when they display the same terminal object. Notebook previews
+pass the concrete terminal key to the containing Graph/GraphMap's registered load
+path, retaining that adapter's configured content provider, root and lifecycle.
+The notebook's identity owner and its StringStore for explicit creation are not
+substitute preview providers. The graph/map owns adapters; rows own only their
+preview widgets. Passive String preview initialization does not author content;
+genuine inline edits still submit value-only updates through the concrete owner.
+Unresolved/missing targets remain explicit nonauthoring text, while resolution,
+read, loader and required-preview failures propagate rather than becoming absence.
+
 ## Logical versus physical operations
 
 Use `Lifecycle:delete!(graph-key)` for supported six entity schemes, notebooks

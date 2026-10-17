@@ -7,12 +7,14 @@
 (local TextStyle (require :text-style))
 (local Utils (require :graph/view/utils))
 
-(fn build-item-rows [items]
+(fn build-item-rows [identity-store items]
+  (assert identity-store "Notebook presentation requires owning IdentityStore")
   (local total (length (or items [])))
   (icollect [i k (ipairs (or items []))]
-    {:index i
-     :total total
-     :key (tostring k)}))
+    (do
+      (local key (tostring k))
+      (local terminal-key (identity-store:resolve-key key))
+      {:index i :total total :key key :terminal-key terminal-key})))
 
 (fn key-scheme [key]
   (when (and key (= (type key) "string"))
@@ -25,34 +27,47 @@
   (local scheme (or (key-scheme key) "unknown"))
   (tostring scheme))
 
-(fn resolve-preview-node [target item-key]
+(fn resolve-preview-node [target terminal-key]
   (local graph (and target target.graph))
-  (if (not graph)
-      nil
-      (if graph.resolve-node
-          (do
-            (local (ok resolved) (pcall (fn [] (graph:resolve-node item-key))))
-            (if ok resolved nil))
-          (or (graph:lookup item-key)
-              (if graph.load-by-key
-                  (do
-                    (local (ok loaded) (pcall (fn [] (graph:load-by-key item-key))))
-                    (if ok loaded nil))
-                  nil)))))
+  (when (and graph (not (= (key-scheme terminal-key) "identity")))
+    (assert (= (type graph.load-by-key) :function) "Notebook preview requires graph load-by-key")
+    (graph:load-by-key terminal-key)))
 
-(fn build-preview-widget [target item-key child-ctx]
-  (local resolved (resolve-preview-node target item-key))
-  (if (not resolved)
-      (values ((Text {:text (Utils.truncate-with-ellipsis item-key 42)})
-               child-ctx)
-              nil)
+(fn build-preview-widget [target terminal-key child-ctx]
+  (local resolved (resolve-preview-node target terminal-key))
+  (if (= resolved nil)
+      ((Text {:text (Utils.truncate-with-ellipsis terminal-key 42)}) child-ctx)
       (do
-        (assert resolved.preview (.. "Resolved notebook item is missing preview: " (tostring item-key)))
-        (local preview-widget
-          ((resolved.preview resolved {:node resolved}) child-ctx))
+        (assert (= (type resolved.preview) :function)
+                (.. "Resolved notebook item requires callable preview: " terminal-key))
+        (local builder (resolved.preview resolved {:node resolved}))
+        (assert (= (type builder) :function)
+                (.. "Notebook preview requires callable builder: " terminal-key))
+        (local preview-widget (builder child-ctx))
         (assert (and preview-widget preview-widget.layout)
-                (.. "Notebook preview builder must return widget with layout for " (tostring item-key)))
-        (values preview-widget resolved))))
+                (.. "Notebook preview builder must return widget with layout for " terminal-key))
+        preview-widget)))
+
+(fn resolve-item-rows [target]
+  (local identity-store (assert (and target target.store target.store.identity-store)
+                               "Notebook presentation requires owning IdentityStore"))
+  (local current (and target.get-notebook (target:get-notebook)))
+  (build-item-rows identity-store (or (and current current.items) [])))
+
+(fn publish-item-rows [view rows]
+  (view.items-label:set-text (.. "Items (" (# rows) "):"))
+  (view.list:set-items rows))
+
+(fn initialize-view [view rows signal handler]
+  (fn populate []
+    (publish-item-rows view rows)
+    (when signal (signal:connect handler)))
+  (local (ok result) (pcall populate))
+  (when (not ok)
+    ;; The builder has not returned, so its caller cannot own/drop this root yet.
+    (pcall view.drop view)
+    (error result 0))
+  view)
 
 (fn NotebookNodeView [node opts]
   (local options (or opts {}))
@@ -61,7 +76,7 @@
   (fn build [ctx]
     (local build-ctx (or ctx options.ctx (and target target.graph target.graph.ctx)))
     (assert build-ctx "NotebookNodeView requires a build context")
-    (local view {})
+    (local initial-rows (resolve-item-rows target))
     (local notebook (and target target.get-notebook (target:get-notebook)))
 
     (local name-input
@@ -89,15 +104,12 @@
                   :show-head false
                   :item-spacing 0.25
                   :builder (fn [item child-ctx]
-                             (local item-key (tostring (or item.key "")))
-                             (local index (tonumber (or item.index 1)))
-                             (local total (tonumber (or item.total 0)))
-                             (local (preview-widget resolved-node)
-                                    (build-preview-widget target item-key child-ctx))
-                             (local type-label
-                                    (if (and resolved-node resolved-node.key)
-                                        (type-label-from-key resolved-node.key)
-                                        (type-label-from-key item-key)))
+                              (local item-key (tostring (or item.key "")))
+                              (local terminal-key item.terminal-key)
+                              (local index (tonumber (or item.index 1)))
+                              (local total (tonumber (or item.total 0)))
+                              (local preview-widget (build-preview-widget target terminal-key child-ctx))
+                              (local type-label (type-label-from-key terminal-key))
 
                              (local type-text
                                ((Text {:text type-label
@@ -208,34 +220,20 @@
                          (FlexChild (fn [_] actions-row) 0)]})
        build-ctx))
 
-    (set view.name-input name-input)
-    (set view.items-label items-label)
-    (set view.list list)
-    (set view.actions-row actions-row)
-    (set view.layout flex.layout)
-
-    (set view.refresh-items
-         (fn [self]
-           (local current (and target target.get-notebook (target:get-notebook)))
-           (local items (or (and current current.items) []))
-           (local count (length items))
-           (when (and self.items-label self.items-label.set-text)
-             (self.items-label:set-text (.. "Items (" count "):")))
-           (when (and self.list self.list.set-items)
-             (self.list:set-items (build-item-rows items)))))
+    (fn refresh-items [self]
+      (publish-item-rows self (resolve-item-rows target)))
 
     (local items-signal (and target target.items-changed))
-    (local items-handler (fn [_payload] (view:refresh-items)))
-    (when items-signal
-      (items-signal:connect items-handler))
+    (fn items-handler [_payload] (refresh-items {:items-label items-label :list list}))
 
-    (set view.drop
-         (fn [_self]
-           (when items-signal
-             (items-signal:disconnect items-handler true))
-           (flex:drop)))
+    (fn drop [_self]
+      (when items-signal
+        (items-signal:disconnect items-handler true))
+      (flex:drop))
 
-    (view:refresh-items)
-    view))
+    (local view {:name-input name-input :items-label items-label :list list
+                 :actions-row actions-row :layout flex.layout
+                 :refresh-items refresh-items :drop drop})
+    (initialize-view view initial-rows items-signal items-handler)))
 
 NotebookNodeView

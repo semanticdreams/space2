@@ -6,12 +6,13 @@
 (local Text (require :text))
 (local Utils (require :graph/view/utils))
 
-(fn build-item-rows [items]
-  (local total (length (or items [])))
-  (icollect [i k (ipairs (or items []))]
-    {:index i
-     :total total
-     :key (tostring k)}))
+(fn build-item-rows [identity-store items]
+  (assert identity-store "ListEntityNodeView requires its owning IdentityStore")
+  (local total (length items))
+  (icollect [i key (ipairs items)]
+    (do
+      (local text (identity-store:resolve-key key))
+      {:index i :total total :key key :text text})))
 
 (fn maybe-focus-node [node-key]
   (when (and app app.graph-view)
@@ -24,6 +25,26 @@
         (when (and focus-node focus-node.request-focus)
           (focus-node:request-focus {:reason :list-entity}))))))
 
+(fn resolve-item-rows [target]
+  (local identity-store (assert (and target target.store target.store.identity-store)
+                               "ListEntityNodeView requires its owning IdentityStore"))
+  (local current (and target.get-entity (target:get-entity)))
+  (build-item-rows identity-store (or (and current current.items) [])))
+
+(fn publish-item-rows [view rows]
+  (view.items-label:set-text (.. "Items (" (# rows) "):"))
+  (view.list:set-items rows))
+
+(fn initialize-view [view rows signal handler]
+  (fn populate []
+    (publish-item-rows view rows)
+    (when signal (signal:connect handler)))
+  (local (ok result) (pcall populate))
+  (when (not ok)
+    (pcall view.drop view)
+    (error result 0))
+  view)
+
 (fn ListEntityNodeView [node opts]
   (local options (or opts {}))
   (local target (or node options.node))
@@ -31,7 +52,7 @@
   (fn build [ctx]
     (local build-ctx (or ctx options.ctx (and target target.graph target.graph.ctx)))
     (assert build-ctx "ListEntityNodeView requires a build context")
-    (local view {})
+    (local initial-rows (resolve-item-rows target))
     (local entity (and target target.get-entity (target:get-entity)))
 
     (local name-input
@@ -64,7 +85,7 @@
                              (local total (tonumber (or item.total 0)))
 
                              (local key-button
-                               ((Button {:text (Utils.truncate-with-ellipsis item-key 28)
+                                ((Button {:text (Utils.truncate-with-ellipsis item.text 28)
                                          :variant :ghost
                                          :padding [0.35 0.35]
                                          :on-click (fn [_button _event]
@@ -150,34 +171,20 @@
                          (FlexChild (fn [_] actions-row) 0)]})
        build-ctx))
 
-    (set view.name-input name-input)
-    (set view.items-label items-label)
-    (set view.list list)
-    (set view.actions-row actions-row)
-    (set view.layout flex.layout)
-
-    (set view.refresh-items
-         (fn [self]
-           (local current (and target target.get-entity (target:get-entity)))
-           (local items (or (and current current.items) []))
-           (local count (length items))
-           (when (and self.items-label self.items-label.set-text)
-             (self.items-label:set-text (.. "Items (" count "):")))
-           (when (and self.list self.list.set-items)
-             (self.list:set-items (build-item-rows items)))))
+    (fn refresh-items [self]
+      (publish-item-rows self (resolve-item-rows target)))
 
     (local items-signal (and target target.items-changed))
-    (local items-handler (fn [_payload] (view:refresh-items)))
-    (when items-signal
-      (items-signal:connect items-handler))
+    (fn items-handler [_payload] (refresh-items {:items-label items-label :list list}))
 
-    (set view.drop
-         (fn [_self]
-           (when items-signal
-             (items-signal:disconnect items-handler true))
-           (flex:drop)))
+    (fn drop [_self]
+      (when items-signal
+        (items-signal:disconnect items-handler true))
+      (flex:drop))
 
-    (view:refresh-items)
-    view))
+    (local view {:name-input name-input :items-label items-label :list list
+                 :actions-row actions-row :layout flex.layout
+                 :refresh-items refresh-items :drop drop})
+    (initialize-view view initial-rows items-signal items-handler)))
 
 ListEntityNodeView
